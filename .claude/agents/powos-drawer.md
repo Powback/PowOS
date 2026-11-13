@@ -9,7 +9,7 @@ Files: shell/ui/drawer.tsx (grid, RecentRow, LetterBar), shell/ui/gesture.ts (dr
 shell/ui/shell.css (.launcher, .launcher-frame, .dock, .home > .bar, .drawer*, --p/--fade), shell/ui/home.tsx and
 shell/ui/pull.tsx (launcher markup), --pill-foot in shell/theme.css. nativeglass.ts is powos-perf's: coordinate
 before touching it.
-Work in your own git worktree off worktree-powos-multiplatform, rebase often, commit only your paths with
+Work in your own git worktree off main, rebase often, commit only your paths with
 "Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>", fast-forward push, never force-push.
 Ship: commit -> rebase -> push to origin -> `tools/phone/ship.sh request --note "..."` (or --silent); never ship-apk.sh/push.sh
 yourself (handbook Shipping).

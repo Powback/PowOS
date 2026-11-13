@@ -25,7 +25,7 @@ needs_of() { local a
 ship_pending() { local kind=$1 mark path base tip
   case "$kind" in apps) mark=apps-live path=apps ;; shell) mark=live path=shell ;; *) return ;; esac
   base=$(cat "$Q/$mark" 2>/dev/null) || return 0          # no record: can't judge, don't block
-  tip=$(git rev-parse -q --verify "origin/${PREFLIGHT_BASE:-worktree-powos-multiplatform}" 2>/dev/null) || return 0
+  tip=$(git rev-parse -q --verify "origin/${PREFLIGHT_BASE:-main}" 2>/dev/null) || return 0
   [ "$base" = "$tip" ] && return 0
   git cat-file -e "$base^{commit}" 2>/dev/null || return 0
   # apps: only app modules (apps/<app>/ with a powos-app.json) - ship.sh's apps_changed. apps/install.sh & co. never

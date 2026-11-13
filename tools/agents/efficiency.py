@@ -312,7 +312,7 @@ def main():
     ap.add_argument('--since'); ap.add_argument('--hours', type=float, default=24)
     ap.add_argument('--root', default=os.path.expanduser('~/.claude/projects'))
     ap.add_argument('--repo', default=os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
-    ap.add_argument('--branch', default='origin/worktree-powos-multiplatform'); ap.add_argument('--json', action='store_true')
+    ap.add_argument('--branch', default='origin/main'); ap.add_argument('--json', action='store_true')
     ap.add_argument('--tools', action='store_true', help='per-tool OUTPUT size + waste (errors, repeats, unreferenced, polls)')
     a = ap.parse_args()
     since = a.since or (dt.datetime.now(dt.timezone.utc) - dt.timedelta(hours=a.hours)).strftime('%Y-%m-%dT%H:%M')

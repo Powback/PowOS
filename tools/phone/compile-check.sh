@@ -46,7 +46,7 @@ if [ "${rc:-1}" != 0 ]; then echo "compile-check: FAILED (gradle exit ${rc:-?})"
 kt=""
 while IFS= read -r f; do
     case "$f" in targets/android/app/*.kt) kt+="${kt:+,}${f#targets/android/app/}" ;; esac
-done < <(git -C "$root" diff --name-only --diff-filter=AM "$(git -C "$root" merge-base HEAD origin/worktree-powos-multiplatform 2>/dev/null || echo HEAD)" 2>/dev/null)
+done < <(git -C "$root" diff --name-only --diff-filter=AM "$(git -C "$root" merge-base HEAD origin/main 2>/dev/null || echo HEAD)" 2>/dev/null)
 if [ -n "$kt" ] && [ "${GATE_LINT:-1}" != 0 ]; then
     . "$root/tools/lib/need-docker.sh"; need_docker
     lint=$("$root/targets/android/lint-complexity.sh" --only "$kt" 2>&1); lrc=$?

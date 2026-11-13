@@ -17,7 +17,7 @@ its libraries, the manager with `fleet_login.py`, claude-login) and the phone's 
 launchers at the paths `install-powos-android.sh` installs them (`targets/android/tools/phone-files.sh` reads that map
 from the install script, so the image and the package can't disagree). Its version is `<commit count>.g<sha9>` of the
 newest commit touching those files: it only grows along origin's history, and a ship without code changes publishes
-nothing new. Only commits on `origin/worktree-powos-multiplatform` are published (an agent's branch never reaches phones).
+nothing new. Only commits on `origin/main` are published (an agent's branch never reaches phones).
 
 ## Away from home: the PowOS VPN (issue #2)
 

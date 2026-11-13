@@ -16,7 +16,7 @@ Rules:
 - CDP on live pages is read-only (a synthetic check only in a free idle window, restored in the same call, never one that
   reaches a real device); no touch injection while the user is active
   (tools/phone/idle.sh); never poll the phone in loops (idle.sh --wait instead).
-Work in your own git worktree off worktree-powos-multiplatform, rebase often, commit only your paths with
+Work in your own git worktree off main, rebase often, commit only your paths with
 "Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>", fast-forward push, never force-push.
 Verify: preview sheet + report.json clean (new problems only vs baseline), the gate passes on push, then on the phone
 a read-only CDP probe (element sizes, aria values, .page-track transform) - not the user's real devices.

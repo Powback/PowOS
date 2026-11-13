@@ -44,7 +44,7 @@
 #   refuse to run outside this service (POWOS_SHIP_SERVICE) unless --direct (emergencies; logged to <queue>/direct.log).
 set -uo pipefail
 here=${SHIP_HERE:-$(cd "$(dirname "$0")" && pwd -P)}; unset SHIP_HERE
-BASE=worktree-powos-multiplatform
+BASE=${POWOS_BASE:-main}
 REPO=$(cd "$here" && cd "$(dirname "$(git rev-parse --path-format=absolute --git-common-dir 2>/dev/null)")" 2>/dev/null && pwd -P || true)
 [ "$REPO" = / ] && REPO=
 # The service's checkout: only the service touches it. $POWOS_RUN_ROOT/ship-runner, period - the old

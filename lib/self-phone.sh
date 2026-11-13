@@ -29,7 +29,7 @@ self_phone_seed() {
         mkdir -p "$_sp_root/var/lib/powos" && cp -a "$_sp_src" "$_sp_root/var/lib/powos/src" || return 1
     fi
     grep -qs '^upstream-branch=' "$_sp_root/etc/powos/config" ||
-        { mkdir -p "$_sp_root/etc/powos" && echo "upstream-branch=worktree-powos-multiplatform" >> "$_sp_root/etc/powos/config"; }
+        { mkdir -p "$_sp_root/etc/powos" && echo "upstream-branch=main" >> "$_sp_root/etc/powos/config"; }
 }
 
 # self_phone_bake SRC SHA [ROOT]: what a fresh install does - apply, bake the read-only copy the marker describes

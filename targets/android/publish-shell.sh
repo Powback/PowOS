@@ -8,14 +8,14 @@
 # APK version at publish time: a phone on an older APK takes that APK first (the shell may call its new native parts).
 #
 # Usage: targets/android/publish-shell.sh [store-dir]   (default: ~/Projects/android-app-dev/output)
-# Only origin's history: a commit not on origin/worktree-powos-multiplatform (an agent's branch) is never published,
+# Only origin's history: a commit not on origin/main (an agent's branch) is never published,
 # and never one older than what the store has (the commit time decides, as ShellSource's does). Run by build-app.sh
 # after each APK it publishes and by the ship service after a shell ship (tools/phone/ship.sh).
 set -euo pipefail
 HERE=$(cd "$(dirname "$0")" && pwd)
 ROOT=$(cd "$HERE/../.." && pwd)
 STORE=${1:-${PUBLISH_STORE:-$HOME/Projects/android-app-dev/output}}
-BASE=${POWOS_BASE_BRANCH:-worktree-powos-multiplatform}
+BASE=${POWOS_BASE_BRANCH:-${POWOS_BASE:-main}}
 [ -d "$STORE" ] || { echo "publish-shell: no store at $STORE" >&2; exit 2; }
 rev=$(git -C "$ROOT" rev-parse HEAD)
 if [ -z "${PUBLISH_ANY_COMMIT:-}" ] && ! git -C "$ROOT" merge-base --is-ancestor HEAD "origin/$BASE" 2>/dev/null; then

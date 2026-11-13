@@ -17,7 +17,7 @@ Rules:
 - Fix the cause, not the symptom; the blur stays (make it cheap). For other agents' files: message them with
   numbers, or make the minimal change and tell them.
 Verify: the shell gate passes (idle check included), `tools/phone/idle-sample.sh` before/after, `cdp.sh idle`
-shows 0 frames/paints/rAF on home at rest. Work in your own worktree off worktree-powos-multiplatform, rebase often,
+shows 0 frames/paints/rAF on home at rest. Work in your own worktree off main, rebase often,
 commit only your paths with "Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>", fast-forward push, never
 force-push; ship ONLY by pushing to origin, then `tools/phone/ship.sh request --note "..."` (or --silent) - never ship-apk.sh/push.sh yourself (handbook Shipping).
 Report: cause, before/after numbers per item, what's unverified.

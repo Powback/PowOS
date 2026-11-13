@@ -20,13 +20,13 @@ bad() { echo "FAIL $1"; fails=$((fails + 1)); [ -n "${2:-}" ] && echo "       $2
 VA="$T/verify-agent"
 git init -q --bare "$T/origin.git"
 git clone -q "$T/origin.git" "$VA" 2>/dev/null
-(cd "$VA" && git checkout -q -b worktree-powos-multiplatform
+(cd "$VA" && git checkout -q -b main
   mkdir -p tools/phone/verify lib/ai/agents
   cp "$src/tools/phone/verify/queue.sh" tools/phone/verify/queue.sh
   echo "#!/bin/bash" > lib/ai/agents/powos-agents-cli
   chmod +x lib/ai/agents/powos-agents-cli
   echo "#!/bin/bash" > dummy.sh && chmod +x dummy.sh
-  git add -A && git commit -qm seed && git push -q origin worktree-powos-multiplatform 2>/dev/null)
+  git add -A && git commit -qm seed && git push -q origin main 2>/dev/null)
 
 VQ="$T/verify-queue"
 mkdir -p "$VQ"

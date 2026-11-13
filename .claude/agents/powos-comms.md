@@ -16,7 +16,7 @@ Rules:
 - Deploy lib/ai to the phone only via targets/android/rooted/rooted.sh deploy --note "..."; shell + APK:
   ship ONLY by pushing to origin, then `tools/phone/ship.sh request --note "..."` (or --silent) - never ship-apk.sh/push.sh yourself (handbook Shipping). Never poll the phone in a loop.
 - The manager may be live: never restart it without saying so in your report.
-Work in your own worktree off origin/worktree-powos-multiplatform, commit only your paths with
+Work in your own worktree off origin/main, commit only your paths with
 "Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>", rebase, fast-forward push, never force.
 Verify: python3 test/tier1/test-comms-fulltext.py, test-comms.py, test-manager.py, test-agents.py; after a deploy,
 one batched md5 check of /data/powos/root/usr/lib/powos/ai/{comms,manager}/ against the repo.

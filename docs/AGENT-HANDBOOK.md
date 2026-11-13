@@ -7,6 +7,12 @@ for (one line each). Cross-cutting rules live HERE once; expert skills (.claude/
 If you still need a handbook rule, `grep -n '^## ' docs/AGENT-HANDBOOK.md` then `sed -n 'START,ENDp'` just that
 section. The index below gives the line ranges.
 
+**Where to land: `main`, the one branch (2026-11-13).** Worktrees branch off `origin/main`, `land.sh` pushes to
+`origin/main`, the ship and verify runners follow `origin/main`'s tip, and CI (build-test-publish, then the phone
+manifest) runs on every push to main. The old integration branch and `master` are retired - never base on or push
+to them. Scripts read the branch from one variable, `POWOS_BASE` (default `main`; `LAND_BASE` still overrides
+land.sh/pkg-claim.sh for tests).
+
 ## Index (`grep -n '^## ' docs/AGENT-HANDBOOK.md` to get live line numbers; ranges below are approximate)
 - Loading a skill from a worktree (top, before any `## `) — the scoped-skill-name workaround.
 - Which expert owns what — the area -> skill table; route work here first.
@@ -130,10 +136,9 @@ column names the file to load; `.claude/skills/<skill>/SKILL.md` has a `## <old-
   something the USER must do (it shows as a Needs-you card), never for a queued check or another agent.
 - Worktrees: `tools/agents/worktree.sh new <name>` (origin tip, shared node_modules, and the Android build's
   gitignored inputs linked from the shared cache - see "KWin patches" below), `done <name>` once pushed (refuses
-  unpushed/uncommitted work), `list`. Never leave a merged worktree behind. It exists only on
-  `origin/worktree-powos-multiplatform`, not on `master` (friction f132) - from a bare master checkout (or anywhere
-  outside a PowOS worktree), bootstrap it first: `cd ~/Projects/PowOS && git fetch origin worktree-powos-multiplatform
-  && git show origin/worktree-powos-multiplatform:tools/agents/worktree.sh | bash -s new <name>` (the `cd` matters:
+  unpushed/uncommitted work), `list`. Never leave a merged worktree behind. From a stale
+  checkout (or anywhere outside a PowOS worktree), bootstrap it first: `cd ~/Projects/PowOS && git fetch origin main
+  && git show origin/main:tools/agents/worktree.sh | bash -s new <name>` (the `cd` matters:
   the piped script resolves its own repo from `$PWD`, not from a `git -C` on the `show` half alone - run from
   elsewhere and it fails "not a git repository"). Agent worktrees made by `new` live at `$POWOS_WT_ROOT/<name>`
   (default `~/pw/<name>`), OUTSIDE `~/Projects` entirely - no ancestor `~/Projects/CLAUDE.md`, no `PowOS/CLAUDE.md`,
@@ -374,7 +379,7 @@ widened first; out of scope here. `tools/emu/emu.sh` otherwise needed no change 
   (friction f139).
 - **Agents never ship themselves.** Land with `tools/agents/land.sh "msg" -- <paths> --ship "plain words for the
   user"` (Efficiency, above) and END YOUR TURN - nothing else. That one call does what used to be spelled out here
-  step by step: commit by pathspec, rebase once, push to origin/worktree-powos-multiplatform, then
+  step by step: commit by pathspec, rebase once, push to origin/main, then
   `tools/phone/ship.sh request --note "..."` (or `--silent` with no `--ship`). Critical paths (`shell/`, `targets/android/`, `apps/`, `lib/`, `tools/app-api/`) auto-request a ship by default; use `--no-ship` to suppress it for docs-only or non-shipping changes. One ship service (launchd
   `com.powos.ship-runner`, unit ship-runner-mac, its own checkout
   .claude/worktrees/ship-runner) ships origin's TIP in two parts: push.sh of exactly the shell files that differ
@@ -673,7 +678,7 @@ Git and process
 - The one exception: also rebase once at the START of a worktree, if a tool you need isn't there yet. A worktree
   branches from origin's tip at creation time; if origin gains a tool shortly after (e.g. `tools/agents/land.sh`
   landed moments after a worktree branched without it), the worktree won't have it until it rebases - `ls` failing
-  on a tool the handbook says should exist is the signal to `git fetch && git rebase origin/worktree-powos-multiplatform`
+  on a tool the handbook says should exist is the signal to `git fetch && git rebase origin/main`
   before doing anything else, not to hand-roll the tool's logic (friction f138).
 - `git push` runs tools/git-hooks/pre-push (core.hooksPath): the complexity lint on the pushed files; a failure is
   yours to split, never `--no-verify` (e9af512's lint failure blocked every ship-apk, 2026-10-22).

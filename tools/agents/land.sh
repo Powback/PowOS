@@ -11,11 +11,11 @@
 #      got a commit, since this worktree's merge-base, touching the same files AND overlapping line ranges as
 #      this landing's own diff - "origin already changed <file> lines X-Y in <sha> <subject>: check you're not
 #      duplicating it" (friction f115: two agents fixed the same bug in parallel, found only at rebase);
-#   3. fetches origin/worktree-powos-multiplatform, refuses a package patch number or pkgrel that's a duplicate
+#   3. fetches origin/main, refuses a package patch number or pkgrel that's a duplicate
 #      of what's already there (friction f111: two agents landed pkgs/kwin/0025-*.patch and pkgrel 3.29 at the
 #      same time - different filenames, no git conflict, so it merged silently), then rebases ONCE, right
 #      before the push - tools/agents/pkg-claim.sh reserves a free one ahead of time so this never fires;
-#   4. pushes to origin/worktree-powos-multiplatform (never main, never --force); on a push race (someone
+#   4. pushes to origin/main (never --force); on a push race (someone
 #      landed meanwhile) it fetches + rebases + pushes ONE more time, then gives up rather than loop;
 #   5. sets the board task's step (python3 lib/ai/agents/powos-agents-cli task set), skipped with a note if
 #      the board isn't reachable - never fails the landing over that;
@@ -34,11 +34,11 @@
 #       --queue widget-preview-crash tools/phone/verify/widget-check.sh --round 1
 #   tools/agents/land.sh "update docs" -- docs/AGENT-HANDBOOK.md --no-ship
 #
-# Env overrides (tests): LAND_BASE (default worktree-powos-multiplatform), LAND_AGENTS_CLI, LAND_SHIP,
+# Env overrides (tests): LAND_BASE (default main), LAND_AGENTS_CLI, LAND_SHIP,
 # LAND_QUEUE, LAND_REMOTE (default origin).
 set -uo pipefail
 here=$(cd "$(dirname "$0")" && pwd -P)
-BASE=${LAND_BASE:-worktree-powos-multiplatform}
+BASE=${LAND_BASE:-${POWOS_BASE:-main}}
 REMOTE=${LAND_REMOTE:-origin}
 RUN_ROOT=${POWOS_RUN_ROOT:-$HOME/pw}   # powos-multiplatform's new home (wt-move-rest); old path still matched below
 # Resolved the same way `git rev-parse --show-toplevel` resolves $top below (symlink components, e.g. macOS's

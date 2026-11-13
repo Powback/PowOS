@@ -62,7 +62,7 @@ reload_check_behind() {
     [[ -d "$src/.git" ]] || return 0
     timeout 8 git -C "$src" fetch --quiet 2>/dev/null || return 0
     up="$(git -C "$src" rev-parse --abbrev-ref --symbolic-full-name '@{u}' 2>/dev/null)"
-    [[ -n "$up" ]] || up="origin/master"
+    [[ -n "$up" ]] || up="origin/main"
     behind="$(git -C "$src" rev-list --count "HEAD..$up" 2>/dev/null)"
     [[ "$behind" =~ ^[0-9]+$ ]] && (( behind > 0 )) || return 0
     pwarn "Checkout is $behind commit(s) behind $up — plain reload would apply STALE code."

@@ -169,7 +169,7 @@ chg=(${files[@]+"${files[@]}"}) scope_re="" scope_note="all scenes" skip_tsc=""
 if [ -z "$GATE_ALL" ] && [ "${GATE_PRIORITY:-}" != ship ] && [ -z "$app" ] && [ -z "${GATE_ONLY:-}" ] && [ "$base" = head ]; then
   if [ ${#chg[@]} -eq 0 ]; then   # no files named: what this branch changed in shell/ since the merge base, plus uncommitted
     top=$(git -C "$SHELL_DIR" rev-parse --show-toplevel 2>/dev/null) || top=""
-    mb=$(git -C "$SHELL_DIR" merge-base HEAD origin/worktree-powos-multiplatform 2>/dev/null) || mb=""
+    mb=$(git -C "$SHELL_DIR" merge-base HEAD origin/main 2>/dev/null) || mb=""
     if [ -n "$top" ] && [ -n "$mb" ]; then
       while IFS= read -r f; do [ -n "$f" ] && chg+=("${f#shell/}"); done < <({ git -C "$top" diff --name-only "$mb" HEAD -- shell; git -C "$top" status --porcelain -- shell | sed 's/^...//'; } | sort -u)
     fi

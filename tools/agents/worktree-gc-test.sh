@@ -14,7 +14,7 @@ export GIT_AUTHOR_NAME=t GIT_AUTHOR_EMAIL=t@t GIT_COMMITTER_NAME=t GIT_COMMITTER
 git init -q --bare "$T/origin.git"
 git clone -q "$T/origin.git" "$T/main" >/dev/null
 cd "$T/main"
-git checkout -q -b worktree-powos-multiplatform
+git checkout -q -b main
 # C1: an "old" point on the base branch (backdated 40 min) - what an abandoned worktree would still sit at.
 old="@$(( $(date +%s) - 2400 )) +0000"
 echo one > f; git add f
@@ -24,7 +24,7 @@ C1=$(git rev-parse HEAD)
 recent="@$(( $(date +%s) - 60 )) +0000"
 echo two >> f; git add f
 GIT_COMMITTER_DATE="$recent" git commit -q --date="$recent" -m two
-git push -q origin worktree-powos-multiplatform
+git push -q origin main
 
 export POWOS_WT_ROOT=$T/pw POWOS_RUN_ROOT=$T/run POWOS_WT_RMLOG=$T/removals.log
 mkdir -p "$POWOS_WT_ROOT"
@@ -32,7 +32,7 @@ mkdir -p "$POWOS_WT_ROOT"
 # at_old <name>: a worktree at C1 (old, fully merged into origin's tip - C1 is its ancestor) - the "should be
 # gc'd" shape. Extra args become more commits/files for the ahead/dirty variants.
 at_old() { git worktree add -q -b "agent/$1" "$POWOS_WT_ROOT/$1" "$C1" >/dev/null; }
-at_tip() { git worktree add -q --track -b "agent/$1" "$POWOS_WT_ROOT/$1" origin/worktree-powos-multiplatform >/dev/null; }
+at_tip() { git worktree add -q --track -b "agent/$1" "$POWOS_WT_ROOT/$1" origin/main >/dev/null; }
 
 at_old old-merged                                              # clean, ahead=0, 40 min old -> gc'd
 at_tip recent-merged                                           # clean, ahead=0, ~1 min old -> too fresh, kept

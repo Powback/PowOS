@@ -29,7 +29,7 @@ printf '#!/bin/bash\necho "BCHECK $*" >> "$LOG"\n[ ! -e "$HOME/bindings-bad" ] |
 chmod +x "$T/gen" "$T/bcheck"
 
 git init -q --bare "$T/origin.git"
-git clone -q "$T/origin.git" "$T/seed" 2>/dev/null; cd "$T/seed"; git checkout -q -b worktree-powos-multiplatform
+git clone -q "$T/origin.git" "$T/seed" 2>/dev/null; cd "$T/seed"; git checkout -q -b main
 mkdir -p tools/phone apps/agents/module/src apps/plain/module shell/vendor
 cp "$src/tools/phone/ship.sh" tools/phone/; cp "$src/apps/vendor.sh" "$src/apps/install.sh" apps/
 echo 'powos-agents.js   generated              apps/agents: `apps/vendor.sh agents`' > shell/vendor/VERSIONS
@@ -42,13 +42,13 @@ printf '#!/bin/bash\necho "PUSH $*" >> "$LOG"\n' > shell/push.sh
 printf '#!/bin/bash\necho "MAIL $(cat "$1")" >> "$LOG"\n' > tools/phone/user.sh
 printf '.claude/\n' > .gitignore
 chmod +x tools/phone/*.sh apps/*.sh shell/push.sh
-git add -A; git commit -qm base; git push -q origin worktree-powos-multiplatform 2>/dev/null
+git add -A; git commit -qm base; git push -q origin main 2>/dev/null
 git rev-parse HEAD > "$HOME/.cache/powos-installed-commit"   # the phone's APK matches base
-git clone -q -b worktree-powos-multiplatform "$T/origin.git" "$T/B" 2>/dev/null
+git clone -q -b main "$T/origin.git" "$T/B" 2>/dev/null
 cd "$T/B"
 # The ship's apps/install.sh: a stub that logs (the real one is tested at the end).
 printf '#!/bin/bash\necho "INSTALL $1 $2 svc=${POWOS_SHIP_SERVICE:-}" >> "$LOG"\n' > apps/install.sh
-git commit -qam "install stub"; git push -q origin HEAD:worktree-powos-multiplatform 2>/dev/null
+git commit -qam "install stub"; git push -q origin HEAD:main 2>/dev/null
 
 fails=0
 ok() { echo "PASS $1"; }; bad() { echo "FAIL $1"; fails=$((fails+1)); }
@@ -67,7 +67,7 @@ git checkout -q apps/agents/module/src/lib.rs
 # A. The incident: the module changed (a new column), its bindings NOT regenerated. Old ship.sh: built + published.
 : > "$LOG"
 echo 'table work { id, title, try_line }' > apps/agents/module/src/lib.rs
-git commit -qam "agents: work.try_line (bindings forgotten)"; git push -q origin HEAD:worktree-powos-multiplatform 2>/dev/null; tA=$(git rev-parse HEAD)
+git commit -qam "agents: work.try_line (bindings forgotten)"; git push -q origin HEAD:main 2>/dev/null; tA=$(git rev-parse HEAD)
 req --note "AI page: try line"
 drained 40 && settle
 ! grep -q '^INSTALL agents' "$LOG" && ok "A: module without its regenerated bindings NOT published" || { bad "A: published anyway"; cat "$LOG"; tail -5 "$Q/runner.log"; }
@@ -78,7 +78,7 @@ grep -q "REFUSED - shell/vendor/powos-agents.js isn't what apps/agents/module bu
 # B. The fix: module + regenerated bindings in ONE commit - module first (as the service), then the bindings pushed.
 : > "$LOG"
 "$VENDOR_GEN" agents --out shell/vendor/powos-agents.js
-git commit -qam "agents: powos-agents.js regenerated"; git push -q origin HEAD:worktree-powos-multiplatform 2>/dev/null; tB=$(git rev-parse HEAD)
+git commit -qam "agents: powos-agents.js regenerated"; git push -q origin HEAD:main 2>/dev/null; tB=$(git rev-parse HEAD)
 req --note "AI page: try line, for real"
 drained 40 && settle
 for _ in $(seq 20); do grep -q '^INSTALL' "$LOG" && break; sleep 1; done
@@ -95,7 +95,7 @@ b2=$(grep -n '^BCHECK --no-publish --vendor shell/vendor$' "$LOG" | tail -1 | cu
 # C. Bindings that wouldn't decode the phone's modules: the tip is refused - nothing pushed, nothing published.
 : > "$LOG"; touch "$HOME/bindings-bad"
 echo 'table work { id, title, try_line, owner }' > apps/agents/module/src/lib.rs; "$VENDOR_GEN" agents --out shell/vendor/powos-agents.js
-git commit -qam "agents: owner"; git push -q origin HEAD:worktree-powos-multiplatform 2>/dev/null; tC=$(git rev-parse HEAD)
+git commit -qam "agents: owner"; git push -q origin HEAD:main 2>/dev/null; tC=$(git rev-parse HEAD)
 req --note "owner column"
 for _ in $(seq 40); do [ "$(cat "$Q/failed" 2>/dev/null)" = "$tC" ] && break; sleep 1; done; settle
 ! grep -q '^PUSH .*vendor' "$LOG" && ! grep -q '^INSTALL' "$LOG" && ok "C: mismatched bindings: no push, no publish" || { bad "C: shipped anyway"; cat "$LOG"; }

@@ -17,7 +17,7 @@ Rules:
 - Ship ONLY by pushing to origin, then `tools/phone/ship.sh request --note "..."` (or --silent) - never ship-apk.sh/push.sh yourself (handbook Shipping) (compile Kotlin before pushing it); commit a shell file with everything it imports.
 - HACK markers need a docs/REMOTE-POWOS.md section 4 row in the same commit.
 - CDP on live pages is read-only. Never poll the phone: one `tools/phone/idle.sh --wait 120 1800`, Awake only.
-- Own worktree off worktree-powos-multiplatform, commit only your paths with
+- Own worktree off main, commit only your paths with
   "Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>", rebase, fast-forward push, never force-push.
 Verify: tools/phone/verify/edge.sh (home pull -> shade window, right edge -> Quick Tools, corner -> pull panel), logcat
 PowosEdge/PowosCornerPull/PowosOverlay/PowosShade, and the recording frame-stepped. Report: user-visible change, APK, commits, unverified.

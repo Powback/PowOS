@@ -55,7 +55,7 @@ printf '#!/bin/bash\n[ ! -e "$HOME/gate-down" ]\n' > "$T/bin/gate-probe"
 printf '#!/bin/bash\n[ -e "$HOME/phone-offline" ] && { echo vpn=offline handshake=1913s; exit 69; }; echo vpn=up\n' > "$T/bin/phone-state"
 chmod +x "$T/bin/"*; export PATH="$T/bin:$PATH"
 git init -q --bare "$T/origin.git"
-git clone -q "$T/origin.git" "$T/seed" 2>/dev/null; cd "$T/seed"; git checkout -q -b worktree-powos-multiplatform
+git clone -q "$T/origin.git" "$T/seed" 2>/dev/null; cd "$T/seed"; git checkout -q -b main
 mkdir -p tools/phone tools/lib shell/dev shell/ui targets/android/app; cp "$src/tools/lib/need-docker.sh" tools/lib/
 cp "$src/tools/phone/ship.sh" "$src/tools/phone/ship-apk.sh" tools/phone/; cp "$src/shell/push.sh" shell/
 mv tools/phone/ship-apk.sh tools/phone/ship-apk.real.sh
@@ -82,7 +82,7 @@ echo "APK $(git rev-parse HEAD) svc=${POWOS_SHIP_SERVICE:-} $*" >> "$LOG"; git r
 # the overrides newer than this build and the phone runs this APK's own copies; it tells the service so, as the real
 # one does (apk/shell-tip = its own build). Otherwise it says nothing: the service then takes the APK's own commit.
 if [ -e "$HOME/apk-stale-shell" ]; then
-  o=$(git ls-remote origin refs/heads/worktree-powos-multiplatform | cut -f1)
+  o=$(git ls-remote origin refs/heads/main | cut -f1)
   git diff --name-only HEAD "$o" -- shell 2>/dev/null | sed 's|^shell/||' | while read -r f; do rm -f "$PHONE/files/shell/$f"; done
   echo "APKSTALE" >> "$LOG"; [ -d "$SHIP_DIR/apk" ] && git rev-parse HEAD > "$SHIP_DIR/apk/shell-tip"
 fi
@@ -128,17 +128,17 @@ printf '#!/bin/bash\necho "ROOTED $(git rev-parse HEAD) svc=${POWOS_SHIP_SERVICE
 # units_gate's checks (the real ones read this repo's units/): pass here - the rooted deploy itself is what's tested.
 mkdir -p test/tier1; for t in test-units-registry.py test-powos-dispatch.py; do echo 'print("ok")' > "test/tier1/$t"; done
 chmod +x tools/phone/*.sh shell/dev/gate.sh shell/push.sh apps/*.sh targets/android/rooted/rooted.sh
-git add -A; git commit -qm base; git push -q origin worktree-powos-multiplatform 2>/dev/null
+git add -A; git commit -qm base; git push -q origin main 2>/dev/null
 git rev-parse HEAD > "$HOME/.cache/powos-installed-commit"   # the phone runs base's APK
-git clone -q -b worktree-powos-multiplatform "$T/origin.git" "$T/B" 2>/dev/null
+git clone -q -b main "$T/origin.git" "$T/B" 2>/dev/null
 cd "$T/B"
 fails=0
 ok() { echo "PASS $1"; }; bad() { echo "FAIL $1"; fails=$((fails+1)); }
-land() { git pull -q --rebase 2>/dev/null; printf '%s\n' "$2" > "$1"; git add -A; git commit -qm "$3"; git push -q origin HEAD:worktree-powos-multiplatform 2>/dev/null; }
+land() { git pull -q --rebase 2>/dev/null; printf '%s\n' "$2" > "$1"; git add -A; git commit -qm "$3"; git push -q origin HEAD:main 2>/dev/null; }
 req() { SHIP_REQUESTER=B bash tools/phone/ship.sh request "$@" > "$T/req.out" 2>&1; }
 # drained [s]: every request served within s seconds.
 drained() { for _ in $(seq "$(( ${1:-40} * 5 ))"); do ls "$Q"/*.req >/dev/null 2>&1 || return 0; sleep 0.2; done; return 1; }
-tip() { git -C "$T/B" rev-parse origin/worktree-powos-multiplatform; }
+tip() { git -C "$T/B" rev-parse origin/main; }
 
 # 1. Two shell pushes 1 s apart, two requests: ONE push of both files, both notes in one notification, tip recorded.
 : > "$LOG"
@@ -201,7 +201,7 @@ drained && grep -q '^PUSH' "$LOG" && ok "ships once it's free" || bad "not shipp
 echo 'export const a = 9' > shell/ui/a.tsx; git commit -qam local
 req --note x; rc=$?
 [ $rc = 3 ] && grep -q "push it first" "$T/req.out" && ok "unpushed request refused" || { bad "unpushed request rc $rc"; cat "$T/req.out"; }
-git reset -q --hard origin/worktree-powos-multiplatform
+git reset -q --hard origin/main
 
 # 5. The guards: agents can't ship by hand; --direct from the tip works and is logged; --direct behind is refused.
 out=$(cd shell && ./push.sh --vpn --note x ui/a.tsx 2>&1); rc=$?
@@ -213,13 +213,13 @@ out=$(cd shell && ./push.sh --errors 2>&1); rc=$?
 git checkout -q HEAD~1
 out=$(cd shell && ./push.sh --vpn --direct --note x ui/a.tsx 2>&1); rc=$?
 [ $rc = 3 ] && echo "$out" | grep -q "isn't origin" && ok "--direct behind the tip refused" || { bad "--direct behind rc $rc"; echo "$out"; }
-git checkout -q worktree-powos-multiplatform
+git checkout -q main
 out=$(SHIP_APK_CURRENT=1 bash tools/phone/ship-apk.real.sh --note x 2>&1); rc=$?
 [ $rc = 3 ] && echo "$out" | grep -q "agents don't ship" && ok "ship-apk refused outside the service" || { bad "ship-apk guard rc $rc"; echo "$out"; }
 git checkout -q HEAD~1   # behind: logged, then refused before any build
 out=$(SHIP_APK_CURRENT=1 bash tools/phone/ship-apk.real.sh --direct --note x 2>&1); rc=$?
 [ $rc = 3 ] && grep -q 'ship-apk --direct' "$Q/direct.log" && ok "ship-apk --direct logged (then its tip check)" || { bad "ship-apk --direct rc $rc"; echo "$out"; }
-git checkout -q worktree-powos-multiplatform
+git checkout -q main
 
 # 6. A ship that fails: mailed once, not retried on the same tip; a fix on origin ships.
 : > "$LOG"
@@ -272,7 +272,7 @@ grep -q 'a = 9' "$PHONE/files/shell/ui/a.tsx" && grep -q '^APPINSTALL x install'
 #     and the runner log say "shell held for its APK <sha>".
 : > "$LOG"; touch "$HOME/hold-apk"
 git pull -q --rebase 2>/dev/null; echo 'class Main10' > targets/android/app/Main.kt; echo 'export const a = 10' > shell/ui/a.tsx
-git add -A; git commit -qm "kt10 + shell together"; git push -q origin HEAD:worktree-powos-multiplatform 2>/dev/null
+git add -A; git commit -qm "kt10 + shell together"; git push -q origin HEAD:main 2>/dev/null
 req --note "windows drawn natively"; t10=$(tip)
 for _ in $(seq 100); do grep -q '^APKSTART' "$LOG" && break; sleep 0.2; done
 sleep 1
@@ -300,7 +300,7 @@ rm -f "$HOME/.config/powos/ship-no-idle-wait"
 #     measured rooted changes from the APK-installed tip, so the deploy never ran). status says it's pending meanwhile.
 : > "$LOG"; touch "$HOME/hold-apk"
 git pull -q --rebase 2>/dev/null; echo 'class Main12' > targets/android/app/Main.kt; echo 1 > targets/android/session/powos-app-quit
-git add -A; git commit -qm "kt12 + rooted"; git push -q origin HEAD:worktree-powos-multiplatform 2>/dev/null
+git add -A; git commit -qm "kt12 + rooted"; git push -q origin HEAD:main 2>/dev/null
 req --note "swipe closes it"; t12=$(tip)
 for _ in $(seq 100); do grep -q '^APKSTART' "$LOG" && break; sleep 0.2; done
 sleep 1
@@ -339,7 +339,7 @@ rm -f "$HOME/apk-stale-shell"
 # landm FILE... : one commit of a module + bindings change (and the other files named)
 landm() { git pull -q --rebase 2>/dev/null; echo "fn a$1() {}" > apps/x/module/src/lib.rs; echo "export const x = $1" > shell/vendor/powos-x.js
   shift; for f in "$@"; do echo "// $RANDOM" >> "$f"; done
-  git add -A; git commit -qm "module x"; git push -q origin HEAD:worktree-powos-multiplatform 2>/dev/null; }
+  git add -A; git commit -qm "module x"; git push -q origin HEAD:main 2>/dev/null; }
 appslive() { for _ in $(seq 150); do [ "$(cat "$Q/apps-live" 2>/dev/null)" = "$1" ] && return 0; sleep 0.2; done; return 1; }
 first2() { grep -E '^(PUSH|APPINSTALL|APK )' "$LOG" | awk '{print $1}' | paste -sd, -; }
 : > "$LOG"; rm -f "$HOME/published-x"

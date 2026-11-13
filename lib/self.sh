@@ -41,9 +41,11 @@ else
     SELF_MARKER="/var/lib/powos/.powos-src-commit"
 fi
 SELF_UPSTREAM="${POWOS_UPSTREAM:-https://github.com/Powback/PowOS.git}"
-# Branch `self` follows: `powos config upstream-branch <name>` (key upstream-branch in /etc/powos/config), default master.
+# Branch `self` follows: `powos config upstream-branch <name>` (key upstream-branch in /etc/powos/config), default main.
 SELF_BRANCH="${POWOS_UPSTREAM_BRANCH:-$(awk -F= '$1=="upstream-branch" { v=$2 } END { print v }' /etc/powos/config 2>/dev/null)}"
-SELF_BRANCH="${SELF_BRANCH:-master}"
+# master and the integration branch worktree-powos-multiplatform were retired 2026-11-13 (one branch: main); a
+# config that still names either follows main.
+case "$SELF_BRANCH" in ""|master|worktree-powos-multiplatform) SELF_BRANCH=main ;; esac
 
 # The phone applies a tree with one small routine shared with its rootfs build and rooted deploy.
 source "$(dirname "${BASH_SOURCE[0]}")/self-phone.sh"

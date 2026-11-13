@@ -14,7 +14,7 @@
 set -uo pipefail
 here=$(cd "$(dirname "$0")" && pwd -P)
 S=${UNITS_PUBLISH_DIR:-$HOME/.cache/powos-units-publish}; mkdir -p "$S"
-REF=${POWOS_UNITS_REF:-origin/worktree-powos-multiplatform}
+REF=${POWOS_UNITS_REF:-origin/main}
 # The checkout to fetch from: this script's own (the repo), or the one install recorded (the installed copy).
 R=${POWOS_UNITS_REPO:-$(cat "$S/repo" 2>/dev/null || git -C "$here" rev-parse --show-toplevel 2>/dev/null)}
 log() { echo "$(date '+%F %T') $*" >> "$S/publish.log"; }

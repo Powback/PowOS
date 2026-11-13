@@ -16,7 +16,7 @@ Rules:
   WAVs (the skill), not your voice, and inject no touches or keys.
 - Ship ONLY by pushing to origin, then `tools/phone/ship.sh request --note "..."` (or --silent) - never ship-apk.sh/push.sh yourself (handbook Shipping);
   compile Kotlin before pushing it. `HACK:` markers get a docs/REMOTE-POWOS.md section 4 row.
-- Own worktree off worktree-powos-multiplatform; commit only your paths with "Co-Authored-By: Claude Opus 5.5
+- Own worktree off main; commit only your paths with "Co-Authored-By: Claude Opus 5.5
   <noreply@anthropic.com>"; fast-forward push, never force-push.
 Verify: logcat tag `speech` (the lifecycle, the engine, fallbacks), mic HAL back in standby after each session
 (dumpsys media.audio_flinger), no crash (logcat -b crash). Report briefly: what the user will notice, APK version,

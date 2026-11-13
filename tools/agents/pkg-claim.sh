@@ -16,10 +16,10 @@
 #   --dry-run (with reserve-patch or reserve-pkgrel): prints the number it WOULD reserve; writes nothing (no claim,
 #        no lock). Use it to test this script - a real reserve permanently burns that number.
 #
-# CLAIMS=${POWOS_PKG_CLAIMS:-~/.cache/powos-pkg-claims}. BASE=${LAND_BASE:-worktree-powos-multiplatform}.
+# CLAIMS=${POWOS_PKG_CLAIMS:-~/.cache/powos-pkg-claims}. BASE=${LAND_BASE:-${POWOS_BASE:-main}}.
 set -euo pipefail
 CLAIMS=${POWOS_PKG_CLAIMS:-$HOME/.cache/powos-pkg-claims}
-BASE=${LAND_BASE:-worktree-powos-multiplatform}
+BASE=${LAND_BASE:-${POWOS_BASE:-main}}
 mkdir -p "$CLAIMS"
 
 usage() { sed -n '2,/^# CLAIMS=/p' "$0" | sed 's/^# \{0,1\}//'; }

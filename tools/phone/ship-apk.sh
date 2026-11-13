@@ -19,11 +19,12 @@
 # a fault of this commit; nothing built in or installed, and the ship service gates it again once the machine is back.
 set -euo pipefail
 cd "$(git rev-parse --show-toplevel)"
+BASE=${POWOS_BASE:-main}   # the one branch (main since 11-13)
 # Always the shared, current rules: each worktree has its own copy of this script, and an old copy skipped the
 # "only the origin tip" check (an unmerged e89fb58 got installed). Re-run as origin's version unless it's this one.
 if [ -z "${SHIP_APK_CURRENT:-}" ]; then
-  git fetch -q origin worktree-powos-multiplatform 2>/dev/null || true
-  cur=$(mktemp); git show origin/worktree-powos-multiplatform:tools/phone/ship-apk.sh > "$cur" 2>/dev/null || true
+  git fetch -q origin "$BASE" 2>/dev/null || true
+  cur=$(mktemp); git show origin/$BASE:tools/phone/ship-apk.sh > "$cur" 2>/dev/null || true
   if [ -s "$cur" ] && ! cmp -s "$cur" "$0"; then SHIP_APK_CURRENT=1 exec bash "$cur" "$@"; fi
   rm -f "$cur"
 fi
@@ -49,33 +50,33 @@ if [ -n "$silent" ]; then inote="--silent"; else inote="--note \"${note//\"/}\""
 lock=$HOME/.cache/powos-ship.lock; mkdir -p "$HOME/.cache"
 sq=${SHIP_DIR:-$HOME/.cache/powos-ship-queue}   # the ship service's dir: its pause flag, the installing mark
 # Never ship a build that lacks what's installed: the last shipped commit must be in HEAD (two agents' APKs
-# overwrote each other's work). Rebase onto worktree-powos-multiplatform first.
-# Ship only what's already on origin/worktree-powos-multiplatform: a build from an unpushed commit (8f2a606) left
+# overwrote each other's work). Rebase onto origin/$BASE first.
+# Ship only what's already on origin/$BASE: a build from an unpushed commit (8f2a606) left
 # every other agent's next build refused for lacking it.
-git fetch -q origin worktree-powos-multiplatform 2>/dev/null || true
+git fetch -q origin "$BASE" 2>/dev/null || true
 # Only refuse a request whose own commit isn't on origin at all (force-pushed away, or never pushed). A commit that
 # IS on origin but origin has since moved past is NOT refused here (friction f36: "HEAD is behind origin" refused
 # ships from the service's own checkout lagging origin by the time the build started - the service's whole job is
 # to ship origin's TIP, never its own stale snapshot).
-if ! git merge-base --is-ancestor HEAD origin/worktree-powos-multiplatform 2>/dev/null; then
-  echo "ship-apk: REFUSED - HEAD isn't on origin/worktree-powos-multiplatform yet: fast-forward/rebase and push first" >&2; exit 3
+if ! git merge-base --is-ancestor HEAD origin/$BASE 2>/dev/null; then
+  echo "ship-apk: REFUSED - HEAD isn't on origin/$BASE yet: fast-forward/rebase and push first" >&2; exit 3
 fi
 # ...and the BUILD must be at that tip: the install resets every shell override, so a build missing a newer
 # shell-only push (a revert that brought the blur back, 10:15) silently undid it on the phone at 10:17. The service
 # (POWOS_SHIP_SERVICE=1) catches itself up to origin's tip instead of refusing - it just confirmed above that HEAD's
 # own commit is still in origin's history, so this only ever fast-forwards. A human's --direct ship still refuses
 # and asks them to pull/rebase by hand (an emergency ship from an old snapshot should be deliberate).
-if [ "$(git rev-parse HEAD)" != "$(git rev-parse origin/worktree-powos-multiplatform)" ]; then
+if [ "$(git rev-parse HEAD)" != "$(git rev-parse origin/$BASE)" ]; then
   if [ "${POWOS_SHIP_SERVICE:-}" = 1 ]; then
-    echo "ship-apk: HEAD was behind origin/worktree-powos-multiplatform - catching up to its tip before building"
-    git reset -q --hard origin/worktree-powos-multiplatform
+    echo "ship-apk: HEAD was behind origin/$BASE - catching up to its tip before building"
+    git reset -q --hard origin/$BASE
   else
-    echo "ship-apk: REFUSED - HEAD is behind origin/worktree-powos-multiplatform: git pull --ff-only (or rebase) first" >&2; exit 3
+    echo "ship-apk: REFUSED - HEAD is behind origin/$BASE: git pull --ff-only (or rebase) first" >&2; exit 3
   fi
 fi
 last=$(cat "$HOME/.cache/powos-installed-commit" 2>/dev/null || true)
 if [ -n "$last" ] && ! git merge-base --is-ancestor "$last" HEAD 2>/dev/null; then
-  echo "ship-apk: REFUSED - HEAD lacks the installed build's commit $last (git rebase worktree-powos-multiplatform)" >&2; exit 3
+  echo "ship-apk: REFUSED - HEAD lacks the installed build's commit $last (git rebase origin/$BASE)" >&2; exit 3
 fi
 until mkdir "$lock" 2>/dev/null; do
   echo "ship-apk: waiting for $(cat "$lock/who" 2>/dev/null || echo another build)"; sleep 15
@@ -87,7 +88,7 @@ trap 'rm -rf "$lock"; rm -f "$sq/wants-phone" "$sq/apk/waiting"; [ "$(cat "$sq/i
 # (another ship took the lock first and built a newer tip) has nothing left to install - 3 ships queued behind one idle
 # wait each rebuilt and reinstalled the same code (2026-10-22). Skip it instead of an ~8 min build + install.
 inst=$(cat "$HOME/.cache/powos-installed-commit" 2>/dev/null || true)
-git fetch -q origin worktree-powos-multiplatform 2>/dev/null || true
+git fetch -q origin "$BASE" 2>/dev/null || true
 if [ -n "$inst" ] && git merge-base --is-ancestor HEAD "$inst" 2>/dev/null; then
   echo "ship-apk: already shipped - the installed build $(git rev-parse --short "$inst") contains $(git rev-parse --short HEAD); nothing to do"
   exit 0
@@ -142,8 +143,8 @@ apk_delta() {   # shell files at commit $1 the APK's bundled shell lacks or has 
     while read -r f; do cmp -s "$f" "$d/apk/assets/shell/$f" || echo "$f"; done)
   rm -rf "$d"
 }
-git fetch -q origin worktree-powos-multiplatform 2>/dev/null || true
-tip=$(git rev-parse origin/worktree-powos-multiplatform)
+git fetch -q origin "$BASE" 2>/dev/null || true
+tip=$(git rev-parse origin/$BASE)
 newer=$(apk_delta "$tip") stamp=""; sg=POWOS_SKIP_GATE=1; [ -z "${SHIP_GATE_FIRST:-}" ] || sg=
 # The full pre-gate of the delta (573 s; scene sweeps like dock-position / widget fit) REFUSED every APK on 2026-10-28
 # for scenes unrelated to the install. Those files are already live (the shell ship pushed them, and its post-gate
@@ -183,8 +184,8 @@ if [ -z "$now" ]; then
   waited=0; ok=""; wmax=$(( ${SHIP_WAIT_MIN:-10080} * 60 ))   # default 7 days: effectively never
   while [ $waited -lt $wmax ]; do
     # A newer APK is wanted: this pending one is replaced (the runner builds origin's tip), never installed stale.
-    git fetch -q origin worktree-powos-multiplatform 2>/dev/null || true
-    wtip=$(git rev-parse origin/worktree-powos-multiplatform 2>/dev/null || true)
+    git fetch -q origin "$BASE" 2>/dev/null || true
+    wtip=$(git rev-parse origin/$BASE 2>/dev/null || true)
     if [ -n "$wtip" ] && [ "$wtip" != "$(git rev-parse HEAD)" ] && [ -n "$(git diff --name-only HEAD "$wtip" -- targets/android/app targets/android/build-app.sh 2>/dev/null | grep -v 'app/version.properties$')" ]; then
       echo "ship-apk: superseded - origin's tip $(git rev-parse --short "$wtip") has newer APK inputs; this pending APK is dropped for that build"; exit 8
     fi
@@ -276,8 +277,8 @@ mkdir -p "$nr" && cp "$apk" "$nr/powos.apk.tmp" && mv "$nr/powos.apk.tmp" "$nr/p
 # Then, in ONE push, every shell file origin's tip (now: it may have moved during the wait) has differently from the
 # APK's own shell. The set gated before the install goes on without a second gate (the stamp is for exactly it at that
 # tree); a different set (origin moved) is gated as any push, from the new tip.
-git fetch -q origin worktree-powos-multiplatform 2>/dev/null || echo "ship-apk: fetch failed - re-applying from the last fetched origin (the service re-applies anything newer: apk/shell-tip below)" >&2
-tip2=$(git rev-parse origin/worktree-powos-multiplatform)
+git fetch -q origin "$BASE" 2>/dev/null || echo "ship-apk: fetch failed - re-applying from the last fetched origin (the service re-applies anything newer: apk/shell-tip below)" >&2
+tip2=$(git rev-parse origin/$BASE)
 full=$(apk_delta "$tip2")
 pushok=1
 # The overrides kept on through a stamped install: those not in this push are stale (the new APK's copy is the tip's)

@@ -18,7 +18,7 @@ mkdir -p "$HOME/.cache"
 git config --global user.email t@t; git config --global user.name t; git config --global init.defaultBranch main
 
 git init -q --bare "$T/origin.git"
-git clone -q "$T/origin.git" "$T/seed" 2>/dev/null; cd "$T/seed"; git checkout -q -b worktree-powos-multiplatform
+git clone -q "$T/origin.git" "$T/seed" 2>/dev/null; cd "$T/seed"; git checkout -q -b main
 mkdir -p tools/phone apps/app-api
 cp "$src/tools/phone/ship.sh" tools/phone/
 cat > apps/app-api/powos-app.json <<'EOF'
@@ -30,9 +30,9 @@ printf '#!/bin/bash\necho "BUILD $1 $(git rev-parse HEAD)" >> "$LOG"\n' > apps/b
 printf '#!/bin/bash\necho "INSTALL $1 $2 note=$4" >> "$LOG"\n' > apps/install.sh
 printf '.claude/\n' > .gitignore
 chmod +x tools/phone/ship.sh apps/build.sh apps/install.sh
-git add -A; git commit -qm base; git push -q origin worktree-powos-multiplatform 2>/dev/null
+git add -A; git commit -qm base; git push -q origin main 2>/dev/null
 git rev-parse HEAD > "$HOME/.cache/powos-installed-commit"   # the phone's APK already matches base - no Kotlin changed
-git clone -q -b worktree-powos-multiplatform "$T/origin.git" "$T/B" 2>/dev/null
+git clone -q -b main "$T/origin.git" "$T/B" 2>/dev/null
 cd "$T/B"
 
 fails=0
@@ -43,7 +43,7 @@ drained() { for _ in $(seq "${1:-30}"); do ls "$Q"/*.req >/dev/null 2>&1 || retu
 # A commit that only changes apps/app-api/: built + installed, with the ship note, no APK involved.
 : > "$LOG"
 echo "marker 1" > apps/app-api/marker.txt; git add -A; git commit -qm "app-api change"
-git push -q origin HEAD:worktree-powos-multiplatform 2>/dev/null
+git push -q origin HEAD:main 2>/dev/null
 t=$(git rev-parse HEAD)
 req --note "app-api got better"
 drained 40 && ok "request served" || { bad "request left queued"; cat "$Q/runner.log" 2>/dev/null; }
@@ -65,7 +65,7 @@ drained 20 && ok "no-op request served" || bad "no-op request left queued"
 : > "$LOG"
 rm -f "$Q/apps-live"
 echo "marker 2" > apps/app-api/marker.txt; git add -A; git commit -qm "app-api change 2"
-git push -q origin HEAD:worktree-powos-multiplatform 2>/dev/null
+git push -q origin HEAD:main 2>/dev/null
 t=$(git rev-parse HEAD)
 req --note "app-api improved again"
 drained 40 && ok "request after deleting apps-live served" || { bad "request after deleting apps-live left queued"; cat "$Q/runner.log" 2>/dev/null; }

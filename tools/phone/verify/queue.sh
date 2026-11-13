@@ -66,7 +66,7 @@
 set -uo pipefail
 here=${QUEUE_HERE:-$(cd "$(dirname "$0")" && pwd -P)}; unset QUEUE_HERE; phone=${QUEUE_PHONE:-$(cd "$here/.." && pwd -P)}
 . "$here/game-lib.sh"   # game_up: the one "a game runs" test (queue and checks)
-BASE=worktree-powos-multiplatform
+BASE=${POWOS_BASE:-main}
 REPO=$(cd "$here" && cd "$(dirname "$(git rev-parse --path-format=absolute --git-common-dir 2>/dev/null)")" 2>/dev/null && pwd -P || true)
 [ "$REPO" = / ] && REPO=
 WTR=${POWOS_WT_ROOT:-$HOME/pw}   # where tools/agents/worktree.sh new puts agent worktrees (outside the repo)

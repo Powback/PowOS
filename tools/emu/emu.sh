@@ -88,7 +88,7 @@ running() { a get-state 2>/dev/null | grep -qx device; }
 booted() { [ "$(a shell getprop sys.boot_completed 2>/dev/null | tr -d '\r')" = 1 ] && a shell 'cmd package path android' >/dev/null 2>&1; }
 wait_boot() { local i; for i in $(seq "${1:-300}"); do booted && return 0; sleep 1; done; die "no boot within ${1:-300} s (log: $STATE/emulator.log)"; }
 emu_commit() { a shell cat "$COMMIT_FILE" 2>/dev/null | tr -d '\r'; }
-tip() { git -C "$REPO" fetch -q origin worktree-powos-multiplatform 2>/dev/null; git -C "$REPO" rev-parse origin/worktree-powos-multiplatform; }
+tip() { git -C "$REPO" fetch -q origin main 2>/dev/null; git -C "$REPO" rev-parse origin/main; }
 
 # --- the AVD ------------------------------------------------------------------------------------------------------
 image() {

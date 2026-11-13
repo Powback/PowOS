@@ -33,7 +33,7 @@ hand_runner() {
 }
 case "${1:-install}" in
 install)
-  [ -e "$VR/.git" ] || git -C "$REPO" worktree add -q --detach "$VR" origin/worktree-powos-multiplatform
+  [ -e "$VR/.git" ] || git -C "$REPO" worktree add -q --detach "$VR" origin/main
   [ -f "$VR/tools/phone/verify/queue.sh" ] || { echo "runner-deploy: $VR has no queue.sh (push it, then queue.sh run once)"; exit 1; }
   mkdir -p "$Q/done" "$HOME/Library/LaunchAgents"
   sed -e "s#@HOME@#$HOME#g" -e "s#@VR@#$VR#g" "$here/$L.plist" > "$P"

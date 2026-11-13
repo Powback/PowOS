@@ -27,11 +27,11 @@ bad() { echo "FAIL $1"; fails=$((fails + 1)); [ -n "${2:-}" ] && echo "       $2
 SA="$T/ship-agent"
 git init -q --bare "$T/origin.git"
 git clone -q "$T/origin.git" "$SA" 2>/dev/null
-(cd "$SA" && git checkout -q -b worktree-powos-multiplatform
+(cd "$SA" && git checkout -q -b main
   mkdir -p tools/phone
   cp "$src/tools/phone/ship.sh" tools/phone/ship.sh
   echo seed > seed.txt
-  git add -A && git commit -qm seed && git push -q origin worktree-powos-multiplatform 2>/dev/null)
+  git add -A && git commit -qm seed && git push -q origin main 2>/dev/null)
 
 SQ="$T/ship-queue"
 run_ship() { (cd "$SA" && SHIP_DIR="$SQ" SHIP_QUIET_S=1 SHIP_QUIET_SHELL_S=1 SHIP_POLL_S=1 bash tools/phone/ship.sh "$@") 2>&1; }
@@ -71,7 +71,7 @@ grep -qi PAUSED <<<"$out" && bad "status after resume must not still say PAUSED"
 # ============================================= tools/phone/verify/queue.sh ======================================
 VA="$T/verify-agent"
 git clone -q "$T/origin.git" "$VA" 2>/dev/null
-(cd "$VA" && git checkout -q worktree-powos-multiplatform)
+(cd "$VA" && git checkout -q main)
 mkdir -p "$VA/tools/phone/verify"
 cp "$src/tools/phone/verify/queue.sh" "$VA/tools/phone/verify/queue.sh"
 

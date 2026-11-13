@@ -19,7 +19,7 @@ ok()  { echo "  ok   - $1"; PASS=$((PASS+1)); }
 bad() { echo "  FAIL - $1"; FAIL=$((FAIL+1)); [ -n "${2:-}" ] && echo "         $2"; }
 
 TMP="$(mktemp -d)"; trap 'rm -rf "$TMP"' EXIT
-export LAND_BASE=worktree-powos-multiplatform LAND_REMOTE=origin
+export LAND_BASE=main LAND_REMOTE=origin
 
 if [ ! -x "$LAND" ]; then
   echo "== Results: 0 passed, 1 failed =="

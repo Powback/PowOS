@@ -15,7 +15,7 @@ Rules:
   docs/REMOTE-POWOS.md section 4. Never prune the Docker build cache.
 - No sudo, ever, without the user (power caps and fan control need root: ask). Confirm before deleting data.
 - PowStation commits go on branch `mac` (don't push it unless told); local-llm-stack never to master.
-Work in your own git worktree off worktree-powos-multiplatform, commit only your paths with
+Work in your own git worktree off main, commit only your paths with
 "Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>", rebase, fast-forward push; on the box `git pull --ff-only`.
 Verify: units register, curl health endpoints, llm-bench.py for tok/s, voice-bench.py ws for latency, stt.pow/health.
 Report briefly: what's live (URLs, models, tok/s, voice latency before/after), commits, what's unverified.

@@ -9,7 +9,7 @@
 #                            $POWOS_WT_ROOT first, then the old .claude/worktrees location (pre-move worktrees)
 #   worktree.sh list         name, age of HEAD, commits not on origin (patch-id), dirty files; both locations
 #   worktree.sh gc [--dry-run]   remove every worktree (both locations) that's clean, fully merged into
-#                            origin/worktree-powos-multiplatform (ahead=0, as `done` checks) AND untouched for
+#                            origin/main (ahead=0, as `done` checks) AND untouched for
 #                            30+ min (HEAD commit age AND no file/index/reflog mtime in it, f405) with no live
 #                            process in it (cwd or command line, f405); logs each removal to $RMLOG: agents that
 #                            finished without `worktree.sh done` (friction f3). Never touches a runner's own
@@ -19,7 +19,7 @@
 #                            sweep (board-sweep.sh fetches and runs origin's copy, same as it does for the
 #                            agents CLI, so a fix here reaches every sweep without each worktree updating by hand).
 set -euo pipefail
-BASE=worktree-powos-multiplatform
+BASE=${POWOS_BASE:-main}
 # Resolve from CWD (git-common-dir is identical across every worktree of this repo, main or not), never from $0:
 # $0 is wherever this script's BYTES happen to sit (a /tmp copy, "bash" when piped via `bash -s`, a worktree's own
 # tools/agents/) - resolving the repo root from it nests a new worktree inside whichever worktree you ran this

@@ -14,7 +14,7 @@ allowed() (no iframes, no "null", exact origin). PowOS app UIs stay modules in t
 Verify: ShellOriginTest (JVM) for logic; after install, tools/phone/bridge-check.sh [page] (phone awake, user idle
 >=120 s, never wake it) must exit 0; logcat tag PowosShell "refused a message" must stay empty in normal use.
 Ship ONLY by pushing to origin, then `tools/phone/ship.sh request --note "..."` - never ship-apk.sh/push.sh yourself
-(compile Kotlin before pushing it: handbook Shipping); check logcat yourself afterwards. Workarounds: a HACK marker + docs/REMOTE-POWOS.md section 4 row. Own worktree off worktree-powos-multiplatform, rebase often, commit
+(compile Kotlin before pushing it: handbook Shipping); check logcat yourself afterwards. Workarounds: a HACK marker + docs/REMOTE-POWOS.md section 4 row. Own worktree off main, rebase often, commit
 only your paths with "Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>", fast-forward push, never force-push.
 Report briefly: what changed for the user, the APK version, commits, what's unverified.
 

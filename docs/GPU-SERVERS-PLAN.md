@@ -172,7 +172,7 @@ platform). VoiceAgent ran unchanged: config only (branch `server-gpu195` in `~/P
 - `powos units`: the box runs image 0.3.0 (0f5e878, built from master), which has no units tool, and an image update
   means `rpm-ostree` + a reboot. The desktop session (seat0, auto-login, screen locked) was live, so there was no
   reboot. `/usr/local/bin/powos` (unit `powos-units-shim`, a marked HACK) routes `units` to a git checkout of
-  `worktree-powos-multiplatform` at `~/Projects/PowOS`, and everything else to the image's `/usr/bin/powos`.
+  `main` at `~/Projects/PowOS`, and everything else to the image's `/usr/bin/powos`.
   - Real fix: an image with powos-units, then `rpm-ostree upgrade` + reboot at a quiet time, then remove the shim.
 - Fleet docs: `~/Projects/CLAUDE.md` network table has the box.
 - Linger was already on. Firewalld's FedoraWorkstation zone already allows 1025-65535/tcp, so the service ports

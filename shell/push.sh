@@ -36,6 +36,7 @@
 # ~/.cache/powos-ship-queue/direct.log). --errors, --pre-gate and test/ pushes (--test) are free.
 set -euo pipefail
 cd "$(dirname "$0")"
+BASE=${POWOS_BASE:-main}   # the one branch (main since 11-13)
 force="" pregate="" pregated=""
 for a in "$@"; do case "$a" in --force) force=1 ;; --pre-gate) pregate=1 ;; --pre-gated=*) pregated=${a#--pre-gated=} ;; esac; done
 # dev/gate.sh exit 75 = NO VERDICT: its job machine (.58) didn't answer and the hub can't pass the full gate - neither a
@@ -60,9 +61,9 @@ direct=""; da=(); for a in "$@"; do [ "$a" = --direct ] && direct=1 || da+=("$a"
 only_test() { local f n=0; for f in $(shell_files "$@"); do case "$f" in test/*) n=1 ;; *) return 1 ;; esac; done; [ $n = 1 ]; }
 if [ -z "${POWOS_GATE_DONE:-}" ] && [ -z "${POWOS_SHIP_SERVICE:-}" ] && [ -z "$pregate" ] && [[ " $* " != *" --errors "* ]] && ! only_test "$@"; then
   [ -n "$direct" ] || { echo "push.sh: refused - agents don't ship: push to origin, then tools/phone/ship.sh request --note \"...\" (the ship service pushes origin's tip; --direct only for an emergency, logged)" >&2; exit 3; }
-  git fetch -q origin worktree-powos-multiplatform 2>/dev/null || true
-  [ "$(git rev-parse HEAD)" = "$(git rev-parse origin/worktree-powos-multiplatform 2>/dev/null)" ] ||
-    { echo "push.sh: --direct refused - HEAD isn't origin/worktree-powos-multiplatform's tip (git pull --ff-only first)" >&2; exit 3; }
+  git fetch -q origin "$BASE" 2>/dev/null || true
+  [ "$(git rev-parse HEAD)" = "$(git rev-parse origin/$BASE 2>/dev/null)" ] ||
+    { echo "push.sh: --direct refused - HEAD isn't origin/$BASE's tip (git pull --ff-only first)" >&2; exit 3; }
   dl=${SHIP_DIR:-$HOME/.cache/powos-ship-queue}; mkdir -p "$dl"
   echo "$(date '+%F %T') push.sh --direct $(git rev-parse --short HEAD) $(basename "$(git rev-parse --show-toplevel)") pid $$: $*" >> "$dl/direct.log"
   echo "push.sh: --direct - outside the ship service (logged to $dl/direct.log)" >&2
@@ -111,15 +112,15 @@ check_newer() {
 # fell apart into one column on the phone). Each file must be exactly origin's version: commit, rebase, push to
 # origin, then push here. The gate-test page (test/) is exempt; --force overrides. Checked first, before either path.
 if [ -z "${POWOS_GATE_DONE:-}" ] && [ -z "$force" ] && [ -z "$pregate" ] && ! reset_or_errors "$@"; then
-  git fetch -q origin worktree-powos-multiplatform 2>/dev/null || true
+  git fetch -q origin "$BASE" 2>/dev/null || true
   stale=""; skip=""
   for a in "$@"; do
     [ -n "$skip" ] && { skip=""; continue; }
     case "$a" in --note) skip=1; continue ;; --*) continue ;; test/*) continue ;; esac
     [ -f "$a" ] || continue
-    git show "origin/worktree-powos-multiplatform:shell/$a" 2>/dev/null | cmp -s - "$a" || stale="$stale $a"
+    git show "origin/$BASE:shell/$a" 2>/dev/null | cmp -s - "$a" || stale="$stale $a"
   done
-  [ -z "$stale" ] || { echo "push.sh: refused - not origin's version:$stale (commit, rebase onto origin/worktree-powos-multiplatform, push to origin, then push here)" >&2; exit 1; }
+  [ -z "$stale" ] || { echo "push.sh: refused - not origin's version:$stale (commit, rebase onto origin/$BASE, push to origin, then push here)" >&2; exit 1; }
 fi
 # --pre-gate: the gate alone, on the committed shell + these files (what the phone runs after an install of this
 # tree's parent build and a push of them - ship-apk's case), and a stamp for exactly them at exactly this tree.
@@ -128,8 +129,8 @@ if [ -n "$pregate" ]; then
   [ ${#pf[@]} -gt 0 ] || { echo "push.sh: --pre-gate which files?" >&2; exit 2; }
   [ -z "$(git status --porcelain -- "${pf[@]}")" ] || { echo "push.sh: --pre-gate: commit them first (only HEAD's files are stamped)" >&2; exit 1; }
   # Of origin's history (the tip, or behind it while origin moves on - ship-apk pushes what came later, gated).
-  git fetch -q origin worktree-powos-multiplatform 2>/dev/null || true
-  git merge-base --is-ancestor HEAD origin/worktree-powos-multiplatform 2>/dev/null || { echo "push.sh: --pre-gate: HEAD isn't on origin/worktree-powos-multiplatform" >&2; exit 1; }
+  git fetch -q origin "$BASE" 2>/dev/null || true
+  git merge-base --is-ancestor HEAD origin/$BASE 2>/dev/null || { echo "push.sh: --pre-gate: HEAD isn't on origin/$BASE" >&2; exit 1; }
   # The ship's gate (ship-apk.sh runs this): its own slot, never queued behind agent gates (dev/gate.sh).
   export GATE_PRIORITY=ship
   set +e

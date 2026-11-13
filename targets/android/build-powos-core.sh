@@ -16,7 +16,7 @@
 set -euo pipefail
 HERE=$(cd "$(dirname "$0")" && pwd)
 ROOT=$(cd "$HERE/../.." && pwd)
-BASE=${POWOS_BASE_BRANCH:-worktree-powos-multiplatform}
+BASE=${POWOS_BASE_BRANCH:-${POWOS_BASE:-main}}
 OUT=$HERE/out/powos-core
 PATHS=(bin lib targets/android/session targets/android/shims targets/android/play targets/android/install-powos-android.sh targets/android/tools/phone-files.sh
   config/etc/profile.d units/phone)

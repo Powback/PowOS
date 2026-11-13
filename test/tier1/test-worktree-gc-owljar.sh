@@ -23,7 +23,7 @@ old=$(( $(date +%s) - 7200 ))
 export GIT_AUTHOR_DATE="@$old" GIT_COMMITTER_DATE="@$old"
 git init -q --bare "$T/origin.git"
 P=$T/pw/powos-multiplatform
-git init -q -b worktree-powos-multiplatform "$P"
+git init -q -b main "$P"
 mkdir -p "$P/tools/agents" "$P/shell/dev" "$P/targets/android/app/owl/src/main/kotlin"
 cp "$REPO/tools/agents/worktree.sh" "$REPO/tools/agents/build-inputs-cache.sh" "$P/tools/agents/"
 cp "$REPO/shell/dev/owl-jar.sh" "$P/shell/dev/"
@@ -31,7 +31,7 @@ echo 'fun main() {}' > "$P/targets/android/app/owl/src/main/kotlin/Main.kt"
 echo 'build/' > "$P/targets/android/app/owl/.gitignore"; echo 'out/' > "$P/.gitignore"
 git -C "$P" add -A; git -C "$P" commit -qm one
 echo '// two' >> "$P/targets/android/app/owl/src/main/kotlin/Main.kt"; git -C "$P" commit -qam two
-git -C "$P" remote add origin "$T/origin.git"; git -C "$P" push -q origin worktree-powos-multiplatform
+git -C "$P" remote add origin "$T/origin.git"; git -C "$P" push -q origin main
 unset GIT_AUTHOR_DATE GIT_COMMITTER_DATE
 wt() { ( cd "$P" && bash tools/agents/worktree.sh "$@" ); }
 

@@ -22,7 +22,7 @@ Rules:
   it. Never run KWin's debug console or other KWin UI from a probe. Never bring the PowOS activity to the front
   (it takes over the user's screen). Never poll the phone (one idle.sh --wait).
 - Mark workarounds `HACK:` with a row in docs/REMOTE-POWOS.md section 4.
-Work in your own git worktree off worktree-powos-multiplatform, rebase often, commit only your paths with
+Work in your own git worktree off main, rebase often, commit only your paths with
 "Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>", fast-forward push, never force-push. C++ compiles on the
 phone (dev/phone.sh build) before you push it.
 Verify: the gate (and --shots for the desktop scenes, contrast in report.json), then on the phone: dev/phone.sh

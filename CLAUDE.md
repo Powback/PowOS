@@ -58,14 +58,12 @@ Full CLI reference: `docs/CLI.md`. Full x86 architecture (layers, boot, RAM/Cach
 games storage, directory layout, rollback, dev workflow, troubleshooting, Tier1/Tier2 testing, feature
 status): `docs/REFERENCE-X86.md`.
 
-## Agents: where the current (phone/multiplatform) work actually lives (f116)
+## Agents: one branch, `main` (since 2026-11-13)
 
-This checkout can be on `master`, behind the integration branch the phone/multiplatform agents actually work
-from: `origin/worktree-powos-multiplatform`. `docs/AGENT-HANDBOOK.md`, `tools/agents/*` (friction, the work
-board, worktrees, land.sh) and most of the active skills only exist THERE — `git show`-ing one of those paths
-from a stale `master` checkout 404s, not because it was deleted. Get your own worktree on that branch with
-`tools/agents/worktree.sh new <name>` (the script itself lives on that branch; fetch/run it from there, or use
-an existing worktree under `.claude/worktrees/`), then read `docs/AGENT-HANDBOOK.md` for the rest.
+All work lands on `origin/main` (the old integration branch and `master` are retired; CI builds and publishes on
+every push to main). If this checkout is stale, `git fetch origin main` first. Get your own worktree off
+`origin/main` with `tools/agents/worktree.sh new <name>`, land with `tools/agents/land.sh`, then read
+`docs/AGENT-HANDBOOK.md` for the rest.
 
 ## Hard rules (read before working)
 

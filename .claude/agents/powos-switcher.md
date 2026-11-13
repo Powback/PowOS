@@ -17,7 +17,7 @@ Rules:
 - Ship ONLY by pushing to origin, then `tools/phone/ship.sh request --note "..."` (or --silent) - never ship-apk.sh/push.sh yourself (handbook Shipping)
   (compile Kotlin before pushing it).
 - HACK markers need a docs/REMOTE-POWOS.md section 4 row in the same commit.
-- Own worktree off worktree-powos-multiplatform, commit only your paths with
+- Own worktree off main, commit only your paths with
   "Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>", rebase, fast-forward push, never force-push.
 Verify: open an app (am start), swipe home from home page 1, page 2 and PowOS AI's page; also hold for the switcher
 and swipe home from it. Home's content must be on screen in every frame; going home from an app keeps the page,

@@ -1,6 +1,6 @@
 #!/bin/bash
 # Hermetic test of ship-apk.sh's "behind origin" handling (friction f36): "ship-apk: REFUSED - HEAD is behind
-# origin/worktree-powos-multiplatform" refused every service ship whose own checkout had lagged origin by the
+# origin/main" refused every service ship whose own checkout had lagged origin by the
 # time the build started - the service's whole job is to ship origin's TIP, never its own stale snapshot. Only
 # a commit that ISN'T on origin at all should ever be refused.
 #   test/tier1/test-ship-catchup.sh        exit 0 = all pass
@@ -21,27 +21,27 @@ fails=0
 ok() { echo "PASS $1"; }
 bad() { echo "FAIL $1"; fails=$((fails + 1)); }
 
-seed_repo() {   # a bare origin with one base commit on worktree-powos-multiplatform, and a clone at $T/A
+seed_repo() {   # a bare origin with one base commit on main, and a clone at $T/A
   rm -rf "$T/origin.git" "$T/seed" "$T/A" "$T/B"
   git init -q --bare "$T/origin.git"
   git clone -q "$T/origin.git" "$T/seed" 2>/dev/null
   (
-    cd "$T/seed" && git checkout -q -b worktree-powos-multiplatform
+    cd "$T/seed" && git checkout -q -b main
     mkdir -p tools/phone tools/lib shell/dev targets/android
     cp "$src/tools/phone/ship-apk.sh" tools/phone/ship-apk.sh
     cp "$src/tools/lib/need-docker.sh" tools/lib/need-docker.sh   # ship-apk sources it (f34/f35)
     printf '#!/bin/bash\necho "ok all pages"\n' > shell/dev/gate.sh
     printf '#!/bin/bash\necho "BUILD ATTEMPTED" >&2\nexit 5\n' > targets/android/build-app.sh
     chmod +x shell/dev/gate.sh targets/android/build-app.sh tools/phone/ship-apk.sh
-    git add -A && git commit -qm base && git push -q origin worktree-powos-multiplatform 2>/dev/null
+    git add -A && git commit -qm base && git push -q origin main 2>/dev/null
   )
-  git clone -q -b worktree-powos-multiplatform "$T/origin.git" "$T/A" 2>/dev/null
+  git clone -q -b main "$T/origin.git" "$T/A" 2>/dev/null
 }
 
 advance_origin() {   # another agent's commit lands on origin after $T/A's checkout was made
-  git clone -q -b worktree-powos-multiplatform "$T/origin.git" "$T/B" 2>/dev/null
+  git clone -q -b main "$T/origin.git" "$T/B" 2>/dev/null
   (cd "$T/B" && echo "newer" > shell/dev/marker.txt && git add -A && git commit -qm newer &&
-    git push -q origin HEAD:worktree-powos-multiplatform 2>/dev/null)
+    git push -q origin HEAD:main 2>/dev/null)
   rm -rf "$T/B"
 }
 
@@ -53,7 +53,7 @@ run_ship() {   # run_ship <extra env...> -- <extra args...>
 #    never refuses for being behind.
 seed_repo; advance_origin
 old_head=$(cd "$T/A" && git rev-parse HEAD)
-new_tip=$(cd "$T/origin.git" && git rev-parse worktree-powos-multiplatform)
+new_tip=$(cd "$T/origin.git" && git rev-parse main)
 run_ship env POWOS_SHIP_SERVICE=1; rc=$?
 [ "$old_head" != "$new_tip" ] || { bad "setup: A wasn't actually behind origin"; exit 1; }
 grep -q "REFUSED - HEAD is behind" "$T/out" && bad "service ship still refuses for being behind" ||

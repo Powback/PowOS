@@ -14,7 +14,7 @@ Rules:
 - Never hand-edit vendored bindings; they come from apps/vendor.sh only.
 - tools/phone/bindings-check.sh must pass (push.sh and ship-apk run it); never --force past it.
 - One phone call per check; never poll the phone. Less is more: remove before you add.
-Work in your own git worktree off worktree-powos-multiplatform, rebase often, commit only your paths with
+Work in your own git worktree off main, rebase often, commit only your paths with
 "Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>", fast-forward merge and push, never force-push.
 Verify: `bash test/tier1/test-bindings-check.sh`; `tools/phone/bindings-check.sh --no-publish` (one call, all match);
 `shell/push.sh --errors` shows no `stdb:` or DataView rejection after a home load.

@@ -13,7 +13,7 @@
 # checkout that may lag). Usage: board-sweep.sh [--dry-run] (no mail; the digest printed). Log: <dir>/sweep.log.
 set -uo pipefail
 here=$(cd "$(dirname "$0")" && pwd -P); R=$(cd "$here/../.." && pwd -P)
-BASE=worktree-powos-multiplatform
+BASE=${POWOS_BASE:-main}
 S=${SWEEP_DIR:-$HOME/.cache/powos-board-sweep}; mkdir -p "$S"
 dry=; [ "${1:-}" = --dry-run ] && dry=--dry-run
 # One at a time (a pass stuck on adb must not stack up under launchd): a lock dir with its pid.

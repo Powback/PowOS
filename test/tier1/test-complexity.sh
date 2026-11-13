@@ -14,7 +14,7 @@
 # Fail closed: each lint installs/fetches its own tools (cached); only GATE_LINT=0 skips them.
 #
 # Scope: by default each language's lint runs only when that language changed against the merge base with
-# origin/worktree-powos-multiplatform (committed, uncommitted or untracked): detekt only for .kt/.java (or its config),
+# origin/main (committed, uncommitted or untracked): detekt only for .kt/.java (or its config),
 # the TS lint for shell/ and apps/*/ui, clippy for .rs, the bash ratchets for .sh/bin/build. --all (or CX_ALL=1, no
 # merge base, CI) runs everything: the ship pipeline and CI keep the full mode.
 # Usage:  bash test/tier1/test-complexity.sh [--all]
@@ -27,7 +27,7 @@ ALL=${CX_ALL:-}; [ "${1:-}" = --all ] && ALL=1
 # Which languages changed (bash 3.2: no associative arrays). Unknown merge base -> everything.
 LT=0; LK=0; LR=0; LB=0
 if [ -z "$ALL" ]; then
-    mb=$(git -C "$ROOT" merge-base HEAD origin/worktree-powos-multiplatform 2>/dev/null) || mb=""
+    mb=$(git -C "$ROOT" merge-base HEAD origin/main 2>/dev/null) || mb=""
     if [ -z "$mb" ]; then ALL=1; else
         changed=$( { git -C "$ROOT" diff --name-only "$mb"; git -C "$ROOT" ls-files --others --exclude-standard; } | sort -u)
         echo "$changed" | grep -qE '^(shell/|apps/[^/]+/ui/|test/tier1/test-complexity)' && LT=1

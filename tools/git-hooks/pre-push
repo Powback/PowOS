@@ -11,7 +11,7 @@ files=() apps="" kt=""
 while read -r _lref lsha _rref rsha; do
   [ "$lsha" = "$zero" ] && continue
   base=$rsha
-  [ "$rsha" = "$zero" ] && base=$(git merge-base "$lsha" origin/worktree-powos-multiplatform 2>/dev/null || echo "$lsha")
+  [ "$rsha" = "$zero" ] && base=$(git merge-base "$lsha" origin/main 2>/dev/null || echo "$lsha")
   while IFS= read -r f; do
     case "$f" in
       shell/*.ts|shell/*.tsx|shell/*.mjs|shell/*.js) files+=("${f#shell/}") ;;

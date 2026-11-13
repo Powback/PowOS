@@ -26,7 +26,7 @@ loaded() { launchctl print "$D/$L" >/dev/null 2>&1; }
 case "${1:-install}" in
 install)
   [ -d "$HOME/.cache/powos-ship.lock" ] && { echo "ship-deploy: an APK ship is running ($(cat "$HOME/.cache/powos-ship.lock/who" 2>/dev/null)) - install after it"; exit 1; }
-  [ -e "$SR/.git" ] || git -C "$REPO" worktree add -q --detach "$SR" origin/worktree-powos-multiplatform
+  [ -e "$SR/.git" ] || git -C "$REPO" worktree add -q --detach "$SR" origin/main
   [ -f "$SR/tools/phone/ship.sh" ] || { echo "ship-deploy: $SR has no ship.sh (push it to origin first)"; exit 1; }
   mkdir -p "$Q/done" "$HOME/Library/LaunchAgents"
   sed -e "s#@HOME@#$HOME#g" -e "s#@VR@#$SR#g" "$here/$L.plist" > "$P"

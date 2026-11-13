@@ -34,7 +34,7 @@ export PATH="$T/bin:$PATH"
 git init -q --bare "$T/origin.git"
 git clone -q "$T/origin.git" "$T/seed" 2>/dev/null
 (
-  cd "$T/seed" && git checkout -q -b worktree-powos-multiplatform
+  cd "$T/seed" && git checkout -q -b main
   mkdir -p tools/phone shell/dev targets/android/app targets/android/rooted
   cp "$src/tools/phone/ship.sh" tools/phone/ship.sh
   printf '#!/bin/bash\necho "ok all pages"\n' > shell/dev/gate.sh
@@ -58,22 +58,22 @@ ROOTED
   echo "x" > NOTES.txt
   echo "guard" > targets/android/rooted/powos-run.sh
   printf '.claude/\n' > .gitignore   # the ship service's own checkout (.claude/worktrees/ship-runner) lives inside $T/B
-  git add -A && git commit -qm base && git push -q origin worktree-powos-multiplatform 2>/dev/null
+  git add -A && git commit -qm base && git push -q origin main 2>/dev/null
 )
 # A baseline "installed APK" commit: without it, pending_apk() forces an APK ship on EVERY request
 # ("[ -z "$inst" ] || ..." in ship.sh - empty means no record yet, so everything is pending), which the
 # ship-apk.sh stub above always fails, leaving every request stuck forever - unrelated to what this test checks,
 # as ship-queue-test.sh's own seed records the same baseline for the same reason.
 git -C "$T/seed" rev-parse HEAD > "$HOME/.cache/powos-installed-commit"
-git clone -q -b worktree-powos-multiplatform "$T/origin.git" "$T/B" 2>/dev/null
+git clone -q -b main "$T/origin.git" "$T/B" 2>/dev/null
 cd "$T/B"
 
 fails=0
 ok() { echo "PASS $1"; }; bad() { echo "FAIL $1"; fails=$((fails + 1)); }
-land() { git pull -q --rebase 2>/dev/null; printf '%s\n' "$2" > "$1"; git add -A; git commit -qm "$3"; git push -q origin HEAD:worktree-powos-multiplatform 2>/dev/null; }
+land() { git pull -q --rebase 2>/dev/null; printf '%s\n' "$2" > "$1"; git add -A; git commit -qm "$3"; git push -q origin HEAD:main 2>/dev/null; }
 req() { SHIP_REQUESTER=B bash tools/phone/ship.sh request "$@" > "$T/req.out" 2>&1; }
 drained() { for _ in $(seq "${1:-40}"); do ls "$Q"/*.req >/dev/null 2>&1 || return 0; sleep 1; done; return 1; }
-tip() { git -C "$T/B" rev-parse origin/worktree-powos-multiplatform; }
+tip() { git -C "$T/B" rev-parse origin/main; }
 wait_for() { for _ in $(seq "${2:-20}"); do eval "$1" && return 0; sleep 1; done; return 1; }   # wait for a shell test to pass
 
 # 1. A commit that doesn't touch any of rooted.sh deploy's inputs never triggers a rooted deploy.

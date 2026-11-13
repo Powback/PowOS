@@ -58,7 +58,7 @@ EOF
 chmod +x "$T/bin/"*; export PATH="$T/bin:$PATH"
 # --- the repo: origin (bare), the shipper's clone A, another agent's clone B ---
 git init -q --bare "$T/origin.git"
-git clone -q "$T/origin.git" "$T/seed" 2>/dev/null; cd "$T/seed"; git checkout -q -b worktree-powos-multiplatform
+git clone -q "$T/origin.git" "$T/seed" 2>/dev/null; cd "$T/seed"; git checkout -q -b main
 mkdir -p tools/phone tools/lib shell/dev shell/ui targets/android; cp "$src/tools/lib/need-docker.sh" tools/lib/
 cp "$src/tools/phone/ship-apk.sh" "$src/tools/phone/ship-guard.sh" tools/phone/; cp "$src/shell/push.sh" shell/
 cat > shell/dev/gate.sh <<'EOF'
@@ -89,18 +89,18 @@ printf '#!/bin/bash\n[ "${1:-}" = --remote-cmd ] && echo true; exit 0\n' > tools
 printf '#!/bin/bash\ncase "$*" in *date*) echo "12-31 00:00:00" ;; *) exec adb "$@" ;; esac\n' > tools/phone/adb.sh
 echo 'export const ai = "old"' > shell/ui/ai.tsx; echo 'export const x = 1' > shell/ui/other.tsx
 chmod +x shell/dev/gate.sh shell/push.sh targets/android/*.sh tools/phone/*.sh
-git add -A; git commit -qm base; git push -q origin worktree-powos-multiplatform 2>/dev/null
+git add -A; git commit -qm base; git push -q origin main 2>/dev/null
 mkapk HEAD "$PHONE/app/base.apk"   # the phone runs base's APK
-git clone -q -b worktree-powos-multiplatform "$T/origin.git" "$T/A" 2>/dev/null
-git clone -q -b worktree-powos-multiplatform "$T/origin.git" "$T/B" 2>/dev/null
-landB() { (cd "$T/B" && git pull -q --rebase 2>/dev/null; echo "$1" > shell/ui/ai.tsx && git commit -qam "$2" && git push -q origin HEAD:worktree-powos-multiplatform 2>/dev/null; git rev-parse HEAD); }
+git clone -q -b main "$T/origin.git" "$T/A" 2>/dev/null
+git clone -q -b main "$T/origin.git" "$T/B" 2>/dev/null
+landB() { (cd "$T/B" && git pull -q --rebase 2>/dev/null; echo "$1" > shell/ui/ai.tsx && git commit -qam "$2" && git push -q origin HEAD:main 2>/dev/null; git rev-parse HEAD); }
 fails=0
 ok() { echo "PASS $1"; }; bad() { echo "FAIL $1"; fails=$((fails+1)); }
 ship() { (cd "$T/A" && git pull -q --ff-only 2>/dev/null; SHIP_APK_CURRENT=1 bash tools/phone/ship-apk.sh --silent --now) > "$T/ship.out" 2>&1; }
 
 # 1. A commit lands during the build: gated before the install, pushed right after it without a second gate.
 : > "$LOG"
-export GATE_SLEEP=2 DURING_BUILD="cd $T/B && echo 'export const ai = \"new\"' > shell/ui/ai.tsx && echo 'export const x = 2' > shell/ui/other.tsx && git commit -qam newer && git push -q origin HEAD:worktree-powos-multiplatform"
+export GATE_SLEEP=2 DURING_BUILD="cd $T/B && echo 'export const ai = \"new\"' > shell/ui/ai.tsx && echo 'export const x = 2' > shell/ui/other.tsx && git commit -qam newer && git push -q origin HEAD:main"
 ship; rc=$?
 i=$(grep -n '^INSTALL' "$LOG" | cut -d: -f1); p=$(grep -n '^PUSH' "$LOG" | tail -1 | cut -d: -f1)
 pg=$(grep -n '^GATE .* ui/ai.tsx' "$LOG" | head -1 | cut -d: -f1)
@@ -117,7 +117,7 @@ grep -q "every page booted" "$T/ship.out" && ok "pages checked after the install
 
 # 2. The newer set doesn't load: no install, and why.
 : > "$LOG"; rm -f "$HOME/.cache/powos-installed-commit"; export GATE_SLEEP=0
-export DURING_BUILD="cd $T/B && git pull -q --rebase && echo BROKEN > shell/ui/ai.tsx && git commit -qam broken && git push -q origin HEAD:worktree-powos-multiplatform"
+export DURING_BUILD="cd $T/B && git pull -q --rebase && echo BROKEN > shell/ui/ai.tsx && git commit -qam broken && git push -q origin HEAD:main"
 ship; rc=$?
 [ $rc -eq 3 ] && ! grep -q '^INSTALL' "$LOG" && grep -q "REFUSED - not installing" "$T/ship.out" && ok "failed pre-gate refuses the install" || { bad "failed pre-gate (rc $rc)"; cat "$LOG" "$T/ship.out"; }
 unset DURING_BUILD
@@ -131,7 +131,7 @@ ship; rc=$?; rm -f "$HOME/gate-down"
 [ $rc -eq 75 ] && ! grep -q '^BUILD\|^INSTALL' "$LOG" && [ "$(grep -c '^GATE' "$LOG")" = 1 ] && grep -q "DEFERRED - no gate verdict" "$T/ship.out" &&
   ! grep -q "REFUSED\|doesn't load" "$T/ship.out" && ok "no gate verdict on HEAD: DEFERRED (75), nothing built or installed" || { bad "no-verdict head gate (rc $rc)"; cat "$LOG" "$T/ship.out"; }
 : > "$LOG"; touch "$HOME/gate-down-pre"
-export DURING_BUILD="cd $T/B && git pull -q --rebase && echo 'export const ai = \"nv\"' > shell/ui/ai.tsx && git commit -qam nv && git push -q origin HEAD:worktree-powos-multiplatform"
+export DURING_BUILD="cd $T/B && git pull -q --rebase && echo 'export const ai = \"nv\"' > shell/ui/ai.tsx && git commit -qam nv && git push -q origin HEAD:main"
 ship; rc=$?; rm -f "$HOME/gate-down-pre"; unset DURING_BUILD
 [ $rc -eq 75 ] && grep -q '^BUILD' "$LOG" && ! grep -q '^INSTALL' "$LOG" && grep -q "DEFERRED - no gate verdict" "$T/ship.out" &&
   ! grep -q "REFUSED\|pre-gate failed" "$T/ship.out" && ok "no gate verdict on the newer shell files: DEFERRED (75), not installed" || { bad "no-verdict pre-gate (rc $rc)"; cat "$LOG" "$T/ship.out"; }
@@ -199,7 +199,7 @@ git -C "$T/A" remote set-url origin "$T/origin.git"
 # ...and with origin reachable, a shell landing during the build is re-applied from origin's CURRENT tip, and that
 # tip is what the service records as the phone's shell.
 (cd "$T/A" && git pull -q --ff-only 2>/dev/null); rm -f "$HOME/.cache/powos-installed-commit"
-export DURING_BUILD="cd $T/B && git pull -q --rebase && echo 'export const ai = \"S7\"' > shell/ui/ai.tsx && git commit -qam S7 && git push -q origin HEAD:worktree-powos-multiplatform"
+export DURING_BUILD="cd $T/B && git pull -q --rebase && echo 'export const ai = \"S7\"' > shell/ui/ai.tsx && git commit -qam S7 && git push -q origin HEAD:main"
 : > "$LOG"; (cd "$T/A" && SHIP_APK_CURRENT=1 bash tools/phone/ship-apk.sh --silent --now) > "$T/ship.out" 2>&1; rc=$?; unset DURING_BUILD
 S7=$(git -C "$T/B" rev-parse HEAD)
 grep -q '"S7"' "$PHONE/files/shell/ui/ai.tsx" 2>/dev/null && [ "$(cat "$SHIP_DIR/apk/shell-tip" 2>/dev/null)" = "$S7" ] &&

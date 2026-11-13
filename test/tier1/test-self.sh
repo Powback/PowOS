@@ -346,8 +346,8 @@ FAKE_GIT_DIRTY=1 self_pull_align_master "$PH" >/dev/null 2>&1; rc=$?
 : > "$GIT_LOG"
 self_pull_align_master "$PH" >/dev/null 2>&1; rc=$?
 [[ $rc -eq 0 ]] && ok "align_master: a clean tree is safe to align" || bad "align_master rc=$rc on a clean tree"
-grep -q "checkout -B master origin/master" "$GIT_LOG" \
-  && ok "align_master: aligns onto origin/master (never checkout -f)" \
+grep -q "checkout -B main origin/main" "$GIT_LOG" \
+  && ok "align_master: aligns onto origin/main (never checkout -f)" \
   || bad "align_master: did not align a clean tree"
 ! grep -q "checkout -f" "$GIT_LOG" && ok "align_master: never uses checkout -f" || bad "checkout -f used!"
 

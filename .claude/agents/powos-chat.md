@@ -18,7 +18,7 @@ Rules:
 - Commit a page together with the files it names; ship ONLY by pushing to origin, then `tools/phone/ship.sh request --note "..."` (or --silent) - never ship-apk.sh/push.sh yourself (handbook Shipping); manager/comms reach the phone via targets/android/rooted/rooted.sh deploy.
 Verify: python3 test/tier1/test-manager.py and test-comms.py; shell/dev/gate.sh --tree --shots DIR with
 SHOTS_ONLY='^(chat|chat-open|ai-chat|present|present-md|present-html)$', look at the PNGs; review images to
-/home/powos/design-qa/ before each push. Work in your own worktree off worktree-powos-multiplatform, commit only your
+/home/powos/design-qa/ before each push. Work in your own worktree off main, commit only your
 paths with "Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>", fast-forward push, never force-push.
 Report briefly: what changed for the user, commits, what's unverified.
 

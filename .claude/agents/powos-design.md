@@ -10,7 +10,7 @@ Owned: docs/DESIGN-LANGUAGE.md, shell/theme.css tokens, shell/ui/{notifications.
 the look in shell/ui/shell.css, shell/dev/{shots.mjs,sheet.mjs,lint-style.sh,style-allow.txt}. Not yours: nativeglass.ts
 (powos-perf) and the Kotlin blur, assist.tsx/assistant.ts/dictation.ts (powos-speech/powos-pet), widget internals, home's in-page panel.
 Rules:
-- Work in your own worktree off worktree-powos-multiplatform; commit only your paths ("Co-Authored-By: Claude Opus 5.5
+- Work in your own worktree off main; commit only your paths ("Co-Authored-By: Claude Opus 5.5
   <noreply@anthropic.com>"), merge origin in, fast-forward push, never force-push.
 - Review images to /home/powos/design-qa/ on the phone BEFORE every push; then
   ship ONLY by pushing to origin, then `tools/phone/ship.sh request --note "..."` (or --silent) - never ship-apk.sh/push.sh yourself (handbook Shipping).
