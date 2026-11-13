@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Ownership/expiry using the real Java Lease; no device or Android build."""
 import pathlib
+import shutil
 import subprocess
 import tempfile
 import unittest
@@ -25,8 +26,14 @@ public class Check {
   check(!l.start(n, 100000));
  }
 }''')
-            subprocess.run(['docker', 'run', '--rm', '--pull=never', '--network=none', '-v', f'{temp}:/work', '-w', '/work',
-                            'eclipse-temurin:17-jdk-jammy', 'sh', '-c', 'javac -d . Lease.java Check.java && java Check'], check=True)
+            build = 'javac -d . Lease.java Check.java && java Check'
+            # A host JDK when there is one (CI's runner has one, but not the image: --pull=never failed there with
+            # errors=1, 11-13); else the JDK image, pulled if missing (the tier1 container has docker, no java).
+            if shutil.which('javac') and shutil.which('java'):
+                subprocess.run(['sh', '-c', build], cwd=temp, check=True)
+            else:
+                subprocess.run(['docker', 'run', '--rm', '--network=none', '-v', f'{temp}:/work', '-w', '/work',
+                                'eclipse-temurin:17-jdk-jammy', 'sh', '-c', build], check=True)
 
     def test_contract(self):
         root = ET.parse(APP / 'src/main/AndroidManifest.xml').getroot()
