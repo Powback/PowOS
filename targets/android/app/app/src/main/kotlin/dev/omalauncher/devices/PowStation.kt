@@ -300,6 +300,59 @@ object PowStation {
         }, "powstation-leave").start()
     }
 
+    // --- approving other devices (this phone joined as an approver)
+
+    /**
+     * The Devices app's realm calls (bridge "devices.realm", off the main thread): this phone approves and revokes with
+     * its own enrollment, as powos-deviced does on a desktop (its /v1/enroll calls) - the token never reaches a page. "state"
+     * -> {enrolled, approver}; "pending" / "devices" / "approve" {code, decision, tenant?} / "revoke" {id} -> the
+     * realm's answer; a refusal throws with the realm's words (the bridge rejects with them).
+     */
+    fun realm(
+        c: Context,
+        op: String,
+        body: JSONObject?,
+    ): JSONObject {
+        val e = enrollment(c)
+        val approver = e?.optJSONObject("device")?.optBoolean("approver") == true
+        if (op == "state") return JSONObject().put("enrolled", e != null).put("approver", approver)
+        val call = realmCall(op, body ?: JSONObject())
+        checkNotNull(e) { "this phone hasn't joined a PowStation - Settings > powstation" }
+        check(approver) { "this phone joined without the right to approve devices" }
+        val realm = e.optString("realm")
+        val (st, r) =
+            runCatching { http(call.first, realm + call.second, call.third, e.optString("device_token")) }
+                .getOrElse { throw IllegalStateException("the hub (${hostOf(realm)}) isn't reachable") }
+        // a realm 401 is about this phone's enrollment (revoked or left), never a pairing
+        check(st == 200) { refusal(r, "the hub answered $st") }
+        return r
+    }
+
+    /** [op]'s method, realm path and body (pure: PowStationTest); only the fields the realm takes are passed on. */
+    fun realmCall(
+        op: String,
+        b: JSONObject,
+    ): Triple<String, String, JSONObject?> =
+        when (op) {
+            "pending" -> Triple("GET", "/v1/devices/pending", null)
+            "devices" -> Triple("GET", "/v1/devices", null)
+            "approve" -> {
+                val decision = b.optString("decision", "approve")
+                require(decision == "approve" || decision == "deny") { "decision is approve or deny" }
+                val code = b.optString("code").trim().take(16)
+                require(code.isNotEmpty()) { "which code?" }
+                val out = JSONObject().put("code", code).put("decision", decision).put("approver", b.optBoolean("approver", true))
+                b.optString("tenant").takeIf { it.isNotBlank() }?.let { out.put("tenant", it.take(64)) }
+                Triple("POST", "/v1/devices/approve", out)
+            }
+            "revoke" -> {
+                val id = b.optString("id").trim().take(64)
+                require(id.isNotEmpty()) { "which device?" }
+                Triple("POST", "/v1/devices/revoke", JSONObject().put("id", id))
+            }
+            else -> throw IllegalArgumentException("no such realm call: $op")
+        }
+
     // --- what this phone tells the realm
 
     private fun deviceName(c: Context) = Settings.Global.getString(c.contentResolver, Settings.Global.DEVICE_NAME) ?: android.os.Build.MODEL

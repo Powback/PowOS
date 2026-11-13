@@ -19,6 +19,11 @@ export interface ThisDevice {
    * installed here skipped (homeimport.ts). Resolves with the counts for the Devices app's line.
    */
   importHome(layout: LayoutExport): Promise<{ dock: number; home: number; skipped: string[] }>;
+  /**
+   * This phone's own enrollment as an approver (PowStation.kt): the Devices app's "New device wants to join" card and
+   * Revoke on a phone, with no server command. Rejects on an APK without it (the card then stays hidden).
+   */
+  realm(op: "state" | "pending" | "devices" | "approve" | "revoke", body?: object): Promise<any>;
 }
 
 const none = () => Promise.reject(new Error("this PowOS app can't do that yet"));
@@ -27,6 +32,7 @@ export const thisDevice: ThisDevice = {
   lock: () => powos.devices?.lock() ?? none(),
   allowLock: () => powos.devices?.allowLock() ?? none(),
   stopLock: () => powos.devices?.stopLock() ?? none(),
+  realm: (op, body) => powos.devices?.realm(op, body) ?? none(),
   onLock: (on) => powos.on("devices.lock", (s) => on(s as LockAccess)),
   importHome: (layout) =>
     importLayout(layout, {

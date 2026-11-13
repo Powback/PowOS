@@ -908,6 +908,12 @@ export interface Bridge {
     /** Android's own "Activate device admin app?" screen; the answer comes as a "devices.lock" event. */
     allowLock(): Promise<LockAccess>;
     stopLock(): Promise<LockAccess>;
+    /**
+     * This phone's enrollment in its PowStation as an approver (devices/PowStation.kt; the token stays in the app):
+     * "state" -> {enrolled, approver}; "pending" / "devices" / "approve" {code, decision, tenant?} / "revoke" {id} ->
+     * the realm's answer; a refusal rejects with the realm's words. Off the main thread (network).
+     */
+    realm(op: "state" | "pending" | "devices" | "approve" | "revoke", body?: object): Promise<any>;
   };
   /** The phone's notifications, for the launcher's own panel; "notifications.changed" brings the list again. */
   /**

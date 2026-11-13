@@ -262,6 +262,7 @@ function native(host: NonNullable<Window["PowosHost"]>): Bridge {
       lock: () => call<LockAccess>("devices.lock"), // detect
       allowLock: () => call<LockAccess>("devices.lockAllow"), // detect
       stopLock: () => call<LockAccess>("devices.lockStop"), // detect
+      realm: (op, body) => call<any>("devices.realm", op, body ?? null), // detect
     },
     privacy: {
       list: () => call<PrivacyList>("privacy.list"),

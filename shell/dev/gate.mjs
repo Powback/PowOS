@@ -15174,11 +15174,11 @@ async function settleDevices(r) {
   try {
     await r.page.evaluate(() => new Promise((ok) => (window.importShim ? ok() : addEventListener("load", ok))));
     await r.page.evaluate([dvWait, dvType, dvLine, dvFails, dvAgent, dvJoinAgent, dvTxt, dvLock, dvLockAsk, dvLockDecline, dvLockGrant, dvLockStop, dvSleep].map((f) => `window.${f.name} = ${f}`).join(";\n"));
-    for (const step of [dvMount, dvThisPhone, dvPair, dvPaired, dvOptimistic, dvRollback, dvUnlock, dvBusy, dvJoin, dvJoinDeny, dvMember]) {
+    for (const step of [dvMount, dvThisPhone, dvPair, dvPaired, dvOptimistic, dvRollback, dvUnlock, dvBusy, dvJoin, dvJoinDeny, dvMember, dvJoinPhone]) {
       const out = await r.page.evaluate(step);
       r.problems.push(...out);
       if (step === dvJoinDeny) await r.page.screenshot({ path: "/cache/devices-join.png" }).catch(() => {});
-      if (out.length && ![dvOptimistic, dvBusy, dvRollback, dvUnlock, dvThisPhone, dvJoin, dvJoinDeny, dvMember].includes(step)) break;
+      if (out.length && ![dvOptimistic, dvBusy, dvRollback, dvUnlock, dvThisPhone, dvJoin, dvJoinDeny, dvMember, dvJoinPhone].includes(step)) break;
     }
     await r.page.screenshot({ path: "/cache/devices-folded.png" }).catch(() => {});
   } catch (e) {
@@ -15593,6 +15593,46 @@ async function dvMember() {
     [/Revoked/.test(early), `100 ms after Revoke the card says "${early}" (want revoked at once)`],
     [/may not approve/.test(err), `a refused Revoke shows "${err}", want the realm's words`],
     [join.revoked[0] === "desk1" && !root.querySelector(card), `Revoke again didn't revoke and forget it (${JSON.stringify(join.revoked)})`],
+  ]);
+}
+
+/**
+ * A phone that joined its PowStation as an approver (host.thisDevice.realm, PowStation.kt) and paired with nothing:
+ * the join card shows from the phone's own enrollment, Approve goes through it with the hub's first Claude
+ * subscription (no agent call, no server command), shown at once and kept.
+ */
+async function dvJoinPhone() {
+  const { h, render } = await window.importShim("preact");
+  render(null, window.__dv.root);
+  window.__dv.root.remove();
+  try { localStorage.removeItem("powos.devices.v1"); } catch {}
+  const agent = dvAgent();
+  const asked = [];
+  let pending = [{ user_code: "WXYZ-BCDF", device: { id: "fold1", name: "razr", kind: "phone", platform: "android 16" }, expires_in: 500 }];
+  agent.host.thisDevice.realm = async (op, body) => {
+    asked.push([op, body ?? null]);
+    if (op === "state") return { enrolled: true, approver: true };
+    if (op === "pending") return { pending, tenants: ["default", "plink"] };
+    if (op === "devices") return { devices: [] };
+    if (op === "approve") return await dvSleep(500), (pending = []), { state: "approved" };
+    throw new Error(`no such realm call: ${op}`);
+  };
+  const mod = await window.importShim("./_app/local.devices/pages/main.js");
+  const root = Object.assign(document.createElement("div"), { id: "dv-root", style: "position:fixed;inset:0;background:var(--color-background);color:var(--color-foreground)" });
+  document.body.append(root);
+  window.__dv = { root, ...agent };
+  render(h(mod.default, { host: agent.host, app: "local.devices", close: () => {} }), root);
+  const row = '[data-waiting="WXYZ-BCDF"]';
+  if (!(await dvWait(row, 3000))) return [`a phone enrolled as an approver shows no join card: "${root.textContent.slice(0, 200)}"`];
+  root.querySelector(`${row} [data-join-approve]`).click();
+  await dvSleep(100);
+  const early = dvTxt(`${row} [data-join-result]`);
+  await dvSleep(800);
+  const sent = JSON.stringify(asked.find(([op]) => op === "approve")?.[1]);
+  return dvFails([
+    [/Approved - razr is joining/.test(early), `100 ms after Approve on the phone the row says "${early}" (want the result at once)`],
+    [sent === '{"code":"WXYZ-BCDF","decision":"approve","tenant":"default"}', `the phone's realm call got ${sent} (want the hub's first Claude subscription)`],
+    [!agent.calls.some((c) => c.path.startsWith("/v1/enroll/")), "the phone approved through an agent instead of its own enrollment"],
   ]);
 }
 
