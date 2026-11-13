@@ -1,0 +1,47 @@
+{
+  "id": "strata-bench",
+  "name": "Opt-in larger-model benchmark",
+  "kind": "container",
+  "host": "desktop",
+  "hostNote": "gpu-195, GPU1 only; never started at boot",
+  "owner": "system:llm",
+  "purpose": "Benchmark Qwen3.8 Flash Next with Strata CPU/GPU expert streaming. Conflicts with llm-pool while active; restore llm-pool after the trial. API is loopback-only, accessed through SSH.",
+  "installedBy": "hosts/gpu-195/strata-bench/strata-bench.container copied to the user's quadlet directory",
+  "image": "ghcr.io/niko1221/strata@sha256:d39ca9fc583c5085dc66b857fbf3b3e3a9e256f692672d4061322d3bd468433a",
+  "ports": [
+    "127.0.0.1:9293/tcp"
+  ],
+  "files": [
+    "/var/home/powos/.config/containers/systemd/strata-bench.container",
+    "/var/lib/powos/models/strata"
+  ],
+  "processes": [
+    {
+      "systemd": "strata-bench.service"
+    },
+    {
+      "container": "strata-bench"
+    }
+  ],
+  "limits": {
+    "memory": "48g",
+    "memory_swap": "48g",
+    "cpus": 4,
+    "pids": 8192
+  },
+  "gpu": "nvidia.com/gpu=1",
+  "health": "http://127.0.0.1:9293/health",
+  "autosleep": "Manual benchmark only; stop after trials",
+  "remove": {
+    "stop": [
+      "systemctl --user stop strata-bench.service"
+    ],
+    "commands": [
+      "rm -f /var/home/powos/.config/containers/systemd/strata-bench.container",
+      "systemctl --user daemon-reload"
+    ],
+    "keep": [
+      "/var/lib/powos/models/strata (downloaded models, packs and private API key)"
+    ]
+  }
+}

@@ -1,0 +1,25 @@
+[Unit]
+Description=PowOS GLM Flash benchmark (Maya-S24, GPU1)
+Conflicts=llm-pool.service strata-bench.service
+After=llm-pool.service strata-bench.service network-online.target
+
+[Container]
+ContainerName=maya-bench
+Image=localhost/maya-bench:1.1.28
+Entrypoint=python3
+Exec=/bench/launch.py
+PublishPort=127.0.0.1:9294:8080
+AddDevice=nvidia.com/gpu=1
+SecurityLabelDisable=true
+ShmSize=2g
+Volume=/var/lib/powos/models/maya:/models
+Volume=%h/Projects/PowOS/hosts/gpu-195/maya-bench:/bench:ro
+Environment=PYTHONUNBUFFERED=1
+# Raise only for a voice-paused trial; restore 36 when speech services run.
+Environment=MAYA_BENCH_RAM_GB=36
+Label=io.powos.unit=maya-bench
+PodmanArgs=--memory=52g --memory-swap=52g --cpus=4 --cpu-shares=256 --pids-limit=8192 --ulimit=memlock=-1:-1 --stop-timeout=120
+
+[Service]
+TimeoutStartSec=1800
+TimeoutStopSec=150

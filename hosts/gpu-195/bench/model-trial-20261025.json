@@ -1,0 +1,125 @@
+{
+  "date": "2026-10-25",
+  "hardware": ".195 GPU1, RTX 3090 24 GB; stt-batch resident",
+  "harness": "Claude Code 2.1.310 through Claude authority -> LiteLLM -> llama-swap",
+  "limitations": "Two small single-run tasks, not a model ranking. Original ambiguous interval prompt excluded. Tool sets differ where noted. Timeouts count as failed agent runs.",
+  "runs": [
+    {
+      "model": "general-nothink",
+      "note": "file tools, original cache task",
+      "case": "cache",
+      "seconds": 9.55,
+      "cli_exit": 0,
+      "passed": false,
+      "turns": 5,
+      "is_error": false
+    },
+    {
+      "model": "general-nothink",
+      "note": "file tools, clarified intervals",
+      "case": "intervals",
+      "seconds": 56.54,
+      "cli_exit": 0,
+      "passed": false,
+      "turns": 3,
+      "is_error": false
+    },
+    {
+      "model": "swift-27b-nothink",
+      "note": "file tools, cache",
+      "case": "cache",
+      "seconds": 41.36,
+      "cli_exit": 0,
+      "passed": true,
+      "turns": 3,
+      "is_error": false
+    },
+    {
+      "model": "swift-27b-nothink",
+      "note": "file tools, clarified intervals",
+      "case": "intervals",
+      "seconds": 44.34,
+      "cli_exit": 0,
+      "passed": true,
+      "turns": 3,
+      "is_error": false
+    },
+    {
+      "model": "swift-27b",
+      "note": "file tools, medium thinking",
+      "case": "intervals",
+      "seconds": 108.03,
+      "cli_exit": 0,
+      "passed": false,
+      "turns": 3,
+      "is_error": false
+    },
+    {
+      "model": "swift-27b",
+      "note": "file tools, medium thinking",
+      "case": "cache",
+      "seconds": 57.39,
+      "cli_exit": 0,
+      "passed": true,
+      "turns": 3,
+      "is_error": false
+    },
+    {
+      "model": "bonsai-27b-nothink",
+      "note": "file tools",
+      "case": "intervals",
+      "seconds": 68.35,
+      "cli_exit": 0,
+      "passed": true,
+      "turns": 12,
+      "is_error": false
+    },
+    {
+      "model": "bonsai-27b-nothink",
+      "note": "file tools",
+      "case": "cache",
+      "seconds": 240,
+      "passed": false,
+      "error": "timeout"
+    },
+    {
+      "model": "bonsai-27b-nothink",
+      "note": "file tools and Bash",
+      "case": "intervals",
+      "seconds": 240,
+      "passed": false,
+      "error": "timeout"
+    },
+    {
+      "model": "bonsai-27b-nothink",
+      "note": "file tools and Bash",
+      "case": "cache",
+      "tools": "Read,Edit,Write,Bash",
+      "seconds": 56.62,
+      "cli_exit": 0,
+      "passed": true,
+      "turns": 7,
+      "is_error": false
+    }
+  ],
+  "warm_streams_128_tokens": {
+    "general-nothink": {
+      "ttft_s": 0.06003816705197096,
+      "decode_tok_s": 82.79107850356877,
+      "tokens": 128,
+      "elapsed_s": 1.5940198749303818
+    },
+    "bonsai-27b-nothink": {
+      "ttft_s": 0.7664965828880668,
+      "decode_tok_s": 66.9280770187002,
+      "tokens": 128,
+      "elapsed_s": 2.6640559579245746
+    },
+    "swift-27b-nothink": {
+      "ttft_s": 0.334787,
+      "decode_tok_s": 13.646339,
+      "tokens": 128,
+      "elapsed_s": 9.641312
+    }
+  }
+}

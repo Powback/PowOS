@@ -1,0 +1,97 @@
+{
+  "date": "2026-10-26",
+  "host": "192.168.50.195",
+  "hardware": {
+    "gpus": [
+      "NVIDIA GeForce RTX 3090 24 GiB",
+      "NVIDIA GeForce RTX 3090 24 GiB"
+    ],
+    "topology": "NV4",
+    "engine": "Strata 0.1.48"
+  },
+  "model": "Qwen3.8 Flash Next IQ2_XS",
+  "context_tokens": 131072,
+  "kv_cache": "int8",
+  "huihui_projection": true,
+  "request_profile": {
+    "tasks": [
+      "Python LRU cache using OrderedDict",
+      "Python merge overlapping intervals"
+    ],
+    "temperature": 0,
+    "thinking": false,
+    "max_output_tokens": 256,
+    "metric": "completion tokens divided by time from first generated text to stream end"
+  },
+  "arms": {
+    "single_gpu_voice_running_smoke": {
+      "gpu_selection": "host GPU1 only (container GPU0)",
+      "voice_llm": "running on host GPU0",
+      "samples_decode_tok_s": [98.24, 101.18],
+      "median_decode_tok_s": 99.71,
+      "notes": "Two initial samples; not a controlled A/B."
+    },
+    "dual_gpu_voice_running_smoke": {
+      "gpu_selection": "host GPU0 and GPU1",
+      "voice_llm": "running on host GPU0",
+      "samples_decode_tok_s": [73.67, 107.99],
+      "median_decode_tok_s": 90.83,
+      "split": "layers 0-10 on GPU0, 11-47 on GPU1",
+      "free_vram_after_load_mib": {
+        "gpu0": 475,
+        "gpu1": 424
+      },
+      "notes": "Model started, but headroom was below Strata's warning threshold; do not treat as a stable profile."
+    },
+    "single_gpu_voice_llm_stopped": {
+      "gpu_selection": "host GPU1 only (container GPU1 when both cards are exposed)",
+      "voice_llm": "stopped temporarily; voice STT and TTS remained running",
+      "cold_warmup_seconds": 31.675,
+      "first_measured_batch_tok_s": [50.92, 97.67, 92.61, 108.65],
+      "first_measured_batch_median_tok_s": 95.14,
+      "repeat_tok_s": [105.7, 109.67, 129.77, 111.48],
+      "repeat_median_tok_s": 110.575,
+      "repeat_ttft_seconds": [0.4, 0.459, 0.401, 0.346],
+      "notes": "The first request after the warmup was slower; repeat batch is used for the clean comparison."
+    },
+    "dual_gpu_voice_llm_stopped_initial": {
+      "gpu_selection": "host GPU0 and GPU1",
+      "voice_llm": "stopped temporarily; voice STT and TTS remained running",
+      "cold_warmup_seconds": null,
+      "samples_tok_s": [184.95, 145.8, 168.46, 134.93, 213.11, 161.6],
+      "median_tok_s": 165.03,
+      "notes": "Already-warm engine after a real long-context request; directional sample, not the clean-reload comparison."
+    },
+    "dual_gpu_voice_llm_stopped_clean_reload": {
+      "gpu_selection": "host GPU0 and GPU1",
+      "voice_llm": "stopped temporarily; voice STT and TTS remained running",
+      "cold_warmup_seconds": 35.611,
+      "samples_tok_s": [139.33, 122.02, 140.23, 151.36],
+      "median_tok_s": 139.78,
+      "ttft_seconds": [0.237, 0.211, 0.275, 0.209],
+      "split": "layers 0-23 on GPU0, 24-47 on GPU1",
+      "profiled_experts_resident_percent": 94,
+      "free_vram_after_load_mib": {
+        "gpu0": 474,
+        "gpu1": 424
+      },
+      "versus_single_gpu_repeat_percent": 26.4,
+      "notes": "Matched short-prompt A/B, four measured requests per arm after cold load and warmup. Very small sample; both cards were close to full. Strata warned about low VRAM reserve."
+    }
+  },
+  "live_long_context_observation": {
+    "profile": "dual GPU, voice LLM stopped",
+    "prompt_tokens": 119139,
+    "prefill_seconds": 35,
+    "approx_prefill_tok_s": 3404,
+    "generation_sample_tokens": 442,
+    "generation_sample_tok_s": 110.4,
+    "caveat": "One live Claude request, not an independent matched benchmark."
+  },
+  "final_state": {
+    "pool": "restored to GPU1-only; prior quadlet and flash-next.json restored",
+    "voice_llm": "restarted",
+    "local_queue": "resumed after draining active calls",
+    "dual_gpu_mode_left_enabled": false
+  }
+}

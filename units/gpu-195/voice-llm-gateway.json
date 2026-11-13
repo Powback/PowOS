@@ -1,0 +1,32 @@
+{
+  "id": "voice-llm-gateway",
+  "name": "Voice LLM gateway and idle GPU lease manager",
+  "kind": "container",
+  "host": "desktop",
+  "hostNote": "gpu-195 (192.168.50.195, Bazzite 44, 2x RTX 3090)",
+  "owner": "system:voice",
+  "purpose": "public OpenAI-compatible voice LLM API on :8100; tracks request activity, offloads vLLM weights to host RAM after 300 seconds idle, reads global GPU metrics to let GPU1-only coding continue while voice wakes on GPU0, and waits for any dual-GPU Flash Next lease to expire naturally",
+  "installedBy": "hosts/gpu-195/install.sh (rootless podman quadlet, user powos, linger on)",
+  "image": "localhost/voice-llm-gateway:latest",
+  "ports": ["8100/tcp"],
+  "files": [
+    "/var/home/powos/.config/containers/systemd/voice-llm-gateway.container",
+    "/var/lib/powos/voiceagent/voice-gpu-state.json"
+  ],
+  "processes": [
+    {"systemd": "voice-llm-gateway.service"},
+    {"container": "voice-llm-gateway"}
+  ],
+  "autosleep": "vLLM /sleep?level=1 after 300 seconds without gateway API requests; /wake_up on next request; dual-GPU lease waits up to 30 minutes for Flash Next's natural TTL unload, while GPU1-only sessions are not interrupted",
+  "gpu": "none; coordinates GPU0/GPU1 lease with llm-pool",
+  "health": "http://192.168.50.195:8100/health",
+  "remove": {
+    "stop": ["systemctl --user stop voice-llm-gateway.service"],
+    "commands": [
+      "rm -f /var/home/powos/.config/containers/systemd/voice-llm-gateway.container",
+      "systemctl --user daemon-reload",
+      "podman rmi localhost/voice-llm-gateway:latest"
+    ],
+    "keep": ["/var/lib/powos/voiceagent"]
+  }
+}

@@ -5,7 +5,7 @@
   "host": "gpu195",
   "hostNote": "gpu-195 (192.168.50.195, Bazzite 44 nvidia-open, 2x RTX 3090)",
   "owner": "system:llm",
-  "purpose": "the general model pool on GPU1: llama-swap on :9292 (http://llm-gpu.pow via Traefik on .100, PowStation config/traefik/dynamic/llm-gpu.yml) starts vLLM per model on first request and unloads it after 10 idle minutes; models general (Qwen/Qwen3-14B-AWQ, 32k, tools, thinking; general-nothink = thinking off), vision (Qwen/Qwen2.5-VL-7B-Instruct-AWQ, 16k), embed (BAAI/bge-m3), ocr (PaddlePaddle/PaddleOCR-VL-1.6, 0.12, for PowScan); embed or ocr may sit beside general or vision, never general with vision; OpenAI API (/v1/chat/completions, /v1/embeddings, /v1/models); phase 4: the router's general/vision/embed",
+  "purpose": "the general model pool on llm-gpu.pow: llama-swap on :9292 starts models on request and unloads them after their TTL; general, vision, embed, OCR, Swift, Bonsai and Nanbeige pin host GPU1; only Flash Next may lease both GPUs after voice idle-offload confirms voice LLM weights are in host RAM",
   "installedBy": "hosts/gpu-195/install.sh (rootless podman quadlet, user powos, linger on)",
   "image": "localhost/llm-pool:latest",
   "ports": [
@@ -13,7 +13,8 @@
   ],
   "files": [
     "/var/home/powos/.config/containers/systemd/llm-pool.container",
-    "/var/home/powos/.config/llm-pool/config.yaml"
+    "/var/home/powos/.config/llm-pool/config.yaml",
+    "/var/home/powos/.config/llm-pool/flash-next.json"
   ],
   "processes": [
     {
@@ -24,14 +25,14 @@
     }
   ],
   "limits": {
-    "memory": "28g",
-    "memory_swap": "28g",
-    "cpus": 3,
+    "memory": "48g",
+    "memory_swap": "48g",
+    "cpus": 4,
     "pids": 8192
   },
-  "autosleep": "llama-swap ttl 600 s per model (the proxy stays up, ~30 MB RAM, no VRAM)",
-  "gpu": "nvidia.com/gpu=1",
-  "vramBudget": "19.7g (general or vision 0.70 + embed 0.10 or ocr 0.12 of 24 GiB; stt-batch holds the other 2.4)",
+  "autosleep": "llama-swap ttl 600 s per model (the proxy stays up, ~30 MB RAM, no VRAM); Swift trial TTL 300 s; Bonsai TTL 300 s",
+  "gpu": "nvidia.com/gpu=0,1 (Flash Next leases both only while voice LLM is idle/offloaded; all other models pin host GPU1)",
+  "vramBudget": "19.7g (general or vision 0.70 + embed 0.10 or ocr 0.12 of 24 GiB; stt-batch holds the other 2.4); Swift alone uses 0.86 (~20.6 GiB), never beside other pool models; Bonsai alone ~9 GiB measured at 32k (GPU1 total ~11.4 GiB with stt-batch); Flash Next ~21 GiB plus stt-batch, ~37 GiB host RAM",
   "health": "http://192.168.50.195:9292/health",
   "remove": {
     "stop": [
@@ -44,10 +45,11 @@
       "podman rmi localhost/llm-pool:latest"
     ],
     "keep": [
-      "/var/lib/powos/models/hf (Qwen3-14B-AWQ ~10 GB, Qwen2.5-VL-7B-AWQ ~6.5 GB, bge-m3 ~2.3 GB)",
+      "/var/lib/powos/models/hf (Qwen3-14B-AWQ ~10 GB, Qwen2.5-VL-7B-AWQ ~6.5 GB, bge-m3 ~2.3 GB); Swift W4A16 ~19.6 GB; Bonsai PQ2_0 ~7.2 GB",
       "/var/lib/powos/models/vllm",
-      "docker.io/vllm/vllm-openai (voice-llm's image; the pool's base)"
+      "docker.io/vllm/vllm-openai (voice-llm's image; the pool's base)",
+      "/var/lib/powos/models/strata (pinned Flash Next weights, draft layer, packs and Huihui vector)"
     ]
   },
-  "vramNote": "GPU1 only, shared with stt-batch; GPU0 is the realtime voice path's (docs/GPU-SERVERS-PLAN.md)"
+  "vramNote": "GPU1 shared with stt-batch; Flash Next may lease GPUs 0+1 only when the gateway confirms voice LLM weights are offloaded to host RAM"
 }

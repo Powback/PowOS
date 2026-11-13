@@ -1,0 +1,350 @@
+{
+  "A1": {
+    "seconds": 84.805,
+    "text": "CEDAR-7421",
+    "usage": {
+      "input_tokens": 13831,
+      "output_tokens": 8
+    }
+  },
+  "B1": {
+    "seconds": 44.483,
+    "text": "ORBIT-5938",
+    "usage": {
+      "input_tokens": 15031,
+      "output_tokens": 8
+    }
+  },
+  "A2": {
+    "seconds": 24.406,
+    "text": "CEDAR-7421",
+    "usage": {
+      "input_tokens": 19,
+      "output_tokens": 8,
+      "cache_read_input_tokens": 13839
+    }
+  },
+  "queued_before_cancel": {
+    "active": 1,
+    "waiting": 2,
+    "waitingBytes": 470,
+    "completed": 15,
+    "cancelled": 2,
+    "maxWaiting": 32,
+    "waitMs": 240000
+  },
+  "queued_after_cancel": {
+    "active": 1,
+    "waiting": 1,
+    "waitingBytes": 238,
+    "completed": 15,
+    "cancelled": 3,
+    "maxWaiting": 32,
+    "waitMs": 240000
+  },
+  "interrupt": {
+    "next_response_including_other_sessions_seconds": 0.346,
+    "text": "INTERRUPT-OK"
+  },
+  "final_queue": {
+    "active": 0,
+    "waiting": 0,
+    "waitingBytes": 0,
+    "completed": 17,
+    "cancelled": 3,
+    "maxWaiting": 32,
+    "waitMs": 240000
+  },
+  "date": "2026-10-26",
+  "status": "passed",
+  "method": {
+    "model": "flash-next-huihui-nothink",
+    "context": 131072,
+    "path": "Claude authority -> LiteLLM -> llama-swap -> Strata 0.1.48",
+    "thinking": false,
+    "cache_mib": 4096,
+    "cache_slots": 4,
+    "cache_min_free_mib": 3072,
+    "notes": [
+      "A/B/A timings include fair-queue waits behind live user sessions; not model-speed measurements.",
+      "A2 reused 13839 cached input tokens with only 19 new input tokens.",
+      "An initial interrupt probe expected exactly two waiting callers and was invalidated by other live traffic. The corrected probe checks cancellation counters; its successful results appear here.",
+      "Interrupt test disconnects HTTP streams; no claim of testing the terminal Esc key or cancellation of shell tools."
+    ]
+  },
+  "kv_engine_evidence": {
+    "a1_prompt_tokens": 13831,
+    "a1_prompt_read_ms": 10064,
+    "a1_generated_tokens": 8,
+    "a1_decode_ms": 93,
+    "a2_prompt_tokens": 13858,
+    "a2_reused_tokens": 13839,
+    "a2_new_tokens": 19,
+    "a2_restore_ms": 83.8,
+    "a2_prompt_read_ms": 667,
+    "a2_decode_ms": 93
+  },
+  "slot_comparison": {
+    "serial-isolated": {
+      "label": "serial-isolated",
+      "aggregate_median": 93.58774118548597,
+      "rounds": [
+        {
+          "wall_seconds": 6.342890569998417,
+          "aggregate_tokens_per_second": 80.72029532114847,
+          "requests": [
+            {
+              "elapsed": 3.9511900530196726,
+              "ttft": 0.6048277420341037,
+              "usage": {
+                "prompt_tokens": 36,
+                "completion_tokens": 256,
+                "total_tokens": 292,
+                "prompt_tokens_details": {
+                  "cached_tokens": 0
+                }
+              },
+              "chars": 1120
+            },
+            {
+              "elapsed": 6.3415591569500975,
+              "ttft": 4.292540525959339,
+              "usage": {
+                "prompt_tokens": 33,
+                "completion_tokens": 256,
+                "total_tokens": 289,
+                "prompt_tokens_details": {
+                  "cached_tokens": 0
+                }
+              },
+              "chars": 1067
+            }
+          ]
+        },
+        {
+          "wall_seconds": 4.809535488020629,
+          "aggregate_tokens_per_second": 106.45518704982346,
+          "requests": [
+            {
+              "elapsed": 4.809142344980501,
+              "ttft": 2.3824765009921975,
+              "usage": {
+                "prompt_tokens": 36,
+                "completion_tokens": 256,
+                "total_tokens": 292,
+                "prompt_tokens_details": {
+                  "cached_tokens": 0
+                }
+              },
+              "chars": 1135
+            },
+            {
+              "elapsed": 2.1002386629697867,
+              "ttft": 0.06576618098188192,
+              "usage": {
+                "prompt_tokens": 33,
+                "completion_tokens": 256,
+                "total_tokens": 289,
+                "prompt_tokens_details": {
+                  "cached_tokens": 26
+                }
+              },
+              "chars": 1070
+            }
+          ]
+        }
+      ],
+      "engine": {
+        "model": "flash-next",
+        "max_context": 131072,
+        "images": false,
+        "version": "0.1.48",
+        "logit_bias": 1,
+        "context": 131072,
+        "kv": "int8",
+        "kv_resident": 32768,
+        "expert_slots": 11367,
+        "expert_cache_mib": 15599,
+        "expert_slots_primary": 11367,
+        "expert_cache_primary_mib": 15599,
+        "spec": 6,
+        "mtp_max": 4,
+        "lookup": 3,
+        "vram_free_mib": 474,
+        "cvec": "project:4-44",
+        "arena_mib": 33812,
+        "pool_workers": 3,
+        "pcie_frac": "0.18",
+        "spec_min_p": "0.50",
+        "conversation_cache_mib": 4096,
+        "conversation_cache_slots": 4,
+        "conversation_cache_min_free_mib": 3072,
+        "conversation_cache_min_tokens": 2048,
+        "tail_role_token": -1,
+        "vram_elastic": 0,
+        "prefill_cap": 8192,
+        "prefill_stages": 1,
+        "stream_all_min": 1024,
+        "prefill_pipe": 0,
+        "engine": "0.1.48",
+        "drafting": "mtp",
+        "drafting_note": ""
+      },
+      "cache": {
+        "enabled": true,
+        "budget_mib": 4096,
+        "slots": 4,
+        "parked": 1,
+        "bytes": 2450130076,
+        "evictions": 9,
+        "parks": 19,
+        "restores": 9,
+        "last_event": "parked",
+        "last_tokens": 97481,
+        "last_at": 1792977098.8295224,
+        "requests": 38,
+        "requests_reused": 21,
+        "reused_tokens": 1512780,
+        "prompt_tokens": 1641543,
+        "last_reused": 0,
+        "last_prompt": 36
+      }
+    },
+    "batch2-isolated": {
+      "label": "batch2-isolated",
+      "aggregate_median": 50.92944519994788,
+      "rounds": [
+        {
+          "wall_seconds": 14.391422491986305,
+          "aggregate_tokens_per_second": 35.576747210715354,
+          "requests": [
+            {
+              "elapsed": 14.288863476016559,
+              "ttft": 0.7477809180272743,
+              "usage": {
+                "prompt_tokens": 36,
+                "completion_tokens": 256,
+                "total_tokens": 292,
+                "prompt_tokens_details": {
+                  "cached_tokens": 0
+                }
+              },
+              "chars": 1135
+            },
+            {
+              "elapsed": 14.09865020000143,
+              "ttft": 1.7994712759973481,
+              "usage": {
+                "prompt_tokens": 33,
+                "completion_tokens": 256,
+                "total_tokens": 289,
+                "prompt_tokens_details": {
+                  "cached_tokens": 0
+                }
+              },
+              "chars": 1039
+            }
+          ]
+        },
+        {
+          "wall_seconds": 7.72455408598762,
+          "aggregate_tokens_per_second": 66.2821431891804,
+          "requests": [
+            {
+              "elapsed": 7.723875104042236,
+              "ttft": 0.47353427205234766,
+              "usage": {
+                "prompt_tokens": 36,
+                "completion_tokens": 256,
+                "total_tokens": 292,
+                "prompt_tokens_details": {
+                  "cached_tokens": 29
+                }
+              },
+              "chars": 1166
+            },
+            {
+              "elapsed": 7.667393470997922,
+              "ttft": 0.1659067799919285,
+              "usage": {
+                "prompt_tokens": 33,
+                "completion_tokens": 256,
+                "total_tokens": 289,
+                "prompt_tokens_details": {
+                  "cached_tokens": 26
+                }
+              },
+              "chars": 1045
+            }
+          ]
+        }
+      ],
+      "engine": {
+        "model": "flash-next",
+        "max_context": 131072,
+        "images": false,
+        "version": "0.1.48",
+        "logit_bias": 1,
+        "context": 131072,
+        "kv": "int8",
+        "kv_resident": 32768,
+        "expert_slots": 10146,
+        "expert_cache_mib": 13917,
+        "expert_slots_primary": 10146,
+        "expert_cache_primary_mib": 13917,
+        "spec": 6,
+        "mtp_max": 4,
+        "lookup": 3,
+        "vram_free_mib": 528,
+        "cvec": "project:4-44",
+        "arena_mib": 33812,
+        "pool_workers": 3,
+        "pcie_frac": "0.18",
+        "spec_min_p": "0.50",
+        "conversation_cache_mib": 4096,
+        "conversation_cache_slots": 4,
+        "conversation_cache_min_free_mib": 3072,
+        "conversation_cache_min_tokens": 2048,
+        "tail_role_token": -1,
+        "vram_elastic": 0,
+        "prefill_cap": 8192,
+        "prefill_stages": 1,
+        "stream_all_min": 1024,
+        "prefill_pipe": 0,
+        "batch_slots": 2,
+        "slot_cache": 1,
+        "batch_groups": 1,
+        "engine": "0.1.48",
+        "drafting": "mtp",
+        "drafting_note": ""
+      },
+      "cache": {
+        "enabled": true,
+        "budget_mib": 4096,
+        "slots": 4,
+        "parked": 0,
+        "bytes": 0,
+        "evictions": 0,
+        "parks": 0,
+        "restores": 0,
+        "last_event": null,
+        "last_tokens": null,
+        "last_at": null,
+        "requests": 6,
+        "requests_reused": 3,
+        "reused_tokens": 63,
+        "prompt_tokens": 168,
+        "last_reused": 29,
+        "last_prompt": 36
+      }
+    },
+    "notes": [
+      "Two rounds of two concurrent 256-output-token requests per profile, directly against Strata while authority GPU-pool admission was held. Short coding prompts, thinking off, temperature 0, Huihui projection enabled.",
+      "Combined throughput includes prompt reading and completion time for both requests; not comparable to historical single-stream decode TPS.",
+      "Candidate uses parallel=2 with batch MTP and 768 MiB VRAM reserve; baseline is the deployed parallel=1 profile with existing automatic reserve. This compares configurations, not an isolated causal estimate of slot count.",
+      "A preliminary probe with live-user contention was excluded. The first candidate reload hit a port-reuse race; the controller restored the original config, then the successful trial used a complete pool restart.",
+      "Two slots reported by the engine. Candidate was slower; restored single-slot serving. No multi-GPU trial."
+    ],
+    "change_percent": -45.58107231265641
+  }
+}

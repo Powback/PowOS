@@ -1,0 +1,7 @@
+FROM localhost/voiceagent-backend:latest
+
+WORKDIR /app
+COPY gateway.py /app/voice-llm-gateway.py
+
+EXPOSE 8080
+CMD ["python", "/app/voice-llm-gateway.py"]
