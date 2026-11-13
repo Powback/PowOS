@@ -108,3 +108,14 @@ units/phone/platform-adapter.json and the rest of units/powstation/*):
 | docs/platform-validation.json | LAND | the 11-03 live validation record (10 projects, live registry, CDN, sleep/wake, auth) replaces the 10-26 repo-only one that still listed PowCDN as not implemented |
 | docs/projects-CLAUDE.md | LAND (adapted) | its stale "PowCDN publication remains planned" paragraph now says what exists (NAS folder + read-only cdn.pow), in the current CLAUDE.md wording |
 | .gitignore | LAND | `backups/` (untracked in the main checkout) stays out of git |
+
+## Dirty worktrees (uncommitted work that never landed; triaged 11-13)
+
+| worktree (branch) | change | decision | note |
+|---|---|---|---|
+| .claude/worktrees/windows-fix-plan (worktree-windows-fix-plan, 11-10) | tools/phone/verify/queue-emu.sh | LAND 8f80fe69 | `emu_lock_release` removes the emulator lock only when this runner owns it (main's EXIT trap deleted a live foreign holder's lock after a 4-min acquire timeout); the setup EXIT trap frees the lane lock when the checkout/copy step fails; the post-acquire `trap emu_lock_release EXIT` that dropped the copy + lane-lock cleanup is gone |
+| same | queue.sh, runner-deploy.sh, com.powos.verify-emu-runner.plist, units/mac/verify-emu-runner-mac.json | LAND (adapted) 8f80fe69 | emulator lane under its own launchd agent `com.powos.verify-emu-runner` (unit verify-emu-runner-mac, explicit `runner-deploy.sh install emu`; not installed by landing): enqueue kicks it, load recovers queued jobs, a nonzero exit (lock timeout) restarts it, idle exits 0, so an emu job no longer strands until the next add. Not installed: enqueue keeps the nohup fallback. Adapted: worktree add from origin/main (was worktree-powos-multiplatform); a `# powos-units:` line names both plists (the label is now chosen per lane, test-units-registry) |
+| same | test/tier1/test-queue-emu-supervision.py, .claude/skills/powos-phone/SKILL.md | LAND 8f80fe69 | device-free test (fails on main's queue-emu.sh: control run); skill line for the emu agent |
+| same | docs/WINDOWS_FIX_PLAN.md | DROP | a hedging rewrite of the 11-10 plan (causes -> hypotheses, new "safety contracts", exit bar loosened); main has since executed and edited the plan (1bbe0dd2 .. 8e9847df, phases 2.1-3.3), so it no longer applies |
+| same | committed 4d03fed7 (SKIP not counted as pass) | SUPERSEDED 62bd6922 | |
+| /Users/macback/pw/game-borderless (agent/game-borderless, 11-11) | lib/game.sh, powos-steam-compat, unity-screen, test-game-facade.sh | SUPERSEDED a612f179 | a duplicate agent's `powos game <appid> window borderless\|default`: same user.reg Screenmanager + Besiege Config.xml writes at scale 100, kept values put back, one-launch override. Main dispatches to `unity-screen --window` (no powos-steam-compat verb), so no steam pkg change and no pkgrel bump. Its only difference (restore after every exit once wineserver is gone) is a different policy, not a missing feature |
