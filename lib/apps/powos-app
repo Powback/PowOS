@@ -16,7 +16,8 @@ Make one (the whole loop, from a sentence to the phone - each step is one comman
   powos app build <dir> [--local|--remote [user@host]] [--module|--ui]
                                      module -> out/module.wasm (+ TS bindings in ui/bindings), ui -> out/ui (bun).
                                      The module (Rust -> wasm) builds on the app builder (powos app builder) over
-                                     ssh when one is set, else here if cargo + wasm32 are installed; the UI always
+                                     ssh when one is set, else here with the image's toolchain (/opt/powos-rust: the
+                                     dev pack without root, offline) or the user's cargo + wasm32; the UI always
                                      builds here (bun, ~0.1 s). An unchanged module isn't rebuilt.
   powos app install <dir>            build (what changed), publish the module (unless the device's live module is this
                                      very build - checked against the database, not the local build), put the UI
@@ -44,6 +45,9 @@ Change one:
                                      size. Runs shell/dev/preview.sh - where docker is (the Mac, a PowStation), from a
                                      PowOS checkout (POWOS_PREVIEW=<its preview.sh> elsewhere). A widget id is an OWL
                                      file's name (10-today), an app's widget (local.lights.main) or a panel (panel.agents).
+  --add-toolchain                    on build/install/dev/publish: yes to adding the Rust toolchain pack (no root:
+                                     the `dev` pack, once; then modules build here offline). Without it (and with no
+                                     builder) a terminal asks; elsewhere the error shows both choices.
   --note "..."                       on install/publish/ui: what changed, in plain words - the phone's quiet
                                      "update applied" notification (default: "<Name> app installed/updated")
   powos app list                     installed apps and widgets (from the registry)
@@ -103,6 +107,10 @@ BUILDER_CONF = os.path.expanduser(os.environ.get("POWOS_APP_BUILDER_CONF", "~/.c
 CACHE_VOLUME = "powos-apps-cargo"
 BUILDER_IMAGE = "powos-app-builder"
 LOCAL_TARGET = os.path.expanduser("~/.cache/powos/app-target")
+# The phone's own toolchain (targets/android/tools/app-toolchain.sh): rustup's stable + wasm32 and the template's crates
+# prebuilt. In the full image; without root in the `dev` pack (powos-pack need dev), offline once added.
+TOOLCHAIN = os.environ.get("POWOS_RUST", "/opt/powos-rust")
+TOOLCHAIN_PACK = "dev"
 # Parts of a template (lib/apps/templates/<part>/), copied in this order.
 TEMPLATE_SETS = {
     "spacetimedb-astro": ["module", "ui", "page", "widget"],
@@ -317,15 +325,53 @@ def cmd_builder(a):
     log(f"app builder: {v}")
 
 
+def offer_toolchain():
+    """No Rust here and no builder: on a phone without root the toolchain is the `dev` pack. Added only with the
+    user's yes (a terminal prompt, or --add-toolchain / POWOS_APP_ADD_TOOLCHAIN=1 from the AI's run): never a silent
+    download, and never a build on another machine unless `powos app builder` names it."""
+    pack = tool("powos-pack")
+    if not pack or subprocess.run([pack, "status", TOOLCHAIN_PACK], capture_output=True).returncode == 0:
+        return
+    size = ""
+    try:
+        with open("/etc/powos/packs") as f:
+            size = next((f" ({int(w[1]) / 1e6:.0f} MB)" for w in map(str.split, f) if w and w[0] == TOOLCHAIN_PACK), "")
+    except (OSError, ValueError, IndexError):
+        pass
+    choice = (f"this app's module (Rust) needs a toolchain. Either:\n"
+              f"  1. add the {TOOLCHAIN_PACK} pack{size} to this phone, once - modules then build here, offline:\n"
+              f"       powos app build <dir> --add-toolchain   (or Settings > Storage > {TOOLCHAIN_PACK})\n"
+              f"  2. build on another machine of yours with docker over ssh: powos app builder user@host")
+    yes = ADD_TOOLCHAIN or os.environ.get("POWOS_APP_ADD_TOOLCHAIN") == "1"
+    if not yes and sys.stdin.isatty() and sys.stdout.isatty():
+        log(choice)
+        yes = input(f"add the {TOOLCHAIN_PACK} pack now? [y/N] ").strip().lower() in ("y", "yes")
+    if not yes:
+        die("module: " + choice)
+    log(f"module: adding the {TOOLCHAIN_PACK} pack (the Rust toolchain){size}")
+    if subprocess.run([pack, "need", TOOLCHAIN_PACK]).returncode != 0:
+        die(f"module: the {TOOLCHAIN_PACK} pack wasn't added - or: powos app builder user@host")
+
+
 def ssh_cmd(target, command):
     return ["ssh", "-o", "BatchMode=yes", "-o", "ConnectTimeout=5", "-o", "StrictHostKeyChecking=accept-new",
             "-o", "ServerAliveInterval=15", target, command]
 
 
+def rust_env():
+    """The environment cargo runs in: the image's toolchain (TOOLCHAIN) first when it's there, else the user's own."""
+    env = dict(os.environ)
+    if os.path.isfile(os.path.join(TOOLCHAIN, "cargo", "bin", "cargo")):
+        env.update(RUSTUP_HOME=os.path.join(TOOLCHAIN, "rustup"), CARGO_HOME=os.path.join(TOOLCHAIN, "cargo"),
+                   PATH=os.path.join(TOOLCHAIN, "cargo", "bin") + os.pathsep + env.get("PATH", ""))
+    return env
+
+
 def local_rust():
-    if not shutil.which("cargo") or not shutil.which("rustc"):
+    env = rust_env()
+    if not shutil.which("cargo", path=env["PATH"]) or not shutil.which("rustc", path=env["PATH"]):
         return False
-    r = subprocess.run(["rustc", "--print", "sysroot"], capture_output=True, text=True)
+    r = subprocess.run(["rustc", "--print", "sysroot"], capture_output=True, text=True, env=env)
     return r.returncode == 0 and os.path.isdir(os.path.join(r.stdout.strip(), "lib", "rustlib", "wasm32-unknown-unknown"))
 
 
@@ -405,11 +451,26 @@ def build_module(d, m, where=None, force=False):
     crate = crate_name(mod)
     b = where or builder()
     t0 = time.monotonic()
+    if b is None and not local_rust():
+        offer_toolchain()
     if b == "local" or (b is None and local_rust()):
         if not local_rust():
             die("no cargo + wasm32 target here (rustup target add wasm32-unknown-unknown), or: powos app builder user@host")
-        r = subprocess.run(["cargo", "build", "--release", "--target", "wasm32-unknown-unknown", "-q"], cwd=mod,
-                           env={**os.environ, "CARGO_TARGET_DIR": LOCAL_TARGET})
+        env = {**rust_env(), "CARGO_TARGET_DIR": LOCAL_TARGET}
+        seed = os.path.join(TOOLCHAIN, "app-target")
+        if not os.path.isdir(LOCAL_TARGET) and os.path.isdir(seed):
+            # The template's crates, compiled once in the image: the first build compiles only this app's crate.
+            shutil.copytree(seed, LOCAL_TARGET, symlinks=True)
+        # Offline first (the toolchain's registry has every crate the template locks; a phone may be offline), then
+        # with the network for crates the app added itself.
+        cargo = ["cargo", "build", "--release", "--target", "wasm32-unknown-unknown", "-q"]
+        r = subprocess.run(cargo + ["--offline"], cwd=mod, env=env, capture_output=True, text=True)
+        if r.returncode != 0 and re.search(r"offline|no matching package|failed to (download|load source)|"
+                                           r"failed to get|is not available", r.stderr):
+            log("module: crates outside the toolchain's registry - fetching them")
+            r = subprocess.run(cargo, cwd=mod, env=env)
+        elif r.returncode != 0:
+            sys.stderr.write(r.stderr)
         if r.returncode != 0:
             die("module: cargo build failed")
         shutil.copy(os.path.join(LOCAL_TARGET, "wasm32-unknown-unknown", "release", crate + ".wasm"), wasm)
@@ -889,6 +950,14 @@ def cmd_list():
 
 
 def cmd_remove(app_id, data):
+    if not shutil.which("spacetime"):
+        # A UI-only app on a phone without root installs with no SpacetimeDB (cmd_install), so it removes without one:
+        # the launcher lists files/apps itself. (Before: "no spacetime CLI here" and the app stayed.)
+        if not noroot():
+            die("no spacetime CLI here (PowOS ships it: the spacetimedb package)")
+        shutil.rmtree(os.path.join(APPS, app_id), ignore_errors=True)
+        print(f"removed {app_id} (no SpacetimeDB here: its files only)")
+        return
     ok, out = sql(REGISTRY, f"SELECT database FROM app WHERE id = '{app_id}'")
     spacetime("call", "-s", SERVER, REGISTRY, "remove", json.dumps(app_id), quiet=True)
     shutil.rmtree(os.path.join(APPS, app_id), ignore_errors=True)
@@ -921,8 +990,8 @@ def capabilities():
     b = builder()
     rust = local_rust()
     where = (f"builder {b}" if b and b != "local" else "here (cargo + wasm32)" if rust else
-             "nowhere: no cargo + wasm32 here and no builder (powos app builder user@host); a UI-only app "
-             "(\"module\": null) needs none")
+             f"nowhere yet: add the {TOOLCHAIN_PACK} pack (powos app build <dir> --add-toolchain: Rust, offline after) "
+             "or set a builder (powos app builder user@host); a UI-only app (\"module\": null) needs none")
     return [
         ("new", True, f"templates {TEMPLATES}" if os.path.isdir(TEMPLATES) else f"no templates ({TEMPLATES})"),
         ("build --ui", bool(shutil.which("bun") or shutil.which("npx")), shutil.which("bun") or shutil.which("npx")
@@ -1018,8 +1087,15 @@ def cmd_preview(a):
     os.execvp("bash", ["bash", tool, *args, *rest])
 
 
+# --add-toolchain (any command that may build a module): the user's yes to adding the toolchain pack (offer_toolchain).
+ADD_TOOLCHAIN = False
+
+
 def main(a):
+    global ADD_TOOLCHAIN
     a, note = take_note(a)
+    ADD_TOOLCHAIN = "--add-toolchain" in a
+    a = [x for x in a if x != "--add-toolchain"]
     dispatch(a)
     if len(a) == 2 and a[0] in ("install", "publish", "ui"):
         deployed(a[0], a[1], note)

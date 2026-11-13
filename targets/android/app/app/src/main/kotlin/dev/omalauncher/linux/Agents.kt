@@ -83,7 +83,9 @@ fun newAppPrompt(description: String) =
                 "`powos app new <short-name> --name \"<Shown name>\" --dir .` here, then write the module (module/src/lib.rs) " +
                 "and the full-screen page (ui/pages/main.tsx); add a home widget (ui/widgets/main.tsx) only if one makes " +
                 "sense, else drop it from powos-app.json. Then `powos app install .` - on an error, read it, fix the code " +
-                "and install again. Installed, it's in my app drawer and opens full screen; its widget is in home's edit " +
+                "and install again. If it says the module needs a toolchain, ask me in one line whether to add PowOS's " +
+                "developer pack (about 300 MB, once; builds offline after) and only on my yes run " +
+                "`powos app install . --add-toolchain`. Installed, it's in my app drawer and opens full screen; its widget is in home's edit " +
                 "sheet. No .desktop file: that's only for apps on the Plasma desktop. Keep your replies short - I'm " +
                 "reading them on my phone; end with one line saying what the app does.",
         )

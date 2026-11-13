@@ -92,6 +92,35 @@ rm -f "$T/powos-pinned-pacman.conf"; run RESOLVES=1 REPO=1-1 HAVE=1-1 >/dev/null
 grep -q -- "--config $T/conf -Syu" "$T/log" && ok "a resolving store: the plain config" || bad "pinned while it resolves: $(cat "$T/log")"
 printf '[options]\n\n[powos]\nServer = http://x\n' > "$T/conf"
 
+# The base catch-up (gh#13, razr 11-10: an old base without SpacetimeDB): what phone-base-sync.py names is reinstalled -
+# [powos]'s from [powos], Arch's only at the installed version, the rest left for its pack.
+printf 'print("spacetimedb\\ntmux\\nghost\\nnewer")\n' > "$T/sync"   # phone-update runs it with python3
+cat > "$T/bin/pacman" <<'S'
+#!/bin/sh
+echo "pacman $*" >> "$LOG"
+case "$*" in
+  "-Q powos-core") exit 1 ;;
+  *"-Si powos-core"*) exit 1 ;;
+  *"--config"*"-Si spacetimedb") exit 0 ;;
+  *"--config"*"-Si "*) exit 1 ;;
+  "-Si tmux") echo "Version         : 3.5-1" ;;
+  "-Q tmux") echo "tmux 3.5-1" ;;
+  "-Si newer") echo "Version         : 2-1" ;;
+  "-Q newer") echo "newer 1-1" ;;
+  "-Si "*|"-Q "*) exit 1 ;;
+  *) exit 0 ;;
+esac
+S
+chmod +x "$T/bin/pacman"
+out=$(run POWOS_BASE_SYNC="$T/sync")
+grep -q -- "--config $T/conf -S --noconfirm spacetimedb$" "$T/log" && ok "base: spacetimedb back from [powos]" || bad "base: $(cat "$T/log")"
+grep -qx -- "pacman -S --noconfirm tmux" "$T/log" && ok "base: tmux at its installed version" || bad "base tmux: $(cat "$T/log")"
+{ ! grep -q -- "-S --noconfirm.*\(ghost\|newer\)" "$T/log" && echo "$out" | grep -q "ghost isn't in this image's base" && echo "$out" | grep -q "newer isn't"; } &&
+  ok "base: no upgrade, no unknown package - left for its pack" || bad "base others: $out / $(cat "$T/log")"
+echo "$out" | grep -q '^#step base$' && ok "base: a progress step" || bad "no #step base"
+out=$(ARGS=--check run POWOS_BASE_SYNC="$T/sync")
+grep -q -- "-S --noconfirm spacetimedb" "$T/log" && bad "--check reinstalled" || ok "--check changes no base"
+
 # 3. `powos update` on a phone goes to it.
 grep -q 'phone-update.sh" --check' "$ROOT/bin/powos" && ok "powos update check -> phone-update.sh" || bad "bin/powos doesn't route the phone"
 exit $fail

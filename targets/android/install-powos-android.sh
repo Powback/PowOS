@@ -170,6 +170,13 @@ cp $P/manifest/flatpaks.txt /usr/share/powos/phone-flatpaks.txt
 # can't carry it; the aarch64 build of the same release. Real fix: the manifest lists such binaries too.
 curl -fsSL -o /tmp/bun.zip https://github.com/oven-sh/bun/releases/latest/download/bun-linux-aarch64.zip
 bsdtar -xf /tmp/bun.zip -C /tmp && install -m 755 /tmp/bun-linux-aarch64/bun /usr/bin/bun && rm -rf /tmp/bun*
+# The Rust -> wasm toolchain `powos app build` uses for an app's module on the phone itself, offline (gh#13 A3):
+# rustup's stable + wasm32 and the app template's crates prebuilt, in /opt/powos-rust (rootfs-packs.conf: the dev pack,
+# added once from Settings > Storage or when `powos app build` asks). Not fatal: `powos app builder user@host` still builds.
+if [ -d "$P/current/src/lib/apps/templates/module/module" ]; then
+  sh "$P/current/src/targets/android/tools/app-toolchain.sh" /opt/powos-rust "$P/current/src/lib/apps/templates/module/module" ||
+    echo "powos: the app toolchain (/opt/powos-rust) failed - modules build on an app builder" >&2
+fi
 # Claude Code out of the box (the user, 11-09 on the non-root razr: "claude is not installed"): the vendor's native
 # installer, the same one `powos ai install claude` and the manager's first use run, into the app user's home
 # (/root/.local/bin, on every login shell's PATH) so it keeps updating itself there. Fail the image build rather

@@ -19,7 +19,7 @@ ROOT=$(cd "$HERE/../.." && pwd)
 BASE=${POWOS_BASE_BRANCH:-${POWOS_BASE:-main}}
 OUT=$HERE/out/powos-core
 PATHS=(bin lib targets/android/session targets/android/shims targets/android/play targets/android/install-powos-android.sh targets/android/tools/phone-files.sh
-  config/etc/profile.d units/phone)
+  config/etc/profile.d units/phone targets/android/rootfs-packs.conf targets/android/tools/split-rootfs.py)
 publish=""; [ "${1:-}" = --publish ] && publish=1
 if [ -n "$publish" ] && [ -z "${PUBLISH_ANY_COMMIT:-}" ] && ! git -C "$ROOT" merge-base --is-ancestor HEAD "origin/$BASE" 2>/dev/null; then
   echo "build-powos-core: not published - $(git -C "$ROOT" rev-parse --short HEAD) isn't on origin/$BASE"
@@ -60,6 +60,9 @@ package() {
   sh "\$srcdir/phone-files.sh" targets/android/install-powos-android.sh | while read -r mode src dest; do
     install -Dm "\$mode" "targets/android/\$src" "\$pkgdir\$dest"
   done
+  # What the base should hold, for lib/phone-base-sync.py (phone-update.sh's "base" step: an older base catches up).
+  if [ -f targets/android/rootfs-packs.conf ]; then install -Dm 644 targets/android/rootfs-packs.conf "\$pkgdir/usr/share/powos/rootfs-packs.conf"; fi
+  if [ -f targets/android/tools/split-rootfs.py ]; then install -Dm 755 targets/android/tools/split-rootfs.py "\$pkgdir/usr/lib/powos/split-rootfs.py"; fi
 }
 EOF
   # Built in the container's own /b (a macOS-shared folder can't take the builder's ownership), the package copied back.

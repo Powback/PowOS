@@ -123,6 +123,9 @@ object UpdatePlan {
         val l = line.trim()
         if (l == "#step packages") return "Updating Linux packages"
         if (l == "#step powos") return "Updating PowOS"
+        // An older base image catching up (phone-base-sync.py): e.g. SpacetimeDB, which every PowOS app's data needs.
+        if (l == "#step base") return "Completing the Linux image"
+        if (l.startsWith("phone-update: adding to the base:")) return "Adding to the Linux image:" + l.substringAfter("base:")
         STEP.find(l)?.let {
             val n = if (it.groupValues[1].isEmpty()) "" else " (${it.groupValues[1]}/${it.groupValues[2]})"
             return "Updating ${it.groupValues[4]}$n"

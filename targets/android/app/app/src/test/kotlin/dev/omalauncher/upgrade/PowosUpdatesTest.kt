@@ -72,6 +72,8 @@ class PowosUpdatesTest {
         // Without a terminal (the app reads a pipe), as on the razr 11-09.
         assertEquals("Updating powos-core", UpdatePlan.progress("upgrading powos-core..."))
         assertNull(UpdatePlan.progress("checking keys in keyring"))
+        assertEquals("Completing the Linux image", UpdatePlan.progress("#step base"))
+        assertEquals("Adding to the Linux image: spacetimedb tmux", UpdatePlan.progress("phone-update: adding to the base: spacetimedb tmux"))
         val lines = listOf("(1/2) upgrading kwin", "(2/2) upgrading fex-emu", "installing powos-core...", "(1/1) installing powos-core")
         assertEquals(3, UpdatePlan.changed(lines))
     }

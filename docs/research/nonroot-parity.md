@@ -414,3 +414,38 @@ warm-built APK since 11-04 shipped without them.
 - **VPN pairing** (board devices-pairing-doesn-t-discover-over-vpn): Add a device merges the realm registry (agent
   addresses) with mDNS; `shell/test/devices-discover.test.ts`. Phone agents have no realm endpoint yet, so the phone's
   own Devices app falls back to the address field over the VPN.
+
+## What changed 11-10 (nonroot-appmaking: making apps and SpacetimeDB web apps without root)
+
+Razr probe (read-only, `PROBE=1 tools/phone/verify/nonroot-appmaking.sh`, APK 2026.11.09-2349, base from before 11-09):
+`new` yes, `build --ui` yes (bun), **module build no** (no toolchain, no builder), **install no** (no `spacetime`:
+pacman lists `spacetimedb-2.12.0-1` as installed but its files were split into the apps pack the razr never added, so
+no package update ever brought it back), services yes.
+
+- **An old base catches up by package, not by re-download.** `lib/phone-base-sync.py` (in powos-core with
+  `rootfs-packs.conf` + `split-rootfs.py`) applies today's split rules to the phone's own pacman db and names the base
+  packages whose files are mostly missing (a whole package left in a pack, never one file a script removed) and roots
+  the image never had. `phone-update.sh`'s new `base` step (after powos-core, so new rules arrive first) reinstalls
+  them: [powos]'s own (spacetimedb) from [powos], Arch's only at the installed version (no `-Sy`, no partial upgrade),
+  the rest is left for its pack. Runs automatically at every session start and with the app's update check; progress
+  through `powos-progress base-sync` (a notification even from the session-start run) and "Completing the Linux
+  image" / "Adding to the Linux image: ..." in the PowOS updates notification. Cached on the pacman db + rules + packs.
+  On the razr's real db it names spacetimedb, tmux, gnome-keyring (+ deps), btop/fzf/gum/fastfetch, github-cli.
+  Tests: tier1 `test-phone-base-sync.py`, `test-phone-update.sh` (base cases), JVM `PowosUpdatesTest`.
+- **Module builder: the `dev` pack carries the Rust -> wasm toolchain** (`targets/android/tools/app-toolchain.sh`,
+  run by install-powos-android.sh into `/opt/powos-rust`, `pack dev path opt/powos-rust/*`): rustup's stable + wasm32
+  (Arch Linux ARM's rust has no wasm32 std) and the template's crates (spacetimedb 2.12 + deps) fetched and compiled
+  once. Measured in an arm64 container: 805 MB unpacked / 288 MB gz; a new app's first module build **offline in
+  7 s** (only its own crate compiles). `powos app build` uses it (`--offline` first, then the network only for crates
+  the app added) and seeds `~/.cache/powos/app-target` from it. Why the pack over an offloaded build: it works offline
+  and on a phone that isn't enrolled, needs no new PowStation service or credentials, and the ssh builder
+  (`powos app builder user@host`) stays as the second choice. No silent download: without the pack and a builder,
+  `powos app build` shows both choices; a terminal asks y/N, the AI (manager) passes `--add-toolchain` /
+  `POWOS_APP_ADD_TOOLCHAIN=1` only on the user's yes; `powos-pack need dev` shows the download's progress.
+- `powos app remove` of a UI-only app works with no SpacetimeDB on a phone without root (it died "no spacetime CLI").
+- Check: `tools/phone/verify/nonroot-appmaking.sh` (from the Mac, razr): base, widget (UI-only island), preview, new,
+  module, install (DB + files/apps + powos-registry), stdb (reducer -> table, live subscription, anonymous SQL writes
+  refused on the app DB and the registry), persist (RESTART=1), App API, edit (page -> `app ui`, module -> `publish`,
+  data kept), cleanup. Runs each step in the image through run-as + liblotfixrun with the script on stdin.
+- Left: the razr needs powos-core from this branch (base step) + an APK/base built with the dev pack's toolchain;
+  `.preview/` sheets still need docker (W3); `compose blocks` example specs (C1).

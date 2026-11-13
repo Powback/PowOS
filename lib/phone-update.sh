@@ -100,5 +100,32 @@ if [ -n "$repo" ] && { [ -z "$have" ] || [ "$(vercmp "$repo" "$have")" -gt 0 ]; 
 else
   echo "powos-core ${have:-not in the repo} is current"
 fi
+# The base: packages a newer base image has that this phone's doesn't (an image split before they joined the base left
+# their files in a pack the phone never added - razr 11-10: no SpacetimeDB). phone-base-sync.py (from powos-core) names
+# them; [powos] reinstalls its own (spacetimedb), Arch's are reinstalled at the version installed (never an upgrade
+# without -Sy: the image's own sync databases), and one missing everywhere is left for its pack (Settings > Storage).
+echo "#step base"
+B=${POWOS_BASE_SYNC:-/usr/lib/powos/phone-base-sync.py}
+if [ "$mode" != check ] && [ -f "$B" ]; then
+  ours="" arch=""
+  for p in $(python3 "$B" 2>/dev/null); do
+    if pacman --config "$conf" -Si "$p" >/dev/null 2>&1; then ours="$ours $p"
+    elif v=$(pacman -Si "$p" 2>/dev/null | sed -n 's/^Version *: *//p' | head -1) && [ -n "$v" ] &&
+         [ "$v" = "$(pacman -Q "$p" 2>/dev/null | cut -d' ' -f2)" ]; then arch="$arch $p"
+    else echo "phone-update: $p isn't in this image's base and no repo here has its version - add its pack (Settings > Storage)"
+    fi
+  done
+  [ -z "$ours$arch" ] && echo "the base is complete"
+  # Seen on the phone however the run started (the session's start runs it with no notification of its own).
+  prog() { command -v powos-progress >/dev/null 2>&1 && powos-progress base-sync "$@" >/dev/null 2>&1; :; }
+  bok=1; set -- $ours $arch; total=$#
+  [ "$total" -gt 0 ] && prog 0 "$total" "Adding to the Linux image:$ours$arch"
+  # shellcheck disable=SC2086
+  [ -n "$ours" ] && { echo "phone-update: adding to the base:$ours"; $SUDO pacman --config "$conf" -S --noconfirm $ours || { ok=0; bok=0; }
+    n=$(echo $ours | wc -w); prog "$n" "$total" "Adding to the Linux image:$arch"; }
+  # shellcheck disable=SC2086
+  [ -n "$arch" ] && { echo "phone-update: adding to the base:$arch"; $SUDO pacman -S --noconfirm $arch || { ok=0; bok=0; }; }
+  if [ "$total" -gt 0 ]; then if [ $bok = 1 ]; then prog done; else prog failed "Some packages couldn't be added - Settings > system updates"; fi; fi
+fi
 [ $ok = 1 ] && done_ ok
 done_ fail

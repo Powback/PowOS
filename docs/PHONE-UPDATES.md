@@ -12,6 +12,12 @@ Pi-hole's DNS; no public route). A new base image is only for **fresh installs**
 | Linux packages | `targets/android/publish-repo.sh` (`[powos]` repo: KWin, FEX, box64, ...) | `pacman -Syu` from `[powos]` only (its own config, `/etc/pacman.d/powos-repo.conf`: no partial upgrade of Arch) | `lib/phone-update.sh`, inside the image (the image's own loader; `sudo` = the non-root session's fake root) |
 | PowOS's own code | `targets/android/build-powos-core.sh --publish` (by build-app.sh and the ship service after a rooted deploy): package `powos-core` in `[powos]` | `powos-core` newer than installed (`vercmp`), or not installed yet | pacman; the first install takes over the files the base image put there unowned (`--overwrite '*'`) |
 
+**The base step** (after powos-core): an image split before a package joined the base (rootfs-packs.conf `roots`)
+left its files in a pack, while pacman lists it installed, so no upgrade brings it back (razr 11-10: no SpacetimeDB).
+`phone-base-sync.py` names those packages from the phone's own db with today's split rules (shipped in powos-core);
+`phone-update.sh` reinstalls [powos]'s from [powos] and Arch's only at the installed version, and shows it
+(`#step base`, `powos-progress base-sync`). A new base image is still never needed for an installed phone.
+
 `powos-core` holds `bin/` -> `/usr/bin` and `lib/` -> `/usr/lib/powos` (`lib/self-phone.sh self_phone_apply`: the CLI,
 its libraries, the manager with `fleet_login.py`, claude-login) and the phone's session scripts, shims and `play/`
 launchers at the paths `install-powos-android.sh` installs them (`targets/android/tools/phone-files.sh` reads that map
