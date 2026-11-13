@@ -37,7 +37,7 @@ d=$(dirname "$0")
 for a in "$@"; do case "$a" in
   connect) echo CONNECT >> "$d/calls"; exit 0 ;;
   disconnect|start-server) exit 0 ;;
-  get-state) s=$(cat "$d/state"); [ "$s" = device ] && { echo device; exit 0; }; echo "error: device $s" >&2; exit 1 ;;
+  get-state) echo POLL >> "$d/polls"; s=$(cat "$d/state"); [ "$s" = device ] && { echo device; exit 0; }; echo "error: device $s" >&2; exit 1 ;;
 esac; done
 '''
 
@@ -58,16 +58,15 @@ class UnauthorizedTest(unittest.TestCase):
 
     def adb(self, *args):
         return subprocess.run(['bash', str(ROOT / 'tools/phone/adb.sh'), *args], env=self.env,
-                              capture_output=True, text=True, timeout=10)
+                              capture_output=True, text=True, timeout=60)  # a hang guard, not a speed check: one call took >10 s on a loaded tier-1 machine (11-13)
 
     def count(self, what):
         f = self.d / 'calls'
         return f.read_text().split().count(what) if f.exists() else 0
 
     def notified(self):
-        for _ in range(50):  # the notify is backgrounded
-            if (self.d / 'notified').exists():
-                break
+        deadline = time.monotonic() + 30  # the notify is backgrounded: wait for it, not a fixed 2.5 s
+        while not (self.d / 'notified').exists() and time.monotonic() < deadline:
             time.sleep(0.05)
         time.sleep(0.2)
         f = self.d / 'notified'
@@ -115,20 +114,30 @@ class UnauthorizedTest(unittest.TestCase):
         self.assertEqual(self.count('CONNECT'), 1, 'a stale (not unauthorized) link keeps its one reconnect')
         self.assertFalse(self.marker.exists())
 
-    def keepalive(self, seconds):
+    def keepalive(self, done):
+        """Run the keepalive until done() holds (polled, 30 s cap), then stop it: conditions, not sleeps - the fixed
+        1.5 s / 0.6 s windows saw only one poll on a loaded tier-1 machine (11-13: 'CONNECT 1 not greater than 1')."""
         env = dict(self.env, ANDROID_SERIAL='10.13.13.7:5555', VADB_POLL_S='0.1')
         p = subprocess.Popen(['sh', str(ROOT / 'targets/android/vadb/vadb-keepalive.sh')], env=env,
                              stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, text=True)
-        time.sleep(seconds)
+        deadline = time.monotonic() + 30
+        while not done() and time.monotonic() < deadline and p.poll() is None:
+            time.sleep(0.05)
         p.kill()
         return p.communicate()[0]
 
+    def polls(self):
+        f = self.d / 'polls'
+        return len(f.read_text().split()) if f.exists() else 0
+
     def test_keepalive_backs_off(self):
-        out = self.keepalive(1.5)
+        # Six state reads = at least five poll rounds in the unauthorized state: none may reconnect.
+        out = self.keepalive(lambda: self.polls() >= 6)
+        self.assertGreaterEqual(self.polls(), 6, out)
         self.assertEqual(self.count('CONNECT'), 0, out)
         self.assertEqual(out.count('unauthorized'), 1, out)
         (self.d / 'state').write_text('offline\n')
-        self.keepalive(0.6)
+        self.keepalive(lambda: self.count('CONNECT') >= 2)
         self.assertGreater(self.count('CONNECT'), 1, 'a dropped (not unauthorized) link is still reconnected')
 
 
