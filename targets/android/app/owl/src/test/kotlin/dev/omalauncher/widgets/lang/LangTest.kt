@@ -639,6 +639,20 @@ class LangTest {
         assertTrue(compileError("widget {\n Text { text: sh(\"x\") } }").contains("sh needs owl 6"))
     }
 
+    @Test fun measureAsksTheHostsFace() {
+        val owl9 = "meta { owl: 9 }"
+        // The default host face: monospace, 0.6 em a character.
+        assertEquals("6", text("round(measure(\"abcde\", 2))", owl9))
+        assertEquals("1.2", text("measure(\"ab\")", owl9))
+        assertTrue(compileError("widget {\n Text { text: measure(\"x\") } }").contains("measure needs owl 9"))
+        // A face the shell measured: per character, bold its own, unknown ones the table's average, CJK a whole em.
+        val m = TextMetrics.of(Json.parse("""{"regular": {"i": 0.25, "W": 0.9}, "bold": {"i": 0.3}, "other": 0.5}"""))!!
+        assertEquals(0.25 * 10 + 0.9 * 10, m.width("iW", 10.0), 1e-9)
+        assertEquals(3.0 + 5.0, m.width("ix", 10.0, bold = true), 1e-9)
+        assertEquals(10.0, m.width("\u4e2d", 10.0), 1e-9)
+        assertEquals(null, TextMetrics.of(Json.parse("""{"regular": {}}""")))
+    }
+
     @Test fun commandsWithQuotedValuesAreListedAsTemplates() {
         fun commands(body: String) = Compiler.compile("widget {\n meta { owl: 6 }\n state v = \"x\"\n state n = 1\n$body\n Text { text: v } }").commands
         assertEquals(listOf("sed -i ${Compiler.NUMBER}d ~/todo.md"), commands("onTap: run(\"sed -i ${'$'}{int(n)}d ~/todo.md\")"))

@@ -80,7 +80,7 @@ that read it redraw. Properties are separated by newlines or `;`.
 | `asset logo = base64"iVBOR..."` | an embedded image (under 2 MB) for `Image { src: logo }`, so the widget is one self-contained file |
 | `requires { pacman: ["jq", "curl"] }` | packages the widget's commands need; see Dependencies |
 | `meta { description: "..."; version: "1.0"; license: "MIT"; category: "news" }` | needed to publish to the widget store (see Sharing) |
-| `meta { owl: 7 }` | the language version the widget needs (this launcher has 7; the default is 1). Older launchers say "update the launcher" instead of failing on what they don't know. `Terminal` needs 2, `sprite` 3, triggers, `file`, `Slider`, `Input`, `android.notifications`, `android.volume`, `volume` and `notification` need 4, and `screen { }`, `screen()`, `close()`, `screenWidth` and `screenHeight` need 5, `Input`'s `focus`, `sh()` and `corners` 6, and `android.alarm`, `android.modes`, `torch`, `share` and `haptic` 7; using them without declaring it is an error |
+| `meta { owl: 7 }` | the language version the widget needs (this launcher has 9; the default is 1). Older launchers say "update the launcher" instead of failing on what they don't know. `Terminal` needs 2, `sprite` 3, triggers, `file`, `Slider`, `Input`, `android.notifications`, `android.volume`, `volume` and `notification` need 4, and `screen { }`, `screen()`, `close()`, `screenWidth` and `screenHeight` need 5, `Input`'s `focus`, `sh()` and `corners` 6, `android.alarm`, `android.modes`, `torch`, `share` and `haptic` 7, `Terminal`'s `session`, `interactive`, `textSize` and `focus` 8, and `measure()` 9; using them without declaring it is an error |
 | `onTap: ...` | runs when the tile (not a button inside it) is tapped |
 | `screen { ... }` | a full-screen view of the widget, opened with `screen()`; see Screens (owl 5) |
 | `every 10s { ... }`, `at t { ... }`, `when c { ... }`, `on x { ... }` | statements that run without a tap; see Triggers |
@@ -175,6 +175,11 @@ corners` for cards and album art, `3 * corners` for small chips, and the same in
 (`rect(x, y, w, h, radius: 8 * corners)`). The tile, buttons and bordered elements without a
 `radius` follow it on their own; a fixed `radius`, a clipped Box, an Image or a Canvas shape
 doesn't. It needs `meta { owl: 6 }`.
+
+`measure(text, size, bold)` is how wide `text` is drawn at `size` dp (default 1: its width in em), bold or not, in
+the face the launcher draws widget text in - the web shell's UI font, a proportional one. Size text to the tile by it,
+never by counting characters (`len(s) * 0.6` is monospace's width and leaves a proportional line short):
+`fontSize: floor(min((tileWidth - 24) / measure(title), 40))`. It needs `meta { owl: 9 }`.
 
 ## Nodes
 

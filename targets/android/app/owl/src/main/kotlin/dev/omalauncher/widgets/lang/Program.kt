@@ -26,6 +26,13 @@ interface Host {
      */
     fun tile(name: String): Value = Null
 
+    /** How wide [text] is at [size] dp in the face the widget's text is drawn in (owl 9's measure()); see [TextMetrics]. */
+    fun measure(
+        text: String,
+        size: Double,
+        bold: Boolean,
+    ): Double = TextMetrics.MONO.width(text, size, bold)
+
     fun act(
         name: String,
         args: List<Value>,

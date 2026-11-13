@@ -3,8 +3,11 @@ package dev.omalauncher.shell
 import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.snapshotFlow
 import dev.omalauncher.Runtime
+import dev.omalauncher.widgets.lang.Json
+import dev.omalauncher.widgets.lang.TextMetrics
 import dev.omalauncher.widgets.lang.text
 import dev.omalauncher.widgets.runtime.WidgetInstance
+import dev.omalauncher.widgets.runtime.WidgetText
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
@@ -164,6 +167,21 @@ class ShellWidgets(
         height: Double,
     ) {
         canvasSizes["$key#$id"] = width to height
+    }
+
+    /** The last face table taken: the page sends it on every load and font change, the same one changes nothing. */
+    private var metricsJson: String? = null
+
+    /**
+     * The face the page draws widget text in (--font-body), as ui/owl.tsx fontMetrics() measured it: what every
+     * widget's measure() answers from, so a widget sizes its words to its tile in that face. A table that isn't one
+     * ([TextMetrics.of]) is ignored.
+     */
+    fun metrics(json: String) {
+        if (json == metricsJson) return
+        val m = runCatching { TextMetrics.of(Json.parse(json)) }.getOrNull() ?: return
+        metricsJson = json
+        WidgetText.metrics = m
     }
 
     /** The page on screen: widgets on it and beside it run their sources, the rest pause. */

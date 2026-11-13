@@ -3,7 +3,7 @@ widget "system" {
   order: 4
   size: 6x3
   minSize: 3x2
-  meta { owl: 6 }
+  meta { owl: 9 }
 
   requires { pacman: ["procps-ng", "fastfetch"] }
 
@@ -11,16 +11,17 @@ widget "system" {
 
   onTap: terminal("fastfetch")
 
-  // Four lines sized from the tile, never fixed (monospace: 0.6 em a character, a line 1.4 em budgeted), centred:
+  // Four lines sized from the tile, never fixed (the longest line's width as measure() gives it in the face it's drawn
+  // in, a line 1.4 em budgeted), centred:
   // one column, or on a wide tile a 2 x 2 of soft chips, each line as big as the longest one's width and the height allow, spread over
   // the height. "16 hours, 36 minutes" says "16h 36m".
   let iw = tileWidth == null ? 154 : tileWidth - 24
   let ih = tileHeight == null ? 106 : tileHeight - 24
   let up = replace(replace(replace(replace(replace(replace(replace(info.up ?? "", " minutes", "m"), " minute", "m"), " hours", "h"), " hour", "h"), " days", "d"), " day", "d"), ",", "")
   let rows = ["arch linux arm", "kernel ${info.kernel}", "${info.packages} packages", "up ${up}"]
-  let longest = max(rows.map(r => len(r)))
+  let longest = max(max(rows.map(r => measure(r))), 1)
   let wide = iw > ih * 1.5
-  let fs = clamp(floor(wide ? min((iw - 8) / 2 / (longest * 0.6) - 3, (ih - 8) / 2 / 1.4 - 4) : min(iw / (longest * 0.6), ih / (4 * 1.4))), 9, 96)
+  let fs = clamp(floor(wide ? min((iw - 8) / 2 / longest - 3, (ih - 8) / 2 / 1.4 - 4) : min(iw / longest, ih / (4 * 1.4))), 9, 96)
 
   if wide {
     Row {

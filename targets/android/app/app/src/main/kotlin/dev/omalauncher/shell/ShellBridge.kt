@@ -847,6 +847,7 @@ class ShellBridge(
                 )
             "widgets.size" -> widgets.size(a.getString(0), a.getInt(1), a.getInt(2), a.getDouble(3), a.getDouble(4))
             "widgets.canvas" -> widgets.canvas(a.getString(0), a.getString(1), a.getDouble(2), a.getDouble(3))
+            "widgets.metrics" -> widgets.metrics(a.getJSONObject(0).toString())
             "widgets.page" -> widgets.page(a.getInt(0))
             "widgets.tap" -> widgets.tap(a.getString(0))
             "widgets.screen" -> widgets.screen()

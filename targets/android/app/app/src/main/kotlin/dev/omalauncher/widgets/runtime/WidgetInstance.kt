@@ -16,7 +16,9 @@ import androidx.compose.runtime.State
 import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.mutableDoubleStateOf
 import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshotFlow
 import androidx.compose.runtime.structuralEqualityPolicy
 import androidx.compose.ui.graphics.toArgb
@@ -37,6 +39,7 @@ import dev.omalauncher.widgets.lang.Obj
 import dev.omalauncher.widgets.lang.Program
 import dev.omalauncher.widgets.lang.Sprite
 import dev.omalauncher.widgets.lang.Str
+import dev.omalauncher.widgets.lang.TextMetrics
 import dev.omalauncher.widgets.lang.Value
 import dev.omalauncher.widgets.lang.Trigger
 import dev.omalauncher.widgets.lang.WidgetError
@@ -56,6 +59,15 @@ import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.selects.select
 import java.io.File
+
+/**
+ * The face widgets' text is drawn in, for their measure() (owl 9): the web shell's UI font as the page measured it
+ * (ShellWidgets.metrics, the bridge's widgets.metrics) - the shell draws the trees; until it reports, the monospace the
+ * Compose launcher draws in. State: a new face re-evaluates every widget that measures.
+ */
+object WidgetText {
+    var metrics by mutableStateOf(TextMetrics.MONO)
+}
 
 /** What widgets need from the launcher: guest commands, Android data and actions. */
 interface Services {
@@ -285,6 +297,12 @@ class WidgetInstance(
             }
         return v?.let { Num(Math.round(it).toDouble()) } ?: Null
     }
+
+    override fun measure(
+        text: String,
+        size: Double,
+        bold: Boolean,
+    ) = WidgetText.metrics.width(text, size, bold)
 
     var time: Double
         get() = frameTime.doubleValue

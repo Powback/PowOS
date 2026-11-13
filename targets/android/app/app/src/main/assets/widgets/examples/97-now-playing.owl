@@ -3,7 +3,7 @@ widget "now playing" {
   order: 20
   size: 6x2
   minSize: 3x2
-  meta { description: "What's playing on your phone, from any music or podcast app: album art, track, progress and play, pause and skip. Tap the tile to open the app"; version: "1.1"; license: "MIT"; category: "fun"; owl: 5 }
+  meta { description: "What's playing on your phone, from any music or podcast app: album art, track, progress and play, pause and skip. Tap the tile to open the app"; version: "1.1"; license: "MIT"; category: "fun"; owl: 9 }
 
   // {available, playing, title, artist, album, app, package, position, duration, art}.
   // Android only shares other apps' sessions with notification access; without it, available is false.
@@ -13,7 +13,8 @@ widget "now playing" {
   let allowed = m == null || m.available != false
   let dur = num(m.duration, 0)
   let pos = dur > 0 ? clamp(num(m.position, 0), 0, dur) : num(m.position, 0)
-  // Sized from the tile, never fixed (monospace: 0.6 em a character, a line 1.4 em budgeted). Side by side - the
+  // Sized from the tile, never fixed (words as wide as measure() gives them in the face they're drawn in, a line 1.4 em
+  // budgeted). Side by side - the
   // art square, as tall as the tile (at most 0.42 of its width), where the width leaves the words ~110 dp - or, a
   // tile taller than wide, stacked: art, words, progress and controls. The words as big as their width and the
   // height allow, the controls a share of the height.
@@ -28,15 +29,16 @@ widget "now playing" {
   let ctl = clamp(floor(min(tall ? ih * 0.12 : ih * 0.3, tw / 4.5)), 28, 84)
   let ls = clamp(floor(min(ih * 0.07, tw / 22)), 9, 18)
   let words = (tall ? ih - artD - 8 : ih) - ctl - (dur > 0 ? ls * 1.4 + 8 : 0) - ls * 1.4 - 8
-  let fs = clamp(floor(min(tw / (max(len(title), 4) * 0.6), words * 0.55 / 1.4)), 11, 44)
+  let fs = clamp(floor(min(tw / max(measure(title, 1, true), 2.4), words * 0.55 / 1.4)), 11, 44)
   // Artist and album where they fit at 9 dp or more, else the artist alone.
-  let who = tw / (max(len(both), 4) * 0.6) >= 9 ? both : (m.artist ?? both)
-  let ws = clamp(floor(min(tw / (max(len(who), 4) * 0.6), fs * 0.75, words * 0.4 / 1.4)), 9, 32)
+  let who = tw / max(measure(both), 2.4) >= 9 ? both : (m.artist ?? both)
+  let ws = clamp(floor(min(tw / max(measure(who), 2.4), fs * 0.75, words * 0.4 / 1.4)), 9, 32)
 
   onTap: media("open")
 
   component Clock(s) {
-    Text { text: s == null ? "" : "${floor(s / 60)}:${pad(floor(s % 60), 2, "0")}"; fontSize: ls; color: muted; font: mono; maxLines: 1; width: (len("${floor(s / 60)}") + 3) * ls * 0.62 + 4 }
+    // As wide as "m:88" (the seconds' widest digits), so the line doesn't shift as they tick.
+    Text { text: s == null ? "" : "${floor(s / 60)}:${pad(floor(s % 60), 2, "0")}"; fontSize: ls; color: muted; maxLines: 1; width: s == null ? 0 : ceil(measure("${floor(s / 60)}:88", ls)) + 2 }
   }
 
   // Drawn, not glyphs: the launcher's icon font only carries weather symbols. Paths need an
@@ -125,8 +127,8 @@ widget "now playing" {
           gap: 8; fill: height; align: center
           Art { src: null; d: artD }
           Spacer { weight: 1 }
-          Text { text: "nothing playing"; fontSize: clamp(floor(iw / (15 * 0.6)), 11, 40); color: muted; align: center; maxLines: 1 }
-          Text { text: "start music in any app"; fontSize: clamp(floor(iw / (22 * 0.6)), 9, 28); color: muted; align: center; maxLines: 1 }
+          Text { text: "nothing playing"; fontSize: clamp(floor(iw / measure("nothing playing")), 11, 40); color: muted; align: center; maxLines: 1 }
+          Text { text: "start music in any app"; fontSize: clamp(floor(iw / measure("start music in any app")), 9, 28); color: muted; align: center; maxLines: 1 }
           Spacer { weight: 1 }
         }
       } else {
@@ -135,8 +137,8 @@ widget "now playing" {
           if side { Art { src: null; d: artD } }
           Column {
             weight: 1; gap: 2
-            Text { text: "nothing playing"; fontSize: clamp(floor(min(tw / (15 * 0.6), ih * 0.3)), 11, 40); color: muted; maxLines: 1 }
-            Text { text: "start music in any app"; fontSize: clamp(floor(min(tw / (22 * 0.6), ih * 0.2)), 9, 28); color: muted; maxLines: 1 }
+            Text { text: "nothing playing"; fontSize: clamp(floor(min(tw / measure("nothing playing"), ih * 0.3)), 11, 40); color: muted; maxLines: 1 }
+            Text { text: "start music in any app"; fontSize: clamp(floor(min(tw / measure("start music in any app"), ih * 0.2)), 9, 28); color: muted; maxLines: 1 }
           }
         }
       }
@@ -196,7 +198,7 @@ widget "now playing" {
               gap: 4
               if dur > 0 {
                 Clock { s: pos }
-                Text { text: "/"; fontSize: ls; color: alpha(muted, 0.5); width: round(ls * 0.8) }
+                Text { text: "/"; fontSize: ls; color: alpha(muted, 0.5); width: ceil(measure("/", ls)) + 2 }
                 Clock { s: dur }
               }
               Spacer { weight: 1 }

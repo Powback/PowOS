@@ -653,6 +653,8 @@ export interface Bridge {
     size(key: string, cols: number, rows: number, width: number, height: number): Promise<void>;
     /** A Canvas's size in dp: its drawing is evaluated at it. */
     canvas(key: string, id: string, width: number, height: number): Promise<void>;
+    /** The face widget text is drawn in (ui/owl.tsx fontMetrics()): what the widgets' measure() answers from. */
+    metrics(m: { regular: Record<string, number>; bold: Record<string, number>; other: number }): Promise<void>;
     /** The home page on screen (a page number): widgets on it and beside it run their sources. */
     page(page: number): Promise<void>;
     /** A tap on the tile that no element took: the widget's own onTap (often screen(), opening it full size). */

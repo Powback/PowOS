@@ -296,6 +296,10 @@ object Builtins {
                         }.toDouble(),
                     )
                 },
+            // owl 9: how wide a text is drawn, in dp, at a size (default 1: em) and bold or not - in the host's own face
+            // (Host.measure), so a widget sizes its text to its tile in a proportional font, not by counting characters.
+            // Not pure: the host's face can change while the widget runs.
+            "measure" to Builtin(1, 3, pure = false) { a -> n(a.host?.measure(a.str(0), a.num(1, 1.0), a[2].truthy) ?: TextMetrics.MONO.width(a.str(0), a.num(1, 1.0), a[2].truthy)) },
             "trim" to Builtin(1, 1) { a -> Str(a.str(0).trim()) },
             "upper" to Builtin(1, 1) { a -> Str(a.str(0).uppercase()) },
             "lower" to Builtin(1, 1) { a -> Str(a.str(0).lowercase()) },

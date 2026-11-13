@@ -16,6 +16,7 @@ import dev.omalauncher.widgets.lang.Num
 import dev.omalauncher.widgets.lang.Obj
 import dev.omalauncher.widgets.lang.Program
 import dev.omalauncher.widgets.lang.Str
+import dev.omalauncher.widgets.lang.TextMetrics
 import dev.omalauncher.widgets.lang.Value
 import dev.omalauncher.widgets.lang.WNode
 import dev.omalauncher.widgets.lang.WidgetError
@@ -36,7 +37,10 @@ import java.time.Duration
  * only ever the data file's.
  *
  *   owl trees <file.owl> --theme <colors.toml> --variants <variants.json> [--data <data.json>] [--live]
- *   owl trees --batch <batch.json>       [{ "file", "theme", "data", "live", "variants", "out" }]: each to its "out"
+ *   owl trees --batch <batch.json>       [{ "file", "theme", "data", "live", "variants", "out", "metrics" }]: each to its "out"
+ *
+ * metrics: the face the page draws text in, as ui/owl.tsx fontMetrics() measured it (the preview's measure pass) - what
+ * measure() answers from; without it, monospace (TextMetrics.MONO).
  *
  * variants.json: [{ "id", "cols", "rows", "w", "h", "screen": [w, h] | null, "canvas": { "<element id>": [w, h] } }]
  * (w/h: the tile's size in dp; canvas: sizes the page measured, else 100x100 as on the phone before it reports).
@@ -52,7 +56,7 @@ internal fun trees(args: List<String>): Int {
     return 0
 }
 
-private data class PreviewInputs(val theme: Map<String, Int>, val data: Map<String, Value>, val live: Boolean)
+private data class PreviewInputs(val theme: Map<String, Int>, val data: Map<String, Value>, val live: Boolean, val metrics: TextMetrics = TextMetrics.MONO)
 
 private fun readData(path: String?): Map<String, Value> =
     path?.let { File(it) }?.takeIf { it.exists() }?.let { Json.parse(it.readText()) as? Obj }?.fields.orEmpty()
@@ -61,7 +65,8 @@ private fun batchTree(job: Map<String, Value>): String {
     val theme = job["theme"]?.takeIf { it != Null }?.let { toml(File(it.toString()).readText()) }.orEmpty()
     val data = readData(job["data"]?.takeIf { it != Null }?.toString())
     val variants = (job["variants"] as Lst).items.map { it as Obj }
-    return trees(File(job["file"].toString()).readText(), PreviewInputs(theme, data, job["live"]?.truthy == true), variants)
+    val metrics = TextMetrics.of(job["metrics"]) ?: TextMetrics.MONO
+    return trees(File(job["file"].toString()).readText(), PreviewInputs(theme, data, job["live"]?.truthy == true, metrics), variants)
 }
 
 private fun batchTrees(path: String): Int {
@@ -80,7 +85,7 @@ private fun batchTrees(path: String): Int {
 
 private fun trees(source: String, inputs: PreviewInputs, variants: List<Obj>): String {
     val program = Compiler.compile(source)
-    val host = PreviewHost(program, inputs.theme, inputs.data, inputs.live)
+    val host = PreviewHost(program, inputs.theme, inputs.data, inputs.live, inputs.metrics)
     val out = LinkedHashMap<String, Value>()
     for (v in variants) {
         val f = v.fields
@@ -123,6 +128,7 @@ private class PreviewHost(
     private val colors: Map<String, Int>,
     private val data: Map<String, Value>,
     private val live: Boolean,
+    private val metrics: TextMetrics,
 ) : Host {
     override val budget = Budget()
     val root = Env.root(this)
@@ -229,6 +235,12 @@ private class PreviewHost(
         }
 
     override fun time() = 0.0
+
+    override fun measure(
+        text: String,
+        size: Double,
+        bold: Boolean,
+    ) = metrics.width(text, size, bold)
 
     override fun tile(name: String): Value {
         if (name == "linux") return data["linux"] ?: bool(true)

@@ -5,7 +5,9 @@
  *                 each allows, minSize to 4x4, on the cover screen's cells and the inner screen's -> /work/widgets.json
  *                 and /work/batch.json (what `owl trees --batch` evaluates, per theme);
  *   PASS=measure  each OWL widget's sheet drawn once with those trees, the size each Canvas reported -> batch.json again
- *                 (Canvas code draws to its own size: the second trees are drawn at the measured ones, as on the phone);
+ *                 (Canvas code draws to its own size: the second trees are drawn at the measured ones, as on the phone),
+ *                 with the UI font's widths the page measured (ui/owl.tsx fontMetrics(): what measure() answers from -
+ *                 the first trees had monospace's, as the phone's before its page reports);
  *   PASS=render   every sheet per theme: drawn, the fit checks run (dev/preview/sheet.tsx check()), shot; a widget with
  *                 a screen (its onTap's screen()) opened full size on each screen too, its backdrop checked; one
  *                 contact sheet per widget -> /out/<widget>.png, /out/report.json, and a line per failure on stdout.
@@ -160,8 +162,8 @@ function plan() {
   console.log(`plan: ${chosen.length} widgets, ${chosen.reduce((n, w) => n + w.cells.length, 0)} tile sizes, themes ${THEMES.join(" ")}`);
 }
 
-/** `owl trees --batch` jobs: per OWL widget and theme; [canvas]: sizes measured, by tile key. */
-function writeBatch(widgets, canvas) {
+/** `owl trees --batch` jobs: per OWL widget and theme; [canvas]: sizes measured, by tile key; [metrics]: the UI font's. */
+function writeBatch(widgets, canvas, metrics) {
   const jobs = [];
   fs.mkdirSync(path.join(WORK, "trees"), { recursive: true });
   for (const w of widgets.filter((w) => w.kind === "owl"))
@@ -173,6 +175,7 @@ function writeBatch(widgets, canvas) {
         data: fs.existsSync(data) ? data : null,
         live: process.env.PREVIEW_LIVE === "1",
         out: path.join(WORK, "trees", `${w.id}.${t}.json`),
+        ...(metrics ? { metrics } : {}),
         variants: [
           ...w.cells.map((c) => ({ id: c.key, cols: c.cols, rows: c.rows, w: c.w - GAP, h: c.h - GAP, screen: null, canvas: canvas[c.key] ?? {} })),
           // The screen, at each screen's size (its panel's body: a little less, measured in the render pass).
@@ -403,12 +406,14 @@ try {
     const widgets = JSON.parse(fs.readFileSync(path.join(WORK, "widgets.json"), "utf8"));
     if (PASS === "measure") {
       const canvas = {};
+      let metrics = null;
       const t = theme(THEMES[0]);
       await pool(
         widgets.filter((w) => w.kind === "owl"),
           async (w, browser) => {
             const { page } = await sheet(browser, w, t, 1900);
             const got = await page.evaluate(() => window.__pv.canvasSizes());
+            metrics ??= await page.evaluate(async () => (await importShim("./ui/owl.tsx")).fontMetrics());
             if (process.env.PREVIEW_DEBUG) console.log(`measure ${w.id}: ${JSON.stringify(got).slice(0, 300)} canvases in page: ${await page.evaluate(() => document.querySelectorAll("#pv-root canvas").length)}`);
             Object.assign(canvas, got);
             // The screens' canvases: the screen's own page.
@@ -428,8 +433,8 @@ try {
             await page.close();
           },
       );
-      writeBatch(widgets, canvas);
-      console.log(`measure: ${Object.keys(canvas).length} tiles with canvases`);
+      writeBatch(widgets, canvas, metrics);
+      console.log(`measure: ${Object.keys(canvas).length} tiles with canvases, the UI font ${metrics ? `measured (a ${metrics.regular.a} em)` : "NOT measured"}`);
     } else {
       const report = {};
       const lines = await pool(widgets, async (w, b) => {

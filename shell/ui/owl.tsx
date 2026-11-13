@@ -5,12 +5,13 @@
  */
 import type { JSX } from "preact";
 import { useEffect, useLayoutEffect, useMemo, useRef } from "preact/hooks";
-import { signal, type Signal } from "@preact/signals";
+import { effect, signal, type Signal } from "@preact/signals";
 import { powos } from "../bridge.ts";
 import { carry, selected } from "../state.ts";
 import { takeTap, tapTaken } from "./taps.ts";
 import { TerminalView } from "./terminal.tsx";
 import { memo } from "./memo.ts";
+import { uiFont } from "./uifont.ts";
 import type { Cell, OwlNode, OwlOp, OwlRoot, ThemeColors } from "../types.ts";
 
 /**
@@ -91,12 +92,47 @@ powos.on("widget.tree", ({ key, screen, tree: t }: { key: string; screen: boolea
 const TAP_MS = 400;
 const SIZES: Record<string, number> = { huge: 44, title: 20, small: 11, label: 11 };
 /**
- * HACK: an OWL widget's text stays in the theme's monospace (--font), not the UI font (--font-body): the widgets size
- * their text by counting characters at 0.6 em (50-weather.owl, 80-system-info.owl, 86-whats-new.owl...), so in the
- * proportional face they fall short of their tile (the gate's widget sweep: 13-17% empty sides). The real fix: OWL
- * gives scripts a text measure (measure(text, size)) and the widgets size by it - then this becomes --font-body.
+ * HACK: an OWL widget's text stays in the theme's monospace (--font), not the UI font (--font-body): most example
+ * widgets still size their text by counting characters at 0.6 em (10-clock.owl, 20-system.owl, 86-whats-new.owl...),
+ * so in the proportional face they'd fall short of their tile (the gate's widget sweep: 13-17% empty sides). Widgets
+ * that size by measure(text, size, bold) (owl 9: 50-weather, 80-system-info, 97-now-playing) are right in any face -
+ * it answers from fontMetrics() below, the face OWL_FONT draws in. The real fix: every widget sizes by measure(),
+ * then this becomes --font-body.
  */
 const OWL_FONT = "var(--font)";
+/** What fontMetrics() measures one by one: ASCII, Latin-1 and the symbols widgets show (°, …, ·, arrows, ♪). */
+const MEASURED = [
+  ...Array.from({ length: 95 }, (_, i) => String.fromCharCode(32 + i)),
+  ...Array.from({ length: 96 }, (_, i) => String.fromCharCode(160 + i)),
+  ..."–—‘’“”•…←↑→↓▲▼►◄♪♫×÷±µ€£¥∞≈≠≤≥√%‰№™",
+];
+/**
+ * The widget face's advance widths, in em, regular and bold, as the browser draws them (canvas measureText at 100 px in
+ * the face OWL_FONT resolves to here): { regular: { "<char>": em }, bold, other }. The host's widget engine answers a
+ * widget's measure() from it (TextMetrics.kt; the preview's trees too - dev/preview/preview.mjs's measure pass).
+ */
+export async function fontMetrics() {
+  await document.fonts?.ready;
+  const probe = document.createElement("span");
+  probe.style.cssText = `position:absolute;visibility:hidden;font-family:${OWL_FONT}`;
+  document.body.append(probe);
+  const family = getComputedStyle(probe).fontFamily;
+  probe.remove();
+  const g = document.createElement("canvas").getContext("2d")!;
+  const table = (weight: string) => {
+    g.font = `${weight} 100px ${family}`;
+    return Object.fromEntries(MEASURED.map((c) => [c, Math.round(g.measureText(c).width * 10) / 1000]));
+  };
+  const regular = table("normal");
+  const letters = [..."abcdefghijklmnopqrstuvwxyz"].map((c) => regular[c]);
+  return { regular, bold: table("bold"), other: Math.round((letters.reduce((a, b) => a + b, 0) / letters.length) * 1000) / 1000 };
+}
+// Sent on load and on every font pick (Settings > style > font): the widgets size their text to the new face at once.
+effect(() => {
+  void uiFont.value;
+  // After the pick reached html[data-font] (uifont.ts's own effect) and the stylesheet.
+  requestAnimationFrame(() => void fontMetrics().then((m) => powos.widgets.metrics(m), () => {}));
+});
 const FONTS: Record<string, string> = { sans: "system-ui, sans-serif", serif: "serif", mono: "var(--font)", icon: '"Symbols Nerd Font", "JetBrainsMono Nerd Font", monospace' };
 const BOX_ALIGN: Record<string, [string, string]> = {
   center: ["center", "center"],

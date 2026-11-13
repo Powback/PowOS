@@ -22,7 +22,7 @@ class Compiler private constructor(
          * instead of failing on what they don't know. Bump it with every
          * addition a widget could depend on: nodes, properties, builtins.
          */
-        const val LEVEL = 8
+        const val LEVEL = 9
         private const val MAX_ASSET_BYTES = 2 shl 20
 
         fun compile(src: String): Program =
@@ -109,7 +109,9 @@ class Compiler private constructor(
                 listOf("android.alarm", "android.modes", "torch", "share", "haptic").associateWith { 7 } +
                 // owl 8: one shell in a tile and its screen (session), a tile that only shows it (interactive: false),
                 // its text in sp like other widgets' text (textSize), and in a screen typing at once (focus).
-                listOf("Terminal.session", "Terminal.interactive", "Terminal.textSize", "Terminal.focus").associateWith { 8 }
+                listOf("Terminal.session", "Terminal.interactive", "Terminal.textSize", "Terminal.focus").associateWith { 8 } +
+                // owl 9: text measured in the face it's drawn in.
+                listOf("measure").associateWith { 9 }
 
         // No onLongPress: long-press belongs to the home screen, which lifts the tile to move it.
         /**
@@ -168,7 +170,7 @@ class Compiler private constructor(
         const val NUMBER = "‹number›"
 
         /** Builtins that always give a number (or null, which reads as …). */
-        private val NUMBERS = setOf("int", "round", "floor", "ceil", "abs", "fixed", "len", "count", "sum", "min", "max", "clamp")
+        private val NUMBERS = setOf("int", "round", "floor", "ceil", "abs", "fixed", "len", "measure", "count", "sum", "min", "max", "clamp")
 
         private const val MAX_SHAPES = 8
 

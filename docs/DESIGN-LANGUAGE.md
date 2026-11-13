@@ -83,8 +83,9 @@ Checks:
     (`pre`, `code`, `.term`).
   - A UI rule never names `--font`, and never measures text by counting monospace characters (`agents.tsx`
     `charWidth` measures the theme's font).
-  - Known exception: OWL widgets (`owl.tsx` `OWL_FONT`) stay monospace until OWL scripts can measure text. They size
-    their text by counting characters today.
+  - Known exception: OWL widgets (`owl.tsx` `OWL_FONT`) stay monospace until every widget sizes its text by
+    `measure()` (owl 9, answered from the page's own measure of the face, `owl.tsx` `fontMetrics()`); most still count
+    characters today.
 - **Contrast ≥ 4.5:1.** Text needs 4.5:1 contrast against what is drawn behind it (3:1 for large text). Measure it
   with `gate.sh --shots` (`report.json`).
 - **Secondary text** uses `--color-muted`, never a dimmed opacity. Text on the wallpaper uses `--on-wallpaper` with

@@ -172,6 +172,7 @@ function native(host: NonNullable<Window["PowosHost"]>): Bridge {
       fire: (key, screen, id, name, args) => call("widgets.fire", key, !!screen, id, name, args ?? []),
       size: (key, cols, rows, width, height) => call("widgets.size", key, cols, rows, width, height),
       canvas: (key, id, width, height) => call("widgets.canvas", key, id, width, height),
+      metrics: (m) => call("widgets.metrics", m),
       page: (page) => call("widgets.page", page),
       tap: (key) => call("widgets.tap", key),
       screen: () => call<WidgetScreen>("widgets.screen"),
@@ -671,6 +672,7 @@ function mock(): Bridge {
       fire: async (key, _screen, id, name, args) => console.log("[mock] fire", key, id, name, args),
       size: async () => {},
       canvas: async () => {},
+      metrics: async () => {},
       page: async () => {},
     },
     // A stand-in that answers after a tool call, as a streamed turn does.
