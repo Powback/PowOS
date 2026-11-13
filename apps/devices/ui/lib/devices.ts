@@ -25,7 +25,14 @@ export interface ThisDevice {
   onLock(on: (s: LockAccess) => void): () => void;
   /** Another device's home + dock (its "layout" answer) onto this one (the shell's homeimport.ts); missing on older shells. */
   importHome?(layout: unknown): Promise<{ dock: number; home: number; skipped: string[] }>;
+  /**
+   * This phone's own enrollment as an approver (PowStation.kt: the app's Join your PowStation enrollment, its token
+   * never leaves the app): "state" -> {enrolled, approver}; "pending" / "devices" / "approve" {code, decision, tenant?}
+   * / "revoke" {id} -> the realm's answer, a refusal rejects with the realm's words. Missing on older shells/APKs.
+   */
+  realm?(op: RealmOp, body?: object): Promise<any>;
 }
+export type RealmOp = "state" | "pending" | "devices" | "approve" | "revoke";
 export interface Host {
   net?: Net;
   thisDevice?: ThisDevice;
@@ -274,3 +281,45 @@ export function revokeEnrolled(net: Net | undefined, by: Device, id: string) {
     body: JSON.stringify({ id }),
   });
 }
+
+/** Whatever approves for this page: the realm calls, through this device's agent or this phone's own enrollment. */
+export interface Approver {
+  /** Stable while the same approver is shown (polls restart when it changes). */
+  key: string;
+  pending(): Promise<{ pending: Waiting[]; tenants: string[] }>;
+  devices(): Promise<Enrolled[]>;
+  decide(d: { code: string; decision: "approve" | "deny"; tenant?: string | null }): Promise<unknown>;
+  revoke(id: string): Promise<unknown>;
+}
+
+/** Through the paired agent on this device (a desktop's powos-deviced /v1/enroll/*). */
+export const viaAgent = (net: Net | undefined, by: Device): Approver => ({
+  key: `agent:${by.id}`,
+  pending: () => waiting(net, by),
+  devices: () => enrolledDevices(net, by),
+  decide: (d) => decide(net, by, d),
+  revoke: (id) => revokeEnrolled(net, by, id),
+});
+
+/**
+ * Through this phone's own enrollment (host.thisDevice.realm): a phone that joined its PowStation from setup approves
+ * the next device here, with no pairing to itself and no server command. Paired devices are marked from [paired].
+ */
+export const viaThisDevice = (td: ThisDevice, paired: Device[]): Approver => ({
+  key: "this-device",
+  pending: async () => {
+    const r = await td.realm!("pending");
+    const known = new Set(paired.map((d) => d.id));
+    const list: Waiting[] = Array.isArray(r?.pending) ? r.pending : [];
+    return {
+      pending: list.map((w) => ({ ...w, paired: !!w.paired || known.has(w.device?.id) })),
+      tenants: (Array.isArray(r?.tenants) ? r.tenants : []).filter((t: unknown): t is string => typeof t === "string"),
+    };
+  },
+  devices: async () => {
+    const r = await td.realm!("devices");
+    return Array.isArray(r?.devices) ? r.devices : [];
+  },
+  decide: ({ code, decision, tenant }) => td.realm!("approve", { code, decision, ...(tenant ? { tenant } : {}) }),
+  revoke: (id) => td.realm!("revoke", { id }),
+});

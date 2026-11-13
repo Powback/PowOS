@@ -1,6 +1,7 @@
 /**
- * New devices joining the realm, approved from here: only when this device is enrolled as an approver (its own agent,
- * paired from this app, says realm.approver and that this app runs on it - lib/devices/powos-deviced /v1/enroll/*).
+ * New devices joining the realm, approved from here: only when this device is enrolled as an approver - its own agent,
+ * paired from this app, says realm.approver and that this app runs on it (lib/devices/powos-deviced /v1/enroll/*), or
+ * this phone joined its PowStation as an approver (host.thisDevice.realm, PowStation.kt) - see useApprover.
  *
  * "New device wants to join": every waiting device with its code shown big, so the person matches it with the code on
  * the new device's own screen, and Approve / Deny. Live (polled while the page is shown) and optimistic: a tap shows
@@ -12,7 +13,7 @@
  * The realm's registry (useRealm) gives each paired card its Revoke (enrolled) or how to enroll it (paired only).
  */
 import { useEffect, useRef, useState } from "preact/hooks";
-import { decide, enrolledDevices, revokeEnrolled, waiting, type Device, type Enrolled, type Net, type Waiting } from "./devices";
+import { approverOf, viaAgent, viaThisDevice, type Approver, type Device, type Enrolled, type Net, type Status, type ThisDevice, type Waiting } from "./devices";
 import { KIND, S } from "./ui";
 
 const POLL_MS = 3000;
@@ -21,8 +22,25 @@ const SHOWN_MS = 4000;
 
 type Decision = { decision: "approve" | "deny"; error?: string; done?: boolean };
 
+/**
+ * Who approves on this page: this device's paired agent when it is an approver, else this phone's own enrollment when
+ * it joined as an approver (asked once when the page opens; an older APK without it shows no card).
+ */
+export function useApprover(net: Net | undefined, list: Device[], live: Record<string, Status | undefined>, td?: ThisDevice): Approver | null {
+  const [phone, setPhone] = useState(false);
+  useEffect(() => {
+    if (!td?.realm) return;
+    let on = true;
+    td.realm("state").then((s) => on && setPhone(!!s?.approver), () => {});
+    return () => void (on = false);
+  }, [td]);
+  const agent = approverOf(list, live);
+  if (agent) return viaAgent(net, agent);
+  return phone && td?.realm ? viaThisDevice(td, list) : null;
+}
+
 /** Polls [load] while the page is shown and [by] is set; returns the last answer and a reload. */
-function usePoll<T>(by: Device | null, load: (by: Device) => Promise<T>, empty: T): [T, () => void] {
+function usePoll<T>(by: Approver | null, load: (by: Approver) => Promise<T>, empty: T): [T, () => void] {
   const [v, setV] = useState<T>(empty);
   const ref = useRef(by);
   ref.current = by;
@@ -35,12 +53,12 @@ function usePoll<T>(by: Device | null, load: (by: Device) => Promise<T>, empty: 
     reload();
     const t = setInterval(() => !document.hidden && reload(), POLL_MS);
     return () => clearInterval(t);
-  }, [by?.id]);
+  }, [by?.key]);
   return [v, reload];
 }
 
-export function Join({ net, by }: { net?: Net; by: Device | null }) {
-  const [{ pending: list, tenants }, reload] = usePoll(by, (d) => waiting(net, d), { pending: [] as Waiting[], tenants: [] as string[] });
+export function Join({ by }: { by: Approver | null }) {
+  const [{ pending: list, tenants }, reload] = usePoll(by, (d) => d.pending(), { pending: [] as Waiting[], tenants: [] as string[] });
   const [picked, setPicked] = useState<Record<string, string | null>>({});
   const tenantOf = (code: string) => (code in picked ? picked[code] : (tenants[0] ?? null));
   const [decided, setDecided] = useState<Record<string, Decision & { w: Waiting }>>({});
@@ -49,7 +67,7 @@ export function Join({ net, by }: { net?: Net; by: Device | null }) {
     const code = w.user_code;
     setDecided((all) => ({ ...all, [code]: { w, decision } }));
     try {
-      await decide(net, by, { code, decision, tenant: decision === "approve" ? tenantOf(code) : null });
+      await by.decide({ code, decision, tenant: decision === "approve" ? tenantOf(code) : null });
       setDecided((all) => ({ ...all, [code]: { w, decision, done: true } }));
       setTimeout(() => setDecided(({ [code]: _, ...rest }) => rest), SHOWN_MS);
       reload();
@@ -133,11 +151,11 @@ function Failed({ d, run, dismiss }: { d: Decision; run: (x: "approve" | "deny")
 }
 
 /** The realm's devices as the approver sees them: enrolled ids (revoked ones left out), and a revoke. */
-export function useRealm(net: Net | undefined, by: Device | null) {
-  const [devices, reload] = usePoll<Enrolled[] | null>(by, (d) => enrolledDevices(net, d), null);
+export function useRealm(by: Approver | null) {
+  const [devices, reload] = usePoll<Enrolled[] | null>(by, (d) => d.devices(), null);
   const enrolled = devices && new Set(devices.filter((d) => !d.revoked).map((d) => d.id));
   const revoke = async (id: string) => {
-    await revokeEnrolled(net, by!, id);
+    await by!.revoke(id);
     reload();
   };
   return { enrolled, revoke };

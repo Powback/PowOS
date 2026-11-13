@@ -461,6 +461,7 @@ class ShellBridge(
         if (method == "ai.verdict") return callVerdict(id, args)
         if (method in OFF_MAIN) return callOffMain(id, method, args)
         if (method in LOOKUPS) return callOffMain(id, method, args, lookups)
+        if (method in REALM) return callOffMain(id, method, args, realmIo)
         main.post {
             MainStallWatch.call = method
             try {
@@ -808,6 +809,8 @@ class ShellBridge(
             "devices.lock" -> dev.omalauncher.devices.LockAccess.state(context)
             "devices.lockAllow" -> dev.omalauncher.devices.LockAccess.ask(activity ?: context)
             "devices.lockStop" -> dev.omalauncher.devices.LockAccess.stop(context)
+            // This phone approving / revoking other devices with its own enrollment (devices/PowStation.kt): [REALM].
+            "devices.realm" -> dev.omalauncher.devices.PowStation.realm(context, a.getString(0), a.optJSONObject(1))
             "privacy.list" -> privacyList()
             "privacy.open" -> openPermissions(a.getString(0))
             "notifications.list" -> notificationList()
@@ -2236,6 +2239,10 @@ class ShellBridge(
         // quickpage.pages: a resolveActivity and an icon drawn per settings page (QuickPageCatalog).
         private val LOOKUPS = setOf("apps.local", "qs.destinations", "speech.warm", "quickpage.pages", "apps.background", "apps.stopBackground")
         private val lookups = java.util.concurrent.Executors.newSingleThreadExecutor { r -> Thread(r, "shell-lookups").apply { isDaemon = true } }
+
+        /** The hub's network calls (devices.realm: up to 10 s on a slow LAN), on their own thread: never the UI's, nor a lookup's. */
+        private val REALM = setOf("devices.realm")
+        private val realmIo = java.util.concurrent.Executors.newSingleThreadExecutor { r -> Thread(r, "shell-realm").apply { isDaemon = true } }
 
         /** One thread for them all, so a page's set then get stay in that order. */
         private val fileIo = java.util.concurrent.Executors.newSingleThreadExecutor { r -> Thread(r, "shell-store").apply { isDaemon = true } }

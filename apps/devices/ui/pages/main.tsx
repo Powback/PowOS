@@ -7,11 +7,11 @@
  * On a device enrolled as an approver, lib/join.tsx: new devices asking to join (Approve / Deny) and Revoke per device.
  */
 import { useState } from "preact/hooks";
-import { act, approverOf, forget, load, realmAgentOf, save, type Cap, type Device, type Host, type Status } from "../lib/devices";
+import { act, forget, load, realmAgentOf, save, type Cap, type Device, type Host, type Status } from "../lib/devices";
 import { canWake, useActions, useLive, type Live, type Pending } from "../lib/live";
 import { AddDevice } from "../lib/add";
 import { ThisPhone } from "../lib/thisphone";
-import { Join, useRealm } from "../lib/join";
+import { Join, useApprover, useRealm } from "../lib/join";
 import { KIND, S } from "../lib/ui";
 
 interface Props {
@@ -41,8 +41,8 @@ export default function Main({ host, close }: Props) {
   const live = liveState.live;
   const { pending, run, dismiss } = useActions(net, list, liveState);
   const liveS = Object.fromEntries(Object.entries(live).map(([k, v]) => [k, v.s]));
-  const by = approverOf(list, liveS);
-  const realm = useRealm(net, by);
+  const by = useApprover(net, list, liveS, host.thisDevice);
+  const realm = useRealm(by);
   const drop = (d: Device) => {
     update(list.filter((x) => x.id !== d.id));
     forget(net, d);
@@ -54,7 +54,7 @@ export default function Main({ host, close }: Props) {
         <h1 style={S.title}>Devices</h1>
       </header>
       <ThisPhone dev={host.thisDevice} />
-      <Join net={net} by={by} />
+      <Join by={by} />
       {list.length === 0 && <div style={S.muted}>No devices yet. Add one below: it shows a code on its own screen.</div>}
       {list.map((d) => (
         <DeviceCard

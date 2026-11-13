@@ -68,6 +68,10 @@ comes from a device the realm already trusts, never from a browser session.
        server) only records a name; nothing uses it while per-device AI isn't deployed.
      - **The CLI** on the approver: `powos devices pending`, then `powos devices approve BCDF-GHJK [--tenant default]
        [--no-approver] [--deny]` (no code: the only device waiting, after a yes).
+     - **A phone** that joined from setup (Join your PowStation) as an approver: the same card in its Devices app, with
+       no pairing to itself. The app asks the phone's own enrollment (`host.thisDevice.realm`, bridge `devices.realm`,
+       `devices/PowStation.kt`: the realm calls below with the phone's token, which never reaches the page); Revoke
+       on paired cards works the same way. A device whose own agent is an approver is asked first.
      Both go through the approver's own agent (`powos-deviced`: `/v1/enroll/pending|approve|devices|revoke`), which
      calls `enroll.pow`'s `GET /v1/devices/pending` / `POST /v1/devices/approve {code, decision, tenant?, approver?}`
      with its enrollment token. The agent answers `/v1/enroll/*` only to a caller on the same device (loopback or its
