@@ -8,6 +8,7 @@ set -uo pipefail
 B=$(cd "$(dirname "$0")/../.." && pwd)/tools/agents/build-slot.sh
 export XDG_CACHE_HOME; XDG_CACHE_HOME=$(mktemp -d)
 export BUILD_SLOT_POLL_S=0.1
+export BUILD_SLOT_TRACE; BUILD_SLOT_TRACE=$XDG_CACHE_HOME/trace
 L=$XDG_CACHE_HOME/log; R=$XDG_CACHE_HOME/release; T=${BUILD_SLOT_TEST_TIMEOUT_S:-60}
 pass=0; failn=0; holder=""
 finish() {
@@ -23,6 +24,7 @@ diag() {
   printf '; locks:'; for d in "$XDG_CACHE_HOME"/powos-build-slot*; do [ -e "$d" ] && printf ' %s(pid=%s label=%s)' \
     "${d##*/}" "$(cat "$d/pid" 2>/dev/null)" "$(cat "$d/label" 2>/dev/null)"; done
   printf '; procs:'; ps -eo pid=,args= 2>/dev/null | grep '[b]uild-slot.sh' | awk '{printf " %s(%s %s)", $1, $4, $5}'
+  printf '; trace:'; tr '\n' '|' < "$BUILD_SLOT_TRACE" 2>/dev/null
 }
 # waitfor <cond>: poll until <cond> is true, up to $T s. Events, not durations.
 waitfor() { local i=0; while ! eval "$1"; do i=$((i+1)); [ "$i" -le $((T*20)) ] || return 1; sleep 0.05; done; }

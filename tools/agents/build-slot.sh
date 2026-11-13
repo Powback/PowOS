@@ -39,13 +39,15 @@ else
   locks="$base/powos-build-slot"
 fi
 t0=$(date +%s)
+# BUILD_SLOT_TRACE=<file>: every take/reclaim/release appended as "<pid> <event> <lock>" (test-build-slot's evidence).
+trace() { [ -z "${BUILD_SLOT_TRACE:-}" ] || echo "$$ $*" >> "$BUILD_SLOT_TRACE"; }
 said=""
 lock=""
 while :; do
   for l in $locks; do
     if mkdir "$l" 2>/dev/null; then
       echo $$ > "$l/pid"; echo "$label" > "$l/label"
-      lock=$l; break
+      trace took "$l"; lock=$l; break
     fi
     # A dead holder's slot (its process no longer running) is reclaimed instead of waited on forever.
     p=$(cat "$l/pid" 2>/dev/null) || p=""
@@ -54,11 +56,11 @@ while :; do
     # older than a minute (holder killed in that gap) is reclaimed.
     if [ -z "$p" ]; then
       [ -n "$(find "$l" -maxdepth 0 -mmin +1 2>/dev/null)" ] || continue
-      echo "build-slot: reclaimed $l (no pid for over a minute)" >&2
+      echo "build-slot: reclaimed $l (no pid for over a minute)" >&2; trace reclaimed-pidless "$l"
       rm -rf "$l" 2>/dev/null; continue 2
     fi
     # Said on stderr: a reclaim of a live holder's slot is the one way a lane admits one job too many.
-    if ! kill -0 "$p" 2>/dev/null; then echo "build-slot: reclaimed $l (holder pid $p not running)" >&2; rm -rf "$l" 2>/dev/null; continue 2; fi
+    if ! kill -0 "$p" 2>/dev/null; then echo "build-slot: reclaimed $l (holder pid $p not running)" >&2; trace reclaimed-dead "$l $p"; rm -rf "$l" 2>/dev/null; continue 2; fi
   done
   [ -z "$lock" ] || break
   if [ -z "$said" ]; then
@@ -95,7 +97,7 @@ child=""
 cleanup() {   # <on-signal>: kill the CLI, remove the container (a caller-named one only on a signal), free the slot
   [ -z "$child" ] || kill -TERM "$child" 2>/dev/null
   if [ -n "$cname" ] && { [ -n "$1" ] || [ -z "$own_name" ]; }; then docker rm -f "$cname" >/dev/null 2>&1; fi
-  rm -rf "$lock"
+  trace released "$lock"; rm -rf "$lock"
 }
 on_signal() { trap - EXIT HUP INT TERM ALRM; cleanup 1; exit $((128 + $1)); }
 trap 'cleanup ""' EXIT
