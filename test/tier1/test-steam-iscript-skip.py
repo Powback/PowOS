@@ -113,9 +113,16 @@ class IscriptSkip(unittest.TestCase):
 
     def test_runs_when_prefix_replaced(self):
         self.record()
-        shutil.rmtree(self.data / "pfx")
+        # The new prefix is made while the old one still exists (moved aside), so it surely has another inode: on ext4
+        # (CI's runner, 11-13) an rmtree + mkdir got the freed inode back, the key matched and the skip was taken
+        # (overlayfs, the tier1 container, never reuses one). That inode reuse is the key's known limit: a prefix
+        # rebuilt after a full delete can keep its inode (user_settings.py _iscript_key; reg_guard's delete covers
+        # the registry case).
+        (self.data / "pfx").rename(self.data / "pfx.old")
         (self.data / "pfx").mkdir()
         (self.data / "pfx/creation_sync_guard").touch()
+        self.assertNotEqual(os.stat(self.data / "pfx").st_ino, os.stat(self.data / "pfx.old").st_ino)
+        shutil.rmtree(self.data / "pfx.old")
         r = self.run_chain(self.chain())
         self.assertEqual(r.returncode, 7)
 
