@@ -41,7 +41,7 @@ raw=$(docker run --rm --security-opt label=disable --platform "linux/$arch" --cp
       -A clippy::all -W clippy::cognitive_complexity -W clippy::too_many_lines -W clippy::too_many_arguments \
       -W clippy::excessive_nesting > /tmp/c.txt 2>&1 || { cat /tmp/c.txt; echo "CLIPPY-FAILED $a"; }
     sed "s|^src/|apps/$a/module/src/|" /tmp/c.txt
-  done' 2>&1) || { echo "FAIL rust complexity: the clippy run failed"; echo "$raw" | tail -5; exit 1; }
+  done' 2>&1) || { rc=$?; echo "FAIL rust complexity: the clippy run failed (docker rc $rc): $(echo "$raw" | grep -v '^[[:space:]]*$' | tail -1 | cut -c1-200)"; echo "$raw" | tail -5; exit 1; }
 if echo "$raw" | grep -q "^CLIPPY-FAILED"; then echo "FAIL rust complexity: clippy failed for $(echo "$raw" | sed -n 's/^CLIPPY-FAILED //p' | tr '\n' ' ')"; echo "$raw" | grep -E "^error" | head -5; exit 1; fi
 # "<file>:<l>:<c>: warning: <msg>" -> "<file> <lint>"
 counts=$(echo "$raw" | sed -nE 's/^([^:]+):[0-9]+:[0-9]+: warning: (this block is too nested|the function has a cognitive complexity|this function has too many lines|this function has too many arguments).*/\1 \2/p' |

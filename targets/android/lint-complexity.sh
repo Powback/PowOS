@@ -103,7 +103,9 @@ fi
 rc=0; detekt --create-baseline --baseline "$O/now.xml" >"$out/run.log" 2>&1 || rc=$?
 # --only on files with no finding at all: detekt ran fine but writes no baseline.
 [ -n "$only" ] && [ $rc = 0 ] && [ ! -s "$out/now.xml" ] && grep -q 'number of kt files' "$out/run.log" && echo '<SmellBaseline/>' >"$out/now.xml"
-[ -s "$out/now.xml" ] || { echo "FAIL kotlin complexity: detekt didn't run"; tail -5 "$out/run.log"; exit 1; }
+# The cause goes on the FAIL line itself: tier-1's runner shows only FAIL lines, and 11-13's full run said "didn't run"
+# with no reason (it passed alone and in the next full run).
+[ -s "$out/now.xml" ] || { echo "FAIL kotlin complexity: detekt didn't run (rc $rc): $(grep -v '^[[:space:]]*$' "$out/run.log" | tail -1 | cut -c1-200)"; tail -5 "$out/run.log"; exit 1; }
 ids() { sed -n 's|.*<ID>\(.*\)</ID>.*|\1|p' | sort -u; }
 new=$(comm -13 <(ids < "$APP/$BASE") <(ids < "$out/now.xml"))
 stale=$(comm -23 <(ids < "$APP/$BASE") <(ids < "$out/now.xml"))
