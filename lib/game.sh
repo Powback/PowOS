@@ -511,51 +511,66 @@ _game_steam_dir() {  # <appid> -> the game's install dir
     return 1
 }
 
+_game_aot_status() {  # <store> <game dir> <appid>
+    local st=$1 g=$2 app=$3
+    if [[ -s "$st/installed.tsv" ]]; then pok "aot on: $(wc -l < "$st/installed.tsv") images in $g"
+    elif [[ -f "$st/images.tsv" ]]; then plog "aot off ($(wc -l < "$st/images.tsv") images built in $st)"
+    else plog "aot off (nothing built: tools/games/mono-aot.sh all $app)"; fi
+}
+
+# _game_aot_place1 <store> <game dir> <rel> <sha>: one image beside its assembly. Prints placed|stale|kept|skip|failed.
+# A changed assembly (a game update: new GUID too) makes its image stale - Mono would ignore it, so it isn't placed;
+# a file of that name that isn't ours (the game's own) is never replaced.
+_game_aot_place1() {
+    local st=$1 g=$2 rel=$3 sha=$4 cur
+    [[ -n "$rel" && "$rel" != *..* && -f "$st/images/$rel" ]] || { echo skip; return; }
+    cur=$(sha256sum < "$g/${rel%.dll}" 2>/dev/null | cut -d' ' -f1 || true)
+    [[ "$cur" == "$sha" ]] || { echo stale; return; }
+    [[ -e "$g/$rel" ]] && { echo kept; return; }
+    ln "$st/images/$rel" "$g/$rel" 2>/dev/null || cp "$st/images/$rel" "$g/$rel" || { echo failed; return; }
+    printf '%s\t%s\n' "$rel" "$(sha256sum < "$g/$rel" | cut -d' ' -f1)" >> "$st/installed.tsv.new"
+    echo placed
+}
+
+_game_aot_on() {  # <store> <game dir> <appid>
+    local st=$1 g=$2 app=$3 rel sha guid r n=0 stale=0 placed=0 kept=0 msg
+    [[ -f "$st/images.tsv" ]] || { perr "No AOT images for $app in $st (build them: tools/games/mono-aot.sh all $app)"; return 1; }
+    _game_aot "$app" off >/dev/null || return 1
+    : > "$st/installed.tsv.new"
+    while IFS=$'\t' read -r rel sha guid; do
+        r=$(_game_aot_place1 "$st" "$g" "$rel" "$sha")
+        [[ $r == skip ]] && continue
+        n=$((n + 1))
+        case $r in placed) placed=$((placed + 1)) ;; stale) stale=$((stale + 1)) ;; kept) kept=$((kept + 1)) ;; esac
+    done < "$st/images.tsv"
+    mv "$st/installed.tsv.new" "$st/installed.tsv"
+    msg="aot on: $placed of $n images placed in $g"
+    (( stale )) && msg+=", $stale stale (assembly changed: rebuild with tools/games/mono-aot.sh all $app)"
+    (( kept )) && msg+=", $kept not placed (a file of that name is already there)"
+    pok "$msg"
+    [[ $placed -gt 0 ]]
+}
+
+_game_aot_off() {  # <store> <game dir>
+    local st=$1 g=$2 rel sha n=0
+    [[ -f "$st/installed.tsv" ]] || { plog "aot off (nothing placed)"; return 0; }
+    while IFS=$'\t' read -r rel sha; do
+        [[ -n "$rel" && "$rel" != *..* && -e "$g/$rel" ]] || continue
+        if [[ "$(sha256sum < "$g/$rel" | cut -d' ' -f1)" == "$sha" ]]; then rm -f "$g/$rel"; n=$((n + 1))
+        else pwarn "kept $g/$rel: changed since aot on placed it"; fi
+    done < "$st/installed.tsv"
+    rm -f "$st/installed.tsv"
+    pok "aot off: $n images removed from $g"
+}
+
 _game_aot() {  # <appid> status|on|off
-    local app=$1 st g rel sha guid n=0 stale=0 placed=0 kept=0 cur
+    local app=$1 st g
     st=$(_game_aot_store "$app")
     g=$(_game_steam_dir "$app") || { perr "Steam game $app isn't installed"; return 1; }
     case "$2" in
-        status)
-            if [[ -s "$st/installed.tsv" ]]; then
-                pok "aot on: $(wc -l < "$st/installed.tsv") images in $g"
-            else
-                if [[ -f "$st/images.tsv" ]]; then plog "aot off ($(wc -l < "$st/images.tsv") images built in $st)"
-                else plog "aot off (nothing built: tools/games/mono-aot.sh all $app)"; fi
-            fi ;;
-        on)
-            [[ -f "$st/images.tsv" ]] || { perr "No AOT images for $app in $st (build them: tools/games/mono-aot.sh all $app)"; return 1; }
-            _game_aot "$app" off >/dev/null || return 1
-            : > "$st/installed.tsv.new"
-            while IFS=$'\t' read -r rel sha guid; do
-                [[ -n "$rel" && "$rel" != *..* && -f "$st/images/$rel" ]] || continue
-                n=$((n + 1))
-                # A changed assembly (a game update: new GUID too) makes its image stale: Mono would ignore it, so
-                # don't place it at all.
-                cur=$(sha256sum < "$g/${rel%.dll}" 2>/dev/null | cut -d' ' -f1 || true)
-                [[ "$cur" == "$sha" ]] || { stale=$((stale + 1)); continue; }
-                # A file of that name that isn't ours (the game's own) is never replaced.
-                [[ -e "$g/$rel" ]] && { kept=$((kept + 1)); continue; }
-                ln "$st/images/$rel" "$g/$rel" 2>/dev/null || cp "$st/images/$rel" "$g/$rel" || continue
-                printf '%s\t%s\n' "$rel" "$(sha256sum < "$g/$rel" | cut -d' ' -f1)" >> "$st/installed.tsv.new"
-                placed=$((placed + 1))
-            done < "$st/images.tsv"
-            mv "$st/installed.tsv.new" "$st/installed.tsv"
-            local msg="aot on: $placed of $n images placed in $g"
-            (( stale )) && msg+=", $stale stale (assembly changed: rebuild with tools/games/mono-aot.sh all $app)"
-            (( kept )) && msg+=", $kept not placed (a file of that name is already there)"
-            pok "$msg"
-            [[ $placed -gt 0 ]] ;;
-        off)
-            [[ -f "$st/installed.tsv" ]] || { plog "aot off (nothing placed)"; return 0; }
-            while IFS=$'\t' read -r rel sha; do
-                [[ -n "$rel" && "$rel" != *..* ]] || continue
-                [[ -e "$g/$rel" ]] || continue
-                if [[ "$(sha256sum < "$g/$rel" | cut -d' ' -f1)" == "$sha" ]]; then rm -f "$g/$rel"; n=$((n + 1))
-                else pwarn "kept $g/$rel: changed since aot on placed it"; fi
-            done < "$st/installed.tsv"
-            rm -f "$st/installed.tsv"
-            pok "aot off: $n images removed from $g" ;;
+        status) _game_aot_status "$st" "$g" "$app" ;;
+        on) _game_aot_on "$st" "$g" "$app" ;;
+        off) _game_aot_off "$st" "$g" ;;
         *) perr "powos game <name> aot [status|on|off]"; return 2 ;;
     esac
 }
