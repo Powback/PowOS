@@ -3,7 +3,10 @@
 import importlib.util
 import json
 from pathlib import Path
+import os
+import shutil
 import subprocess
+import tempfile
 import unittest
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -11,6 +14,20 @@ V = ROOT / 'tools/phone/verify'
 spec = importlib.util.spec_from_file_location('resize_state', V / 'resize-state.py')
 m = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(m)
+
+
+# The device runs these scripts in Android's /system/bin/sh, which is mksh (read -t, no /tmp). Simulating them in the
+# host's `sh` made the result depend on the host: bash-as-sh on the Mac passed, dash in the tier1 container / CI failed
+# on `read -t` (11-13). So the simulation runs in mksh itself, everywhere.
+MKSH = shutil.which('mksh')
+
+
+def device_sh(script, env=None, timeout=3):
+    assert MKSH, "mksh (Android's /system/bin/sh) is missing: apt-get install mksh (tools/jobs/tier1.Dockerfile, CI lint)"
+    with tempfile.TemporaryDirectory() as d:
+        # su on Android may have no TMPDIR; give the helper a real one here (its /data/local/tmp default is device-only).
+        env = dict(os.environ, TMPDIR=d, **(env or {}))
+        return subprocess.run([MKSH, '-c', script], capture_output=True, text=True, timeout=timeout, env=env)
 
 
 def capture(round_=True, active=True, off=False):
@@ -91,7 +108,7 @@ logcat() { exec node -e 'console.log("T_ACTIVE"); setInterval(()=>{},1000)' ; }
 resize_first_match T || exit 1
 printf 'captured\\n'
 '''
-        result = subprocess.run(['bash', '-c', script], capture_output=True, text=True, timeout=3)
+        result = device_sh(script)
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertTrue(result.stdout.endswith('WWR_WATCH matched ' + result.stdout.split('WWR_WATCH matched ')[1].split('\n')[0] + '\ncaptured\n'), result.stdout)
 
@@ -102,8 +119,11 @@ logcat() { exec node -e 'setInterval(()=>{},1000)' ; }
 resize_first_match T && exit 2
 exit 0
 '''
-        result = subprocess.run(['bash', '-c', script], capture_output=True, text=True, timeout=3)
+        result = device_sh(script)
         self.assertEqual(result.returncode, 0, result.stderr)
+        # It must fail by its own deadline, not by a setup error (a mktemp failure also returned non-zero, 11-13).
+        self.assertIn('WWR_WATCH start', result.stdout)
+        self.assertRegex(result.stdout, r'WWR_WATCH (deadline|read timed out or ended)')
 
     def test_inactive_device_capture(self):
         # Exact shape of both real files: only console states, no SF/timestamp markers.
@@ -127,13 +147,12 @@ exit 0
 
     def device_run(self, stream_active, watch_s='8', helper_edit=None):
         """Run diag_device_cmd's exact string through adb-shell -> su -c with stubbed device tools."""
-        import os, tempfile
         token = 'WWR_61_76_66555'
         raw = 'home LOG :18 ' + token + ' {{"at":{},"active":{},"epoch":{},"off":false}}'
         with tempfile.TemporaryDirectory() as d:
             b = Path(d, 'bin'); b.mkdir()
             stubs = {
-                'su': '[ "$1" = -c ] && exec sh -c "$2"',
+                'su': f'[ "$1" = -c ] && exec {MKSH} -c "$2"',
                 # Calls in order: watcher start, matched, BEGIN, END.
                 'date': 'case "$1" in +%s%3N) n=$(cat "$D/n" 2>/dev/null || echo 0); echo $((n + 1)) > "$D/n"; case $n in 0) echo 900 ;; 1) echo 950 ;; 2) echo 1000 ;; *) echo 1100 ;; esac ;; *) exec /bin/date "$@" ;; esac',
                 'input': 'exit 0',
@@ -161,7 +180,8 @@ exit 0
             script = f'here={V}\n' + fn + f'diag_device_cmd {token} 1 2 3 4'
             cmd = subprocess.run(['bash', '-c', script], capture_output=True, text=True, check=True).stdout
             env = dict(os.environ, PATH=f'{b}:' + os.environ['PATH'], D=d, TMPDIR=d, WWR_WATCH_S=watch_s)
-            out = subprocess.run(['sh', '-c', cmd], capture_output=True, text=True, env=env, timeout=12)
+            assert MKSH, "mksh (Android's /system/bin/sh) is missing: apt-get install mksh"
+            out = subprocess.run([MKSH, '-c', cmd], capture_output=True, text=True, env=env, timeout=12)
             return token, out
 
     def test_device_command_matches_real_line(self):

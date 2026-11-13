@@ -116,6 +116,9 @@ jobs:
       - name: Tier1 suite (auto-discovered)
         run: |
           pip install psutil rich 2>/dev/null || true
+          # mksh = Android's /system/bin/sh: test-resize-state runs the device scripts in it (dash has no read -t).
+          # Same package list as tools/jobs/tier1.Dockerfile, so tier1 == CI.
+          sudo apt-get install -y mksh
           bash test/tier1/run-all.sh
 
   # ─── STAGE 2: build image locally, test against it, push on green ────────
