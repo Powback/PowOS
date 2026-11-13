@@ -16,7 +16,7 @@ name: Build, Test & Publish PowOS
 #
 # Variants:
 #   nvidia-open          NVIDIA open kernel modules (DEFAULT; RTX 50-series REQUIRES this).
-#                         Built + tested + published on every push to master.
+#                         Built + tested + published on every push to main.
 #                         Also gets :latest.
 #   main                 AMD / Intel (ghcr.io/ublue-os/bazzite:stable). Built +
 #                         published on every push. NO NVIDIA drivers — this is
@@ -32,20 +32,20 @@ name: Build, Test & Publish PowOS
 #                         Built weekly via cron (or workflow_dispatch). NOT
 #                         E2E-tested (by intent — the :testing base is by
 #                         definition experimental upstream), and NEVER built
-#                         on push (master pushes don't change bazzite:testing,
+#                         on push (main pushes don't change bazzite:testing,
 #                         so a per-push rebuild would double CI for zero
 #                         signal).
 
 on:
   push:
-    branches: [ master ]
+    branches: [ main ]
     paths-ignore:
       - '**.md'
       - 'docs/**'
       - '.github/workflows/build-disk-image.yml'
       - '.github/workflows/registry-cleanup.yml'
   pull_request:
-    branches: [ master ]
+    branches: [ main ]
   workflow_dispatch:
     inputs:
       variant:
