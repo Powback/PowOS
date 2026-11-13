@@ -16,6 +16,14 @@ on panic its fans go to 100%. The power cap is restored to the card's default on
   powos-gpu-fan run              the daemon (root; powos-gpu-fan.service)
   powos-gpu-fan status           temps, fans, power, limits (no root needed)
   powos-gpu-fan reset            give every fan back to the vBIOS curve, restore default power limits (root)
+  powos-gpu-fan mode [auto|quiet|performance]   show / set the power mode (root to set; the daemon picks it up)
+
+Power profiles (11-09, "gpu-195 runs loud"): a card that sat at <= idle_util % for idle_after_s gets the idle profile
+(lower power cap + graphics clocks capped at idle_max_clock_mhz); any util > idle_util puts it back on the busy profile
+on the next tick (interval_s). Measured 11-09: GPU0 at 0% util drew 155 W at 86 C, fans 100%, SM clock held at
+1740 MHz (P2, voice-llm/STT/TTS contexts resident); a card can't be powered off while contexts are resident, so the
+idle profile is the "power-down" for a held card. Modes (/etc/powos/gpu-fan-mode): auto = switch per card,
+quiet = idle profile always, performance = busy profile always with the driver's default power limit.
 
 Config: /etc/powos/gpu-fan.json (optional) overrides DEFAULTS below, e.g. {"power_limit_w": 280}.
 """
@@ -39,8 +47,15 @@ DEFAULTS = {
     'down_step': 2,         # max % the fan drops per tick (up is immediate)
     'hysteresis_c': 3,      # the fan only drops once the temp is this far below the temp that set the current speed
     'interval_s': 2.0,
-    'power_limit_w': 250,   # per card; null = leave the driver's limit alone
+    'power_limit_w': 250,   # per card, busy profile; null = leave the driver's limit alone
+    'idle_power_limit_w': 150,   # per card, idle profile (range 100-375 W on the 3090s); null = keep power_limit_w
+    'idle_max_clock_mhz': 1000,  # idle profile: graphics clock cap (NVML locked clocks); null = no clock cap
+    'idle_min_clock_mhz': 210,
+    'idle_util': 2,              # GPU util % at/below which a card counts as idle
+    'idle_after_s': 60,          # ... for this long before the idle profile goes on
 }
+MODE_FILE = Path('/etc/powos/gpu-fan-mode')
+MODES = ('auto', 'quiet', 'performance')
 
 NVML_TEMPERATURE_GPU = 0
 OK = 0
@@ -91,6 +106,8 @@ class Gpu:
         self.cool_since = None   # when the temp first sat at/below release_c while we controlled the fans
         self.no_release_until = 0.0
         self.released_at = None  # when we last handed back (to catch the vBIOS spinning straight up)
+        self.profile = None      # 'busy' / 'idle' / 'performance' once set
+        self.idle_since = None
 
     def temp(self):
         return u('nvmlDeviceGetTemperature', self.h, NVML_TEMPERATURE_GPU)
@@ -121,6 +138,31 @@ class Gpu:
 
     def uncap(self):
         nvml().nvmlDeviceSetPowerManagementLimit(self.h, self.default_pl)
+        nvml().nvmlDeviceResetGpuLockedClocks(self.h)   # best effort: also the failure path
+
+    def util(self):
+        class Util(C.Structure):
+            _fields_ = [('gpu', C.c_uint), ('memory', C.c_uint)]
+        out = Util()
+        check(nvml().nvmlDeviceGetUtilizationRates(self.h, C.byref(out)), 'GetUtilizationRates')
+        return out.gpu
+
+    def set_profile(self, name, cfg):
+        """busy: power_limit_w, no clock cap. idle: idle_power_limit_w + clocks capped. performance: driver default."""
+        if name == 'idle':
+            w = cfg['idle_power_limit_w'] or cfg['power_limit_w']
+            if w:
+                self.cap(w)
+            if cfg['idle_max_clock_mhz']:
+                check(nv.nvmlDeviceSetGpuLockedClocks(self.h, int(cfg['idle_min_clock_mhz']),
+                                                      int(cfg['idle_max_clock_mhz'])), 'SetGpuLockedClocks')
+        else:
+            nv.nvmlDeviceResetGpuLockedClocks(self.h)
+            if name == 'performance':
+                check(nv.nvmlDeviceSetPowerManagementLimit(self.h, self.default_pl), 'SetPowerManagementLimit')
+            elif cfg['power_limit_w']:
+                self.cap(cfg['power_limit_w'])
+        self.profile = name
 
 
 def curve_at(curve, t):
@@ -130,6 +172,33 @@ def curve_at(curve, t):
         if t <= t1:
             return f0 + (f1 - f0) * (t - t0) / (t1 - t0)
     return 100.0
+
+
+def read_mode():
+    try:
+        m = MODE_FILE.read_text().strip()
+    except OSError:
+        return 'auto'
+    return m if m in MODES else 'auto'
+
+
+def power_tick(g, cfg, now):
+    """Pick the card's power profile from the mode and its utilization; only touches NVML on a change."""
+    mode = read_mode()
+    if mode == 'performance':
+        want = 'performance'
+    elif mode == 'quiet':
+        want = 'idle'
+    else:
+        if g.util() > cfg['idle_util']:
+            g.idle_since = None
+            want = 'busy'
+        else:
+            g.idle_since = g.idle_since or now
+            want = 'idle' if now - g.idle_since >= cfg['idle_after_s'] else (g.profile or 'busy')
+    if want != g.profile:
+        g.set_profile(want, cfg)
+        log(f'gpu{g.index}: power profile {want} (mode {mode}), limit {g.limit_w():.0f} W')
 
 
 def gpus():
@@ -152,12 +221,11 @@ def run():
 
     for g in cards:
         log(f'gpu{g.index}: {g.fans} fans, range {g.fan_min}-{g.fan_max}%, default power {g.default_pl / 1000:.0f} W')
-        if cfg['power_limit_w']:
-            try:
-                g.cap(cfg['power_limit_w'])
-                log(f'gpu{g.index}: power limit {cfg["power_limit_w"]} W')
-            except RuntimeError as e:
-                log(f'gpu{g.index}: power cap not set: {e}')
+        try:
+            g.set_profile('busy', cfg)
+            log(f'gpu{g.index}: power limit {g.limit_w():.0f} W (busy profile)')
+        except RuntimeError as e:
+            log(f'gpu{g.index}: power cap not set: {e}')
     try:
         while not stop:
             for g in cards:
@@ -166,13 +234,19 @@ def run():
                 except RuntimeError as e:
                     log(f'gpu{g.index}: {e}; back to the vBIOS curve')
                     g.to_default()
+                try:
+                    power_tick(g, cfg, time.monotonic())
+                except RuntimeError as e:   # a power/clock call failed: no clock cap, busy limit, keep going
+                    log(f'gpu{g.index}: power profile: {e}; clocks uncapped')
+                    nvml().nvmlDeviceResetGpuLockedClocks(g.h)
+                    g.profile = 'error'
+                    g.idle_since = None
             time.sleep(cfg['interval_s'])
     finally:
         for g in cards:
             g.to_default()
-            if cfg['power_limit_w']:
-                g.uncap()
-        log('stopped: fans on the vBIOS curve, default power limits')
+            g.uncap()
+        log('stopped: fans on the vBIOS curve, default power limits, clocks uncapped')
 
 
 def tick(g, cfg):
@@ -230,17 +304,32 @@ def status():
                 fans.append(f'{g.fan(i)}%')
             except RuntimeError:
                 fans.append(f'{u("nvmlDeviceGetFanSpeed", g.h)}%')
+        clk = C.c_uint()
+        nv.nvmlDeviceGetClockInfo(g.h, 1, C.byref(clk))   # NVML_CLOCK_SM
         print(f'gpu{g.index}: {g.temp()} C, fans {" ".join(fans)}, {g.power_w():.0f} W of {g.limit_w():.0f} W '
-              f'(default {g.default_pl / 1000:.0f} W)')
+              f'(default {g.default_pl / 1000:.0f} W), util {g.util()}%, SM {clk.value} MHz')
+    print(f'mode: {read_mode()}')
 
 
 def reset():
     for g in gpus():
         g.to_default()
         g.uncap()
-    print('fans on the vBIOS curve, default power limits')
+    print('fans on the vBIOS curve, default power limits, clocks uncapped')
+
+
+def mode():
+    if len(sys.argv) < 3:
+        print(read_mode())
+        return
+    m = sys.argv[2]
+    if m not in MODES:
+        sys.exit(f'mode must be one of {", ".join(MODES)}')
+    MODE_FILE.parent.mkdir(parents=True, exist_ok=True)
+    MODE_FILE.write_text(m + '\n')
+    print(f'mode {m}: the daemon applies it within {DEFAULTS["interval_s"]:.0f} s')
 
 
 if __name__ == '__main__':
     cmd = sys.argv[1] if len(sys.argv) > 1 else 'status'
-    {'run': run, 'status': status, 'reset': reset}.get(cmd, lambda: sys.exit(__doc__))()
+    {'run': run, 'status': status, 'reset': reset, 'mode': mode}.get(cmd, lambda: sys.exit(__doc__))()

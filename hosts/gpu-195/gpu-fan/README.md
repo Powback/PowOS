@@ -14,6 +14,22 @@ silent fan-stop. It only takes over when the stock curve is louder than it needs
 
 Power cap: 250 W per card (default 350 W, range 100-375 W). LLM decode is memory-bound, so it costs a few percent.
 
+Power profiles (2026-11-09, user ask "gpu-195 runs loud"). Measured that day, read-only: GPU0 at 0% util drew
+155 W at 86 C with both fans at 100% and the SM clock held at 1740 MHz (P2: voice-llm, STT and TTS contexts stay
+resident, so the card can't drop to P8 or be powered down); GPU1 ran the Qwenputer loop at 63-100% util, 156-188 W,
+72 C, fans 70-88%. Both cards were in SW thermal slowdown. Per card, every tick:
+
+| profile | when | power limit | graphics clock |
+|---|---|---|---|
+| busy | util > `idle_util` (2%), applied on the next tick (2 s) | `power_limit_w` 250 W | uncapped |
+| idle | util <= 2% for `idle_after_s` (60 s) | `idle_power_limit_w` 150 W | capped at `idle_min_clock_mhz`-`idle_max_clock_mhz` (210-1000 MHz) |
+| performance | mode `performance` | driver default 350 W | uncapped |
+
+Mode, persisted in `/etc/powos/gpu-fan-mode`: `auto` (default, the table above), `quiet` (idle profile always),
+`performance` (busy at the default limit). `sudo powos-gpu-fan mode quiet`; `powos-gpu-fan mode` shows it. A card
+holding resident contexts can't be powered off, so the idle profile is the power-down for a held card. Any NVML
+error in the power path uncaps the clocks and keeps the busy limit; stop/reset restores default limits and clocks.
+
 ```sh
 sudo bash hosts/gpu-195/gpu-fan/install.sh            # install/update, enable at boot, start (idempotent)
 python3 /usr/local/bin/powos-gpu-fan status           # temps, fans, power (no root)
