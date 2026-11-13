@@ -477,13 +477,24 @@ RUN set -eu; \
 # one or the other, it does not merge them.
 #
 # If a future kernel gains CONFIG_OVERLAY_FS_REDIRECT_DIR, revisit: metacopy is
-# genuinely faster where it works. The guard below fails the build if the vendor
-# file ever stops containing the option, so this cannot rot into a no-op.
+# genuinely faster where it works.
+# 2026-11-13: the base's storage.conf stopped setting metacopy (CI: every variant's
+# build failed on the old "vendor no longer sets metacopy=on" guard). Then there is
+# nothing to drop and NO /etc override is written - a frozen copy of the vendor file
+# would only rot. What stays a build error: metacopy in any vendor storage config
+# that this step does not strip (a drop-in, or a form the sed below misses).
 RUN set -eu; \
     src=/usr/share/containers/storage.conf; \
     [ -f "$src" ] || { echo "BUILD ERROR: $src missing; cannot derive /etc override"; exit 1; }; \
-    grep -q 'metacopy=on' "$src" \
-      || { echo "BUILD ERROR: vendor storage.conf no longer sets metacopy=on - re-check whether this override is still needed"; exit 1; }; \
+    for d in /usr/share/containers/storage.conf.d /etc/containers/storage.conf.d; do \
+      if [ -d "$d" ] && grep -rq 'metacopy' "$d"; then \
+        echo "BUILD ERROR: metacopy set in a $d drop-in - extend this override"; exit 1; \
+      fi; \
+    done; \
+    if ! grep -q 'metacopy' "$src"; then \
+      echo "overlay: vendor storage.conf has no metacopy ($(grep -m1 '^mountopt' "$src" || echo 'no mountopt')) - no /etc override needed"; \
+      exit 0; \
+    fi; \
     mkdir -p /etc/containers; \
     sed 's/^\(mountopt[[:space:]]*=.*\)metacopy=on,\?/\1/; s/,\"$/\"/; s/^\(mountopt[[:space:]]*=[[:space:]]*\"\),/\1/' \
         "$src" > /etc/containers/storage.conf; \
