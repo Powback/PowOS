@@ -5,7 +5,8 @@
 # The check runs here against a fake phone (idle/user/root/adb/cdp stubs; each X read sleeps like user.sh's round trip):
 #   - Steam's window found, no tap opens a menu, WWP_BUDGET_S=6: rc 1 with "scan stopped: the run's 6s clock ran out"
 #     well under the budget, and the step it stopped at;
-#   - a long clock: the scan ends with the diagnosis verdict ("no tap ... opened a menu (N taps; KWin touch lines ...");
+#   - a long clock: the scan ends with the diagnosis verdict ("no tap ... opened a menu (N taps; home gestures to KWin
+#     ..., KWin touch-at lines ..." - d416d952's wording, which this check had not followed);
 #   - no `| xargs` left in it (comments aside); menus() reads named steamwebhelper windows too (no "has no name" filter).
 set -u
 src=$(cd "$(dirname "$0")/../.." && pwd)
@@ -64,8 +65,8 @@ echo "$out" | grep -q "signal 13" && bad "SIGPIPE noise in the run's output" "$o
 : > "$FAKE_TAPS"
 out=$(FAKE_X_S=0 WWP_BUDGET_S=120 timeout 90 bash "$F/verify/ww-popups.sh" 2>&1); rc=$?
 n=$(wc -l < "$FAKE_TAPS")
-if [ $rc = 1 ] && echo "$out" | grep -q "^FAIL no tap on Steam's menu bar opened a menu ($n taps; KWin touch lines 3, app popup lines 0" && [ "$n" -ge 10 ]; then
-  ok "no menu: a diagnosis verdict after the whole scan ($n taps, taps reached KWin)"
+if [ $rc = 1 ] && echo "$out" | grep -q "^FAIL no tap on Steam's menu bar opened a menu ($n taps; home gestures to KWin [0-9?]*, KWin touch-at lines 3, app popup lines 0" && [ "$n" -ge 10 ]; then
+  ok "no menu: a diagnosis verdict after the whole scan ($n taps, each side's counts named)"
 else bad "no-menu verdict wrong (rc $rc, $n taps)" "$out"; fi
 grep -n '| *xargs' "$src/tools/phone/verify/ww-popups.sh" | grep -vE '^[0-9]+:[[:space:]]*#' | grep -v '`| xargs`' | grep -q . &&
   bad "ww-popups.sh pipes into xargs again" || ok "no xargs pipes"
