@@ -70,3 +70,15 @@ was refused mid-switch to `main` ("HEAD isn't on origin/main") and must be re-re
 | feat/phone-proton | edce7196 | superseded-by 75c16fd8 | same change landed |
 | feat/phone-proton | 224f41dd | superseded-by 914a8958 | same change landed |
 | feat/phone-proton | 8e6c35d6 | superseded-by a5d8daf5 | same change landed |
+
+## wip/2026-11-10-platform (96b5c471, uncommitted 11-10 work; base ea5dd0d3)
+
+| file | decision | note |
+|---|---|---|
+| lib/apps/powos-platform | LAND | pass-through commands (down/logs/ps) keep the declared host even when policy is invalid; unreadable model/unknown host fails instead of silently running on the hub |
+| test/tier1/test-platform.py | LAND | tests for the above; legacy-model pass-through test now uses a readable model without x-pow |
+| docs/PLATFORM.md | LAND | "Placement failure behavior" section |
+| units/mac/vm-route-mac.json | LAND | records the 11-10 ping + pow-col0-heal fallback (PowStation 2ba5b78, deployed) |
+| units/mac/disk-guard-mac.json | LAND | new unit for the deployed com.powstation.disk-guard daemon (PowStation 2ba5b78); purpose updated for container shedding (PowStation 0a9546a) |
+| tools/jobs/compose.yml | SUPERSEDED 1e510228 | main sets `cgroup_parent: nomad.slice` unconditionally (harmless parent dir on the hub) |
+| tools/jobs/job.sh | SUPERSEDED 1e510228 | POW_JOB_CGROUP_PARENT plumbing not needed with the unconditional parent |

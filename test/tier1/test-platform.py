@@ -43,6 +43,20 @@ def fixture():
 
 
 class ContractTests(unittest.TestCase):
+    def test_invalid_policy_keeps_remote_target_for_down(self):
+        report = {"managed": True, "host": "pow58", "errors": ["missing limits"]}
+        with patch.object(p, "load_model", return_value={}), patch.object(p, "inspect_model", return_value=report), \
+             patch.dict(os.environ, {"POW_PLATFORM_HOST": "powstation"}), patch.object(p.subprocess, "call", return_value=0) as call:
+            self.assertEqual(p.main(["down"]), 0)
+            self.assertEqual(call.call_args.args[0], ["docker", "--context", "pow58", "compose", "down"])
+
+    def test_unreadable_target_never_falls_back_to_local(self):
+        with patch.object(p, "load_model", side_effect=p.Failure("cannot read target")), \
+             patch.object(p.subprocess, "call") as call:
+            with self.assertRaises(p.Failure):
+                p.main(["down"])
+            call.assert_not_called()
+
     def test_valid_and_secret_free(self):
         model = fixture()
         report = p.inspect_model(model)
@@ -178,7 +192,7 @@ class CliTests(unittest.TestCase):
             call.assert_not_called()
 
     def test_passthrough_without_contract_stays_local(self):
-        with patch.object(p, "load_model", side_effect=p.Failure("no file")), patch.object(p.subprocess, "call", return_value=0) as call:
+        with patch.object(p, "load_model", return_value={"name": "legacy", "services": {}}), patch.object(p.subprocess, "call", return_value=0) as call:
             self.assertEqual(p.main(["logs", "--tail", "10"]), 0)
             call.assert_called_once_with(p.engine() + ["logs", "--tail", "10"])
 

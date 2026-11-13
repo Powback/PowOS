@@ -570,12 +570,10 @@ def main(argv=None):
               "Other commands pass through to the Compose engine. See PowOS/docs/PLATFORM.md.")
         return 0
     if command not in COMMANDS and command not in MUTATIONS:
-        # logs/ps/down/build... go to the host the project is placed on; no contract (or no file) -> as before.
-        try:
-            report = inspect_model(load_model(flags))
-            context = host_guard(report) if not report["errors"] else None
-        except (Failure, ValueError):
-            context = None
+        # Resolve placement even when policy validation fails (operators must still be able
+        # to stop a broken project). Never turn an unreadable/unknown target into the hub.
+        report = inspect_model(load_model(flags))
+        context = host_guard(report)
         return subprocess.call(engine(context) + argv)
     if command == "fleet":
         parser = argparse.ArgumentParser(prog="pow-compose fleet")

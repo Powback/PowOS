@@ -1,0 +1,27 @@
+{
+  "id": "disk-guard-mac",
+  "name": "Mac disk guard for the Colima VM's sparse disk images (Mac launchd daemon)",
+  "kind": "service",
+  "owner": "system:powstation",
+  "host": "mac",
+  "purpose": "since 2026-11-10 launchd com.powstation.disk-guard (PowStation/scripts/disk-guard.sh, root, every 30 s) watches free space on /System/Volumes/Data, where the Colima VM's sparse disk images grow: alerts below 60 GB (PowDash's Discord webhook + Mac powos comms via PowStation/scripts/pow-alert.sh), SIGSTOPs stickman trainers and pauses sheddable containers (sabnzbd) below 25 GB (resumed at 30), deletes its 10 GB ballast ~/.colima/pow-disk-ballast below 12 GB, and below 3 GB freezes (SIGSTOP) the VM's Virtualization.framework process so its ext4 never sees a failed write (resumed at 8 GB). HACK until the VM images get their own APFS volume with -reserve. Docs: PowStation/docs/vm-self-healing.md",
+  "installedBy": "sudo cp PowStation/scripts/com.powstation.disk-guard.plist /Library/LaunchDaemons/ && sudo launchctl bootstrap system /Library/LaunchDaemons/com.powstation.disk-guard.plist",
+  "files": [
+    "/Library/LaunchDaemons/com.powstation.disk-guard.plist",
+    "~/Projects/PowStation/data/disk-guard.log",
+    "~/Projects/PowStation/data/disk-guard/",
+    "~/Projects/PowStation/data/alert-discord.json",
+    "~/.colima/pow-disk-ballast"
+  ],
+  "processes": [
+    {
+      "match": "PowStation/scripts/disk-guard\\.sh"
+    }
+  ],
+  "unbounded": "macOS has no cgroups; a short bash pass every 30 s (df, two stat calls, an lsof only at <25 GB); 10 GB ballast file, created only when free >= 75 GB",
+  "remove": {
+    "commands": [
+      "sudo PowStation/scripts/disk-guard.sh --uninstall"
+    ]
+  }
+}

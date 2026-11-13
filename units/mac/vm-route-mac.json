@@ -4,7 +4,7 @@
   "kind": "service",
   "owner": "system:powstation",
   "host": "mac",
-  "purpose": "since 2026-11-08 the Colima VM runs on vzNAT; launchd com.powstation.vm-route (PowStation/scripts/vm-route.sh, root, KeepAlive) keeps 192.168.50.100 host-routed to the VM's vzNAT lease and proxy-ARPs .100 on en0, so LAN clients, router forwards and DHCP DNS keep using .100. HACK until Lima's vmnet-helper backend (lima-vm/lima#4370). Design: PowStation/docs/research/vm-networking-permanent.md",
+  "purpose": "since 2026-11-08 the Colima VM runs on vzNAT; launchd com.powstation.vm-route (PowStation/scripts/vm-route.sh, root, KeepAlive) keeps 192.168.50.100 host-routed to the VM's vzNAT lease and proxy-ARPs .100 on en0, so LAN clients, router forwards and DHCP DNS keep using .100. HACK until Lima's vmnet-helper backend (lima-vm/lima#4370). Design: PowStation/docs/research/vm-networking-permanent.md. Since 2026-11-10 it also pings the VM's vzNAT address and, after 3 misses while the VM runs, runs the VM's pow-col0-heal --force over colima ssh (at most every 5 min) and alerts via PowStation/scripts/pow-alert.sh; docs PowStation/docs/vm-self-healing.md",
   "installedBy": "sudo cp PowStation/scripts/com.powstation.vm-route.plist /Library/LaunchDaemons/ && sudo launchctl bootstrap system /Library/LaunchDaemons/com.powstation.vm-route.plist",
   "files": [
     "/Library/LaunchDaemons/com.powstation.vm-route.plist",
@@ -15,7 +15,7 @@
       "match": "PowStation/scripts/vm-route\\.sh"
     }
   ],
-  "unbounded": "macOS has no cgroups; one bash loop doing a lease-file read plus route/arp lookups every 10 s, logs only on change",
+  "unbounded": "macOS has no cgroups; one bash loop doing a lease-file read, route/arp lookups and one 2 s ping every 10 s, logs only on change; a colima ssh heal (capped at 90 s) at most every 5 min when the VM stops answering",
   "remove": {
     "commands": [
       "sudo PowStation/scripts/vm-route-remove.sh --uninstall"

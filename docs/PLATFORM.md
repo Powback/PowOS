@@ -236,3 +236,9 @@ Tests: `python3 test/tier1/test-platform.py` and `python3 test/tier1/test-units-
 tier-1 runner discovers both automatically. Runtime status, application readiness and restore tests remain
 separate evidence. Historical files in `examples/platform-contract` are proposals; live project Compose files
 and this document supersede their draft schema.
+
+### Placement failure behavior
+
+Commands such as `down` retain the declared host even if other policy fields are invalid. If the Compose model
+cannot be read, or its host cannot be resolved, the wrapper fails rather than silently selecting the hub.
+Legacy Compose models without `x-pow` continue to use the current engine.
