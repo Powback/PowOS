@@ -26,7 +26,7 @@ unarch=$(printf '%s\n' "$map" | awk '$2 ~ /^\.\.\/\.\.\//{print substr($2,7)}' |
   hit=""; for p in $paths; do case "$s" in "$p"|"$p"/*) hit=1 ;; esac; done; [ -n "$hit" ] || echo "$s"; done)
 [ -z "$unarch" ] && ok "every repo-root source is archived" || bad "not in PATHS: $unarch"
 
-# 2. phone-update.sh with pacman, pgrep and vercmp stubbed.
+# 2. phone-update.sh with pacman, pgrep, vercmp and sudo stubbed.
 T=$(mktemp -d); trap 'rm -rf "$T"' EXIT
 mkdir -p "$T/bin"
 cat > "$T/bin/pacman" <<'S'
@@ -45,6 +45,13 @@ S
 cat > "$T/bin/vercmp" <<'S'
 #!/bin/sh
 [ "$1" = "$2" ] && { echo 0; exit; }; [ "$(printf '%s\n%s\n' "$1" "$2" | sort -V | tail -1)" = "$1" ] && echo 1 || echo -1
+S
+# sudo: phone-update.sh prefixes pacman with it when not root. The tier1 container is root (no sudo); CI's runner is
+# not, and its real sudo resets PATH (secure_path), so pacman ran unstubbed and every decision failed (11-13). The
+# stand-in runs the command as is, under the stubbed PATH.
+cat > "$T/bin/sudo" <<'S'
+#!/bin/sh
+exec "$@"
 S
 chmod +x "$T/bin/"*
 printf '[options]\n\n[powos]\nServer = http://x\n' > "$T/conf"
