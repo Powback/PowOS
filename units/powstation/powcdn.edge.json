@@ -1,0 +1,41 @@
+{
+  "id": "powcdn.edge",
+  "name": "powcdn: edge",
+  "kind": "container",
+  "host": "powstation",
+  "owner": "user",
+  "purpose": "asset-origin; Compose-managed by powcdn",
+  "installedBy": "pow-compose register",
+  "processes": [
+    {
+      "container": "powcdn"
+    }
+  ],
+  "autosleep": "never",
+  "platform": {
+    "schema": "powos.platform/v1",
+    "project": "powcdn",
+    "service": "edge",
+    "lifecycleAuthority": "powstation-autosleep",
+    "lifecycle": {
+      "policy": "always"
+    },
+    "access": {
+      "authentication": "none",
+      "exposure": "lan"
+    }
+  },
+  "remove": {
+    "stop": [
+      "docker compose --project-directory /Users/macback/Projects/PowCDN -f /Users/macback/Projects/PowCDN/docker-compose.yml --project-name powcdn stop edge"
+    ],
+    "keep": [
+      "/mnt/nas/cdn",
+      "/Users/macback/Projects/PowCDN/nginx.conf"
+    ]
+  },
+  "limits": {
+    "memory": "268435456",
+    "cpus": 2
+  }
+}

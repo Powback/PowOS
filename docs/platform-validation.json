@@ -1,10 +1,17 @@
 {
-  "scope": "Repository integration; live activation not performed",
+  "date": "2026-11-03",
+  "scope": "Live integration checks and real host-unit registration; not full functional coverage of every application",
   "schema": "powos.platform/v1",
-  "projects": 8,
-  "services": 64,
-  "datasets": 162,
+  "projects": 10,
+  "services": 67,
+  "datasets": 174,
   "fleetValid": true,
+  "registry": {
+    "location": "/Users/macback/.config/powos/units.d",
+    "registeredExpectedUnits": 67,
+    "missingUnits": [],
+    "liveRegistry": true
+  },
   "checks": {
     "platformTests": {
       "passed": 30,
@@ -14,22 +21,93 @@
       "passed": 13,
       "failed": 0
     },
-    "isolatedRegistry": {
-      "registeredUnits": 64,
-      "location": "/private/tmp/pow-platform-registry",
-      "liveRegistry": false
+    "cdn": {
+      "assertions": {
+        "cdn-http-first.log": 31,
+        "cdn-http-second.log": 31,
+        "cdn-compose.log": 4,
+        "cdn-migration.log": 52
+      },
+      "status": "passed",
+      "initialMigrationRun": "failed during stale NFS fixture setup; harness now waits for visibility and asserts the intended open-file refusal; rerun passed"
     },
-    "composeRuntimeSettings": "Original mounts, ports, networks, images, builds, commands, restarts, dependencies, healthchecks, CPU shares and shutdown grace preserved",
-    "shellSyntax": "passed",
-    "spaceTimeAILint": "passed",
-    "spaceTimeAISpecToCode": "blocked by duplicate local.1 tag in DESIGN.md outside this change",
-    "runtimeStatus": "unavailable: Docker socket permission denied"
+    "autosleepMock": "passed",
+    "liveSleepWake": {
+      "fixture": "isolated nginx; removed",
+      "unauthenticatedProtectedRequest": 401,
+      "backendStayedFrozen": true,
+      "allowedRequest": 200,
+      "wakeRequestSeconds": 0.005151,
+      "backendThawed": true
+    },
+    "auth": {
+      "portal": 200,
+      "health": "OK",
+      "unauthenticatedMedia": "302 redirect to PowAuth",
+      "successfulUserLogin": "not exercised"
+    },
+    "crossDevice": {
+      "phonePowOSRootfsToCDN": 200,
+      "phonePowOSRootfsToAuthPortal": 200
+    },
+    "spaceTimeAI": "lint and spec-to-code passed inside existing image with read-only checkout; other package check stages not run",
+    "runtime": "no unhealthy or restarting running containers observed"
   },
-  "notImplemented": [
-    "PowCDN backend/controller",
-    "shared storage reservation/quota enforcement",
-    "game/media activity wake adapters",
-    "automatic cross-host placement/failover"
+  "configuredButAbsent": {
+    "minecraft-create121": [
+      "mc"
+    ],
+    "mcwebviewer": [
+      "mcwebviewer",
+      "mcwv-bridge"
+    ],
+    "powflix": [
+      "epg"
+    ],
+    "android-app-dev": [
+      "android-emulator",
+      "android-remote",
+      "decompiler",
+      "intercept",
+      "scan-reports",
+      "telemetry",
+      "traffic-dashboard"
+    ],
+    "scenes-pow": [
+      "scenes-nginx"
+    ],
+    "powstation": [
+      "apps-dashboard",
+      "dot-proxy",
+      "health-dashboard",
+      "honeypot",
+      "log-rotator",
+      "log-viewer",
+      "mitmproxy",
+      "telemetry"
+    ]
+  },
+  "nonRunningJobs": {
+    "android-app-dev": [
+      {
+        "service": "android-builder",
+        "state": "exited",
+        "exitCode": 0
+      }
+    ]
+  },
+  "coverageLimits": [
+    "Absent applications were not started or functionally tested",
+    "No deliberate NAS outage/power-loss test",
+    "No authenticated user session or role-matrix test",
+    "No game/media activity sleep adapters enabled"
   ],
-  "activation": "bash PowStation/scripts/register-platform-units.sh from an unrestricted terminal on the Mac; normal service deployment applies new labels"
+  "currentCDNDesign": "Deployed LAN/VPN read-only NAS folder, no HTTP slice cache. Earlier label/publisher-controller design superseded.",
+  "remainingCapabilities": [
+    "Shared capacity reservation/quota enforcement",
+    "Game/media activity-aware wake adapters",
+    "Automatic cross-host placement/failover"
+  ],
+  "cleanup": "Temporary smoke/compose containers and CDN test namespaces removed",
+  "evidenceDirectory": "validation/2026-11-03"
 }

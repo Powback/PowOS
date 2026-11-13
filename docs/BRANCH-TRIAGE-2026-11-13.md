@@ -82,3 +82,29 @@ was refused mid-switch to `main` ("HEAD isn't on origin/main") and must be re-re
 | units/mac/disk-guard-mac.json | LAND | new unit for the deployed com.powstation.disk-guard daemon (PowStation 2ba5b78); purpose updated for container shedding (PowStation 0a9546a) |
 | tools/jobs/compose.yml | SUPERSEDED 1e510228 | main sets `cgroup_parent: nomad.slice` unconditionally (harmless parent dir on the hub) |
 | tools/jobs/job.sh | SUPERSEDED 1e510228 | POW_JOB_CGROUP_PARENT plumbing not needed with the unconditional parent |
+
+## Local-only branches (never on GitHub; triaged 11-13)
+
+| branch | commit | decision | note |
+|---|---|---|---|
+| agent/f206 | a1602416 | LAND 741762b6 | wait-guard refuses file-writing Bash (sed -i, perl -i, cp/mv/rm/ln/tee/patch, git apply, > / >> file, python open 'w') in the shared/runner checkouts for subagents. Adapted: with no `cd X &&` prefix the hook input's own `cwd` decides (was: never), and `--rm` / `format-patch` no longer count as rm / patch; tests added for both |
+| agent/land-ship | 6a980e47 | SUPERSEDED 87a3d9a1 | auto ship request for shell/targets/apps/lib/tools/app-api paths + `--no-ship` landed there |
+| agent/owl-measure | cb8e60fd | LAND 41f369fa | OWL 9 `measure(text, size, bold)`: TextMetrics (Measure.kt), Host.measure, widgets.metrics bridge call, ShellWidgets/WidgetText, `owl trees` metrics, preview measure pass, 50-weather / 80-system-info / 97-now-playing sized by it, LangTest. Adapted: OWL_FONT stays monospace (HACK kept, registry row updated) because the other ~15 example widgets still count characters at 0.6 em; fontMetrics() measures the face OWL_FONT draws in, so measure() is right in either face and the switch to --font-body is one line once every widget measures; TextMetrics.of split for the detekt complexity limit |
+| local-snapshot-1109 | 82a58235 | SUPERSEDED (77 of 96 files identical on main) + LAND 4 | file by file below |
+| local-snapshot-1109 | 18604586 | SUPERSEDED d7669b23 | both files identical on main; the enroll unit regenerated now (`pow-compose units`: drops the duplicated `-p powos-enroll` in its stop command) |
+
+82a58235 file by file (the 77 not listed are byte-identical on main: bin/pow-compose, config/*, examples/platform-contract/*,
+units/phone/platform-adapter.json and the rest of units/powstation/*):
+
+| file | decision | note |
+|---|---|---|
+| CLAUDE.md, bin/powos, docs/PLATFORM.md, lib/apps/powos-platform, lib/apps/powos-units, test/tier1/test-platform.py | SUPERSEDED 9a60cf58, d7233a2d, 1d859f24, 24d17470 | main carries the snapshot's content and later work on top |
+| config/platform-fleet.json | SUPERSEDED d7669b23 | main adds powos-enroll |
+| units/powstation/{android.android-builder, powdash.app, powflix.epg, powstation.authelia}.json | SUPERSEDED d4e66b8d, 117c9bf0, 7d9524aa, 584945fe | regenerated later on main |
+| targets/android/rooted/{rooted.sh, powos-deploy.sh} | SUPERSEDED ba93f67e | snapshot's lines are in main's newer versions |
+| targets/android/app/engine/src/main/assets/powos-rootfs.sha256 | DROP | a dirty-tree rootfs pin; main pins its own rebuilt base (6ed9d044 and later) |
+| units/powstation/rsi-dashboard.app.json | DROP | a local-llm-stack worktree experiment, not in the fleet manifest |
+| units/powstation/powcdn.edge.json | LAND (regenerated) | PowCDN is in main's fleet manifest but had no unit record; written fresh by `pow-compose units`, not copied |
+| docs/platform-validation.json | LAND | the 11-03 live validation record (10 projects, live registry, CDN, sleep/wake, auth) replaces the 10-26 repo-only one that still listed PowCDN as not implemented |
+| docs/projects-CLAUDE.md | LAND (adapted) | its stale "PowCDN publication remains planned" paragraph now says what exists (NAS folder + read-only cdn.pow), in the current CLAUDE.md wording |
+| .gitignore | LAND | `backups/` (untracked in the main checkout) stays out of git |

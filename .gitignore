@@ -70,3 +70,6 @@ sources/*/upstream/
 
 # Build-tier bookkeeping (raw cache key, gate record, timings)
 build/.cache/
+
+# Local backups (864 MB on 11-07) stay out of git
+backups/
