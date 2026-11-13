@@ -114,7 +114,10 @@ def report(jobs, wins, per_window=False):
     pct = (100 * useful // tot) if tot else 0
     nv = sum(1 for _, _, c in jobs if c in USEFUL)
     waste = ", ".join(f"{k} {v}s" for k, v in sorted(by.items()) if k not in USEFUL and v) or "none"
-    lines = [f"utilization: {len(wins)} windows, {tot}s window time, {useful}s on {nv} verdicts ({pct}%); "
+    # A timeout is a FAIL verdict, but a kill at the budget usually says only "still at step X" (11-08..11-09: 3452 s
+    # of 48 h window time, the largest class, mostly killed at their first step) - shown so it isn't read as useful.
+    tmo = f" - {by['timeout']}s of it timeouts" if by.get("timeout") else ""
+    lines = [f"utilization: {len(wins)} windows, {tot}s window time, {useful}s on {nv} verdicts ({pct}%{tmo}); "
              f"wasted {tot - useful}s: {waste}, gaps {gaps}s"
              + (f"; woke the phone {len(WAKES)} times for {sum(WAKES)} jobs" if WAKES else "")]
     if per_window:
