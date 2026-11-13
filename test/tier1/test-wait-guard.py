@@ -21,7 +21,8 @@ MAIN_TRANSCRIPT = "/home/user/.claude/projects/foo/sess-1.jsonl"
 
 
 class WaitGuardTests(unittest.TestCase):
-    def run_hook(self, command, transcript_path=SUB_TRANSCRIPT, run_in_background=None, tool_name="Bash"):
+    def run_hook(self, command, transcript_path=SUB_TRANSCRIPT, run_in_background=None, tool_name="Bash",
+                 cwd="/home/user/pw/some-worktree"):
         tool_input = {"command": command}
         if run_in_background is not None:
             tool_input["run_in_background"] = run_in_background
@@ -30,7 +31,7 @@ class WaitGuardTests(unittest.TestCase):
             "tool_name": tool_name,
             "tool_input": tool_input,
             "transcript_path": transcript_path,
-            "cwd": "/home/user/pw/some-worktree",
+            "cwd": cwd,
             "session_id": "sess-1",
         }
         p = subprocess.run([sys.executable, HOOK], input=json.dumps(payload), capture_output=True,
@@ -342,6 +343,115 @@ class WaitGuardTests(unittest.TestCase):
     def test_main_session_git_commit_in_powos_multiplatform_is_allowed(self):
         """Main session is allowed to commit in powos-multiplatform (no guard)."""
         out = self.run_hook("cd /Users/macback/pw/powos-multiplatform && git commit -m 'fix'",
+                            transcript_path=MAIN_TRANSCRIPT)
+        self.assertAllowed(out)
+
+    # -- file-writing operations in shared checkouts (new feature) ----------------------------------------
+    def test_sed_i_in_powos_multiplatform_is_denied(self):
+        """sed -i in powos-multiplatform is denied."""
+        out = self.run_hook("cd /Users/macback/pw/powos-multiplatform && sed -i 's/old/new/' file.txt")
+        self.assertDenied(out, "shared checkout")
+
+    def test_sed_i_in_worktree_is_allowed(self):
+        """sed -i in agent's worktree is allowed."""
+        out = self.run_hook("cd /Users/macback/pw/f206 && sed -i 's/old/new/' file.txt")
+        self.assertAllowed(out)
+
+    def test_perl_i_in_powos_multiplatform_is_denied(self):
+        """perl -i in powos-multiplatform is denied."""
+        out = self.run_hook("cd /Users/macback/pw/powos-multiplatform && perl -i -pe 's/old/new/' file.txt")
+        self.assertDenied(out, "shared checkout")
+
+    def test_cp_in_powos_multiplatform_is_denied(self):
+        """cp in powos-multiplatform is denied."""
+        out = self.run_hook("cd /Users/macback/pw/powos-multiplatform && cp src dest")
+        self.assertDenied(out, "shared checkout")
+
+    def test_cp_in_worktree_is_allowed(self):
+        """cp in agent's worktree is allowed."""
+        out = self.run_hook("cd /Users/macback/pw/f206 && cp src dest")
+        self.assertAllowed(out)
+
+    def test_mv_in_powos_multiplatform_is_denied(self):
+        """mv in powos-multiplatform is denied."""
+        out = self.run_hook("cd /Users/macback/pw/powos-multiplatform && mv old new")
+        self.assertDenied(out, "shared checkout")
+
+    def test_rm_in_powos_multiplatform_is_denied(self):
+        """rm in powos-multiplatform is denied."""
+        out = self.run_hook("cd /Users/macback/pw/powos-multiplatform && rm file.txt")
+        self.assertDenied(out, "shared checkout")
+
+    def test_ln_in_powos_multiplatform_is_denied(self):
+        """ln in powos-multiplatform is denied."""
+        out = self.run_hook("cd /Users/macback/pw/powos-multiplatform && ln -s target link")
+        self.assertDenied(out, "shared checkout")
+
+    def test_tee_in_powos_multiplatform_is_denied(self):
+        """tee in powos-multiplatform is denied."""
+        out = self.run_hook("cd /Users/macback/pw/powos-multiplatform && cat input | tee output.txt")
+        self.assertDenied(out, "shared checkout")
+
+    def test_redirect_to_file_in_powos_multiplatform_is_denied(self):
+        """Redirect > file in powos-multiplatform is denied."""
+        out = self.run_hook("cd /Users/macback/pw/powos-multiplatform && echo 'x' > file.txt")
+        self.assertDenied(out, "shared checkout")
+
+    def test_redirect_append_in_powos_multiplatform_is_denied(self):
+        """Redirect >> file in powos-multiplatform is denied."""
+        out = self.run_hook("cd /Users/macback/pw/powos-multiplatform && echo 'x' >> file.txt")
+        self.assertDenied(out, "shared checkout")
+
+    def test_python_open_w_in_powos_multiplatform_is_denied(self):
+        """python3 open(...'w') in powos-multiplatform is denied."""
+        out = self.run_hook("cd /Users/macback/pw/powos-multiplatform && python3 -c \"open('f', 'w').write('x')\"")
+        self.assertDenied(out, "shared checkout")
+
+    def test_git_apply_in_powos_multiplatform_is_denied(self):
+        """git apply in powos-multiplatform is denied."""
+        out = self.run_hook("cd /Users/macback/pw/powos-multiplatform && git apply patch.diff")
+        self.assertDenied(out, "shared checkout")
+
+    def test_patch_in_powos_multiplatform_is_denied(self):
+        """patch in powos-multiplatform is denied."""
+        out = self.run_hook("cd /Users/macback/pw/powos-multiplatform && patch < fix.patch")
+        self.assertDenied(out, "shared checkout")
+
+    def test_cat_in_powos_multiplatform_is_allowed(self):
+        """cat (read-only) in powos-multiplatform is allowed."""
+        out = self.run_hook("cd /Users/macback/pw/powos-multiplatform && cat file.txt")
+        self.assertAllowed(out)
+
+    def test_grep_in_powos_multiplatform_is_allowed(self):
+        """grep (read-only) in powos-multiplatform is allowed."""
+        out = self.run_hook("cd /Users/macback/pw/powos-multiplatform && grep 'pattern' file.txt")
+        self.assertAllowed(out)
+
+    def test_redirect_to_dev_null_is_allowed(self):
+        """Redirect to /dev/null is allowed."""
+        out = self.run_hook("cd /Users/macback/pw/powos-multiplatform && grep 'pattern' file.txt >/dev/null")
+        self.assertAllowed(out)
+
+    def test_redirect_stderr_to_stdout_is_allowed(self):
+        """Redirect stderr to stdout (2>&1) is allowed."""
+        out = self.run_hook("cd /Users/macback/pw/powos-multiplatform && grep 'pattern' file.txt 2>&1")
+        self.assertAllowed(out)
+
+    def test_write_with_shell_cwd_in_powos_multiplatform_is_denied(self):
+        """No cd prefix: the shell's own cwd (hook input) decides."""
+        out = self.run_hook("sed -i 's/old/new/' file.txt", cwd="/Users/macback/pw/powos-multiplatform")
+        self.assertDenied(out, "shared checkout")
+
+    def test_docker_run_rm_and_format_patch_are_not_writes(self):
+        """--rm and git format-patch are not the rm/patch commands."""
+        out = self.run_hook("cd /Users/macback/pw/powos-multiplatform && docker run --rm img true")
+        self.assertAllowed(out)
+        out = self.run_hook("cd /Users/macback/pw/powos-multiplatform && git format-patch -1 --stdout")
+        self.assertAllowed(out)
+
+    def test_main_session_sed_i_in_powos_multiplatform_is_allowed(self):
+        """Main session is allowed to write in powos-multiplatform (no guard)."""
+        out = self.run_hook("cd /Users/macback/pw/powos-multiplatform && sed -i 's/old/new/' file.txt",
                             transcript_path=MAIN_TRANSCRIPT)
         self.assertAllowed(out)
 

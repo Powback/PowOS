@@ -73,6 +73,20 @@ LOCK_HELD_SET_RE = re.compile(r'\bLOCK_HELD=(?!0\b)\S')
 # Allows for git -C <path> flags
 GIT_CMD_RE = re.compile(r'\bgit\s+(?:-C\s+\S+\s+)?(?:commit|push|rebase|merge)\b')
 
+# Bash file-writing commands to detect (must not be in shared checkout)
+# sed -i / perl -i
+FILE_WRITE_RE = re.compile(
+    r'(?:'
+    r'\bsed\s+-[^\s]*i'  # sed -i or sed -ibackup
+    r'|\bperl\s+-i'  # perl -i
+    r'|(?<![-\w./])(?:cp|mv|rm|ln|tee|patch)\b(?!-)'  # cp/mv/rm/ln/tee/patch as a command (not --rm, format-patch)
+    r'|\bgit\s+(?:-C\s+\S+\s+)?apply\b'  # git apply
+    r'|>\s*(?!/dev/null)(?![&0-9])'  # > file (not >/dev/null, >&, or digit redirects like 2>&1)
+    r'|>>\s'  # >> file
+    r'|python3.*\bopen\s*\([^)]*[\'"]w'  # python3 ... open(...'w')
+    r')'
+)
+
 
 # --- context hygiene (docs/agent-tool-waste-2026-10-24.md fixes 1, 3, 5) ----------------------------
 POLL_WINDOW = 8          # the same status poll again within this many guarded calls is denied
@@ -274,6 +288,50 @@ def _is_dangerous_git_in_powos_multiplatform(cmd):
     return False
 
 
+def _has_file_write_operation(cmd):
+    """Check if command contains file-writing operations (sed -i, cp, >file, etc.)."""
+    return bool(FILE_WRITE_RE.search(cmd))
+
+
+def _extract_bash_cwd(cmd, default_cwd="/"):
+    """Extract the effective working directory for a Bash command.
+
+    Handles:
+      - cd X && command (returns X)
+      - implicit cwd (returns default_cwd)
+
+    Returns the cwd as a string.
+    """
+    # Check for 'cd X &&' pattern at the start
+    cd_match = re.search(r'^\s*cd\s+(\S+)\s*&&', cmd)
+    if cd_match:
+        path = cd_match.group(1)
+        # Strip quotes if present
+        if path.startswith(("'", '"')) and path.endswith(path[0]):
+            path = path[1:-1]
+        return path
+
+    # No explicit cd; return default
+    return default_cwd
+
+
+def _is_file_write_in_shared_checkout(cmd, shell_cwd="/"):
+    """Check if command writes files in the shared checkout.
+
+    Returns True if the command contains file-writing operations and the effective
+    cwd ('cd X &&' prefix, else the shell's own cwd from the hook input) is inside
+    powos-multiplatform or a runner checkout.
+    """
+    if not _has_file_write_operation(cmd):
+        return False
+
+    # Extract the cwd from the command (e.g., 'cd /path && ...'), else the shell's
+    cwd = _extract_bash_cwd(cmd, shell_cwd or "/")
+
+    # Check if the cwd is in a shared checkout
+    return _is_in_powos_multiplatform(cwd) or _is_in_runner_checkout(cwd)
+
+
 def main():
     try:
         inp = json.load(sys.stdin)
@@ -327,6 +385,12 @@ def main():
         # Check for dangerous git commands in powos-multiplatform checkouts
         if _is_dangerous_git_in_powos_multiplatform(cmd):
             _deny("make your own worktree: tools/agents/worktree.sh new <name>")
+            return
+
+        # Check for file-writing operations in the shared checkout
+        if _is_file_write_in_shared_checkout(cmd, inp.get("cwd")):
+            _deny("this is the shared checkout: cd ~/pw/<your-worktree> && … (make one with "
+                  "tools/agents/worktree.sh new <name>)")
             return
 
     # Handle Edit/Write/MultiEdit tools: shared checkout checks
