@@ -45,8 +45,11 @@ said=""
 lock=""
 while :; do
   for l in $locks; do
-    if mkdir "$l" 2>/dev/null; then
-      echo $$ > "$l/pid"; echo "$label" > "$l/label"
+    # The claim is the O_EXCL pid write (bash noclobber), not mkdir's exit code: uutils mkdir (Ubuntu 26.04's
+    # default coreutils, the CI runner) can report success to two racing callers for one directory, and both
+    # then held quick.1 (test-build-slot "third waits", 11-14). The loser leaves the dir to the winner.
+    if mkdir "$l" 2>/dev/null && (set -C; echo $$ > "$l/pid") 2>/dev/null; then
+      echo "$label" > "$l/label"
       trace took "$l" "ino=$(ls -id "$l" 2>/dev/null | cut -d' ' -f1)" "pid=$(cat "$l/pid" 2>/dev/null)"; lock=$l; break
     fi
     # A dead holder's slot (its process no longer running) is reclaimed instead of waited on forever.
