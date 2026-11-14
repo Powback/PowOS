@@ -196,6 +196,16 @@ async function dropFromFolder(c: Carry, target: Aim | null) {
   await powos.home.add(c.app!, target?.page ?? pages.value[page.value], target?.cell);
 }
 
+/**
+ * A drawer app let go on home: pinned at its cell, or on a home app or folder pinned and then grouped as a home tile is.
+ * The host's add moves an app already on home rather than pinning it twice, so it leaves its old spot as a home -> home
+ * drag would.
+ */
+async function addApp(app: string, target: Aim) {
+  if (!target.group) return void (await powos.home.add(app, target.page, target.cell));
+  await powos.home.group(await powos.home.add(app, target.page), target.group);
+}
+
 /** Where a drop at the finger would go: a free cell at the carried size, or an app or folder to group with. */
 function aim(c: Carry): Aim | null {
   const n = pages.value[page.value];
@@ -203,14 +213,23 @@ function aim(c: Carry): Aim | null {
   return n == null ? null : aimOn(c, n);
 }
 
+/** Whether [c] let go on [under] makes (or joins) a folder. */
+function groups(c: Carry, under: HomeItem): boolean {
+  if (under.kind !== "app" && under.kind !== "folder") return false;
+  if (c.item) return c.item.kind === "app";
+  // An app carried in from the drawer too (the user, 11-14: one let go on a home app was refused, so folders could only
+  // be made from apps already on home). Not a dock or folder carry: their drops unpin / take out. Nor one let go on its
+  // own home tile (an app already pinned): the cell check refuses that.
+  return !!c.app && !c.fromDock && !c.fromFolder && under.app !== c.app;
+}
+
 /** [aim] on home page [n]. */
 function aimOn(c: Carry, n: number): Aim | null {
   const g = geometry.value;
   const size = c.item?.resizable ? { w: c.item.cell!.w, h: c.item.cell!.h } : { w: 1, h: 1 };
   const others = itemsOn(n).filter((i) => i.key !== c.item?.key);
-  const app = !c.item || c.item.kind === "app";
   const under = underFinger(c, others);
-  if (under && app && (under.kind === "app" || under.kind === "folder") && c.item) return { group: under.key, page: n };
+  if (under && groups(c, under)) return { group: under.key, page: n };
   const x = Math.max(0, Math.min(home.value.columns - size.w, Math.round((c.x - c.grab.x - g.pad) / g.cellW)));
   const y = Math.max(0, Math.min(g.rows - size.h, Math.round((c.y - c.grab.y - g.pad) / g.cellH)));
   const cell = { x, y, ...size };
@@ -345,7 +364,7 @@ async function letGo(c: Carry | null, ev: PointerEvent) {
   if (c.fromFolder) return dropFromFolder(c, target);
   if (!target) return;
   tick();
-  if (c.app) await powos.home.add(c.app, target.page, target.cell);
+  if (c.app) await addApp(c.app, target);
   else if (target.group) await powos.home.group(c.item!.key, target.group);
   // The search (the dock's button, the foot's pill or its widget) let go on the grid: the bar widget there.
   else if (c.item!.key === SEARCH_KEY) await undockSearch(target.page, target.cell!);

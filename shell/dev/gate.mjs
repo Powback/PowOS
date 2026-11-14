@@ -7459,6 +7459,60 @@ async function folderDissolveCheck() {
 }
 
 /**
+ * In the page, edit mode: folders made by dragging (the user, 11-14: a drawer app dragged onto a home app was refused,
+ * only home -> home made a folder). (a) Home app A held and let go on home app B: one folder of the two in B's place.
+ * (b) An app off home, carried from the drawer (apps.tsx dragHome, the drawer's own hold) onto home app C: a folder of
+ * the two.
+ */
+async function folderDragCheck() {
+  const S = await window.__gw.mod("./state.ts");
+  const G = await window.__gw.mod("./ui/grid.tsx");
+  const A = await window.__gw.mod("./ui/apps.tsx");
+  const at = (type, x, y) => new PointerEvent(type, { pointerId: 12, pointerType: "touch", clientX: x, clientY: y, bubbles: true, isPrimary: true });
+  const mid = (key) => {
+    const r = document.querySelector(`.home-tile[data-key="${key}"]`).getBoundingClientRect();
+    return [r.left + r.width / 2, r.top + r.height / 2];
+  };
+  // The carry's moves and release on the window, as grid.tsx's startCarry listens.
+  const carryTo = async (start, [x, y]) => {
+    start(at("pointerdown", x - 40, y - 40));
+    for (let k = 1; k <= 6; k++) window.dispatchEvent(at("pointermove", x - 40 + (40 * k) / 6, y - 40 + (40 * k) / 6));
+    await window.__gw.frames(2);
+    window.dispatchEvent(at("pointerup", x, y));
+  };
+  const folderWith = (...keys) => S.home.value.items.find((i) => i.kind === "folder" && keys.every((k) => i.apps.some((x) => x.key === k)));
+  const n = S.pages.value[S.page.value];
+  const onPage = () => S.home.value.items.filter((i) => i.page === n && i.kind === "app" && i.cell).sort((p, q) => p.cell.y - q.cell.y || p.cell.x - q.cell.x);
+  const [a, b, c] = onPage();
+  if (!c) return ["folder-drag: the mock's page has no three apps"];
+  S.editing.value = true;
+  await window.__gw.settled(() => document.querySelector(".edit-sheet"));
+  const fails = [];
+  await carryTo((e) => G.startCarry({ item: a }, e, { x: 20, y: 20 }), mid(b.key));
+  await window.__gw.until(() => folderWith(a.key, b.key));
+  const ab = folderWith(a.key, b.key);
+  if (!ab) fails.push(`folder-drag: home app ${a.key} let go on ${b.key} made no folder of the two`);
+  else if (ab.apps.length !== 2) fails.push(`folder-drag: the home -> home folder holds [${ab.apps.map((x) => x.key)}], not just ${a.key} and ${b.key}`);
+  await window.__gw.settled(() => !document.querySelector(".carried"));
+  S.folder.value = null;
+  // An app in the drawer that is on home nowhere (not a tile, not in a folder): a fresh pin.
+  const pinned = new Set(S.home.value.items.flatMap((i) => [i.app, ...(i.apps ?? []).map((x) => x.app)]));
+  const off = S.apps.value.find((x) => x.kind !== "web" && !pinned.has(x.key));
+  if (!off) return [...fails, "folder-drag: every drawer app is already on home"];
+  await window.__gw.settled(() => !document.querySelector(".folder-view"));
+  await carryTo((e) => A.dragHome(off.key, e), mid(c.key));
+  const made = () => S.home.value.items.find((i) => i.kind === "folder" && i.apps.some((x) => x.key === c.key) && i.apps.some((x) => x.app === off.key));
+  await window.__gw.until(made);
+  if (!made()) {
+    const where = S.home.value.items.find((i) => i.app === off.key);
+    fails.push(`folder-drag: drawer app ${off.key} let go on home app ${c.key} made no folder (${where ? `pinned alone at ${JSON.stringify(where.cell)}` : "not pinned"})`);
+  }
+  S.folder.value = null;
+  S.editing.value = false;
+  return fails;
+}
+
+/**
  * In the page: floating windows on home's pages (ui/desktops.ts) - the host stubbed (the mock has no floating
  * windows), two pages. A window opens on the page on screen; swiping pages hides the other page's windows
  * (floating.desktop's list); a window brought back from the dock (windows.raised) moves to the page on screen; one let go
@@ -14519,6 +14573,9 @@ try {
         }
         return [];
       })));
+  // Folders by drag: home app onto home app, and a drawer app onto a home app (folderDragCheck).
+  if (process.env.SHELL_PAGES !== "0")
+    runs.push(open(browser, `${ORIGIN}/index.html`, "home-folder-drag", { width: 404, height: 900 }).then((r) => whenReady(r, () => r.page.evaluate(folderDragCheck))));
   // The blank-home detector (ui/homedrawn.ts) quiet under every full-screen sheet over home (false "home is blank": 10-31
   // 14:14 the AI page, 20:05 Settings › style), still loud for a home whose dock and bar are gone; the pull window never.
   if (process.env.SHELL_PAGES !== "0") {
