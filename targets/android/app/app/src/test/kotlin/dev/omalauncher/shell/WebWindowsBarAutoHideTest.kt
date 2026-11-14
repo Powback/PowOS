@@ -35,12 +35,11 @@ class WebWindowsBarAutoHideTest {
     /** Only a maximised Android window on home with a task is watched (the poll is nothing otherwise). */
     @Test
     fun onlyMaximisedAndroidWindowsOnHomeAreWatched() {
-        assertTrue(WebWindows.immersiveWatched(linux = false, closed = false, onHome = true, taskId = 7, maximised = true))
-        assertFalse(WebWindows.immersiveWatched(linux = false, closed = false, onHome = true, taskId = 7, maximised = false))
-        assertFalse(WebWindows.immersiveWatched(linux = true, closed = false, onHome = true, taskId = 7, maximised = true))
-        assertFalse(WebWindows.immersiveWatched(linux = false, closed = true, onHome = true, taskId = 7, maximised = true))
-        assertFalse(WebWindows.immersiveWatched(linux = false, closed = false, onHome = false, taskId = 7, maximised = true))
-        assertFalse(WebWindows.immersiveWatched(linux = false, closed = false, onHome = true, taskId = -1, maximised = true))
+        assertTrue(WebWindows.immersiveWatched(android = true, onHome = true, taskId = 7, maximised = true))
+        assertFalse(WebWindows.immersiveWatched(android = true, onHome = true, taskId = 7, maximised = false))
+        assertFalse(WebWindows.immersiveWatched(android = false, onHome = true, taskId = 7, maximised = true))
+        assertFalse(WebWindows.immersiveWatched(android = true, onHome = false, taskId = 7, maximised = true))
+        assertFalse(WebWindows.immersiveWatched(android = true, onHome = true, taskId = -1, maximised = true))
     }
 
     @Test
@@ -85,10 +84,11 @@ class WebWindowsBarAutoHideTest {
     @Test
     fun theRevealedBarsTouchesAreThePages() {
         val touch = body("    private fun onTouch(ev: MotionEvent): Boolean {\n")
-        val reveal = touch.indexOf("if (revealedFull >= 0 && revealTouch(ev)) return false")
+        val reveal = touch.indexOf("if (edgeOrReveal(ev)) return false")
         val takes = touch.indexOf("fullLinux()?.let { return linuxInput(it, ev) }")
         assertTrue("onTouch no longer passes the revealed bar's touches to the page", reveal >= 0)
         assertTrue("the revealed bar's check comes after the full-screen window took the touch", reveal < takes)
+        assertTrue(body("    private fun edgeOrReveal(ev: MotionEvent): Boolean {\n").contains("return revealTouch(ev)"))
         // The page runs while a bar is revealed (GQ1 would pause it under a game).
         assertTrue(src.contains("edge: Boolean = fullEdge != null || revealedFull >= 0,"))
     }
