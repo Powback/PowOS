@@ -1153,7 +1153,9 @@ EOS
     rc=$?; [ -n "$wpp" ] && endjob "$wpp"   # the wait ended without a window (exit 3/6): its pill writes end before pause's
     [ -e "$WL_WOKE" ] && wl_sleep "$phone"   # woken but no window came (or the window's own wl_done couldn't): settings back
     if [ -n "$nowin" ] && [ $rc = 3 ]; then
-      echo "$(date +%T) every queued check waits for its ship - no window taken, looking again in ${NEED_POLL_S:-60} s"
+      # Each held job's own reason (screen, ship, back-off, a game): 11-14 the log said "waits for its ship" for 12 h
+      # while all three jobs waited for the inner screen of a folded phone.
+      echo "$(date +%T) every queued check is held ($( ( select_jobs "" ) 2>/dev/null | sed 's/^[0-9:]* //' | paste -sd ';' - )) - no window taken, looking again in ${NEED_POLL_S:-60} s"
       w0=$(( ${NEED_POLL_S:-60} - ($(date +%s) - w0) )); [ $w0 -gt 0 ] && sleep $w0   # a wait that returned at once (no phone)
     elif [ $rc = 3 ]; then echo "$(date +%T) no free window in ${WAIT_S:-7200}s - waiting again"; fi
     [ $rc = 6 ] && { echo "$(date +%T) stopped from the phone - paused"; pause "Phone checks paused"; }
