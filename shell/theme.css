@@ -96,23 +96,36 @@
   --liquid-refraction: 9px;
   --liquid-rim: 0.5;
   --liquid-dispersion: 0.25;
-  /* The tint: the theme's background lifted a little towards its foreground (a dark wallpaper reads as glass, not as
-     a black slab), see-through by --glass-tint. */
-  --glass-base: color-mix(in srgb, var(--color-foreground) 18%, var(--color-background));
+  /*
+   * THE glass colour (docs/DESIGN-LANGUAGE.md §2, the user 11-14: "the blur tint doesnt match the theme, its only dark
+   * or light"): every glass tint - THE backdrop, the shade, the widgets and the search pill, the frost cards, the drawer,
+   * the sheets, the bars - is this colour at an alpha, never black, white or a cooled neutral. The theme's ground half
+   * way to its surface (lighter_background): gruvbox's warm grey, nord's blue, osaka-jade's green; its hue is exactly
+   * the theme's (oklab: no hue of its own comes in). --tone-alpha is THE backdrop's strength over a wallpaper of the
+   * theme's own tone (dark 58%, light 64%: >= 4.5:1 for every theme's foreground up to a mid wallpaper) and over the
+   * other tone (below: deeper, never another colour).
+   */
+  --glass-tone: color-mix(in oklab, var(--color-surface) 50%, var(--color-background));
+  --tone-alpha: 58%;
+  /* The tint of the glass/plain-fill paths: THE glass colour, see-through by --glass-tint (+ --glass-dim). */
+  --glass-base: var(--glass-tone);
   /* The one darkening for a page that is mostly text (PowOS AI's): more of the same tint, nothing else. */
   --glass-dim: 28%;
   /*
    * The frost (frost v2, 2026-10-22): one material for the surfaces you read through - PowOS AI's cards and panel, the
    * control center. Its strength is the compositor's blur (--frost-blur-native: what's behind can't be read, not a
-   * darker fill), its colour the reference tint cooled, at the reference strength (--glass-tint + --frost-lift); over a
-   * wallpaper of the other tone the same tint, deeper (below), so text keeps its contrast without a halo.
+   * darker fill), its colour THE glass colour (--glass-tone), at the reference strength (--glass-tint + --frost-lift); over
+   * a wallpaper of the other tone the same colour, deeper (below), so text keeps its contrast without a halo.
    */
   --frost-cool: var(--frost-cool-dark);
   --frost-cool-light: #e8eef6;
   --frost-cool-dark: #182230;
   /* The icon plates' other cool (shell.css --icon-plate). */
   --frost-swap-cool: var(--frost-cool-light);
-  --frost-base: color-mix(in oklab, var(--glass-base) 55%, var(--frost-cool));
+  /* The frost's colour: THE glass colour (it was cooled towards --frost-cool: a blue-grey in every theme). */
+  --frost-base: var(--glass-tone);
+  /* The icon plates' neutral (--icon-plate): not glass - an irregular icon's plate stays neutral (gruvbox's read brown). */
+  --plate-base: color-mix(in oklab, var(--glass-tone) 55%, var(--frost-cool));
   --frost-fill: color-mix(in srgb, var(--frost-base) calc(var(--glass-tint) + 16%), transparent);
   /* The frost surfaces' tint over --glass-tint (shell.css frost block); deeper over a wallpaper of the other tone. */
   --frost-lift: 20%;
@@ -136,7 +149,7 @@
    * panel, the assistant's panel, a folder, the shade. No surface names its own blur or tint: they read these two.
    */
   --backdrop-blur-native: 170px;
-  --backdrop-tint: rgb(0 0 0 / 55%);
+  --backdrop-tint: color-mix(in srgb, var(--glass-tone) var(--tone-alpha), transparent);
   /* A menu over the page (PowOS AI's ⋯): THE backdrop's blur, its tint strong enough that the text under it can't be read
      through (the user, 11-01 17:56: the list underneath read through the menu). The theme's ground, nearly opaque. */
   --menu-tint: color-mix(in srgb, var(--color-background) 94%, transparent);
@@ -159,10 +172,10 @@
   --strip-icon: 56px;
   /* Every app icon's one shape (ui/iconshape.ts, shell.css .app-icon-face): a squircle, the corner this much of its
      edge (AndroidApps draws adaptive icons in the same one). Transparent / irregular icons sit on --icon-plate in it:
-     the frost's own neutral tint (never the theme's surface or accent - gruvbox's read as brown), opaque, lifted a
+     a neutral of its own (--plate-base: never the theme's surface or accent - gruvbox's read as brown), opaque, lifted a
      little towards the other tone so a dark or light glyph still shows on it. */
   --icon-radius: 22%;
-  --icon-plate: color-mix(in oklab, var(--frost-base) 85%, var(--frost-swap-cool));
+  --icon-plate: color-mix(in oklab, var(--plate-base) 85%, var(--frost-swap-cool));
   --strip-height: 76px;
   --letter-bar: 22px;
   /* The pill's space above the screen's foot (over the navigation bar's inset): home's search, the drawer's, PowOS AI's compose. */
@@ -208,16 +221,19 @@
  * A wallpaper of the other tone than the theme (dark glass over a bright picture, light glass over a dark one:
  * glass.ts data-wallpaper): the glass keeps the theme's tint, deeper for its text - never the wallpaper's tone (a light
  * frost there was a white slab over the razr fold's pale wallpaper, the user 11-14: "the blur bg stuff is white").
- * THE backdrop at 68% (55%: 3.6:1 for the foreground over a white wallpaper, 68%: 6:1), the frost surfaces at
- * --glass-tint + 44% (76%: 5:1). Labels straight on the wallpaper turn to the other colour (--on-wallpaper).
+ * The glass colour stays the theme's (--glass-tone), only its alpha rises: THE backdrop and the frost surfaces at
+ * --tone-alpha 88% dark / 86% light (measured over all 22 themes: everforest's and gruvbox's foreground need 87% / 85%
+ * of their tone over white for 4.5:1, rose-pine's 85% over black). Labels straight on the wallpaper turn to the other
+ * colour (--on-wallpaper).
  */
 :root[data-light="false"][data-wallpaper="light"], :root[data-light="true"][data-wallpaper="dark"] {
   --glass-dim: 68%;
-  --frost-lift: 44%;
   --on-wallpaper: var(--color-background);
   --on-wallpaper-halo: var(--color-foreground);
 }
-:root[data-light="false"][data-wallpaper="light"] { --backdrop-tint: rgb(0 0 0 / 68%); }
+/* The frost surfaces (--glass-tint + --frost-lift) and the drawer reach THE backdrop's --tone-alpha there. */
+:root[data-light="false"][data-wallpaper="light"] { --tone-alpha: 88%; }
+:is(:root[data-light="false"][data-wallpaper="light"], :root[data-light="true"][data-wallpaper="dark"]) { --frost-lift: calc(var(--tone-alpha) - var(--glass-tint)); }
 :root[data-light="true"] {
   --frost-cool: var(--frost-cool-light);
   --frost-swap-cool: var(--frost-cool-dark);
@@ -225,10 +241,10 @@
   --glass-brightness: 1.08;
   --glass-veil: rgb(255 255 255 / 8%);
   --glass-behind-tint: 66%;
-  /* Light: the theme's own ground at the same strength (dark text stays readable on the shade and the widgets). */
-  --backdrop-tint: color-mix(in srgb, var(--color-background) 55%, transparent);
+  /* Light: THE glass colour a little stronger (rose-pine's and catppuccin-latte's dark text over a mid wallpaper). */
+  --tone-alpha: 64%;
 }
-:root[data-light="true"][data-wallpaper="dark"] { --backdrop-tint: color-mix(in srgb, var(--color-background) 68%, transparent); }
+:root[data-light="true"][data-wallpaper="dark"] { --tone-alpha: 86%; }
 .glass, .glass-native { --glass-tint: 32%; }
 :is(.glass, .glass-native)[data-light="true"] { --glass-tint: 40%; }
 .glass, .glass-behind, .glass-native { --control-fill: color-mix(in srgb, var(--color-foreground) 10%, transparent); }

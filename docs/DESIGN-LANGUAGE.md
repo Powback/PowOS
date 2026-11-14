@@ -42,9 +42,21 @@ Checks:
 ## 2. One material, one backdrop
 
 - **THE backdrop.** Every surface over the wallpaper or an app uses one blur and one tint:
-  `--backdrop-blur-native` (170) and `--backdrop-tint` (black 55%, or the theme's background in light themes). This
+  `--backdrop-blur-native` (170) and `--backdrop-tint` (the theme's glass colour at `--tone-alpha`). This
   covers home's widgets, the search bar, the launcher, the PowOS AI page and panel, folders, the shade and the
   assistant's panel.
+- **Glass is the theme's colour.** Every glass tint (the backdrop, the shade, widgets, the search pill, the frost
+  cards, the drawer, sheets, bars) is one colour, `--glass-tone` (theme.css): the theme's background half way to its
+  surface, mixed in oklab, so gruvbox glass is gruvbox's warm grey, nord's is blue, osaka-jade's green. Never black,
+  white or a neutral grey, and never a cooled tint (the user, 11-14: "the blur tint doesnt match the theme, its only
+  dark or light").
+  - Only the alpha changes. Over a wallpaper of the theme's own tone: 58% dark, 64% light. Over the other tone the
+    same colour, deeper: 88% dark, 86% light, never the wallpaper's tone. These keep the foreground at 4.5:1 or more
+    for all 22 themes.
+  - Lighter or darker tones of it mix with white or black in oklab, which keeps the hue (the frost over a dark
+    wallpaper). Only the icon plate stays neutral (`--plate-base`); it isn't glass.
+  - The compositor's blur carries no colour (GlassBlur.kt regions are blur only); the page's CSS tint is the colour on
+    both the native and the CSS glass. Gate: `glass-tint-tone` (three themes, both wallpaper tones).
   - `--shade-tint` and `--widget-blur-native` only alias these.
   - No surface names its own blur or tint. See `dev/backdrop-check.js` and commits 3e6e5825 and 160e64ed.
   - A picture blurred in the page (the media card's art, a card's splash) uses the frost's `--glass-blur`.

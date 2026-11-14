@@ -25,10 +25,10 @@ html:is([data-mode="windowbar"], [data-mode="windowgrip"], [data-mode="statusbar
 html:root .window-chrome { background: none; box-shadow: none; }
 /* Small labels over arbitrary app content use the shell's existing frosted-label strength (AI headings), so
  * their text remains legible when the content behind the bar is much brighter than the wallpaper. */
-html:root .chrome-surface { --frost-fill: color-mix(in srgb, var(--frost-base) 82%, transparent); }
+html:root .chrome-surface { --frost-fill: color-mix(in srgb, var(--frost-base) max(82%, var(--tone-alpha)), transparent); }
 /* At caption sizes keep the base frost tint: the large-card lift makes small text too faint over a bright app. */
 :root[data-light="false"]:not([data-wallpaper="light"]) .chrome-surface {
-  --frost-fill: color-mix(in srgb, color-mix(in oklab, var(--glass-base) 25%, var(--frost-cool)) 82%, transparent);
+  --frost-fill: color-mix(in srgb, var(--glass-tone) 82%, transparent);
 }
 
 /* FPS meter: fixed width + tabular digits so nothing shifts; the canvas has a fixed size (no reflow). */

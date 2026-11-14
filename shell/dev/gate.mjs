@@ -3024,8 +3024,11 @@ async function resumeThemeHealCheck() {
  * blur but its missing the tint"): every widget face's background valid (not "none": an unset --frost-sheen voided it)
  * and the open drawer's fill still see-through (68% + the 32% tint was an opaque slab, no blur through it). The glass
  * keeps the THEME's tone over either wallpaper (razr fold 11-14, the same pairing: "the blur bg stuff is white" - the
- * frost had flipped to light paper at 52%): the widget faces', the search pill's and a frost surface's fill the
- * theme's colour, deep enough over the other tone for the foreground's 4.5:1 over a white wallpaper.
+ * frost had flipped to light paper at 52%). And its colour is the THEME's (the user 11-14: "the blur tint doesnt match
+ * the theme, its only dark or light" - THE backdrop was black at 55%, the frost a cooled blue-grey in every theme): in
+ * a dark, a light and a strongly coloured theme, every glass fill (THE backdrop = the shade, a widget face, the search
+ * pill, a frost card, the drawer) has the hue of the theme's surface, not a neutral, and the foreground keeps 4.5:1 on
+ * it over a light and over a dark wallpaper.
  */
 async function glassTintToneCheck() {
   const fails = [];
@@ -3037,41 +3040,47 @@ async function glassTintToneCheck() {
   const ready = () => document.querySelector(".page .home-tile > .tile") && document.querySelector(".home.open .launcher-frame");
   if (!(await window.__gw.settled(ready))) return [`never ready: ${document.querySelector(".page .home-tile > .tile") ? "" : "no widget face; "}${document.querySelector(".home.open .launcher-frame") ? "" : "the drawer didn't open"}`];
   try {
-    for (const [fill, tone] of [["#f4f4f4", "light"], ["#101418", "dark"]]) fails.push(...(await glassTintIn(fill, tone)));
+    for (const theme of GLASS_THEMES) {
+      // As the host hands a theme over (ShellBridge.themeColors: surface = the toml's lighter_background).
+      window.__mockEvents.emit("theme.changed", { name: theme.name, light: theme.light, css: theme.css, colors: {} });
+      await window.__gw.until(() => root.dataset.light === String(theme.light), 3000);
+      for (const [fill, tone] of [["#f4f4f4", "light"], ["#101418", "dark"]]) fails.push(...(await glassTintIn(fill, tone, theme)));
+    }
   } finally {
     S.drawer.value = 0;
   }
-  return [...new Set(fails)].slice(0, 8);
+  return [...new Set(fails)].slice(0, 12);
 }
 
+/** glassTintToneCheck's themes, from targets/android/.../assets/themes/*.toml: a dark, a light, a strongly coloured. */
+const GLASS_THEMES = [
+  { name: "gruvbox", light: false, css: { background: "#282828", surface: "#3c3836", foreground: "#d4be98", muted: "#665c54", accent: "#7daea3", border: "#665c54", red: "#ea6962" } },
+  { name: "catppuccin-latte", light: true, css: { background: "#eff1f5", surface: "#dce0e8", foreground: "#4c4f69", muted: "#acb0be", accent: "#1e66f5", border: "#acb0be", red: "#d20f39" } },
+  { name: "osaka-jade", light: false, css: { background: "#111c18", surface: "#23372b", foreground: "#c1c497", muted: "#53685b", accent: "#509475", border: "#53685b", red: "#ff5345" } },
+];
+
 /** glassTintToneCheck in one wallpaper tone: a one-colour picture of [fill], settled to [tone]. */
-async function glassTintIn(fill, tone) {
+async function glassTintIn(fill, tone, theme) {
   const root = document.documentElement;
   const c = document.createElement("canvas");
   c.width = c.height = 32;
   const x = c.getContext("2d");
   x.fillStyle = fill;
   x.fillRect(0, 0, 32, 32);
-  window.__mockEvents.emit("system.glass", { wallpaper: { url: c.toDataURL("image/png"), rev: `tint-${fill}`, source: "live" }, blurBehind: false });
+  window.__mockEvents.emit("system.glass", { wallpaper: { url: c.toDataURL("image/png"), rev: `tint-${theme.name}-${fill}`, source: "live" }, blurBehind: false });
   await window.__gw.until(() => root.dataset.wallpaper === tone, 3000);
-  if (root.dataset.wallpaper !== tone) return [`no ${tone} tone`];
-  const where = `${root.dataset.light === "true" ? "light" : "dark"} theme, ${tone} wallpaper`;
+  if (root.dataset.wallpaper !== tone) return [`${theme.name}: no ${tone} tone`];
+  const where = `${theme.name}, ${tone} wallpaper`;
   const bare = [...document.querySelectorAll(".page .home-tile > .tile")].filter((t) => getComputedStyle(t).backgroundImage === "none");
   const fails = bare.map(() => `${where}: a widget face has no tint`);
-  const probe = document.createElement("i");
-  probe.style.cssText = "position:absolute;width:1px;height:1px;background:var(--text-fill)";
-  document.querySelector(".home .launcher-frame").append(probe);
-  // A color-mix computes to "color(srgb r g b / a)", a plain colour to "rgba(r, g, b, a)"; no alpha given is opaque.
-  const bg = getComputedStyle(probe).backgroundColor;
-  const a = Number(/\/\s*([\d.]+)\s*\)$/.exec(bg)?.[1] ?? /^rgba\([^,]+,[^,]+,[^,]+,\s*([\d.]+)\)$/.exec(bg)?.[1] ?? 1);
-  probe.remove();
-  if (!(a < 0.95)) fails.push(`${where}: the drawer's fill is opaque (${bg})`);
-  return [...fails, ...glassFillFails(where, tone)];
+  const drawer = glassFillOf(".home .launcher-frame", "--text-fill");
+  if (drawer && !(drawer[3] < 0.95)) fails.push(`${where}: the drawer's fill is opaque (${drawer.map((v) => v.toFixed(2))})`);
+  return [...fails, ...glassFillFails(where, fill, theme)];
 }
 
 /** A computed colour ("color(srgb r g b / a)" 0..1, or "rgba(r, g, b, a)" 0..255) as [r, g, b, a] 0..1; null: neither. */
 function glassRgba(css) {
-  const m = /color\(srgb ([\d.]+) ([\d.]+) ([\d.]+)(?: \/ ([\d.]+))?\)/.exec(css);
+  const m = /color\(srgb ([-\d.e]+) ([-\d.e]+) ([-\d.e]+)(?: \/ ([\d.]+))?\)/.exec(css);
   const r = m ? null : /rgba?\(([\d.]+),? ([\d.]+),? ([\d.]+)(?:,? (?:\/ )?([\d.]+))?\)/.exec(css);
   const k = m ? 1 : 255;
   const g = m ?? r;
@@ -3085,12 +3094,23 @@ function glassLum(c) {
   return 0.2126 * lin(c[0]) + 0.7152 * lin(c[1]) + 0.0722 * lin(c[2]);
 }
 
-/** [sel]'s --frost-fill as a colour (a probe painted with it inside), or null. */
-function glassFillOf(sel) {
-  const el = document.querySelector(sel);
+/** [r, g, b] (0..1, sRGB) as oklch [L, C, h degrees]. */
+function glassOklch(c) {
+  const [r, g, b] = c.map((v) => (v <= 0.04045 ? v / 12.92 : ((v + 0.055) / 1.055) ** 2.4));
+  const l = Math.cbrt(0.4122214708 * r + 0.5363325363 * g + 0.0514459929 * b);
+  const m = Math.cbrt(0.2119034982 * r + 0.6806995451 * g + 0.1073969566 * b);
+  const s = Math.cbrt(0.0883024619 * r + 0.2817188376 * g + 0.6299787005 * b);
+  const A = 1.9779984951 * l - 2.428592205 * m + 0.4505937099 * s;
+  const B = 0.0259040371 * l + 0.7827717662 * m - 0.808675766 * s;
+  return [0.2104542553 * l + 0.793617785 * m - 0.0040720468 * s, Math.hypot(A, B), ((Math.atan2(B, A) * 180) / Math.PI + 360) % 360];
+}
+
+/** [token] as a colour, painted by a probe inside [sel] (custom properties resolve where they're declared), or null. */
+function glassFillOf(sel, token) {
+  const el = typeof sel === "string" ? document.querySelector(sel) : sel;
   if (!el) return null;
   const p = document.createElement("i");
-  p.style.cssText = "position:absolute;width:1px;height:1px;background:var(--frost-fill)";
+  p.style.cssText = `position:absolute;width:1px;height:1px;background:var(${token})`;
   el.append(p);
   const c = glassRgba(getComputedStyle(p).backgroundColor);
   p.remove();
@@ -3098,26 +3118,41 @@ function glassFillOf(sel) {
 }
 
 /**
- * glassTintIn's tone part: each glass's fill composited over white (the brightest wallpaper) and over black is the
- * THEME's tone, and over the other tone the foreground keeps 4.5:1 on it (razr fold 11-14: "the blur bg stuff is white").
+ * glassTintIn's colour part: each glass fill over the wallpaper [wall] - THE backdrop (the shade's tint too), a widget
+ * face, the search pill, a frost card (a PowOS app's page), the drawer: its own colour the theme's surface hue (oklch,
+ * within 20 deg, at least 30% of the surface's chroma: never black/white/a cooled grey), and the foreground >= 4.5:1
+ * on it composited over [wall] (the other-tone deepening: more alpha, the same colour).
  */
-function glassFillFails(where, tone) {
-  const dark = document.documentElement.dataset.light !== "true";
-  const fg = glassRgba(getComputedStyle(document.querySelector(".page .home-tile > .tile") ?? document.documentElement).color);
-  const other = tone === (dark ? "light" : "dark");
-  return [["a widget face", ".page .home-tile > .tile"], ["the search pill", ".home > .bar .bar-pill"]].flatMap(([name, sel]) => glassFillFail(`${where}: ${name}`, glassFillOf(sel), dark, other ? fg : null));
+function glassFillFails(where, wall, theme) {
+  const card = document.createElement("div");
+  card.className = "app-screen tile";
+  card.style.display = "none";
+  document.body.append(card);
+  const fills = [
+    ["THE backdrop (the shade)", glassFillOf(document.documentElement, "--backdrop-tint")],
+    ["a widget face", glassFillOf(".page .home-tile > .tile", "--frost-fill")],
+    ["the search pill", glassFillOf(".home > .bar .bar-pill", "--frost-fill")],
+    ["a frost card", glassFillOf(card, "--frost-fill")],
+    ["the drawer", glassFillOf(".home .launcher-frame", "--text-fill")],
+  ];
+  card.remove();
+  const w = glassRgba(`rgb(${[1, 3, 5].map((i) => parseInt(wall.slice(i, i + 2), 16)).join(", ")})`);
+  const fg = glassRgba(`rgb(${[1, 3, 5].map((i) => parseInt(theme.css.foreground.slice(i, i + 2), 16)).join(", ")})`);
+  const sf = glassOklch(glassRgba(`rgb(${[1, 3, 5].map((i) => parseInt(theme.css.surface.slice(i, i + 2), 16)).join(", ")})`).slice(0, 3));
+  return fills.flatMap(([name, c]) => (c ? glassFillFail(`${where}: ${name}`, c, { w, fg, sf }) : [`${where}: ${name} has no fill`]));
 }
 
-/** One glass's fill [c] (null: not on the page): the theme's tone over the wallpaper it isn't drawn on; [fg] readable on it. */
-function glassFillFail(what, c, dark, fg) {
-  if (!c) return [];
-  // Over the wallpaper the theme is NOT drawn on (white under a dark theme's glass, black under a light one's).
-  const bgL = glassLum(c.slice(0, 3).map((v) => v * c[3] + (dark ? 1 - c[3] : 0)));
-  const fails = (dark ? bgL > 0.2 : bgL < 0.2) ? [`${what}'s fill is the wallpaper's tone, not the theme's (${c.map((v) => v.toFixed(2))})`] : [];
-  if (!fg) return fails;
+/** One glass fill [c] over the wallpaper colour [w]: the theme's hue (surface oklch [sf]), [fg] readable on it. */
+function glassFillFail(what, c, { w, fg, sf }) {
+  const fails = [];
+  const [, C, h] = glassOklch(c.slice(0, 3));
+  const dh = Math.abs(((h - sf[2] + 540) % 360) - 180);
+  if (C < Math.max(0.0015, sf[1] * 0.3) || dh > 20) fails.push(`${what}'s colour isn't the theme's (oklch C ${C.toFixed(4)} h ${h.toFixed(0)}, the surface's C ${sf[1].toFixed(4)} h ${sf[2].toFixed(0)})`);
+  const bgL = glassLum(c.slice(0, 3).map((v, i) => v * c[3] + w[i] * (1 - c[3])));
   const fgL = glassLum(fg);
   const ratio = (Math.max(fgL, bgL) + 0.05) / (Math.min(fgL, bgL) + 0.05);
-  return ratio < 4.5 ? [...fails, `${what}'s text ${ratio.toFixed(1)}:1 over ${dark ? "a white" : "a black"} wallpaper`] : fails;
+  if (ratio < 4.5) fails.push(`${what}'s text ${ratio.toFixed(1)}:1 (${c.map((v) => v.toFixed(2))})`);
+  return fails;
 }
 
 /** A page swipe changes the page without a haptic tick (the user, 10-31: "Don't need haptics when changing page"). */
@@ -14572,7 +14607,8 @@ try {
   if (process.env.SHELL_PAGES !== "0")
     runs.push(open(browser, `${ORIGIN}/index.html`, "glass-tint-tone", { width: 404, height: 900 }).then((r) => whenReady(r, async () => {
       // Its helper as the page's global (an evaluated function carries no closure).
-      for (const f of [glassTintIn, glassRgba, glassLum, glassFillOf, glassFillFails, glassFillFail]) await r.page.evaluate(String(f));
+      await r.page.evaluate(`window.GLASS_THEMES = ${JSON.stringify(GLASS_THEMES)}`);
+      for (const f of [glassTintIn, glassRgba, glassLum, glassOklch, glassFillOf, glassFillFails, glassFillFail]) await r.page.evaluate(String(f));
       return r.page.evaluate(glassTintToneCheck);
     })));
   if (process.env.SHELL_PAGES !== "0")

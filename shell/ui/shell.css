@@ -507,9 +507,10 @@
   --glass-dim: 42%;
   --text-fill: color-mix(in srgb, var(--glass-base) calc(var(--glass-tint) + var(--glass-dim)), transparent);
 }
-/* Over a wallpaper of the other tone (theme.css data-wallpaper): a deeper tint for the drawer's labels, still glass -
-   68% with the 32% tint was 100%: an opaque slab, no blur through it (razr fold 11-09: the open drawer one flat grey). */
-:root[data-light="false"][data-wallpaper="light"] .home .launcher-frame, :root[data-light="true"][data-wallpaper="dark"] .home .launcher-frame { --glass-dim: 50%; }
+/* Over a wallpaper of the other tone (theme.css data-wallpaper): a deeper tint for the drawer's labels, THE backdrop's
+   --tone-alpha in all, still glass - 68% with the 32% tint was 100%: an opaque slab, no blur through it (razr fold 11-09:
+   the open drawer one flat grey). */
+:root[data-light="false"][data-wallpaper="light"] .home .launcher-frame, :root[data-light="true"][data-wallpaper="dark"] .home .launcher-frame { --glass-dim: calc(var(--tone-alpha) - var(--glass-tint)); }
 /* The widget and app picker (appwidget.tsx, edit mode's "+"): a page-sized sheet of small labels on cards - at the
    sheets' reference fill 11-13 of its texts were under 4.5:1, at the drawer's 42% still 10 (design audit, launcher gap
    7). The deeper tint, whatever the wallpaper: home is hidden under it anyway (DESIGN-LANGUAGE.md §2 sheets hide home).
@@ -3098,7 +3099,7 @@ html[data-mode="quicktools"], html[data-mode="quicktools"] body { background: tr
 /*
  * PowOS AI (its page's cards, its pull-up panel), the control center, PowOS apps' pages:
  * the frost (theme.css, frost v2) - the compositor's stronger blur on each surface (nativeglass.ts reads
- * --glass-blur-native per surface; the shade's window is blurred by its host: shade.tsx) and the cool tint; over the
+ * --glass-blur-native per surface; the shade's window is blurred by its host: shade.tsx) and the theme's glass colour; over the
  * other tone the same tint, deeper (theme.css --frost-lift). No halos. An app whose page paints its own ground opts out (appscreen.tsx).
  */
 .chrome-surface, .app-screen.tile, .ai-screen .tile, .folder-sheet .folder-bg.tile, html:root .home:has(.ai-panel) .launcher-frame.tile, .notif-panel :is(.cc.v3, .notif-own), .home:has(.ai-panel) .ai-panel, .ai-screen :is(.ai-top > *, .ai-heading, .ai-mail-bar > *, .ai-empty):not(.tile *), .ai-screen.wide .ai-fold:not(.tile *), :is(.home > .bar .bar-pill, .home .dsb-glass) {
@@ -3108,9 +3109,10 @@ html[data-mode="quicktools"], html[data-mode="quicktools"] body { background: tr
   --frost-fill: color-mix(in srgb, var(--frost-base) calc(var(--glass-tint) + var(--frost-lift)), transparent);
   --frost-sheen: color-mix(in srgb, var(--color-foreground) 6%, transparent);
 }
-/* A dark theme over a dark wallpaper: the tint a touch lighter, so the glass shows over pure black. */
+/* A dark theme over a dark wallpaper: the tint a touch lighter, so the glass shows over pure black - the theme's glass
+   colour towards white in oklab, its hue kept (it was lifted towards a cool blue-grey in every theme). */
 :root[data-light="false"]:not([data-wallpaper="light"]) :is(.chrome-surface, .app-screen.tile, .lib-card.tile, .ai-screen .tile, .folder-sheet .folder-bg.tile, .home:has(.ai-panel) .launcher-frame.tile, .notif-panel :is(.cc.v3, .notif-own), .page .home-tile > .tile, :is(.home > .bar .bar-pill, .home .dsb-glass)) {
-  --frost-base: color-mix(in oklab, var(--glass-base) 50%, color-mix(in oklab, var(--frost-cool) 80%, var(--color-foreground)));
+  --frost-base: color-mix(in oklab, var(--glass-tone) 88%, white);
 }
 html:root .chrome-surface, html.glass-native .app-screen.tile.sheet, html:root .lib-card.tile, html:root .ai-screen .tile, html:root .folder-sheet .folder-bg.tile, html:root .home:has(.ai-panel) .launcher-frame.tile, html:root .notif-panel .cc.v3, html:root .page .home-tile > .tile, html:root :is(.home > .bar .bar-pill, .home .dsb-glass) {
   --glass-blur-native: var(--frost-blur-native);
@@ -3166,7 +3168,7 @@ html:root:not(.glass-native) .ai-screen .tile { background: var(--frost-fill); }
  */
 .ai-screen :is(.ai-top > *, .ai-heading:not(.ai-mail-bar), .ai-mail-bar > *, .ai-empty):not(.tile *),
 .ai-screen.wide .ai-fold:not(.tile *) {
-  --frost-fill: color-mix(in srgb, var(--frost-base) 82%, transparent);
+  --frost-fill: color-mix(in srgb, var(--frost-base) max(82%, var(--tone-alpha)), transparent);
   display: inline-flex;
   align-items: center;
   width: fit-content;

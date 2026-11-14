@@ -91,9 +91,10 @@ covers both halves of that rule:
 
 ## Frost (PowOS AI, its pull-up panel, the control center: shell.css "frost v2", theme.css --frost-*)
 - One material: the compositor's blur per surface (nativeglass.ts reads `--glass-blur-native` per element; 360 on
-  these, 140 elsewhere; the shade window's radius is the page's: `powos.shade.blur(dp)` in shade.tsx), a cool tint
-  (`--frost-base`/`--frost-fill`) at the reference strength. Over the OTHER tone of wallpaper it flips to that tone
-  (light glass + `--frost-ink` text) - never a heavier fill (an 84% fill read as "brown slab" and was rejected).
+  these, 140 elsewhere; the shade window's radius is the page's: `powos.shade.blur(dp)` in shade.tsx), tinted with the
+  THEME's glass colour (`--glass-tone`, theme.css; 11-14: every glass tint is it, never black/white/a cooled grey -
+  DESIGN-LANGUAGE.md §2) at `--glass-tint + --frost-lift`. Over the OTHER tone of wallpaper the same colour, deeper
+  (`--tone-alpha` 88/86%), never the wallpaper's tone. Gate glass-tint-tone checks hue + 4.5:1 in 3 themes.
 - No text halos (read as highlighter on a light wallpaper). Labels on raw wallpaper = small frost pills with
   `--lift-edge`. Inside the frost, secondary text is the ink itself, not a see-through grey.
 - Over pure black the blur is black: keep the glass visible with the sheen + lit edge (`--frost-sheen`).
