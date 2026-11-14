@@ -321,6 +321,7 @@ is not scanned. A marker in the code says *why* and *the real fix* where it stan
 
 <!-- hack-registry:start -->
 | `lib/apps/powos-noroot-services:13` | Without root the launcher starts SpacetimeDB and the App API itself in the PowOS image with no budgets, restarts or idle unload: powos-supervisor needs root (state in /run, user switches through powos-runtime). | powos-supervisor gets a no-root mode (its own uid, no user switch, state under XDG_RUNTIME_DIR) and EngineServices runs that instead. |
+| `lib/apps/powos-noroot-services:53` | Under the no-root engine SpacetimeDB's data (keys, data, publish stamps) lives in the app's run dir (`$XDG_RUNTIME_DIR/stdb`, migrated once from /var/lib/powos/stdb and the 11-14 on-device `stdb-data` hack): its atomic config writes are raw `renameat` syscalls (Rust tempfile/rustix) that bypass fakechroot's LD_PRELOAD path rewrite, ENOENT on the in-image path; the run dir is in FAKECHROOT_EXCLUDE_PATH, so both paths are the same. | The engine translates raw path syscalls too (a seccomp trap on the `*at` calls); then every service keeps its manifest's data dir. |
 | marker | why | real fix |
 |---|---|---|
 | `shell/ui/nativeglass.ts:532` | No blur regions while a web window's resize drag moves: any region on home's layer makes SurfaceFlinger GPU-compose the whole stack every frame (clientType=BLUR), ~5 ms a frame and the drag's held frames. | Glass whose blur doesn't force client composition: home's own blurred backdrop in its buffer, or a blurred wallpaper layer redrawn only on change. |

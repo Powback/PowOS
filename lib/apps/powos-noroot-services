@@ -25,6 +25,7 @@ state under XDG_RUNTIME_DIR) and the launcher runs that instead; then this goes.
 import hashlib
 import json
 import os
+import shutil
 import socket
 import subprocess
 import sys
@@ -49,10 +50,76 @@ def listening(addr, timeout=0.3):
         return False
 
 
-def command(manifest):
+# HACK: under the no-root engine (fakechroot, FAKECHROOT_BASE set) SpacetimeDB's data lives in the app's run dir, not
+# /var/lib/powos/stdb: its atomic writes (config.toml, metadata.toml: tempfile + rename) are raw renameat syscalls from
+# Rust's tempfile/rustix, which bypass fakechroot's LD_PRELOAD path rewrite, so the kernel gets the in-image path and
+# says ENOENT; the server never came up (razr ISSUES 11-14). XDG_RUNTIME_DIR (the app's files/run) is in
+# FAKECHROOT_EXCLUDE_PATH, so there the image's path and the kernel's are the same and raw syscalls work; files/run
+# survives app restarts. Real fix: the engine translates raw path syscalls too (a seccomp trap on the *at calls), then
+# every service keeps its manifest's data dir.
+NOROOT_DATA = {"dev.powos.spacetimedb": "stdb"}
+# Where the 11-14 on-device hack put the data (`--data-dir $XDG_RUNTIME_DIR/stdb-data`): moved into the new place once.
+NOROOT_LEGACY = {"dev.powos.spacetimedb": {"stdb-data": "data"}}
+
+
+def noroot():
+    return bool(os.environ.get("FAKECHROOT_BASE"))
+
+
+def data_dir(manifest):
+    """The service's data dir: the manifest's, or under a no-root engine the run-dir one (NOROOT_DATA)."""
+    b = manifest["backend"]
+    data = b.get("data", "")
+    run = os.environ.get("XDG_RUNTIME_DIR", "")
+    if data and noroot() and manifest["id"] in NOROOT_DATA and run.startswith("/"):
+        return os.path.join(run, NOROOT_DATA[manifest["id"]])
+    return data
+
+
+def _empty(path):
+    return not os.path.lexists(path) or (os.path.isdir(path) and not os.path.islink(path) and not os.listdir(path))
+
+
+def migrate(manifest, data):
+    """Moves what an earlier start left in the manifest's data dir (keys, data, publish stamps) and in the on-device
+    hack's dir (NOROOT_LEGACY) into [data], once: an entry moves only when [data] has none (or an empty one) - never
+    over data. Only called when the service isn't listening, so nothing is writing there."""
+    old = manifest["backend"].get("data", "")
+    if not old or os.path.abspath(old) == os.path.abspath(data):
+        return []
+    os.makedirs(data, exist_ok=True)
+    run = os.environ.get("XDG_RUNTIME_DIR", "")
+    moves = [(os.path.join(run, a), os.path.join(data, b)) for a, b in NOROOT_LEGACY.get(manifest["id"], {}).items()]
+    if os.path.isdir(old):
+        moves += [(os.path.join(old, e), os.path.join(data, e)) for e in sorted(os.listdir(old))]
+    out = []
+    for src, dst in moves:
+        if _empty(src):
+            continue
+        if not _empty(dst):
+            out.append(f"{manifest['id']}: kept {src} ({dst} has data)")
+            continue
+        if os.path.isdir(dst) and not os.path.islink(dst):
+            os.rmdir(dst)
+        shutil.move(src, dst)
+        out.append(f"{manifest['id']}: moved {src} -> {dst}")
+    for src, _ in moves:  # emptied leftovers (an old run's empty data/), then the old dir itself
+        if os.path.isdir(src) and _empty(src):
+            os.rmdir(src)
+    if os.path.isdir(old) and _empty(old):
+        os.rmdir(old)
+    return out
+
+
+def command(manifest, data=None):
     """The service's exec with ${data} filled in, its program found (FALLBACK), or None when the image hasn't it."""
     b = manifest["backend"]
-    exe = [x.replace("${data}", b.get("data", "")) for x in b["exec"]]
+    data = b.get("data", "") if data is None else data
+    run = os.environ.get("XDG_RUNTIME_DIR", "")
+    # An image still carrying the on-device hack (a literal --data-dir in the run dir) gets the migrated place.
+    legacy = {os.path.join(run, a): os.path.join(data, b2) for a, b2 in NOROOT_LEGACY.get(manifest["id"], {}).items()} \
+        if run.startswith("/") and data != b.get("data", "") else {}
+    exe = [legacy.get(x, x.replace("${data}", data)) for x in b["exec"]]
     exe = [FALLBACK.get(x, x) if not os.path.exists(x) else x for x in exe]
     return exe if all(os.path.exists(x) for x in exe if x.startswith("/usr/")) else None
 
@@ -65,12 +132,14 @@ def start(name):
     listen = m.get("needs", {}).get("listen", [])
     if listen and listening(listen[0]):
         return f"{m['id']}: up"
-    exe = command(m)
+    data = data_dir(m)
+    exe = command(m, data)
     if not exe:
         return f"{m['id']}: not in this image"
     b = m["backend"]
-    data = b.get("data")
     if data:
+        for line in migrate(m, data):
+            print(line, flush=True)
         os.makedirs(data, exist_ok=True)
         for step in b.get("prepare", []):
             subprocess.run(["sh", "-c", step], cwd=data, check=False)
@@ -93,17 +162,61 @@ def exists(db):
         return False
 
 
+CLI_TOML = os.path.join("~", ".config", "spacetime", "cli.toml")
+SERVER_NAME = "powos"
+
+
+def cli_token():
+    try:
+        with open(os.path.expanduser(CLI_TOML)) as f:
+            for line in f:
+                k, _, v = line.partition("=")
+                if k.strip() == "spacetimedb_token" and v.strip().strip('"'):
+                    return v.strip().strip('"')
+    except OSError:
+        pass
+    return None
+
+
+def identity():
+    """The device owner's CLI identity (~/.config/spacetime/cli.toml), made by THIS server before anything publishes:
+    without it the first `spacetime publish` mints an anonymous one, a later `spacetime login` replaces it, and the
+    registry's owner is lost for good - every `powos app install` refused (razr ISSUES 11-14). Once: an identity that
+    is there is kept. None when there is one, else why not."""
+    if cli_token():
+        return None
+    subprocess.run(["spacetime", "server", "add", "--url", STDB, SERVER_NAME, "--default", "--no-fingerprint"],
+                   capture_output=True, text=True)  # fails when it's there already: fine, login names it
+    r = subprocess.run(["spacetime", "login", "--server-issued-login", SERVER_NAME], capture_output=True, text=True)
+    if cli_token():
+        return None
+    return f"no CLI identity ({CLI_TOML}): spacetime login: {(r.stdout + r.stderr).strip()[-300:] or f'rc {r.returncode}'}"
+
+
+def stdb_data():
+    """SpacetimeDB's data root here (data_dir: the run dir's under a no-root engine), for the publish stamps."""
+    try:
+        with open(os.path.join(SERVICES, "spacetimedb.json")) as f:
+            return data_dir(json.load(f))
+    except (OSError, ValueError, KeyError):
+        return "/var/lib/powos/stdb"
+
+
 def publish(bundled):
-    """Each <database>.wasm the APK ships, published when it isn't the one last published from it (its sha)."""
-    if not bundled or not os.path.isdir(bundled):
-        return []
+    """Each <database>.wasm the APK ships, published when it isn't the one last published from it (its sha), by the
+    device owner's identity (identity(): made first, so the owner of the registry is the CLI's)."""
     for _ in range(60):
         if listening("127.0.0.1:3410"):
             break
         time.sleep(0.5)
     else:
         return ["publish: SpacetimeDB didn't come up"]
-    stamps = "/var/lib/powos/stdb/bundled"
+    why = identity()  # also with nothing to publish: `powos app install` then publishes as this owner
+    if why:
+        return [f"publish: not publishing, {why}"]
+    if not bundled or not os.path.isdir(bundled):
+        return []
+    stamps = os.path.join(stdb_data(), "bundled")
     os.makedirs(stamps, exist_ok=True)
     out = []
     for f in sorted(os.listdir(bundled)):

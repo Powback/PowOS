@@ -843,6 +843,14 @@ def ensure_published_with_registry(d, m, optional):
     ensure_published(d, m)
 
 
+def reason(e):
+    """A failure's last meaningful line: `spacetime call failed:` heads the CLI's output and the real error (e.g. the
+    registry's `only the device owner installs apps`) comes after it, so the first line said nothing (razr 11-14)."""
+    lines = [re.sub(r"^(\d+: |Error: )", "", ln.strip()) for ln in str(e).splitlines()]
+    useful = [ln for ln in lines if ln and not ln.endswith(":")]  # headers: `spacetime call failed:`, `Caused by:`
+    return useful[-1] if useful else (str(e).strip() or type(e).__name__)
+
+
 def register_row(text, optional):
     if optional and not shutil.which("spacetime"):
         return False
@@ -852,7 +860,7 @@ def register_row(text, optional):
     except Fail as e:
         if not optional:
             raise
-        log(f"note: not in the app registry ({str(e).splitlines()[0]}); the launcher lists it from its files")
+        log(f"note: not in the app registry ({reason(e)}); the launcher lists it from its files")
         return False
 
 

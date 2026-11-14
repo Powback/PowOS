@@ -209,7 +209,9 @@ class NoModule(Down):
 def http(path, body, ctype):
     tok = token()
     if not tok:
-        raise Down("no SpacetimeDB identity (~/.config/spacetime/cli.toml)")
+        raise Down("no SpacetimeDB identity (~/.config/spacetime/cli.toml): on a no-root phone the PowOS app's "
+                   "powos-noroot-services makes it when it starts SpacetimeDB (reopen the app); elsewhere "
+                   "`spacetime login --server-issued-login <server>`")
     req = urllib.request.Request(f"{SERVER}{path}", data=body, method="POST",
                                  headers={"Content-Type": ctype, "Authorization": f"Bearer {tok}"})
     try:
