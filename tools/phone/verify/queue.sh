@@ -292,8 +292,20 @@ screen_wrong() { local l; l=$(grep -E '^([0-9:]+ )?(INVALID|SKIP|FAIL)' "$1" 2>/
     *"needs the cover screen"*|*"requested cover but actual display is"*) echo cover ;;
     *) return 1 ;;
   esac; }
+# Virtual fold (QUEUE_VIRTUAL_FOLD, default 1; the user 11-15: "just virtually unfold"): a job that needs the other
+# screen is not held - in its window the runner forces the posture (`cmd device_state state 3` inner / `0` cover, as the
+# checks' own e2e_setup does) and resets it right after the job (vfold_reset). Only inside a window: the phone is idle
+# there, and idle.sh takes an mOverrideState change as the tools' own, not a touch. 11-14: four inner-screen checks
+# waited 17 h for a folded phone. QUEUE_VIRTUAL_FOLD=0: the old hold (the queue never folds anything).
+VFOLD=0
+vfold() { local w=$1 s; [ "${QUEUE_VIRTUAL_FOLD:-1}" = 1 ] || return 0; s=$(screen_now); [ -n "$s" ] && [ "$s" != "$w" ] || return 0
+  perl -e 'alarm shift; exec @ARGV' 15 "$phone/adb.sh" shell "cmd device_state state $([ "$w" = inner ] && echo 3 || echo 0)" >/dev/null 2>&1 || return 0
+  VFOLD=1; rm -f "$Q/screen.now"; sleep 4; echo "$(date +%T) virtual $w screen for the job (device_state override, reset after it)"; }
+vfold_reset() { [ "$VFOLD" = 1 ] || return 0; VFOLD=0
+  perl -e 'alarm shift; exec @ARGV' 15 "$phone/adb.sh" shell "cmd device_state state reset" >/dev/null 2>&1; rm -f "$Q/screen.now"; }
 # screen_held <job name>: (the job's vars sourced) it needs the screen that's off - one line why, returns 0.
-screen_held() { local w=${screen:-${wscreen:-}} s; [ -n "$w" ] || return 1; s=$(screen_now)
+# With virtual fold on, nothing is held for its screen (vfold forces it in the window).
+screen_held() { local w=${screen:-${wscreen:-}} s; [ -n "$w" ] || return 1; [ "${QUEUE_VIRTUAL_FOLD:-1}" = 1 ] && return 1; s=$(screen_now)
   [ -n "$s" ] && [ "$s" != "$w" ] || return 1
   echo "$(date +%T) ${1:-job}: waits for the $w screen (phone $([ "$s" = cover ] && echo folded || echo unfolded)) - stays queued, no try counted"; }
 # job_wscreen <job> <screen>: remember the screen a check said it needs (screen_wrong) for the windows after.
@@ -959,7 +971,8 @@ EOS
           echo "$(date +%T) the phone isn't reachable - leaving the window, jobs stay queued"; exit 3
         fi
         task=; close=0; tries=0; after=0; cwd=$PWD; rel=0; from=; name=; screen=; wscreen=; budget=300; need=; qt=0; cmd=(); . "$j"
-        # Folded / unfolded since the window picked it: it waits for its screen (screen_held), stays queued.
+        # Folded / unfolded since the window picked it: forced virtually (vfold), else it waits for its screen (screen_held).
+        [ -z "${screen:-${wscreen:-}}" ] || vfold "${screen:-$wscreen}"
         screen_held "$(basename "$j" .job)" && continue
         # A job from before repo-relative jobs: its worktree may be gone - run it in the verify checkout instead.
         if [ "$rel" != 1 ] && [[ "$cwd ${cmd[*]}" == *"$REPO/.claude/worktrees/"* ]]; then
@@ -1023,7 +1036,7 @@ EOS
         kill "$budp" 2>/dev/null; wait "$budp" 2>/dev/null
         [ -n "$why" ] || [ ! -e "$log.timedout" ] || why=timeout; rm -f "$log.timedout"
         [ -n "$why" ] && endjob $jp
-        wait $jp; rc=$?
+        wait $jp; rc=$?; vfold_reset
         # A killed check's phone side keeps running (td-launch-phone.sh outlived its budget kill by 2 min and overlapped
         # the next check, 04:31): end every <check>-phone.sh of this job on the phone too.
         if [ -n "$why" ]; then

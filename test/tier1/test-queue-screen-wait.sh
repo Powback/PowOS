@@ -12,6 +12,8 @@ sel=$(sed -n '/^  job_held() {/,/^    return 1; }$/p; /^  select_jobs() {/,/^   
 for f in screen_now screen_wrong screen_held job_wscreen; do grep -q "^$f() {" <<<"$fns" || { echo "FAIL couldn't find $f in queue.sh"; exit 1; }; done
 [ -n "$sel" ] || { echo "FAIL couldn't find job_held/select_jobs in queue.sh"; exit 1; }
 eval "$fns"; eval "$sel"
+# The hold below is QUEUE_VIRTUAL_FOLD=0's; the default forces the screen in the window instead (vfold, 11-15).
+export QUEUE_VIRTUAL_FOLD=0
 shipped() { return 0; }; closes_game() { return 1; }
 T=$(mktemp -d "${TMPDIR:-/tmp}/screen-wait.XXXXXX"); trap 'rm -rf "$T"' EXIT
 Q=$T/q; mkdir -p "$Q/done"; phone=$T/phone; mkdir -p "$phone"
@@ -64,5 +66,8 @@ unfold; select_jobs "" >/dev/null; [ ${#sel[@]} = 2 ] && ok "unfolded: it runs a
 grep -qF 'ws=$(screen_wrong "$log") && kind=screen' "$src" && ok "rc 3 classifies a wrong-screen exit as kind=screen" || bad "kind=screen wiring"
 grep -qF 'if [ "$kind" = screen ]; then' "$src" && grep -qF 'job_wscreen "$j" "$ws"' "$src" && ok "kind=screen: job_wscreen, no rc3_requeue" || bad "screen branch wiring"
 grep -qF 'screen_held "$(basename "$j" .job)" && continue' "$src" && ok "each job re-checks its screen before it runs" || bad "per-job screen check"
+# Default (virtual fold on): a folded phone holds no inner job - the window forces the screen and resets it after.
+fold; screen=inner; wscreen=; QUEUE_VIRTUAL_FOLD=1 screen_held vjob >/dev/null && bad "virtual fold: folded phone still holds an inner job" || ok "virtual fold: an inner job isn't held while folded"
+grep -qF 'vfold "${screen:-$wscreen}"' "$src" && grep -qF 'wait $jp; rc=$?; vfold_reset' "$src" && ok "the window forces the job's screen and resets it after the job" || bad "vfold / vfold_reset wiring"
 [ $fails = 0 ] && echo "all passed" || echo "$fails failed"
 exit $(( fails > 0 ))
