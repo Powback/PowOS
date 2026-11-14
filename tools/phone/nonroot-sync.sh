@@ -70,11 +70,20 @@ want=$(cat "$APK.commit" 2>/dev/null || true)
 tip=$(cat "$Q/live" 2>/dev/null || true)
 known() { [ -n "$1" ] && g cat-file -e "$1^{commit}" 2>/dev/null; }
 
-# resolve PREFIX: the device's adb address from mDNS (ip:port), else an already-connected serial with that prefix.
-resolve() { local a
-  a=$("$ADB" mdns services 2>/dev/null | awk -v p="$1" 'index($1, p) == 1 && $2 ~ /_adb-tls-connect/ {print $3; exit}')
-  [ -n "$a" ] || a=$("$ADB" devices 2>/dev/null | awk -v p="$1" 'index($1, p) == 1 && $2 == "device" {print $1; exit}')
-  [ -n "$a" ] && echo "$a"; }
+# resolve PREFIX: an already-connected serial with that prefix that answers, else the first mDNS address (ip:port)
+# that answers after a connect, else the first mDNS address (logged as not answering). mDNS keeps a stale entry after
+# wireless debugging restarts on a new port ("<name>" at the old port beside "<name> (2)" at the live one): taking
+# the first entry left the razr without APK installs for hours on 11-14 ("192.168.50.18:33919 not answering").
+resolve() { local a first=""
+  a=$("$ADB" devices 2>/dev/null | awk -F'\t' -v p="$1" 'index($1, p) == 1 && $2 == "device" {print $1}' | while IFS= read -r d; do
+    [ "$("$ADB" -s "$d" get-state 2>/dev/null | tr -d '\r')" = device ] && { echo "$d"; break; }; done)
+  [ -z "$a" ] || { echo "$a"; return 0; }
+  for a in $("$ADB" mdns services 2>/dev/null | awk -F'\t' -v p="$1" 'index($1, p) == 1 && $2 ~ /_adb-tls-connect/ {print $3}'); do
+    [ -n "$first" ] || first=$a
+    "$ADB" connect "$a" >/dev/null 2>&1
+    [ "$("$ADB" -s "$a" get-state 2>/dev/null | tr -d '\r')" = device ] && { echo "$a"; return 0; }
+  done
+  [ -n "$first" ] && echo "$first"; }
 # delta A B: shell files changed A -> B (no dev/test): "+f" to push, "-f" to remove. A unknown: every file at B.
 delta() {
   if known "$1"; then g diff --name-only "$1" "$2" -- shell/; else g ls-tree -r --name-only "$2" -- shell/; fi |
