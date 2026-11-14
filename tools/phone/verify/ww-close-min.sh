@@ -32,6 +32,10 @@ else sh_ "input tap $d"; say "dock: tapped $a's cell at $d"
 p=$(wwpt "$WID" .ww-close)
 if [ -n "$p" ]; then sh_ "input tap $p"; say "close: tapped close at $p"
   until_ 5 '[ "$(wwhost "$WID" gone)" = true ]' || bad "close: $WID still listed ($(wwhost "$WID" state)) 5 s after its close tap"
-  until_ 10 '! ww_running "$a"' || bad "close: $a still runs 10 s after its window's close"
+  # Still running: why, in the log (11-13 16:04: KWin's quit ran powos-app-quit, whose TERM and KILL left kate "still
+  # there" - as every app it ended since 10-31 - and nothing said why). A zombie counts as ended (ww_running).
+  until_ 10 '! ww_running "$a"' || { bad "close: $a still runs 10 s after its window's close"
+    ww_procs "$a" | sed "s/^/  proc: /" | tee -a "$OUT/log.txt"
+    sh_ "grep -E \"quit [0-9]+ :|powos-app-quit\" /data/powos/root/run/powos-app/hyprland.log | tail -8" | sed "s/^/  kwin: /" | tee -a "$OUT/log.txt"; }
 else bad "close: $WID has no close button on screen"; fi
 wwc_end "$a minimised by its button, back by its dock cell, closed by its button (window and process gone)"

@@ -86,5 +86,14 @@ sleep 0.3
 check "a plain app and its child end" '! alive $app && ! alive ${kid:-0}'
 check "a plain app never calls powos game" '[[ $(wc -l < "$T/powos.calls") == 1 ]]'
 
+# An app whose parent never waits (11-13: every "ending" since 10-31 logged "still there" after the KILL): ended, it
+# is a zombie until that parent reaps it - "ended", not "still there", and the check's process test agrees.
+(exec -a holder bash -c '(exec -a kate sleep 300) & exec sleep 300') &
+holder=$!; pids+=("$holder")
+for _ in $(seq 50); do zk=$(pgrep -P "$holder" | head -1); [[ -n "$zk" ]] && break; sleep 0.1; done
+out=$("$QUIT" "${zk:-0}" 2>&1)
+check "an app left a zombie by its parent counts as ended" 'echo "$out" | grep -q "ended on TERM" && ! echo "$out" | grep -q "still there"'
+check "the zombie is still listed (the case is real)" '[[ -d /proc/${zk:-0} ]] && grep -q "^State:.*Z" /proc/${zk:-0}/status'
+
 echo "== $PASS passed, $FAIL failed =="
 [[ $FAIL == 0 ]]

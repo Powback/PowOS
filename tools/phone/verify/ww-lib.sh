@@ -61,7 +61,11 @@ ww_us() { local f; f=$(mktemp "${TMPDIR:-/tmp}/wwus.XXXXXX"); printf '%s\n' "$1"
 # ww_ready: home shows web windows here (unfolded, the host has the list) - else nothing a check can open.
 ww_ready() { [ "$(hcall webwindows.list "[]" "l=>'ok'")" = ok ]; }
 # ww_running <proc>: true when that process runs in the session (the user's app - never opened over, never closed).
-ww_running() { [ -n "$(ww_us "pgrep -x '$1' | head -1")" ]; }
+# A zombie is no running app (it has ended; only its parent's wait is missing) - pgrep lists zombies too.
+ww_running() { [ -n "$(ww_us "for p in \$(pgrep -x '$1'); do grep -q '^State:.*Z' /proc/\$p/status 2>/dev/null || { echo \$p; break; }; done")" ]; }
+# ww_procs <proc>: each of that app's processes in the session, one line: pid, state, parent (its name and state),
+# wchan, cgroup (frozen?), pending/blocked signals - why an app outlived its window's close.
+ww_procs() { ww_us "for p in \$(pgrep -x '$1'); do pp=\$(awk '/^PPid:/{print \$2}' /proc/\$p/status); cg=\$(sed -n 's/^0:://p' /proc/\$p/cgroup); echo \"\$p \$(grep -E '^(State|SigPnd|ShdPnd|SigBlk|SigIgn)' /proc/\$p/status | tr -s '\t\n' '  ') wchan=\$(cat /proc/\$p/wchan 2>/dev/null) parent \$pp:\$(cat /proc/\$pp/comm 2>/dev/null) \$(grep '^State' /proc/\$pp/status 2>/dev/null | tr -s '\t' ' ') cgroup \$cg frozen=\$(cat /sys/fs/cgroup\$cg/cgroup.freeze 2>/dev/null)\"; done"; }
 # ww_open <key> <secs>: launch it as a tap would (apps.launch), wait up to secs for a NEW web window of that key whose
 # body is live (its app's frames, not the launch placeholder); prints "w<id>" (rc 1 and the last state when none).
 ww_open() { local key=$1 s=$2 before r n="" i live=""

@@ -43,6 +43,17 @@ description: Use when working on PowOS window tasks - floating Android windows (
   "system.home" -> state.ts goHome() -> page 0 (closes drawer/menus too).
 
 ## Pitfalls already paid for
+- Checks vs the user's windows (11-13 triage): the user's Chrome web window FULL SCREEN behind home made e2e-desktop
+  parts 1/3 + board-look chrome-size FAIL (a launch brings the full-screen task up - right); e2e_setup now puts the
+  user's full-screen web windows back in their windows (e2e_unfull) and full screen again at the restore. A bar drag
+  dropped on another window's bar is a TAB drop (joined the user's Steam: "[tabs] window 16 joined 10") - part2_drag
+  picks a drop spot clear of other windows (otherat). dock_tap refuses while home's page is hidden (it tapped Chrome's
+  tab strip). float-windows.sh = the old freeform path: ENV skip while powos_web_windows=1.
+- powos-app-quit (KWin "quit" 3 s after a close) has logged "still there" after TERM+KILL for EVERY app since 10-31
+  (90x, $XDG_RUNTIME_DIR/powos-app-quit.log; KWin's log is /data/powos/root/run/powos-app/hyprland.log), with
+  "environ: Permission denied" on the same pid; the same script from user.sh ends a powos-run'd process (also a
+  cgroup-v2-frozen one) on TERM. Cause open: it now logs kill's errors and the survivor's state ("why"); ww-close-min
+  prints ww_procs + the KWin quit lines on its FAIL. ww_running / powos-app-quit count a zombie as ended.
 - Vanish bug: a transform on `.screens` (then static, 0 px) made it the containing block of its fixed children ->
   .home 0 px tall for the swipe (bare wallpaper). `.screens` is `position:absolute; inset:0`: any transformed ancestor
   of fixed UI needs a real box.

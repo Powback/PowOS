@@ -493,7 +493,34 @@ e2e_setup() {
   sh_ "cmd statusbar collapse; am start -W -a android.intent.action.MAIN -c android.intent.category.HOME >/dev/null"; sleep 1.5; chk home
   # The journey starts on page 1 (PowOS AI's page or another one: back to it at the end).
   hemit system.home null
+  e2e_unfull
   log "on: ${W}x${H} @${DENS} dpi, home page $PAGE0, layout $LAY0"
+}
+# e2e_unfull: the user's web windows in full screen go back to their windows for the journey (FULL0), full screen again
+# at the restore. Why (11-13 15:21-16:06, rounds 263 + lookw-chrome-size): the user's Chrome (w2) was full screen behind
+# home; Chrome from the drawer/dock brought that full-screen task up (right for a launch), so "Chrome as a floating
+# window", its dock-tap minimise (the tap landed in Chrome's own tab strip), home's search and every Chrome step after
+# FAILed - the journey tested the user's state, not the product.
+FULL0=""
+e2e_unfull() {
+  local f id; f=$(hcall webwindows.list "[]" "l=>l.filter(w=>w.state==='full').map(w=>w.id).join(' ')")
+  case $f in ERR*) return 0 ;; esac
+  for id in $f; do
+    [[ $id =~ ^[0-9]+$ ]] || continue
+    hcall webwindows.toWindow "[$id]" "()=>'ok'" >/dev/null; FULL0="$FULL0 $id"
+    log "web window w$id was full screen (the user's): back in its window for the journey, full screen again after"
+  done
+  [ -n "$FULL0" ] && { sleep 2; sh_ "am start -W -a android.intent.action.MAIN -c android.intent.category.HOME >/dev/null"; sleep 1; hemit system.home null; }
+  return 0
+}
+# e2e_refull: those windows full screen again (before the restore's home intent: behind home, as they started).
+e2e_refull() {
+  local id
+  for id in $FULL0; do
+    [ "$(wwhost "w$id" gone)" = true ] && continue
+    hcall webwindows.fullScreen "[$id]" "()=>'ok'" >/dev/null; sleep 1.5; log "web window w$id full screen again (the user's)"
+  done
+  FULL0=""
 }
 # Everything the journey opened closed, the start state back (also on an abort: a touch, the budget, a FAIL exit).
 RESTORED=0
@@ -522,6 +549,7 @@ e2e_restore() {
   [ -n "$kill" ] && us "for p in$kill; do pkill -x \$p; done; true" >/dev/null
   # The journey's shade never left down for the next one (its window over home eats the next tap).
   SHADE_LEFT=$(shadeup); shade_shut "the restore"
+  e2e_refull
   [ $FORCED = 1 ] && { device_state_reset; sleep 1.5; }
   sh_ "am start -a android.intent.action.MAIN -c android.intent.category.HOME >/dev/null"; sleep 1
   # Once more after home is up: a minimised window (under home) wasn't in the list the first read saw (e2e r3 part 1

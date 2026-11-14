@@ -113,14 +113,25 @@ log "ending $(for p in "${go[@]}"; do printf '%s:%s ' "$p" "$(comm_of "$p")"; do
 # A frozen app (unified sleep) answers no TERM: thawed first (SIGKILL ends frozen tasks anyway).
 timeout 2 dbus-send --session --print-reply=literal --reply-timeout=1500 --dest=dev.powos.Sleep /Gui \
   dev.powos.Sleep.Gui.Wake "string:$pid" >/dev/null 2>&1 || true
-kill -TERM "${go[@]}" 2>/dev/null
+# alive <pid>: still a process - a zombie has ended (only its parent's wait is missing), it isn't "still there".
+alive() { [[ -d /proc/$1 ]] && ! grep -q '^State:.*Z' "/proc/$1/status" 2>/dev/null; }
+# why <pid>: what a process that outlived its signals is doing, for the log - every "ending" since 10-31 (90 of them:
+# foot, kate, dolphin, konsole) ended "still there" after the KILL, and kill's errors went to /dev/null. Its state,
+# parent, ids, capabilities, wait channel, signals and cgroup, and whether this script may read it at all (KWin's
+# child got "environ: Permission denied" on the same pids).
+why() { local s; s=$(grep -E '^(State|PPid|Uid|Gid|CapPrm|SigPnd|ShdPnd|SigBlk|SigIgn)' "/proc/$1/status" 2>&1 | tr -s '\t\n' '  ')
+  echo "$1 [$s wchan=$(cat "/proc/$1/wchan" 2>&1) cgroup=$(sed -n 's/^0:://p' "/proc/$1/cgroup" 2>&1) environ=$(head -c1 "/proc/$1/environ" >/dev/null 2>&1 && echo readable || echo denied)]"; }
+e=$(kill -TERM "${go[@]}" 2>&1) || log "TERM: kill said: $e (we are $(id))"
 for _ in $(seq 20); do
-  left=(); for p in "${go[@]}"; do [[ -d /proc/$p ]] && left+=("$p"); done
+  left=(); for p in "${go[@]}"; do alive "$p" && left+=("$p"); done
   [[ ${#left[@]} == 0 ]] && { log "ended on TERM"; exit 0; }
   sleep 0.1
 done
 log "KILL after 2 s: ${left[*]}"
-kill -KILL "${left[@]}" 2>/dev/null
-sleep 0.3
-left=(); for p in "${go[@]}"; do [[ -d /proc/$p ]] && left+=("$p"); done
-[[ ${#left[@]} == 0 ]] && log "ended" || log "still there: ${left[*]}"
+e=$(kill -KILL "${left[@]}" 2>&1) || log "KILL: kill said: $e (we are $(id))"
+for _ in $(seq 10); do
+  sleep 0.2
+  left2=(); for p in "${left[@]}"; do alive "$p" && left2+=("$p"); done
+  [[ ${#left2[@]} == 0 ]] && { log "ended"; exit 0; }
+done
+log "still there 2 s after the KILL (we are $(id)): $(for p in "${left2[@]}"; do why "$p"; done)"

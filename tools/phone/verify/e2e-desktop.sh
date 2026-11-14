@@ -39,7 +39,10 @@ open_drawer() {
   sleep 1.2; chk drawer; [ "$(isopen)" = true ]
 }
 # dock_tap <key prefix> <name>: a real tap on its dock cell (read over CDP).
-dock_tap() { local p; p=$(pt "$(dockel "$1")"); case $p in none|off|"") fail "no dock cell for $2 ($p)"; return 1 ;; esac
+# Only while home's page is on screen: round 263 read the cell's spot from a hidden home under a full-screen Chrome and
+# the tap at 2180,214 went into Chrome's own tab strip.
+dock_tap() { local p v; v=$(ev "document.visibilityState"); [ "$v" = visible ] || { fail "no dock to tap for $2: home's page isn't on screen ($v)"; return 1; }
+  p=$(pt "$(dockel "$1")"); case $p in none|off|"") fail "no dock cell for $2 ($p)"; return 1 ;; esac
   set -- $p "$2"; tap "$1" "$2" "$3's dock cell"; }
 # put_away <window key> <dock key prefix> <name>: a dock tap on the focused window's app minimises it.
 put_away() {
@@ -170,6 +173,8 @@ part1() {
 }
 
 # Calculator dragged by its title bar. Split out of part2() (length budget) - same steps, CT global.
+# otherat <x> <y> (screen px): the id of a web window other than Calculator's ($CT) under that point, else "none".
+otherat() { ev "(()=>{const d=devicePixelRatio,e=document.elementFromPoint($1/d,$2/d)?.closest('.webwindow[data-wwid]'),i=e?.getAttribute('data-wwid');return i&&i!=='${CT#w}'?'w'+i:'none'})()"; }
 part2_drag() {
   # Drag by the title bar.
   local b0 b1 p x y dx=$(dp 120) dy=$(dp 60); b0=$(tbounds "$CT"); p=$(barpt "$CT")
@@ -181,6 +186,12 @@ part2_drag() {
   # screen edge (2467), its grip off screen and the resize below tapped nothing. Go left when the right has no room.
   [ $((W - ${3:-0})) -lt $((dx * 2)) ] && dx=$((-dx))
   if [ -n "$p" ]; then set -- $p; x=$1; y=$2
+    # The finger's drop point clear of the user's own windows: let go on another window's title bar the drag is a tab
+    # drop (WT1: Calculator joined that window's stack) - round 263 (11-13 15:22) dropped it on the user's floating
+    # Steam: "[tabs] window 16 joined 10", and the move, the dock cell, the edge carry and the restore all followed it.
+    local sx sy; for sx in 1 -1; do for sy in 1 -1; do
+      [ "$(otherat $((x + dx * sx)) $((y + dy * sy)))" = none ] && { dx=$((dx * sx)) dy=$((dy * sy)); break 2; }; done; done
+    [ "$(otherat $((x + dx)) $((y + dy)))" = none ] || note "every drop spot $dx,$dy around the bar is over another window ($(otherat $((x + dx)) $((y + dy))))"
     if mdown $x $y "Calculator's title bar"; then
       mpath $x $y $((x + dx)) $((y + dy)) 6
       sleep 0.3; mup $((x + dx)) $((y + dy)); sleep 1.2; chk drag
@@ -319,8 +330,11 @@ part3() {
   dock_tap "a:$CHROME/" Chrome || return
   chk chrome; CH=$(waitwin $CHROME 8)
   step chrome "Chrome opened from the dock"
-  [ "$CH" != none ] && floating "$CH" Chrome && pass "Chrome floats (task $CH)" || fail "no floating Chrome ($CH)"
-  if [ "$CH" != none ]; then
+  # Its scroll steps need a floating window's bounds: without them `set -- $b` left $1 unset and the part ended
+  # ("line 324: $1: unbound variable", round 263 part 3) with nothing restored by the steps after it.
+  local fl=0; [ "$CH" != none ] && floating "$CH" Chrome && fl=1
+  [ $fl = 1 ] && pass "Chrome floats (task $CH)" || fail "no floating Chrome ($CH)"
+  if [ $fl = 1 ]; then
     local b x y1 y2 u0 u1 u2 pg; b=$(tbounds "$CH"); set -- $b; x=$((($1 + $3) / 2)); y1=$(($2 + ($4 - $2) * 80 / 100)); y2=$(($2 + ($4 - $2) * 35 / 100))
     ui() { sh_ "uiautomator dump /data/local/tmp/e2e-ui.xml >/dev/null 2>&1; md5sum /data/local/tmp/e2e-ui.xml; rm -f /data/local/tmp/e2e-ui.xml" | cut -c1-12; }
     u0=$(ui); pg=$(hpage)
@@ -334,6 +348,7 @@ part3() {
     # Put away, not closed by its bar: the drawer's stages below pull on home, and Chrome left up (its close button
     # under the verify pill, round 1) took both pulls - they started inside its window, so they were Chrome's.
     put_away $CHROME "a:$CHROME/" Chrome chrome-away
+  elif [ "$CH" != none ]; then put_away $CHROME "a:$CHROME/" Chrome chrome-away
   fi
 
   # The drawer's two stages (pullup-stage2.sh's moves): a plain swipe = the drawer, no keyboard; pulled further and

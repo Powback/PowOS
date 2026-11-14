@@ -42,6 +42,12 @@ hcall_once() {
 # made again (up to 4 tries, 2 s apart). An answer from the page (ok, ERR ...) is final.
 hcall() { local v i; for i in 1 2 3 4; do v=$(hcall_once "$@"); case $v in ""|"cdp: adb"*|*"isn't running"*|"no page"*) echo "hcall $2: try $i: '${v}'" >&2; sleep 2 ;; *) echo "$v"; return ;; esac; done; echo "ERR no answer after 4 tries (${v:-empty})"; }
 
+# The old freeform path this check drives (WindowFrames' overlay bars, freeform launch options) is stood down while web
+# windows are on (docs/WEB_WINDOWS.md "One switch": AppWindows.floating() is false with powos_web_windows = 1): every
+# run since 10-23 FAILed at its first step ("home isn't in front after the home intent": a web window's display had the
+# focus) and could never pass. Web windows have their own checks (ww-*.sh, e2e-desktop.sh, board-look-windows.sh).
+[ "$(sh_ "settings get global powos_web_windows")" = 1 ] &&
+  { echo "ENV: powos_web_windows=1 - the freeform window path float-windows checks is off; web windows: ww-*.sh / e2e-desktop.sh"; exit 5; }
 s=$(sh_ "dumpsys power | sed -n s/.*mWakefulness=//p | head -1")
 [ "$s" = Awake ] || { echo "the screen is $s - not woken (rule); nothing done"; exit 3; }
 [ "$(sh_ "settings get global enable_freeform_support")" = 1 ] || fail "enable_freeform_support isn't 1 (OxygenOS coerces freeform to full screen)"
