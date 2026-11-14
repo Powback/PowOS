@@ -21,7 +21,7 @@ interface Entry {
   done: boolean;
 }
 
-/** A control's touches are its own: home's long press / drag of the tile doesn't start on it. */
+/** A control's taps are its own (home's tile tap doesn't fire too). A hold still lifts the tile, as on any launcher. */
 const own = { onPointerDown: (e: Event) => e.stopPropagation() };
 
 export default function Widget({ host, app: id }: Props) {

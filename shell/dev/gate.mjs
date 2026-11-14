@@ -11268,6 +11268,75 @@ async function nonrootIslandsCheck() {
   }
 }
 
+/**
+ * TH1 (island-hold; the razr's no-root log, 11-14 "[home] the test app widget can't be long-pressed or resized"): an
+ * app island whose control stopPropagation()s its pointerdown (dev/gate-island/widgets/hold.js, the template's `own`)
+ * still lifts with home's long press held on that control - the hold is the tile's, as on any Android launcher - and the
+ * control never gets a click from that hold. Control: a quick tap on it stays the control's (its click, no lift, no edit
+ * mode). And its cqmin type measures the tile (.island-face is the size container), not the screen. Real input
+ * (puppeteer's mouse: pointer capture and click targeting as on the phone), not synthetic events.
+ */
+async function islandHoldScene(r) {
+  const setup = await r.page.evaluate(async () => {
+    const S = await window.__gw.mod("./state.ts");
+    const L = await window.__gw.mod("./apps/localapps.ts");
+    S.page.value = 0;
+    await window.__gw.settled();
+    const page = S.pages.value[0];
+    window.__th = { had: S.home.value, hadLocal: L.localApps.value };
+    const man = JSON.stringify({ id: "gate.hold", name: "gate.hold", version: "1", module: null, widgets: [{ id: "main", name: "hold", kind: "island", entry: "widgets/hold.js", size: "2x2" }] });
+    L.localApps.value = { rooted: false, stdb: "up", mb: null, apps: [{ id: "gate.hold", name: "gate.hold", version: "1+apk1", database: "", tier: 0, manifest: man }] };
+    S.home.value = { ...S.home.value, items: [{ key: "panel:app:gate.hold/main", kind: "panel", name: "app:gate.hold/main", page, cell: { x: 1, y: 1, w: 2, h: 2 }, resizable: true, minSize: [1, 1], size: [2, 2] }] };
+    await window.__gw.until(() => document.querySelector(".gate-hold button"));
+    await window.__gw.settled();
+    const b = document.querySelector(".gate-hold button");
+    if (!b) return { fail: "the gate.hold island never loaded (no .gate-hold button)" };
+    const face = document.querySelector(".gate-hold").closest(".island-face").getBoundingClientRect();
+    const r = b.getBoundingClientRect();
+    return { x: r.left + r.width / 2, y: r.top + r.height / 2, font: parseFloat(getComputedStyle(b).fontSize), faceMin: Math.min(face.width, face.height) };
+  });
+  if (setup.fail) return [`TH1: ${setup.fail}`];
+  const state = () =>
+    r.page.evaluate(async () => {
+      const S = await window.__gw.mod("./state.ts");
+      return { taps: document.querySelector(".gate-hold button")?.textContent ?? "(gone)", carried: S.carry.value?.item?.key ?? null, editing: S.editing.value };
+    });
+  const fails = [];
+  try {
+    // cqmin of the tile: 12% of the island face's short side (the screen's would be ~2x on this phone-sized page).
+    if (!(setup.font <= setup.faceMin * 0.12 + 1)) fails.push(`TH1 (size): the island's 12cqmin type is ${setup.font.toFixed(1)} px, its tile's 12cqmin is ${(setup.faceMin * 0.12).toFixed(1)} px - cq units don't measure the tile`);
+    const m = r.page.mouse;
+    // Control: a tap is the control's.
+    await m.move(setup.x, setup.y);
+    await m.down();
+    await new Promise((ok) => setTimeout(ok, 60));
+    await m.up();
+    await new Promise((ok) => setTimeout(ok, 600));
+    let s = await state();
+    if (s.taps !== "taps 1" || s.carried || s.editing) fails.push(`TH1 (tap, control): a tap on the island's control should be its click only - got "${s.taps}", carried ${s.carried}, editing ${s.editing}`);
+    // The hold on the same control: the tile is lifted.
+    await m.down();
+    await new Promise((ok) => setTimeout(ok, 800));
+    s = await state();
+    if (s.carried !== "panel:app:gate.hold/main") fails.push(`TH1 (hold): held 800 ms on a control that stops pointerdown, the island wasn't lifted (carried ${s.carried}, editing ${s.editing})`);
+    await m.up();
+    await new Promise((ok) => setTimeout(ok, 300));
+    s = await state();
+    if (s.taps !== "taps 1") fails.push(`TH1 (hold): the lifting hold also clicked the control ("${s.taps}")`);
+    if (s.carried) fails.push(`TH1 (hold): let go, the island is still carried`);
+  } finally {
+    await r.page.evaluate(async () => {
+      const S = await window.__gw.mod("./state.ts");
+      const L = await window.__gw.mod("./apps/localapps.ts");
+      S.editing.value = false;
+      S.selected.value = null;
+      S.home.value = window.__th.had;
+      L.localApps.value = window.__th.hadLocal;
+    }).catch(() => {});
+  }
+  return fails;
+}
+
 /** WG1's steps in one page, the windows and home restored after. */
 async function gridSnapScene(r) {
   try {
@@ -14260,6 +14329,9 @@ try {
   // NI1: on a phone without root, the launcher's own apps' islands are on home and say what they wait for (nonroot-islands).
   if (process.env.SHELL_PAGES !== "0")
     runs.push(open(browser, `${ORIGIN}/index.html`, "nonroot-islands", { width: 412, height: 915 }).then((r) => whenReady(r, () => r.page.evaluate(nonrootIslandsCheck))));
+  // TH1: a hold on an island's control that eats pointerdown still lifts the tile; a tap stays the control's (island-hold).
+  if (process.env.SHELL_PAGES !== "0")
+    runs.push(open(browser, `${ORIGIN}/index.html`, "island-hold", { width: 412, height: 915 }).then((r) => whenReady(r, () => islandHoldScene(r))));
   // WG1: a window dragged on home snaps into the free cells beside the widgets (ww-gridsnap-unfolded; the user, 10-31 15:49).
   if (process.env.SHELL_PAGES !== "0")
     runs.push(open(browser, `${ORIGIN}/index.html`, "ww-gridsnap-unfolded", { width: 821, height: 883 }).then((r) => whenReady(r, () => gridSnapScene(r))));

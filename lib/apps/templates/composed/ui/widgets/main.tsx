@@ -15,7 +15,7 @@ import composition from "../composition.json";
 
 const C = composition as unknown as Composition;
 
-/** A control's touches are its own: home's long press / drag of the tile doesn't start on it. */
+/** A control's taps are its own (home's tile tap doesn't fire too). A hold still lifts the tile, as on any launcher. */
 const own = { onPointerDown: (e: Event) => e.stopPropagation() };
 
 /** em per character of the shell's monospace font, with room to spare (the phone's ~0.575, the preview's 0.5). */

@@ -3056,6 +3056,11 @@ html.glass:root .lock .lock-note.tile {
   width: 100%;
   height: 100%;
   overflow: hidden;
+  /* The tile is the island's size container: cq units in the module measure its tile, not the screen. A widget whose
+     root is itself the container and sets its type in cqmin there (the app template does) resolved against NO ancestor
+     before - the viewport: a ~130 px font on the razr's test island (no-root log, 11-14). Layout containment comes with
+     it: the module's position: fixed is the tile's (sheets go through host.DetailSheet, never fixed in the island). */
+  container-type: size;
 }
 
 /* A theme picked (app.tsx applyTheme): its colors fade in over 200 ms - colors and fills only, for a moment. */

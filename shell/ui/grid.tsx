@@ -352,39 +352,84 @@ async function letGo(c: Carry | null, ev: PointerEvent) {
   else await placeItem(c.item!.key, target.cell!, target.page);
 }
 
-/** A tile's press: a tap opens, a long press lifts it (and selects it, if it's let go where it is). */
+/**
+ * A tile's press: a tap opens, a long press lifts it (and selects it, if it's let go where it is).
+ *
+ * The hold is the tile's whatever its content does, as an Android launcher's (the razr's no-root log, 11-14: an app
+ * island's controls stopPropagation() their pointerdown, as the app template tells them to, so a hold on one never
+ * reached here and the widget could never be lifted or resized). So the hold is timed in the CAPTURE phase, before
+ * any content handler can stop it; when it fires, the content's gesture is cancelled (a pointercancel to the element
+ * that took the press, kept inside the tile) and the pointer moves to the tile, so the content never sees its up and
+ * a button under the finger never gets its click. A TAP stays the content's: the tile's own tap needs the press to
+ * have reached it in the bubble phase (`reached`), as before - a control that took its pointerdown keeps its taps.
+ * Its own chrome (the actions pill, the resize handle) is never a hold.
+ */
+const TILE_CHROME = ".tile-actions, .resize-handle";
+type Press = { x: number; y: number; long: boolean; timer: number; reached: boolean; id: number };
+/** The synthetic pointercancel a lift sends the content: the tile keeps it to itself. */
+const liftCancels = new WeakSet<Event>();
+/** [item]'s hold came ([s], pressed by [e] on [at].target in [at].tile): the content's gesture ends, the pointer is the
+ * tile's, the tile goes up. */
+function liftTile(item: HomeItem, s: Press, e: PointerEvent, at: { tile: HTMLElement; target: Element | null; grab: { x: number; y: number } }) {
+  const { tile, target } = at;
+  s.long = true;
+  if (target && target !== tile) {
+    const c = new PointerEvent("pointercancel", { pointerId: e.pointerId, pointerType: e.pointerType, isPrimary: e.isPrimary, clientX: e.clientX, clientY: e.clientY, bubbles: true });
+    liftCancels.add(c);
+    target.dispatchEvent(c);
+  }
+  // A real pointer only (a synthetic one has no capture to move): its move/up now go to the tile, not the control.
+  try {
+    if (target?.hasPointerCapture?.(e.pointerId)) target.releasePointerCapture(e.pointerId);
+    tile.setPointerCapture(e.pointerId);
+  } catch {
+    /* not an active pointer */
+  }
+  tick();
+  // One of several picked: they go together (partyAim), none of them selected on its own.
+  if (!partyOf(item, itemsOn(item.page))) selected.value = item.key;
+  // Picking a tile up is editing home: the sheet and the empty page to move it to come with it.
+  editing.value = true;
+  startCarry({ item }, e, at.grab);
+}
+
+/** The press of [item]'s tile (the hold: above); [onTap] its own tap. */
 function useTilePress(item: HomeItem, onTap: () => void) {
-  const state = useRef<{ x: number; y: number; long: boolean; timer: number } | null>(null);
-  const cancel = () => {
+  const state = useRef<Press | null>(null);
+  const disarm = () => {
     if (state.current) clearTimeout(state.current.timer);
+  };
+  const cancel = () => {
+    disarm();
     state.current = null;
   };
   return {
-    onPointerDown: (e: PointerEvent) => {
-      if (e.button) return;
-      const r = (e.currentTarget as HTMLElement).getBoundingClientRect();
-      const grab = { x: e.clientX - r.left, y: e.clientY - r.top };
-      const s = { x: e.clientX, y: e.clientY, long: false, timer: 0 };
-      s.timer = window.setTimeout(() => {
-        s.long = true;
-        tick();
-        // One of several picked: they go together (partyAim), none of them selected on its own.
-        if (!partyOf(item, itemsOn(item.page))) selected.value = item.key;
-        // Picking a tile up is editing home: the sheet and the empty page to move it to come with it.
-        editing.value = true;
-        startCarry({ item }, e, grab);
-      }, LONG_PRESS_MS);
+    onPointerDownCapture: (e: PointerEvent) => {
+      disarm();
+      state.current = null;
+      if (e.button || (e.target as Element | null)?.closest?.(TILE_CHROME)) return;
+      const tile = e.currentTarget as HTMLElement;
+      const r = tile.getBoundingClientRect();
+      const at = { tile, target: e.target as Element | null, grab: { x: e.clientX - r.left, y: e.clientY - r.top } };
+      const s: Press = { x: e.clientX, y: e.clientY, long: false, timer: 0, reached: false, id: e.pointerId };
+      s.timer = window.setTimeout(() => state.current === s && liftTile(item, s, e, at), LONG_PRESS_MS);
       state.current = s;
     },
-    onPointerMove: (e: PointerEvent) => {
-      const s = state.current;
-      // Moved before the hold: a swipe (pages, the drawer), not the tile's.
-      if (s && !s.long && Math.hypot(e.clientX - s.x, e.clientY - s.y) > SLOP) cancel();
+    // Reached in the bubble phase: no control of the content took the press, its tap is the tile's.
+    onPointerDown: () => {
+      if (state.current) state.current.reached = true;
     },
+    onPointerMoveCapture: (e: PointerEvent) => {
+      const s = state.current;
+      // Moved before the hold: a swipe (pages, the drawer, a widget's own drag), not the tile's.
+      if (s && !s.long && e.pointerId === s.id && Math.hypot(e.clientX - s.x, e.clientY - s.y) > SLOP) cancel();
+    },
+    // The finger is off before the hold: no lift, whoever takes the up.
+    onPointerUpCapture: disarm,
     onPointerUp: (e: PointerEvent) => {
       const s = state.current;
       cancel();
-      if (!s || s.long || Math.hypot(e.clientX - s.x, e.clientY - s.y) > SLOP) return;
+      if (!s || s.long || !s.reached || Math.hypot(e.clientX - s.x, e.clientY - s.y) > SLOP) return;
       // An element of the widget took it (its own onTap, a terminal's focus).
       if (tapTaken(e)) return;
       if (selected.value) selected.value = null;
@@ -392,7 +437,14 @@ function useTilePress(item: HomeItem, onTap: () => void) {
       else if (editing.value) toggleChosen(item.key);
       else onTap();
     },
-    onPointerCancel: cancel,
+    onPointerCancelCapture: (e: PointerEvent) => {
+      // The lift's own cancel to the content: not the tile's press ending.
+      if (!liftCancels.has(e)) cancel();
+    },
+    onPointerCancel: (e: PointerEvent) => {
+      // ...and it stays in the tile: home's carry (startCarry) and the page's other pointer watchers never see it.
+      if (liftCancels.has(e)) e.stopPropagation();
+    },
   };
 }
 

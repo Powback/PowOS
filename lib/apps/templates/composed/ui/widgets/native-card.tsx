@@ -14,7 +14,7 @@ import composition from "../composition.json";
 const C = composition as unknown as CardComposition;
 const U = C.uses.find((u) => u.as === C.show.from) ?? C.uses[0];
 
-/** A control's touches are its own: home's long press / drag of the tile doesn't start on it. */
+/** A control's taps are its own (home's tile tap doesn't fire too). A hold still lifts the tile, as on any launcher. */
 const own = { onPointerDown: (e: Event) => e.stopPropagation() };
 
 function useSize(ref: { current: Element | null }): [number, number] {
