@@ -680,6 +680,9 @@ run)
     if ! need=$(modules_needed 2>"$Q/modules-first.err"); then
       # The schemas couldn't be read because the phone dropped off (not a bindings fault): try again, never held.
       if link_down "$Q/modules-first.err" || phone_offline; then offline_wait "$1"; return 2; fi
+      # Failed without a word (11-14 c96808fc, the phone waking: the next manual run matched every module): no bindings
+      # fault to show, so it waits like an offline phone and is tried again, never held for a new commit.
+      if ! grep -q '[^[:space:]]' "$Q/modules-first.err" 2>/dev/null; then offline_wait "$1"; return 2; fi
       mrc=11; need="(unreadable)"
     else need=$(for a in $need; do first_done "$a" || echo "$a"; done | paste -sd' ' -); [ -n "$need" ] || return 0; fi
     # A module publish deferred for no gate verdict (apps/install.sh exit 75): held, never published ungated.
