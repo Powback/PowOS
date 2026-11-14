@@ -279,6 +279,43 @@ _android_screenshot() {
     adb -s "$_ANDROID_DEV" exec-out screencap -d "$pick" -p > "$file" && echo "$file"
 }
 
+_android_running() {
+    _android_need || return 1
+    _android_sh am stack list | awk '
+        /RootTask id=/ { match($0, /displayId=[0-9]+/); disp = substr($0, RSTART + 10, RLENGTH - 10) }
+        /taskId=/ {
+            match($0, /taskId=[0-9]+/); id = substr($0, RSTART + 7, RLENGTH - 7)
+            match($0, /: [^\/ ]+\//); pkg = substr($0, RSTART + 2, RLENGTH - 3)
+            vis = ($0 ~ /visible=true/) ? "visible" : ""
+            if (pkg != "") printf "%-8s display %-4s %-40s %s\n", id, disp, pkg, vis
+        }'
+}
+
+_android_notifications() {
+    _android_need || return 1
+    # Active notifications (not the history): package, title, text, one per line.
+    _android_sh dumpsys notification --noredact | awk '
+        /^ *NotificationRecord\(/ { if (pkg != "") print pkg "\t" title "\t" text; pkg = ""; title = ""; text = ""
+                                    if (match($0, /pkg=[^ ]+/)) pkg = substr($0, RSTART + 4, RLENGTH - 4) }
+        /^ *Notification History/ { exit }
+        /android\.title=/ && title == "" { sub(/.*android\.title=[A-Za-z]* \(/, ""); sub(/\)$/, ""); title = $0 }
+        /android\.text=/ && text == "" { sub(/.*android\.text=[A-Za-z]* \(/, ""); sub(/\)$/, ""); text = $0 }
+        END { if (pkg != "") print pkg "\t" title "\t" text }' |
+        awk -F'\t' '$2 != "" || $3 != "" { printf "%-32s %s%s%s\n", $1, $2, ($2 != "" && $3 != "") ? " - " : "", $3 }'
+}
+
+# _android_passthrough <verb> [args]: the adb shell verbs (input, dumpsys, am, pm, settings, cmd, getprop), a raw
+# shell, and logcat (default: the last 200 lines).
+_android_passthrough() {
+    local verb=$1; shift
+    _android_need || return 1
+    case "$verb" in
+        shell) _android_sh "$@" ;;
+        logcat) if (($#)); then adb -s "$_ANDROID_DEV" logcat "$@"; else adb -s "$_ANDROID_DEV" logcat -d -t 200; fi ;;
+        *) _android_sh "$verb" "$@" ;;
+    esac
+}
+
 cmd_android() {
     local verb=${1:-help}
     shift || true
@@ -290,27 +327,10 @@ cmd_android() {
             _android_open "$@"
             ;;
         running)
-            _android_need || return 1
-            _android_sh am stack list | awk '
-                /RootTask id=/ { match($0, /displayId=[0-9]+/); disp = substr($0, RSTART + 10, RLENGTH - 10) }
-                /taskId=/ {
-                    match($0, /taskId=[0-9]+/); id = substr($0, RSTART + 7, RLENGTH - 7)
-                    match($0, /: [^\/ ]+\//); pkg = substr($0, RSTART + 2, RLENGTH - 3)
-                    vis = ($0 ~ /visible=true/) ? "visible" : ""
-                    if (pkg != "") printf "%-8s display %-4s %-40s %s\n", id, disp, pkg, vis
-                }'
+            _android_running
             ;;
         notifications)
-            _android_need || return 1
-            # Active notifications (not the history): package, title, text, one per line.
-            _android_sh dumpsys notification --noredact | awk '
-                /^ *NotificationRecord\(/ { if (pkg != "") print pkg "\t" title "\t" text; pkg = ""; title = ""; text = ""
-                                            if (match($0, /pkg=[^ ]+/)) pkg = substr($0, RSTART + 4, RLENGTH - 4) }
-                /^ *Notification History/ { exit }
-                /android\.title=/ && title == "" { sub(/.*android\.title=[A-Za-z]* \(/, ""); sub(/\)$/, ""); title = $0 }
-                /android\.text=/ && text == "" { sub(/.*android\.text=[A-Za-z]* \(/, ""); sub(/\)$/, ""); text = $0 }
-                END { if (pkg != "") print pkg "\t" title "\t" text }' |
-                awk -F'\t' '$2 != "" || $3 != "" { printf "%-32s %s%s%s\n", $1, $2, ($2 != "" && $3 != "") ? " - " : "", $3 }'
+            _android_notifications
             ;;
         notify)
             _android_notify "$@"
@@ -321,17 +341,8 @@ cmd_android() {
         link)
             _android_link "$@"
             ;;
-        input|dumpsys|am|pm|settings|cmd|getprop)
-            _android_need || return 1
-            _android_sh "$verb" "$@"
-            ;;
-        shell)
-            _android_need || return 1
-            _android_sh "$@"
-            ;;
-        logcat)
-            _android_need || return 1
-            if (($#)); then adb -s "$_ANDROID_DEV" logcat "$@"; else adb -s "$_ANDROID_DEV" logcat -d -t 200; fi
+        input|dumpsys|am|pm|settings|cmd|getprop|shell|logcat)
+            _android_passthrough "$verb" "$@"
             ;;
         help|--help|-h)
             android_help

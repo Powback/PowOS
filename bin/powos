@@ -1121,23 +1121,30 @@ _update_usage() {
     fi
 }
 
+# _update_phone <action> [args]: the phone (rooted or not) has no bootc and no dnf - its image updates package by package
+# from the [powos] repo, PowOS's own code included (powos-core): lib/phone-update.sh, the same run the app makes
+# (docs/PHONE-UPDATES.md). The whole phone run (the app, the home screen, the image) is the PowOS app's: its state and
+# asking it for a run (lib/phone-app-updates.sh; the desktop's update widget uses the same two).
+# 99 = not a phone, or not a phone verb: the caller goes on.
+_update_phone() {
+    local action="${1:-check}"
+    [[ "$(cat /etc/powos/platform 2>/dev/null)" == phone && -f "$POWOS_LIB/phone-update.sh" ]] || return 99
+    case "$action" in
+        check) sh "$POWOS_LIB/phone-update.sh" --check ;;
+        packages|apply|os) shift; sh "$POWOS_LIB/phone-update.sh" "$@" ;;
+        system) shift; sh "$POWOS_LIB/phone-update.sh" --system "$@" ;;
+        status) shift; sh "$POWOS_LIB/phone-app-updates.sh" status "$@" ;;
+        now) sh "$POWOS_LIB/phone-app-updates.sh" now ;;
+        *) return 99 ;;
+    esac
+}
+
 cmd_update() {
     local action="${1:-check}"
     local UPDATES_LAYER="/run/powos/usb-layers/layers/updates"
 
-    # The phone (rooted or not): no bootc, no dnf - its image updates package by package from the [powos] repo, PowOS's
-    # own code included (powos-core). lib/phone-update.sh, the same run the app makes (docs/PHONE-UPDATES.md).
-    if [[ "$(cat /etc/powos/platform 2>/dev/null)" == phone && -f "$POWOS_LIB/phone-update.sh" ]]; then
-        case "$action" in
-            check) sh "$POWOS_LIB/phone-update.sh" --check; return ;;
-            packages|apply|os) shift; sh "$POWOS_LIB/phone-update.sh" "$@"; return ;;
-            system) shift; sh "$POWOS_LIB/phone-update.sh" --system "$@"; return ;;
-            # The whole phone run (the app, the home screen, the image) is the PowOS app's: its state, and asking it for
-            # a run (lib/phone-app-updates.sh; the desktop's update widget uses the same two).
-            status) shift; sh "$POWOS_LIB/phone-app-updates.sh" status "$@"; return ;;
-            now) sh "$POWOS_LIB/phone-app-updates.sh" now; return ;;
-        esac
-    fi
+    local _prc=0; _update_phone "$@" || _prc=$?
+    (( _prc == 99 )) || return "$_prc"
 
     case "$action" in
         check)
