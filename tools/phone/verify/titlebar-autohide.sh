@@ -28,7 +28,7 @@ part() { wwel "$WID" "e=>{const b=e.querySelector(':scope > $1');if(!b)return ''
 laid() { local b; b=$(part .webwindow-title); [ "$(part .webwindow-body | cut -d' ' -f1)" = "$(echo "$b" | cut -d' ' -f2)" ] && [ "${b%% *}" -ge 0 ]; }
 hid() { [ "$(part .webwindow-body | cut -d' ' -f1)" = 0 ] && [ "$(part .webwindow-title | cut -d' ' -f2)" -le 0 ]; }
 shown() { [ "$(wwel "$WID" "e=>e.classList.contains('ww-bar-shown')")" = true ]; }
-logged() { "$A" shell "logcat -d -T '$SINCE' -s PowosWebWindows:I" 2>/dev/null | tr -d '\r' | grep -q "$1"; }
+logged() { "$A" shell "logcat -d -T '$SINCE' -s PowosWebWindows:I" 2>/dev/null | tr -d '\r' | awk -v p="$1" 'index($0, p) {f=1} END {exit !f}'; }
 
 wwc_start
 [ -n "$(sh_ "pidof $CHROME")" ] && wwc_skip "Chrome runs (the user's)"

@@ -217,7 +217,7 @@ exit 0
         # Lock this observer to entry()/sizeOf()/geometry(), not an invented export.
         source = (ROOT / 'shell/ui/webwindows.tsx').read_text()
         self.assertIn('return `${up ? 2 : 1} ${r.cw} ${r.ch}`', source)
-        self.assertIn('...rects, RADIUS * scale, visible ? 1 : 0, px(alpha), px(scale), w.restore ? 1 : 0, mergeOf(w, el), sizeOf(w, body), fillOf()', source)
+        self.assertIn('...rects, RADIUS * scale, visible ? 1 : 0, px(alpha), px(scale), maximisedWord(w), mergeOf(w, el), sizeOf(w, body), fillOf()', source)
         observer = (V / 'resize-state.js').read_text().replace('TOKEN', '"T"').replace('WINDOW_ID', '4')
         script = '''let sample, records=[], markers=[]; globalThis.setInterval=f=>(sample=f,1); globalThis.clearInterval=()=>{};
 let entry=[4,...Array(12).fill(0),12,1,1,1,0,-1,-1,1,300,200,'ffffff'];
