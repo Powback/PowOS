@@ -456,3 +456,10 @@ no package update ever brought it back), services yes.
   data kept), cleanup. Runs each step in the image through run-as + liblotfixrun with the script on stdin.
 - Left: the razr needs powos-core from this branch (base step) + an APK/base built with the dev pack's toolchain;
   `.preview/` sheets still need docker (W3); `compose blocks` example specs (C1).
+- **11-14 (razr, no root): the toolchain moved to its own `rust` pack**; the dev pack published 11-07 predated it, and a
+  phone that had added dev keeps its install marker, so `powos-pack need dev` never brought /opt/powos-rust ("module: no
+  Rust toolchain here"). `pack rust path opt/powos-rust/*`; `powos app build` offers/adds whichever of dev + rust is
+  missing (only rust on the razr). Re-measured (rustc 1.100.0): 815 MiB / 284 MB gz; build-rootfs.sh refuses to publish
+  packs with an empty rust pack. **Composing needs no Rust at all now**: powos-core carries the shared composed module
+  prebuilt (apps/build.sh composed -> /usr/lib/powos/apps/composed: source, module.wasm, its stamp, bindings), which
+  `powos compose` copies into every widget. `powos app new --template ui`: page + widget, `"module": null`, no bindings.

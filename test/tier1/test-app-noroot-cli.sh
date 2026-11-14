@@ -80,29 +80,57 @@ out=$(run install "$T/w" 2>&1); rc=$?
 out=$(run remove local.w 2>&1); rc=$?
 { [ $rc = 0 ] && [ ! -e "$T/apps/local.w" ]; } && ok "UI-only remove without spacetime" || bad "UI-only remove rc=$rc: $out"
 
-# 4. A module with no Rust and no builder (gh#13 A3): the toolchain pack is offered, added only on a yes, then the
-# module builds with the pack's toolchain offline, its prebuilt crates seeding the target dir.
+# 3b. `powos app new --template ui` (razr 11-14: a UI-only app meant deleting module/ and ui/lib by hand): page +
+# widget, "module": null, no ../bindings import anywhere - builds and installs with no Rust and no SpacetimeDB.
+out=$(run new note --template ui --dir "$T/note" 2>&1) && ok "new --template ui" || bad "new --template ui: $out"
+python3 -c 'import json,sys; m=json.load(open(sys.argv[1])); assert m["module"] is None and m["page"]["entry"] == "pages/main.js" and [w["entry"] for w in m["widgets"]] == ["widgets/main.js"], m' \
+  "$T/note/powos-app.json" 2>/dev/null && ok "ui template: module null, a page and a widget" || bad "ui manifest: $(cat "$T/note/powos-app.json" 2>&1)"
+[ ! -e "$T/note/module" ] && ok "ui template: no module/" || bad "ui template has module/"
+(cd "$T/note/ui" && ! command grep -rq '"../bindings"' .) && ok "ui template: no bindings import" || bad "ui template imports bindings"
+out=$(run build "$T/note" 2>&1); rc=$?
+{ [ $rc = 0 ] && [ -f "$T/note/out/ui/widgets/main.js" ] && [ -f "$T/note/out/ui/pages/main.js" ]; } && ok "ui template builds" || bad "ui template build rc=$rc: $out"
+out=$(run install "$T/note" 2>&1); rc=$?
+{ [ $rc = 0 ] && [ -f "$T/apps/local.note/current/ui/pages/main.js" ]; } && ok "ui template installs without spacetime" || bad "ui template install rc=$rc: $out"
+run remove local.note >/dev/null 2>&1
+
+# 4. A module with no Rust and no builder (gh#13 A3): the toolchain packs (rust, + dev for gcc) are offered, added only
+# on a yes, then the module builds with the pack's toolchain offline, its prebuilt crates seeding the target dir.
+# The stub keeps each pack's install apart: $T/rust is the rust pack (POWOS_RUST), $T/dev-added the dev pack.
 cat > "$B/powos-pack" <<EOF
 #!/bin/sh
 echo "powos-pack \$*" >> "$T/pack.log"
-case "\$1" in status) [ -e "$T/rust/cargo/bin/cargo" ] ;; need) mkdir -p "$T/rust/cargo/bin" "$T/rust/sys/lib/rustlib/wasm32-unknown-unknown" "$T/rust/app-target/seeded"
+case "\$1 \$2" in
+  "status dev") [ -e "$T/dev-added" ] ;;
+  "status rust") [ -e "$T/rust/cargo/bin/cargo" ] ;;
+  "need dev") touch "$T/dev-added" ;;
+  "need rust") mkdir -p "$T/rust/cargo/bin" "$T/rust/sys/lib/rustlib/wasm32-unknown-unknown" "$T/rust/app-target/seeded"
   printf '#!/bin/sh\necho $T/rust/sys\n' > "$T/rust/cargo/bin/rustc"
   printf '#!/bin/sh\necho "cargo \$* CARGO_HOME=\$CARGO_HOME" >> $T/cargo.log; d=\$CARGO_TARGET_DIR/wasm32-unknown-unknown/release; mkdir -p \$d; echo w > \$d/powos_app_tally.wasm\n' > "$T/rust/cargo/bin/cargo"
-  chmod +x "$T/rust/cargo/bin/"* ;; esac
+  chmod +x "$T/rust/cargo/bin/"* ;;
+esac
 EOF
-chmod +x "$B/powos-pack"; for t in grep chmod; do ln -sf "$(command -v $t)" "$B/$t"; done
+chmod +x "$B/powos-pack"; for t in grep chmod touch; do ln -sf "$(command -v $t)" "$B/$t"; done
 rust() { run "$@" 2>&1 </dev/null; }
 run() { env -i HOME="$T/home" PATH="$B" POWOS_LOOPBACK_DIR="$T/loopback" POWOS_APPS_DIR="$T/apps" POWOS_RUST="$T/rust" \
   POWOS_APP_BUILDER_CONF="$T/builder" ${ADD:+POWOS_APP_ADD_TOOLCHAIN=1} python3 "$APP" "$@"; }
 out=$(rust build "$T/tally" --module); rc=$?
-{ [ $rc != 0 ] && echo "$out" | grep -q "add the dev pack" && echo "$out" | grep -q "powos app builder user@host"; } &&
+{ [ $rc != 0 ] && echo "$out" | grep -q "add the dev + rust packs" && echo "$out" | grep -q "powos app builder user@host"; } &&
   ok "no toolchain: both choices shown" || bad "no toolchain msg rc=$rc: $out"
 grep -q "need" "$T/pack.log" 2>/dev/null && bad "the pack was added without a yes" || ok "no download without a yes"
+# The razr (11-14): dev added before the toolchain had a pack of its own - only rust is offered and added.
+touch "$T/dev-added"
+out=$(rust build "$T/tally" --module); rc=$?
+{ [ $rc != 0 ] && echo "$out" | grep -q "add the rust pack " ; } && ok "dev already in: only the rust pack offered" || bad "dev-in msg rc=$rc: $out"
 out=$(ADD=1 rust build "$T/tally" --module)
-grep -q "need dev" "$T/pack.log" && ok "a yes adds the dev pack" || bad "pack not added: $out"
+{ grep -q "need rust" "$T/pack.log" && ! grep -q "need dev" "$T/pack.log"; } && ok "a yes adds the rust pack (dev kept)" || bad "packs: $(cat "$T/pack.log") $out"
 grep -q -- "--offline.*CARGO_HOME=$T/rust/cargo" "$T/cargo.log" 2>/dev/null && ok "the module builds offline with the pack's cargo" || bad "cargo: $(cat "$T/cargo.log" 2>&1) / $out"
 [ -e "$T/home/.cache/powos/app-target/seeded" ] && ok "the prebuilt crates seed the target dir" || bad "target not seeded"
 [ -f "$T/tally/out/module.wasm" ] && ok "out/module.wasm" || bad "no module.wasm: $out"
+# A fresh phone: a yes adds both.
+rm -rf "$T/rust" "$T/dev-added" "$T/tally/out" "$T/pack.log"
+out=$(ADD=1 rust build "$T/tally" --module)
+{ grep -q "need dev" "$T/pack.log" && grep -q "need rust" "$T/pack.log" && [ -f "$T/tally/out/module.wasm" ]; } &&
+  ok "a yes on a fresh phone adds dev + rust, then builds" || bad "fresh: $(cat "$T/pack.log") $out"
 
 # Rooted (no POWOS_LOOPBACK_DIR): a missing spacetime CLI still refuses - the registry is the way in there.
 out=$(env -i HOME="$T/home" PATH="$B" POWOS_APPS_DIR="$T/apps2" POWOS_APP_BUILDER_CONF="$T/builder" \

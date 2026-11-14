@@ -169,6 +169,11 @@ if [ -d "$PUBLISH" ]; then
   # Base + packs beside it, pinned the same way (InstallActivity uses the base once it and every pack are pinned).
   # Opt-in (POWOS_PUBLISH_PACKS=1) until the base is the approved first install for phones without root.
   if [ "${POWOS_PUBLISH_PACKS:-0}" = 1 ]; then
+    # The rust pack is `powos app build`'s toolchain without root: install-powos-android.sh only warns when
+    # app-toolchain.sh fails, so an empty pack would publish fine and every module build on a phone fail (razr 11-14).
+    awk -F'\t' '$1 == "rust" && $4 > 0 {ok=1} END {exit !ok}' "$POWOS_IMAGES/powos-packs.tsv" || {
+      echo "build-rootfs: the rust pack is empty (/opt/powos-rust: app-toolchain.sh failed in the image build) - packs not published" >&2
+      exit 1; }
     for f in powos-rootfs-base $(cut -f1 "$POWOS_IMAGES/powos-packs.tsv" | grep -vx base | sed 's/^/powos-pack-/'); do
       publish_file "$POWOS_IMAGES/$f.tar.gz" "$PUBLISH/$f.tar.gz"
       cut -d' ' -f1 "$POWOS_IMAGES/$f.tar.gz.sha256" > "$HERE/app/engine/src/main/assets/$f.sha256"

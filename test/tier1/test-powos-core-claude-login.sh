@@ -12,14 +12,17 @@ T=$(mktemp -d); trap 'rm -rf "$T"' EXIT
 
 # A claude-login checkout stand-in: dist/ holds its two ES modules.
 mkdir -p "$T/cl/dist"; echo 'console.log("cli")' > "$T/cl/dist/cli.js"; echo 'export {}' > "$T/cl/dist/index.js"
+# The composed module's build stand-in (powos-core needs one; test-powos-core-composed.sh tests that part).
+bash "$ROOT/test/tier1/fixtures/fake-composed.sh" "$T/comp"
 
-out=$(CLAUDE_LOGIN_DIR="$T/cl" CLAUDE_LOGIN_NO_CLONE=1 POWOS_CORE_STAGE="$T/w" "$ROOT/targets/android/build-powos-core.sh" 2>&1) \
+out=$(POWOS_CORE_COMPOSED="$T/comp" CLAUDE_LOGIN_DIR="$T/cl" CLAUDE_LOGIN_NO_CLONE=1 POWOS_CORE_STAGE="$T/w" "$ROOT/targets/android/build-powos-core.sh" 2>&1) \
   && ok "staged" || bad "build-powos-core.sh didn't stage: $out"
 
 # makepkg: sources extracted into srcdir, package() into pkgdir.
 mkdir -p "$T/srcdir" "$T/pkgdir"
 tar -C "$T/srcdir" -xf "$T/w/powos-src.tar" 2>/dev/null
 [ -f "$T/w/claude-login.tar" ] && tar -C "$T/srcdir" -xf "$T/w/claude-login.tar"
+[ -f "$T/w/composed.tar" ] && tar -C "$T/srcdir" -xf "$T/w/composed.tar"
 cp "$T/w/phone-files.sh" "$T/srcdir/" 2>/dev/null
 # install -Dm ... -t: GNU install (the job image's), as makepkg's.
 ( srcdir=$T/srcdir pkgdir=$T/pkgdir; . "$T/w/PKGBUILD" && package ) > "$T/pkg.log" 2>&1 || bad "package() failed: $(tail -5 "$T/pkg.log")"
@@ -36,7 +39,7 @@ grep -q '/usr/lib/powos/ai/manager/fleet_login.py' <(cd "$P" && find . -name fle
   && ok "fleet_login.py (claude-login's caller) is in the same package" || bad "fleet_login.py not packaged"
 
 # No claude-login -> no package (a powos-core without it silently left installed phones without the sign-in).
-out=$(CLAUDE_LOGIN_DIR="$T/none" CLAUDE_LOGIN_NO_CLONE=1 POWOS_CORE_STAGE="$T/w2" "$ROOT/targets/android/build-powos-core.sh" 2>&1) \
+out=$(POWOS_CORE_COMPOSED="$T/comp" CLAUDE_LOGIN_DIR="$T/none" CLAUDE_LOGIN_NO_CLONE=1 POWOS_CORE_STAGE="$T/w2" "$ROOT/targets/android/build-powos-core.sh" 2>&1) \
   && bad "built without claude-login" || ok "refuses to build without claude-login"
 
 echo "$pass passed, $fail failed"

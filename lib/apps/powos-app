@@ -11,13 +11,14 @@ Make one (the whole loop, from a sentence to the phone - each step is one comman
                                      scaffold D (default ~/Projects/<name>): powos-app.json, module/src/lib.rs,
                                      ui/lib/app.ts, ui/pages/main.tsx, ui/widgets/main.tsx, ui/icon.svg.
                                      T: spacetimedb-astro (default: module + page + widget), widget (module +
-                                     widget, no page), module-only (module, no UI). <name> without a dot gets the
-                                     id local.<name>; the database is the id with dashes.
+                                     widget, no page), module-only (module, no UI), ui (page + widget, no module:
+                                     "module": null, nothing to compile - builds and installs anywhere, no Rust).
+                                     <name> without a dot gets the id local.<name>; the database is the id with dashes.
   powos app build <dir> [--local|--remote [user@host]] [--module|--ui]
                                      module -> out/module.wasm (+ TS bindings in ui/bindings), ui -> out/ui (bun).
                                      The module (Rust -> wasm) builds on the app builder (powos app builder) over
                                      ssh when one is set, else here with the image's toolchain (/opt/powos-rust: the
-                                     dev pack without root, offline) or the user's cargo + wasm32; the UI always
+                                     rust pack without root, offline) or the user's cargo + wasm32; the UI always
                                      builds here (bun, ~0.1 s). An unchanged module isn't rebuilt.
   powos app install <dir>            build (what changed), publish the module (unless the device's live module is this
                                      very build - checked against the database, not the local build), put the UI
@@ -45,8 +46,8 @@ Change one:
                                      size. Runs shell/dev/preview.sh - where docker is (the Mac, a PowStation), from a
                                      PowOS checkout (POWOS_PREVIEW=<its preview.sh> elsewhere). A widget id is an OWL
                                      file's name (10-today), an app's widget (local.lights.main) or a panel (panel.agents).
-  --add-toolchain                    on build/install/dev/publish: yes to adding the Rust toolchain pack (no root:
-                                     the `dev` pack, once; then modules build here offline). Without it (and with no
+  --add-toolchain                    on build/install/dev/publish: yes to adding the Rust toolchain (no root: the
+                                     `rust` + `dev` packs, once; then modules build here offline). Without it (and with no
                                      builder) a terminal asks; elsewhere the error shows both choices.
   --note "..."                       on install/publish/ui: what changed, in plain words - the phone's quiet
                                      "update applied" notification (default: "<Name> app installed/updated")
@@ -108,15 +109,19 @@ CACHE_VOLUME = "powos-apps-cargo"
 BUILDER_IMAGE = "powos-app-builder"
 LOCAL_TARGET = os.path.expanduser("~/.cache/powos/app-target")
 # The phone's own toolchain (targets/android/tools/app-toolchain.sh): rustup's stable + wasm32 and the template's crates
-# prebuilt. In the full image; without root in the `dev` pack (powos-pack need dev), offline once added.
+# prebuilt. In the full image; without root the `rust` pack (+ `dev`: gcc links the build scripts), offline once added.
 TOOLCHAIN = os.environ.get("POWOS_RUST", "/opt/powos-rust")
-TOOLCHAIN_PACK = "dev"
+TOOLCHAIN_PACKS = ("dev", "rust")
 # Parts of a template (lib/apps/templates/<part>/), copied in this order.
 TEMPLATE_SETS = {
     "spacetimedb-astro": ["module", "ui", "page", "widget"],
     "widget": ["module", "ui", "widget"],
     "module-only": ["module"],
+    # UI only: a page + a widget, "module": null - no database, so no Rust and no bindings; builds anywhere.
+    "ui": ["ui-only"],
 }
+# What each part brings (ui-only is the ui, page and widget parts without the module's bindings).
+PART_HAS = {"ui": {"ui"}, "page": {"page"}, "widget": {"widget"}, "module": {"module"}, "ui-only": {"ui", "page", "widget"}}
 # What the shell's import map gives every page and widget (shell/index.html): one copy each for the whole shell.
 UI_EXTERNALS = ["preact", "preact/hooks", "preact/jsx-runtime", "@preact/signals", "@preact/signals-core", "spacetimedb"]
 APP_ID = re.compile(r"^[a-z0-9][a-z0-9.-]{0,63}$")
@@ -193,7 +198,7 @@ def icon_svg(name, app_id):
 
 def cmd_new(a):
     if not a or a[0].startswith("-"):
-        die("usage: powos app new <name|id> [--name \"Shown name\"] [--template spacetimedb-astro|widget|module-only] [--dir D]")
+        die("usage: powos app new <name|id> [--name \"Shown name\"] [--template spacetimedb-astro|widget|module-only|ui] [--dir D]")
     ident = a[0].lower()
     opts = flags(a[1:], {"--name": 1, "--template": 1, "--dir": 1})
     app_id = ident if "." in ident else f"local.{ident}"
@@ -216,6 +221,7 @@ def cmd_new(a):
     crate = "powos-app-" + slug
     subst = {"__NAME__": name, "__ID__": app_id, "__DB__": db, "__CRATE__": crate}
     parts = TEMPLATE_SETS[template]
+    has = set().union(*(PART_HAS[p] for p in parts))
     for part in parts:
         src = os.path.join(TEMPLATES, part)
         if not os.path.isdir(src):
@@ -231,7 +237,7 @@ def cmd_new(a):
                 os.makedirs(os.path.dirname(out), exist_ok=True)
                 with open(out, "w") as fh:
                     fh.write(text)
-    has_ui = "ui" in parts
+    has_ui = "ui" in has
     m = {
         "id": app_id,
         "name": name,
@@ -239,15 +245,15 @@ def cmd_new(a):
         "description": "",
         **({"icon": "icon.svg"} if has_ui else {}),
         "ui": {"dir": "out/ui/"} if has_ui else None,
-        **({"page": {"entry": "pages/main.js"}} if "page" in parts else {}),
-        "module": {"path": "module/", "lang": "rust", "database": db, "stdb": "2.12"},
+        **({"page": {"entry": "pages/main.js"}} if "page" in has else {}),
+        "module": {"path": "module/", "lang": "rust", "database": db, "stdb": "2.12"} if "module" in has else None,
         "backend": None,
         "widgets": [
             {"id": "main", "name": name, "kind": "island", "entry": "widgets/main.js", "size": "4x2", "minSize": "2x1"}
         ]
-        if "widget" in parts
+        if "widget" in has
         else [],
-        "surfaces": {"launcher": "page" in parts, "desktop": True},
+        "surfaces": {"launcher": "page" in has, "desktop": True},
         "permissions": [],
         "budget": {"phone": {"memMB": 16, "idle": "unload"}, "desktop": {"memMB": 32}},
     }
@@ -260,8 +266,8 @@ def cmd_new(a):
     with open(os.path.join(d, ".gitignore"), "w") as f:
         f.write("out/\nmodule/target/\nui/bindings/\n")
     log(f"made {app_id} ({name}, template {template}) in {d}")
-    log(f"  database {db}; module/src/lib.rs" + (", ui/pages/main.tsx" if "page" in parts else "")
-        + (", ui/widgets/main.tsx" if "widget" in parts else ""))
+    log(("  UI only (no database): ui/lib/app.ts" if "module" not in has else f"  database {db}; module/src/lib.rs")
+        + (", ui/pages/main.tsx" if "page" in has else "") + (", ui/widgets/main.tsx" if "widget" in has else ""))
     log(f"next: powos app install {d}   then: powos app dev {d} (hot reload while you edit)")
 
 
@@ -326,31 +332,37 @@ def cmd_builder(a):
 
 
 def offer_toolchain():
-    """No Rust here and no builder: on a phone without root the toolchain is the `dev` pack. Added only with the
-    user's yes (a terminal prompt, or --add-toolchain / POWOS_APP_ADD_TOOLCHAIN=1 from the AI's run): never a silent
-    download, and never a build on another machine unless `powos app builder` names it."""
+    """No Rust here and no builder: on a phone without root the toolchain is the `rust` pack (+ `dev`, whose gcc links
+    the build scripts). Added only with the user's yes (a terminal prompt, or --add-toolchain /
+    POWOS_APP_ADD_TOOLCHAIN=1 from the AI's run): never a silent download, and never a build on another machine
+    unless `powos app builder` names it."""
     pack = tool("powos-pack")
-    if not pack or subprocess.run([pack, "status", TOOLCHAIN_PACK], capture_output=True).returncode == 0:
+    missing = [p for p in TOOLCHAIN_PACKS if pack and subprocess.run([pack, "status", p], capture_output=True).returncode != 0]
+    if not missing:
         return
-    size = ""
+    sizes = {}
     try:
         with open("/etc/powos/packs") as f:
-            size = next((f" ({int(w[1]) / 1e6:.0f} MB)" for w in map(str.split, f) if w and w[0] == TOOLCHAIN_PACK), "")
-    except (OSError, ValueError, IndexError):
+            sizes = {w[0]: int(w[1]) for w in map(str.split, f) if len(w) > 1 and w[0] in missing}
+    except (OSError, ValueError):
         pass
+    names = " + ".join(missing)
+    size = f" ({sum(sizes.values()) / 1e6:.0f} MB)" if len(sizes) == len(missing) else ""
     choice = (f"this app's module (Rust) needs a toolchain. Either:\n"
-              f"  1. add the {TOOLCHAIN_PACK} pack{size} to this phone, once - modules then build here, offline:\n"
-              f"       powos app build <dir> --add-toolchain   (or Settings > Storage > {TOOLCHAIN_PACK})\n"
+              f"  1. add the {names} pack{'s' if len(missing) > 1 else ''}{size} to this phone, once - modules then build "
+              f"here, offline:\n"
+              f"       powos app build <dir> --add-toolchain   (or Settings > Storage)\n"
               f"  2. build on another machine of yours with docker over ssh: powos app builder user@host")
     yes = ADD_TOOLCHAIN or os.environ.get("POWOS_APP_ADD_TOOLCHAIN") == "1"
     if not yes and sys.stdin.isatty() and sys.stdout.isatty():
         log(choice)
-        yes = input(f"add the {TOOLCHAIN_PACK} pack now? [y/N] ").strip().lower() in ("y", "yes")
+        yes = input(f"add {names} now? [y/N] ").strip().lower() in ("y", "yes")
     if not yes:
         die("module: " + choice)
-    log(f"module: adding the {TOOLCHAIN_PACK} pack (the Rust toolchain){size}")
-    if subprocess.run([pack, "need", TOOLCHAIN_PACK]).returncode != 0:
-        die(f"module: the {TOOLCHAIN_PACK} pack wasn't added - or: powos app builder user@host")
+    for p in missing:
+        log(f"module: adding the {p} pack (the Rust toolchain)")
+        if subprocess.run([pack, "need", p]).returncode != 0:
+            die(f"module: the {p} pack wasn't added - or: powos app builder user@host")
 
 
 def ssh_cmd(target, command):
@@ -476,8 +488,8 @@ def build_module(d, m, where=None, force=False):
         shutil.copy(os.path.join(LOCAL_TARGET, "wasm32-unknown-unknown", "release", crate + ".wasm"), wasm)
         how = "here"
     elif b is None:
-        die("module: no Rust toolchain here and no app builder set - powos app builder user@host (a machine with "
-            "docker), or install cargo + the wasm32 target")
+        die(f"module: no Rust toolchain here ({TOOLCHAIN} has no cargo + wasm32) and no app builder set - "
+            "powos app builder user@host (a machine with docker), or install cargo + the wasm32 target")
     else:
         buf = io.BytesIO()
         with tarfile.open(fileobj=buf, mode="w:gz") as t:
@@ -998,8 +1010,8 @@ def capabilities():
     b = builder()
     rust = local_rust()
     where = (f"builder {b}" if b and b != "local" else "here (cargo + wasm32)" if rust else
-             f"nowhere yet: add the {TOOLCHAIN_PACK} pack (powos app build <dir> --add-toolchain: Rust, offline after) "
-             "or set a builder (powos app builder user@host); a UI-only app (\"module\": null) needs none")
+             f"nowhere yet: add the {' + '.join(TOOLCHAIN_PACKS)} packs (powos app build <dir> --add-toolchain: Rust, offline "
+             "after) or set a builder (powos app builder user@host); a UI-only app (powos app new --template ui) needs none")
     return [
         ("new", True, f"templates {TEMPLATES}" if os.path.isdir(TEMPLATES) else f"no templates ({TEMPLATES})"),
         ("build --ui", bool(shutil.which("bun") or shutil.which("npx")), shutil.which("bun") or shutil.which("npx")

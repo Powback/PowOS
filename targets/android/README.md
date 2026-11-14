@@ -105,7 +105,8 @@ packs the app adds on demand (engine `Packs.java`). The base is the dependency c
 (`roots`: the Plasma session on Android, the PowOS widgets' QML, the PowOS CLI, terminal, sound, pacman); the packs:
 **gaming** (FEX + its x86 rootfs, box64, Steam's bootstrap and launchers, with their own dependencies), **apps**
 (Brave, MariaDB, SpacetimeDB, wallpapers, Homebrew's archive and every other package of the image), **dev**
-(compilers, build tools, debuggers), **languages** (non-English translations, glibc locales, Noto CJK). Docs/man/help
+(compilers, build tools, debuggers), **rust** (`powos app build`'s Rust -> wasm toolchain, /opt/powos-rust, 284 MB gz /
+815 MiB), **languages** (non-English translations, glibc locales, Noto CJK). Docs/man/help
 are dropped from the base and kept out by pacman's NoExtract. Added from Settings > Storage (installed / size / add /
 remove, live progress), the library's "add gaming" card, `powos-steam`/`powos-play` (`play/powos-pack need gaming`:
 request `pack gaming`), or right after the install for languages when Android's language isn't English.

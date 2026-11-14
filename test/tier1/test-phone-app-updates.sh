@@ -92,9 +92,10 @@ fi
 # 3. powos-core carries the widgets (QML only) to /usr/share/plasma/plasmoids: its PKGBUILD staged and package() run as
 #    makepkg runs it (test-powos-core-claude-login.sh's way; a claude-login stand-in).
 mkdir -p "$T/cl/dist" && echo 'x' > "$T/cl/dist/cli.js" && echo 'x' > "$T/cl/dist/index.js"
-if CLAUDE_LOGIN_DIR="$T/cl" CLAUDE_LOGIN_NO_CLONE=1 POWOS_CORE_STAGE="$T/w" "$ROOT/targets/android/build-powos-core.sh" > "$T/stage.log" 2>&1; then
+bash "$ROOT/test/tier1/fixtures/fake-composed.sh" "$T/comp"  # powos-core needs the composed build (test-powos-core-composed.sh)
+if POWOS_CORE_COMPOSED="$T/comp" CLAUDE_LOGIN_DIR="$T/cl" CLAUDE_LOGIN_NO_CLONE=1 POWOS_CORE_STAGE="$T/w" "$ROOT/targets/android/build-powos-core.sh" > "$T/stage.log" 2>&1; then
   mkdir -p "$T/srcdir" "$T/pkgdir"
-  tar -C "$T/srcdir" -xf "$T/w/powos-src.tar"; tar -C "$T/srcdir" -xf "$T/w/claude-login.tar"; cp "$T/w/phone-files.sh" "$T/srcdir/"
+  tar -C "$T/srcdir" -xf "$T/w/powos-src.tar"; tar -C "$T/srcdir" -xf "$T/w/claude-login.tar"; tar -C "$T/srcdir" -xf "$T/w/composed.tar"; cp "$T/w/phone-files.sh" "$T/srcdir/"
   ( srcdir=$T/srcdir pkgdir=$T/pkgdir; . "$T/w/PKGBUILD" && package ) > "$T/pkg.log" 2>&1 || bad "package() failed: $(tail -3 "$T/pkg.log")"
   W=$T/pkgdir/usr/share/plasma/plasmoids/com.powos.updates
   { [ -s "$W/contents/ui/main.qml" ] && [ -s "$W/metadata.json" ]; } && ok "powos-core ships com.powos.updates to /usr/share/plasma/plasmoids" \

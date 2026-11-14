@@ -194,6 +194,26 @@ class ComposerAI(unittest.TestCase):
         self.assertEqual((m["by"], m["id"]), ("ai", "local.rooms-by-ai"))
         self.assertEqual(m["open"], "local.lights")  # the block's own app, filled in when the AI left it out
 
+    def test_name_sets_the_folder(self):
+        """--name is the folder (~/Projects/<name>, the help's default) and the id, not the AI's own id (razr 11-14:
+        --name mgr-weather wrote ~/Projects/oslo-temperature)."""
+        good = json.loads(self.e.run("widget", "hue rooms", "--no-install", "--json", "--no-ai",
+                                     "--dir", os.path.join(self.e.root, "m")).stdout)["composition"]
+        good.update({"name": "Oslo temperature", "id": "local.oslo-temperature"})
+        home = os.path.join(self.e.root, "home")
+        for ai in (self.fake_ai(good), "off"):
+            r = self.e.run("widget", "hue rooms", "--no-install", "--json", "--name", "mgr-weather",
+                           env={"POWOS_COMPOSE_AI": ai, "HOME": home})
+            self.assertEqual(r.returncode, 0, r.stderr)
+            out = json.loads(r.stdout)
+            self.assertEqual(out["dir"], os.path.join(home, "Projects", "mgr-weather"), ai)
+            self.assertEqual((out["composition"]["id"], out["composition"]["name"]), ("local.mgr-weather", "mgr-weather"))
+            shutil.rmtree(out["dir"])
+        r = self.e.run("widget", "hue rooms", "--no-install", "--json", "--name", "My Rooms", "--id", "local.rooms-x",
+                       env={"HOME": home})
+        out = json.loads(r.stdout)
+        self.assertEqual((out["dir"], out["composition"]["id"]), (os.path.join(home, "Projects", "my-rooms"), "local.rooms-x"))
+
     def test_ai_write_refused_falls_back(self):
         bad = {"spec": "powos.compose/v1", "kind": "widget", "id": "local.lights-off", "name": "Off",
                "uses": [{"as": "r", "block": "appcap", "app": "hue", "action": "set_room", "args": {"group_id": "1", "on": False}}],

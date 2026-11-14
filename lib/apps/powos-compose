@@ -9,7 +9,8 @@ it is an ordinary PowOS app with a database of its own, registered in powos-regi
   powos compose widget "<plain words>" [--name N] [--id local.x] [--dir D] [--arg k=v]... [--no-ai] [--no-install]
                        [--json]
                        words -> a manifest (PowOS AI picks the blocks; without it, or with --no-ai, a word match over
-                       the blocks' names and summaries) -> checked -> an app folder (default ~/Projects/<name>) ->
+                       the blocks' names and summaries) -> checked -> an app folder (default ~/Projects/<name>;
+                       --name sets that folder, the title and, unless --id, the id local.<name>) ->
                        `powos app install` (module published to its own database, UI in place, registered: it shows
                        in home's edit sheet, "PowOS apps"). --arg fills a block's required input (lat=59.9).
                        --no-install: only the folder (then `powos compose install D`; from a Mac checkout
@@ -582,8 +583,10 @@ def _widget_manifest(o, text, args, cid):
     if m is not None:
         if o.get("--name"):
             m["name"] = m.setdefault("show", {})["title"] = o["--name"]
-        if o.get("--id"):
-            m["id"] = o["--id"]
+        # The id follows --name as in the word match (local.<slug of the name>), so its folder is ~/Projects/<name>
+        # (razr 11-14: --name mgr-weather wrote ~/Projects/oslo-temperature, the AI's id).
+        if o.get("--id") or o.get("--name"):
+            m["id"] = o.get("--id") or f"local.{slug(o['--name'])}"
         first = (m.get("uses") or [{}])[0] if isinstance(m.get("uses"), list) else {}
         if "open" not in m and isinstance(first, dict) and opener(specs().get(first.get("app"), {})):
             m["open"] = opener(specs()[first["app"]])  # a tap opens the block's own app, as the word match does
@@ -607,7 +610,8 @@ def _widget_manifest(o, text, args, cid):
 
 def _widget_build(o, m, cid):
     """Step 1: the app folder from the manifest (module + UI)."""
-    d = generate(m, o.get("--dir") or os.path.join("~/Projects", m["id"].split(".", 1)[1]))
+    folder = slug(o["--name"]) if o.get("--name") else m["id"].split(".", 1)[1]
+    d = generate(m, o.get("--dir") or os.path.join("~/Projects", folder))
     log(f"composed {m['id']} ({m['name']}) by {m['by']} in {d}: " + ", ".join(use_name(u) for u in m["uses"]))
     _creation("creation_step_done", cid, 1)
     return d

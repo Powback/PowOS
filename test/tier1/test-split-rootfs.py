@@ -45,6 +45,8 @@ UNOWNED = {
     'usr/share/locale/locale.alias': b'alias',
     'usr/lib/locale/de_DE.utf8/LC_TIME': b'de',
     'usr/lib/locale/C.utf8/LC_TIME': b'c',
+    'opt/powos-rust/cargo/bin/cargo': b'cargo',
+    'opt/powos-rust/rustup/toolchains/stable/lib/rustlib/wasm32-unknown-unknown/lib/libstd.rlib': b'std',
 }
 
 
@@ -96,7 +98,7 @@ class SplitTest(unittest.TestCase):
         self.assertIn('usr/share/doc/*', conf)
         self.assertIn('NoExtract = usr/bin/bwrap', conf)
         packs = dict(l.split('\t')[:2] for l in base['etc/powos/packs'].decode().splitlines())
-        self.assertEqual(set(packs), {'gaming', 'apps', 'dev', 'languages'})
+        self.assertEqual(set(packs), {'gaming', 'apps', 'dev', 'rust', 'languages'})
         self.assertEqual(int(packs['gaming']), os.path.getsize(os.path.join(self.out, 'powos-pack-gaming.tar.gz')))
 
     def test_packs(self):
@@ -113,9 +115,12 @@ class SplitTest(unittest.TestCase):
         self.assertEqual(self.files_of('powos-pack-apps.tar.gz'),
                          {'opt/brave/brave', 'usr/bin/kate', 'usr/share/locale/de/LC_MESSAGES/kate.mo', 'usr/share/homebrew.tar.zst'})
         self.assertEqual(self.files_of('powos-pack-dev.tar.gz'), {'usr/bin/gcc'})
+        # The Rust toolchain is its own pack (razr 11-14: a dev pack added before it existed never brings it).
+        self.assertEqual(self.files_of('powos-pack-rust.tar.gz'),
+                         {'opt/powos-rust/cargo/bin/cargo', 'opt/powos-rust/rustup/toolchains/stable/lib/rustlib/wasm32-unknown-unknown/lib/libstd.rlib'})
         self.assertEqual(self.files_of('powos-pack-languages.tar.gz'),
                          {'usr/share/locale/de/LC_MESSAGES/bash.mo', 'usr/lib/locale/de_DE.utf8/LC_TIME', 'usr/share/fonts/noto-cjk/a.ttc'})
-        for f in ('powos-rootfs-base', 'powos-pack-gaming', 'powos-pack-apps', 'powos-pack-dev', 'powos-pack-languages'):
+        for f in ('powos-rootfs-base', 'powos-pack-gaming', 'powos-pack-apps', 'powos-pack-dev', 'powos-pack-rust', 'powos-pack-languages'):
             sha = Path(self.out, f + '.tar.gz.sha256').read_text().split()[0]
             self.assertRegex(sha, '^[0-9a-f]{64}$')
 

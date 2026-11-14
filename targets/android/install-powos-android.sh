@@ -171,8 +171,9 @@ cp $P/manifest/flatpaks.txt /usr/share/powos/phone-flatpaks.txt
 curl -fsSL -o /tmp/bun.zip https://github.com/oven-sh/bun/releases/latest/download/bun-linux-aarch64.zip
 bsdtar -xf /tmp/bun.zip -C /tmp && install -m 755 /tmp/bun-linux-aarch64/bun /usr/bin/bun && rm -rf /tmp/bun*
 # The Rust -> wasm toolchain `powos app build` uses for an app's module on the phone itself, offline (gh#13 A3):
-# rustup's stable + wasm32 and the app template's crates prebuilt, in /opt/powos-rust (rootfs-packs.conf: the dev pack,
-# added once from Settings > Storage or when `powos app build` asks). Not fatal: `powos app builder user@host` still builds.
+# rustup's stable + wasm32 and the app template's crates prebuilt, in /opt/powos-rust (rootfs-packs.conf: the rust pack,
+# added once from Settings > Storage or when `powos app build` asks). Not fatal here (`powos app builder user@host`
+# still builds), but build-rootfs.sh refuses to publish packs whose rust pack came out empty.
 if [ -d "$P/current/src/lib/apps/templates/module/module" ]; then
   sh "$P/current/src/targets/android/tools/app-toolchain.sh" /opt/powos-rust "$P/current/src/lib/apps/templates/module/module" ||
     echo "powos: the app toolchain (/opt/powos-rust) failed - modules build on an app builder" >&2

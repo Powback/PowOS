@@ -1,8 +1,9 @@
 #!/bin/sh
 # app-toolchain.sh [PREFIX] [TEMPLATE_MODULE_DIR] - the Rust -> wasm toolchain `powos app build` uses on the phone itself
 # (gh#13 A3: making an app with a module on a phone without root, offline). Run by install-powos-android.sh in the
-# image build; rootfs-packs.conf puts PREFIX (default /opt/powos-rust) in the `dev` pack, so a phone without root adds
-# it from Settings > Storage or when `powos app build` asks (powos-pack need dev), once, and builds offline after.
+# image build; rootfs-packs.conf puts PREFIX (default /opt/powos-rust) in the `rust` pack, so a phone without root adds
+# it from Settings > Storage or when `powos app build` asks (powos-pack need rust, + dev for gcc), once, and builds
+# offline after. Measured 11-14 (rustc 1.100.0): 815 MiB unpacked (rustup 605, app-target 181, cargo 31), 284 MB gz.
 #
 #   PREFIX/rustup, PREFIX/cargo   rustup's minimal stable toolchain + the wasm32-unknown-unknown target (Arch Linux ARM's
 #                                 rust has no wasm32 std, so not pacman's)
