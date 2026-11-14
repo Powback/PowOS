@@ -25,15 +25,8 @@ docker image inspect "$IMG" >/dev/null 2>&1 || docker import --platform linux/ar
 # Ours (out/pkgs: kwin, kglobalacceld, plasma-desktop, breeze) come from build-pkgs.sh, never from here.
 ours=$("$HERE/tools/newest-pkgs.sh" "$HERE/out/pkgs" | xargs -n1 basename | sed -E 's/-[^-]+-[^-]+-[^-]+\.pkg\.tar\..*$//' | tr '\n' ' ')
 rm -rf "$OUT" && mkdir -p "$OUT"
-docker run --rm --platform linux/arm64 --cpus 4 --memory 4g -e VER="$VER" -e OURS="$ours" -v "$OUT:/out" -v "$HERE/tools:/tools:ro" "$IMG" bash -c '
-  set -euo pipefail
-  pin=$(for d in /var/lib/pacman/local/*/desc; do
-    awk "/^%NAME%/{getline; n=\$0} /^%VERSION%/{getline; v=\$0} END{print n, v}" "$d"
-  done | awk -v ver="$VER" -v ours=" $OURS " "{v=\$2; sub(/^[0-9]+:/, \"\", v); sub(/-[^-]*\$/, \"\", v)
-    if (v == ver && index(ours, \" \" \$1 \" \") == 0) print \$1}")
-  cd /out
-  python3 -I /tools/repack-installed.py /out $pin >/dev/null
-  repo-add -q powos-plasma.db.tar.gz *.pkg.tar.*
-  echo "$pin" | tr "\n" " " > pinned.txt
-'
+docker run --rm --platform linux/arm64 --cpus 4 --memory 4g -e VER="$VER" -e OURS="$ours" -v "$OUT:/out" -v "$HERE/tools:/tools:ro" "$IMG" \
+  bash /tools/plasma-pin-inside.sh /out ||
+  { echo "plasma-pin: no Plasma $VER pinned from ${TAR#$HERE/} (sha $(cut -c1-12 "$TAR.sha256")): it must be the build base kwin" \
+      "is built on, the shared one is: tools/agents/build-inputs-cache.sh get powos-rootfs.tar.gz[.sha256] <out/...>" >&2; exit 1; }
 echo "plasma-pin: Plasma $VER, $(wc -w < "$OUT/pinned.txt") packages in ${OUT#$HERE/}: $(cat "$OUT/pinned.txt")"

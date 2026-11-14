@@ -28,10 +28,39 @@ ANDROMARCHY_URL=https://github.com/lotfibennour/andromarchy
 ANDROMARCHY_REF=220754d390f743aa5a8227e689402de1a6eb0281
 IMAGE=menci/archlinuxarm:latest   # build host userland only; the rootfs itself is the ALARM tarball
 
+# Inputs from the shared build-inputs cache (tools/agents/build-inputs-cache.sh), where every worktree's build-pkgs.sh
+# run puts its packages: a checkout that doesn't build packages itself (the main ~/Projects/PowOS, 11-14) had kwin
+# 6.7.5-3.31 against PKGBUILD 3.79 and, as out/powos-rootfs.tar.gz, an old full build (Plasma 6.8.1) left from when
+# build-rootfs.sh wrote its output there instead of the 6.7.5 build base KWin is built on - plasma-pin.sh got nothing.
+# The build base is the cache's when it has one; out/pkgs gains each cached build newer than its own (hard links).
+inputs_from_cache() {
+  local bic=$HERE/../../tools/agents/build-inputs-cache.sh cache=${POWOS_BUILD_INPUTS_CACHE:-$HOME/.cache/powos-build-inputs} f b n mine
+  [ -x "$bic" ] || return 0
+  if [ -s "$cache/powos-rootfs.tar.gz.sha256" ] && ! cmp -s "$cache/powos-rootfs.tar.gz.sha256" "$OUT/powos-rootfs.tar.gz.sha256"; then
+    "$bic" get powos-rootfs.tar.gz "$OUT/powos-rootfs.tar.gz" >/dev/null && "$bic" get powos-rootfs.tar.gz.sha256 "$OUT/powos-rootfs.tar.gz.sha256" >/dev/null &&
+      echo "build-rootfs: out/powos-rootfs.tar.gz is now the shared build base ($(cut -c1-12 "$OUT/powos-rootfs.tar.gz.sha256"))" >&2
+  fi
+  [ -d "$cache/pkgs" ] || return 0
+  mkdir -p "$OUT/pkgs"
+  "$HERE/tools/newest-pkgs.sh" "$cache/pkgs" | while IFS= read -r f; do
+    b=${f##*/}
+    n=$(printf '%s\n' "$b" | sed -E 's/-[^-]+-[^-]+-[^-]+\.pkg\.tar\..*$//')
+    mine=$("$HERE/tools/newest-pkgs.sh" "$OUT/pkgs" "$n")
+    [ -z "$mine" ] || [ "$(printf '%s\n%s\n' "${mine##*/}" "$b" | sort -V | tail -1)" != "${mine##*/}" ] || continue
+    "$bic" get "pkgs/$b" "$OUT/pkgs/$b" >/dev/null && echo "build-rootfs: out/pkgs/$b from the shared cache" >&2
+  done
+}
+
 # Step 1 inputs: our KWin + Xwayland packages, and Andromarchy at the pinned commit with our build patches.
 fetch_inputs() {
+inputs_from_cache
 KWIN_PKG=${1:-$("$HERE/tools/newest-pkgs.sh" "$OUT/pkgs" kwin)}
 [ -f "${KWIN_PKG:-}" ] || { echo "no kwin package: run targets/android/build-pkgs.sh first" >&2; exit 1; }
+# The kwin this checkout's pkgs/kwin describes, not an older build (the image would carry stale KWin patches).
+kv=$(sed -n 's/^pkgver=//p' "$HERE/pkgs/kwin/PKGBUILD")-$(sed -n 's/^pkgrel=//p' "$HERE/pkgs/kwin/PKGBUILD")
+case "${KWIN_PKG##*/}" in kwin-"$kv"-*) ;; *)
+  [ -n "${1:-}" ] || { echo "build-rootfs: newest kwin package is ${KWIN_PKG##*/}, pkgs/kwin is $kv: run targets/android/build-pkgs.sh kwin" >&2; exit 1; } ;;
+esac
 # Xwayland too (patches/andromarchy/0005: build-inside.sh installs it from our package instead of compiling it).
 [ -n "$("$HERE/tools/newest-pkgs.sh" "$OUT/pkgs" xwayland-kgsl)" ] ||
   { echo "no xwayland-kgsl package: run targets/android/build-pkgs.sh xwayland-kgsl first" >&2; exit 1; }
@@ -60,7 +89,10 @@ else
 fi
 cp $("$HERE/tools/newest-pkgs.sh" "$OUT/pkgs") "$S/pkgs/"   # ours: kwin, fex-emu, recipes.list builds (newest of each)
 # Plasma at our KWin's version, from the rootfs KWin builds on (tools/plasma-pin.sh: Arch Linux ARM moved Plasma past it).
-"$HERE/tools/plasma-pin.sh" && cp -a "$OUT/plasma-pin" "$S/plasma-pin"
+# Two commands, not "a && b": under set -e a failing left side of && doesn't stop the script (11-14: an empty pin ran on
+# into the image build, which died on an unrelated-looking "could not satisfy dependencies").
+"$HERE/tools/plasma-pin.sh"
+cp -a "$OUT/plasma-pin" "$S/plasma-pin"
 cp -a "$HERE/session" "$HERE/shims" "$HERE/play" "$HERE/phone-rules.conf" "$HERE/tools/resolve-packages.py" "$HERE/tools/phone-parity.py" "$S/"
 install -m 755 "$HERE/install-powos-android.sh" "$S/"
 # claude-login (the native Claude sign-in's backend, install-powos-android.sh puts it in /usr/lib/claude-login): the
