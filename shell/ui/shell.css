@@ -3099,13 +3099,13 @@ html[data-mode="quicktools"], html[data-mode="quicktools"] body { background: tr
  * PowOS AI (its page's cards, its pull-up panel), the control center, PowOS apps' pages:
  * the frost (theme.css, frost v2) - the compositor's stronger blur on each surface (nativeglass.ts reads
  * --glass-blur-native per surface; the shade's window is blurred by its host: shade.tsx) and the cool tint; over the
- * other tone it takes that tone. No halos. An app whose page paints its own ground opts out (appscreen.tsx).
+ * other tone the same tint, deeper (theme.css --frost-lift). No halos. An app whose page paints its own ground opts out (appscreen.tsx).
  */
 .chrome-surface, .app-screen.tile, .ai-screen .tile, .folder-sheet .folder-bg.tile, html:root .home:has(.ai-panel) .launcher-frame.tile, .notif-panel :is(.cc.v3, .notif-own), .home:has(.ai-panel) .ai-panel, .ai-screen :is(.ai-top > *, .ai-heading, .ai-mail-bar > *, .ai-empty):not(.tile *), .ai-screen.wide .ai-fold:not(.tile *), :is(.home > .bar .bar-pill, .home .dsb-glass) {
-  /* Resolved here, from this surface's own --frost-base (a light frost swaps it below). */
+  /* Resolved here, from this surface's own --frost-base. */
   /* Secondary lines the foreground itself, as a widget's: their size says they're secondary. */
   --color-muted: var(--color-foreground);
-  --frost-fill: color-mix(in srgb, var(--frost-base) calc(var(--glass-tint) + 20%), transparent);
+  --frost-fill: color-mix(in srgb, var(--frost-base) calc(var(--glass-tint) + var(--frost-lift)), transparent);
   --frost-sheen: color-mix(in srgb, var(--color-foreground) 6%, transparent);
 }
 /* A dark theme over a dark wallpaper: the tint a touch lighter, so the glass shows over pure black. */
@@ -3145,34 +3145,20 @@ html:root .page .search-face .bar-pill {
 html:root:not(.glass-native) .ai-screen .tile { background: var(--frost-fill); }
 /* Home's widget glass - the widgets, the library's cards, a group's seams, the search pills, an open folder - takes the
    open shade's tint (theme.css --shade-tint) in place of the frost's: the same colour and opacity, no veil under it,
-   their own compositor blur kept, no sheen (the shade has none). Over a wallpaper of the other tone they still flip
-   (below), as their text needs. The faces had no tint at all before this: their background names --frost-sheen, which
-   only the frost block above defines, and a widget face isn't in it - the whole background was invalid, so none. */
-:root:not([data-light="false"][data-wallpaper="light"], [data-light="true"][data-wallpaper="dark"]) :is(.page .home-tile > .tile, .lib-card.tile, .page .seam, :is(.home > .bar .bar-pill, .home .dsb-glass), .page .search-face .bar-pill, .folder-sheet .folder-bg.tile) {
+   their own compositor blur kept, no sheen (the shade has none). The faces had no tint at all before this: their
+   background names --frost-sheen, which only the frost block above defines, and a widget face isn't in it - the whole
+   background was invalid, so none. */
+/*
+ * Over a wallpaper of the other tone (a dark theme over a bright picture, a light one over a dark) the glass keeps the
+ * theme's own tint, deeper for its text (theme.css: --backdrop-tint, --frost-lift) - never the wallpaper's tone. The
+ * frost turned light there (paper at 52% over the blur) and the razr fold's dark theme over its pale green wallpaper
+ * showed every widget, pill and card as a white slab (the user, 11-14: "the blur bg stuff is white"); THE backdrop is
+ * the theme's one tint everywhere (theme.css, 10-31). Only labels straight on the wallpaper turn (theme.css --on-wallpaper).
+ */
+:root :is(.page .home-tile > .tile, .lib-card.tile, .page .seam, :is(.home > .bar .bar-pill, .home .dsb-glass), .page .search-face .bar-pill, .folder-sheet .folder-bg.tile) {
   --frost-fill: var(--shade-tint);
   --frost-sheen: transparent;
   --glass-veil: transparent;
-}
-/*
- * Over a wallpaper of the other tone (a dark theme over a bright picture, a light one over a dark): the frost takes
- * the wallpaper's tone, its text the theme's two colours swapped - as the wallpaper's labels turn (theme.css
- * data-wallpaper) - not a heavier fill.
- */
-:is(:root[data-light="false"][data-wallpaper="light"], :root[data-light="true"][data-wallpaper="dark"]) :is(.chrome-surface, .page .seam, .app-screen.tile, .lib-card.tile, .ai-screen .tile, .folder-view, .home:has(.ai-panel) .launcher-frame.tile, .home:has(.ai-panel) .ai-panel, .notif-panel :is(.cc.v3, .notif-own), .page .home-tile > .tile, :is(.home > .bar .bar-pill, .home .dsb-glass), .ai-screen :is(.ai-top > *, .ai-heading, .ai-mail-bar > *, .ai-empty):not(.tile *), .ai-screen.wide .ai-fold:not(.tile *)) {
-  --frost-base: color-mix(in oklab, var(--frost-paper) 70%, var(--frost-swap-cool));
-  --glass-veil: transparent;
-  --color-foreground: var(--frost-ink);
-  --color-muted: color-mix(in srgb, var(--frost-ink) 80%, transparent);
-  --accent-text: color-mix(in srgb, var(--color-accent) 45%, var(--frost-ink));
-  color: var(--frost-ink);
-}
-/* The widget glass over the other tone: its frost resolved here, from the swapped --frost-base (inherited, it was the
-   root's dark one), and a sheen of its own - their background names --frost-sheen, which nothing set on them in this
-   tone, so the whole background was invalid and the faces had no tint over the live blur (razr fold, dark theme over a
-   light wallpaper, 11-09 "its got blur but its missing the tint"). */
-:is(:root[data-light="false"][data-wallpaper="light"], :root[data-light="true"][data-wallpaper="dark"]) :is(.page .home-tile > .tile, .lib-card.tile, .page .seam, .page .search-face .bar-pill) {
-  --frost-fill: color-mix(in srgb, var(--frost-base) calc(var(--glass-tint) + 20%), transparent);
-  --frost-sheen: transparent;
 }
 /*
  * PowOS AI's labels on the wallpaper (its title and state, "open", the headings, "clear all", the empty line): each a
@@ -4154,21 +4140,11 @@ html:root .ai-left > .ai-menu.tile { --glass-blur-native: var(--backdrop-blur-na
  * sheet over a wide panel on the widgets' frost.
  */
 html:root .ai-screen.panes > .tile { --glass-blur-native: var(--backdrop-blur-native); background: var(--backdrop-tint); }
-/* Over a wallpaper of the other tone the backdrop twice and the theme's own text on it, as the folded status page - not
-   the swapped frost ink every .ai-screen .tile takes (dark ink on THE dark backdrop). The theme's, read on the page. */
-.ai-screen.panes { --ai-theme-fg: var(--color-foreground); --ai-theme-muted: var(--color-muted); --ai-theme-accent: var(--accent-text); }
-html:root:is([data-light="false"][data-wallpaper="light"], [data-light="true"][data-wallpaper="dark"]) .ai-screen.panes > .tile.tile {
-  --color-foreground: var(--ai-theme-fg);
-  --color-muted: var(--ai-theme-muted);
-  --accent-text: var(--ai-theme-accent);
-  color: var(--ai-theme-fg);
-  background: linear-gradient(var(--backdrop-tint), var(--backdrop-tint)), var(--backdrop-tint);
-}
 html:root :is(.ai-screen > .ai-glass, .ai-view.split > .ai-aside.tile) {
   --glass-blur-native: var(--widget-blur-native);
   background: linear-gradient(var(--frost-fill), var(--frost-fill)), linear-gradient(var(--glass-veil), var(--glass-veil));
 }
-:root:not([data-light="false"][data-wallpaper="light"], [data-light="true"][data-wallpaper="dark"]) :is(.ai-screen > .ai-glass, .ai-view.split > .ai-aside.tile) {
+:root :is(.ai-screen > .ai-glass, .ai-view.split > .ai-aside.tile) {
   --frost-fill: var(--shade-tint);
   --frost-sheen: transparent;
   --glass-veil: transparent;
@@ -4181,14 +4157,15 @@ html:root :is(.ai-screen > .ai-glass, .ai-view.split > .ai-aside.tile) {
  * as the widgets, PowOS AI's page (above) and the shade (.notif-scrim) wear it: one tint, one compositor radius, no
  * veil, no sheen, nothing per surface (2026-10-31 "the launcher and the PoAi launcher is not using the same dark
  * background as everything else"; it was --text-fill, the grey reference lifted to the foreground, at 74% over a
- * 20% veil: a light milky wash). Over a wallpaper of the other tone the widgets' swapped frost stands (above). Last in
+ * 20% veil: a light milky wash). Over a wallpaper of the other tone the same, deeper (theme.css). Last in
  * the file and html-prefixed: it wins over each surface's earlier fill.
  */
 /* (.home:has(.ai-panel) named too: :is() takes its weight, so this outranks the frost's 360 on PowOS AI's panel.) */
 html:root :is(.home:has(.ai-panel) .launcher-frame.tile, .home .launcher-frame.tile, .folder-view .folder-focus.tile, .folder-sheet .folder-bg.tile) {
   --glass-blur-native: var(--backdrop-blur-native);
 }
-html:root:not([data-light="false"][data-wallpaper="light"], [data-light="true"][data-wallpaper="dark"]) :is(.home .launcher-frame.tile, .folder-view .folder-focus.tile, .folder-sheet .folder-bg.tile) {
+/* (.home:has(.ai-panel) named here too for its weight: the frost block's html:root .home:has(.ai-panel) rule above.) */
+html:root :is(.home:has(.ai-panel) .launcher-frame.tile, .home .launcher-frame.tile, .folder-view .folder-focus.tile, .folder-sheet .folder-bg.tile) {
   --frost-fill: var(--backdrop-tint);
   --frost-sheen: transparent;
   --glass-veil: transparent;
@@ -4200,12 +4177,12 @@ html:root:not([data-light="false"][data-wallpaper="light"], [data-light="true"][
 html:root :is(.home.pull-screen, .home.adopts) > .stage > .launcher-frame.tile { position: fixed; inset: 0; border-radius: 0; box-shadow: none; }
 /* Home's in-place launcher (home.tsx HomeLauncher) wears the same full-screen backdrop, under home's own bar and dock. */
 /* With CSS glass (no compositor blur, ui/glass.ts): the same tint over the frosted wallpaper, as the widgets' page glass. */
-html.glass:root:not([data-light="false"][data-wallpaper="light"], [data-light="true"][data-wallpaper="dark"]) .home .launcher-frame.tile {
+html.glass:root .home .launcher-frame.tile {
   background:
     linear-gradient(var(--backdrop-tint), var(--backdrop-tint)) border-box,
     var(--glass-image) left calc(-1 * var(--gx)) bottom calc(-1 * var(--gb)) / var(--glass-w) var(--glass-h) no-repeat border-box;
 }
-html.glass:root:not([data-light="false"][data-wallpaper="light"], [data-light="true"][data-wallpaper="dark"]) :is(.folder-view .folder-focus.tile, .folder-sheet .folder-bg.tile) {
+html.glass:root :is(.folder-view .folder-focus.tile, .folder-sheet .folder-bg.tile) {
   background:
     linear-gradient(var(--backdrop-tint), var(--backdrop-tint)) border-box,
     var(--glass-image) calc(-1 * var(--gx)) calc(-1 * var(--gy)) / var(--glass-w) var(--glass-h) no-repeat border-box;
@@ -4254,10 +4231,6 @@ html.glass:root:not([data-light="false"][data-wallpaper="light"], [data-light="t
  */
 html:root .ai-screen.status > .ai-glass.tile { --glass-blur-native: var(--backdrop-blur-native); background: var(--backdrop-tint); }
 /* The pane is THE backdrop on either wallpaper tone (theme.css keeps its tint the theme's): the theme's own text on it. */
-/* Over a wallpaper of the other tone the text needs more of the tint (theme.css --glass-dim): the backdrop twice. */
-:root:is([data-light="false"][data-wallpaper="light"], [data-light="true"][data-wallpaper="dark"]) .ai-screen.status > .ai-glass.tile {
-  background: linear-gradient(var(--backdrop-tint), var(--backdrop-tint)), var(--backdrop-tint);
-}
 :is(.ai-screen.status, .ai-left) { --ais-side: var(--edge); }
 :is(.ai-screen.status, .ai-left) * { font-family: inherit; }
 .ais-top { gap: 12px; }

@@ -104,19 +104,18 @@
   /*
    * The frost (frost v2, 2026-10-22): one material for the surfaces you read through - PowOS AI's cards and panel, the
    * control center. Its strength is the compositor's blur (--frost-blur-native: what's behind can't be read, not a
-   * darker fill), its colour the reference tint cooled, at the reference strength; over a wallpaper of the other tone
-   * it takes that tone (shell.css), so text keeps its contrast without a slab or a halo.
+   * darker fill), its colour the reference tint cooled, at the reference strength (--glass-tint + --frost-lift); over a
+   * wallpaper of the other tone the same tint, deeper (below), so text keeps its contrast without a halo.
    */
   --frost-cool: var(--frost-cool-dark);
   --frost-cool-light: #e8eef6;
   --frost-cool-dark: #182230;
-  /* The frost over a wallpaper of the other tone takes the other tone (light glass, dark text; or the reverse). */
+  /* The icon plates' other cool (shell.css --icon-plate). */
   --frost-swap-cool: var(--frost-cool-light);
-  /* The text on light frost in a dark theme: its background colour (read before anything swaps it). */
-  --frost-ink: var(--color-background);
-  --frost-paper: var(--color-foreground);
   --frost-base: color-mix(in oklab, var(--glass-base) 55%, var(--frost-cool));
   --frost-fill: color-mix(in srgb, var(--frost-base) calc(var(--glass-tint) + 16%), transparent);
+  /* The frost surfaces' tint over --glass-tint (shell.css frost block); deeper over a wallpaper of the other tone. */
+  --frost-lift: 20%;
   --frost-blur-native: 360px;
   /* Home's widgets (and the search pill): the frost's tint, close to home's glass blur (--glass-blur-native 140). 2026-10-28:
      "turn down the blur effect just a little", then "widgets still have too much blur" - 288 was not enough. Now the one
@@ -207,13 +206,18 @@
 
 /*
  * A wallpaper of the other tone than the theme (dark glass over a bright picture, light glass over a dark one:
- * glass.ts data-wallpaper): the text needs more of the tint - nearly opaque (measured: 4.5:1 over a white wallpaper).
+ * glass.ts data-wallpaper): the glass keeps the theme's tint, deeper for its text - never the wallpaper's tone (a light
+ * frost there was a white slab over the razr fold's pale wallpaper, the user 11-14: "the blur bg stuff is white").
+ * THE backdrop at 68% (55%: 3.6:1 for the foreground over a white wallpaper, 68%: 6:1), the frost surfaces at
+ * --glass-tint + 44% (76%: 5:1). Labels straight on the wallpaper turn to the other colour (--on-wallpaper).
  */
 :root[data-light="false"][data-wallpaper="light"], :root[data-light="true"][data-wallpaper="dark"] {
   --glass-dim: 68%;
+  --frost-lift: 44%;
   --on-wallpaper: var(--color-background);
   --on-wallpaper-halo: var(--color-foreground);
 }
+:root[data-light="false"][data-wallpaper="light"] { --backdrop-tint: rgb(0 0 0 / 68%); }
 :root[data-light="true"] {
   --frost-cool: var(--frost-cool-light);
   --frost-swap-cool: var(--frost-cool-dark);
@@ -224,6 +228,7 @@
   /* Light: the theme's own ground at the same strength (dark text stays readable on the shade and the widgets). */
   --backdrop-tint: color-mix(in srgb, var(--color-background) 55%, transparent);
 }
+:root[data-light="true"][data-wallpaper="dark"] { --backdrop-tint: color-mix(in srgb, var(--color-background) 68%, transparent); }
 .glass, .glass-native { --glass-tint: 32%; }
 :is(.glass, .glass-native)[data-light="true"] { --glass-tint: 40%; }
 .glass, .glass-behind, .glass-native { --control-fill: color-mix(in srgb, var(--color-foreground) 10%, transparent); }

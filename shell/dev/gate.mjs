@@ -3022,7 +3022,10 @@ async function resumeThemeHealCheck() {
 /**
  * The widget glass's theme tint in both wallpaper tones (razr fold 11-09, dark theme over a light wallpaper: "its got
  * blur but its missing the tint"): every widget face's background valid (not "none": an unset --frost-sheen voided it)
- * and the open drawer's fill still see-through (68% + the 32% tint was an opaque slab, no blur through it).
+ * and the open drawer's fill still see-through (68% + the 32% tint was an opaque slab, no blur through it). The glass
+ * keeps the THEME's tone over either wallpaper (razr fold 11-14, the same pairing: "the blur bg stuff is white" - the
+ * frost had flipped to light paper at 52%): the widget faces', the search pill's and a frost surface's fill the
+ * theme's colour, deep enough over the other tone for the foreground's 4.5:1 over a white wallpaper.
  */
 async function glassTintToneCheck() {
   const fails = [];
@@ -3063,7 +3066,58 @@ async function glassTintIn(fill, tone) {
   const a = Number(/\/\s*([\d.]+)\s*\)$/.exec(bg)?.[1] ?? /^rgba\([^,]+,[^,]+,[^,]+,\s*([\d.]+)\)$/.exec(bg)?.[1] ?? 1);
   probe.remove();
   if (!(a < 0.95)) fails.push(`${where}: the drawer's fill is opaque (${bg})`);
-  return fails;
+  return [...fails, ...glassFillFails(where, tone)];
+}
+
+/** A computed colour ("color(srgb r g b / a)" 0..1, or "rgba(r, g, b, a)" 0..255) as [r, g, b, a] 0..1; null: neither. */
+function glassRgba(css) {
+  const m = /color\(srgb ([\d.]+) ([\d.]+) ([\d.]+)(?: \/ ([\d.]+))?\)/.exec(css);
+  const r = m ? null : /rgba?\(([\d.]+),? ([\d.]+),? ([\d.]+)(?:,? (?:\/ )?([\d.]+))?\)/.exec(css);
+  const k = m ? 1 : 255;
+  const g = m ?? r;
+  if (!g) return null;
+  return [g[1] / k, g[2] / k, g[3] / k, g[4] == null ? 1 : +g[4]];
+}
+
+/** Relative luminance of [r, g, b] (0..1, sRGB). */
+function glassLum(c) {
+  const lin = (v) => (v <= 0.04045 ? v / 12.92 : ((v + 0.055) / 1.055) ** 2.4);
+  return 0.2126 * lin(c[0]) + 0.7152 * lin(c[1]) + 0.0722 * lin(c[2]);
+}
+
+/** [sel]'s --frost-fill as a colour (a probe painted with it inside), or null. */
+function glassFillOf(sel) {
+  const el = document.querySelector(sel);
+  if (!el) return null;
+  const p = document.createElement("i");
+  p.style.cssText = "position:absolute;width:1px;height:1px;background:var(--frost-fill)";
+  el.append(p);
+  const c = glassRgba(getComputedStyle(p).backgroundColor);
+  p.remove();
+  return c;
+}
+
+/**
+ * glassTintIn's tone part: each glass's fill composited over white (the brightest wallpaper) and over black is the
+ * THEME's tone, and over the other tone the foreground keeps 4.5:1 on it (razr fold 11-14: "the blur bg stuff is white").
+ */
+function glassFillFails(where, tone) {
+  const dark = document.documentElement.dataset.light !== "true";
+  const fg = glassRgba(getComputedStyle(document.querySelector(".page .home-tile > .tile") ?? document.documentElement).color);
+  const other = tone === (dark ? "light" : "dark");
+  return [["a widget face", ".page .home-tile > .tile"], ["the search pill", ".home > .bar .bar-pill"]].flatMap(([name, sel]) => glassFillFail(`${where}: ${name}`, glassFillOf(sel), dark, other ? fg : null));
+}
+
+/** One glass's fill [c] (null: not on the page): the theme's tone over the wallpaper it isn't drawn on; [fg] readable on it. */
+function glassFillFail(what, c, dark, fg) {
+  if (!c) return [];
+  // Over the wallpaper the theme is NOT drawn on (white under a dark theme's glass, black under a light one's).
+  const bgL = glassLum(c.slice(0, 3).map((v) => v * c[3] + (dark ? 1 - c[3] : 0)));
+  const fails = (dark ? bgL > 0.2 : bgL < 0.2) ? [`${what}'s fill is the wallpaper's tone, not the theme's (${c.map((v) => v.toFixed(2))})`] : [];
+  if (!fg) return fails;
+  const fgL = glassLum(fg);
+  const ratio = (Math.max(fgL, bgL) + 0.05) / (Math.min(fgL, bgL) + 0.05);
+  return ratio < 4.5 ? [...fails, `${what}'s text ${ratio.toFixed(1)}:1 over ${dark ? "a white" : "a black"} wallpaper`] : fails;
 }
 
 /** A page swipe changes the page without a haptic tick (the user, 10-31: "Don't need haptics when changing page"). */
@@ -14374,7 +14428,7 @@ try {
   if (process.env.SHELL_PAGES !== "0")
     runs.push(open(browser, `${ORIGIN}/index.html`, "glass-tint-tone", { width: 404, height: 900 }).then((r) => whenReady(r, async () => {
       // Its helper as the page's global (an evaluated function carries no closure).
-      await r.page.evaluate(String(glassTintIn));
+      for (const f of [glassTintIn, glassRgba, glassLum, glassFillOf, glassFillFails, glassFillFail]) await r.page.evaluate(String(f));
       return r.page.evaluate(glassTintToneCheck);
     })));
   if (process.env.SHELL_PAGES !== "0")
