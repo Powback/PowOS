@@ -15,6 +15,11 @@ description: Use for games on the PowOS phone (OnePlus Open) - Steam/Proton unde
 
 Access, idle windows and on-device rules: the powos-phone skill (adb/root/idle/cdp and the on-device verify checks). This is the games/kernel part.
 
+- No root (fakechroot engine): the loader is not fakechroot-aware - LD_LIBRARY_PATH/LD_PRELOAD entries must be HOST
+  paths ($FAKECHROOT_BASE prefix) and the engine's LD_LIBRARY_PATH outranks RUNPATH $ORIGIN (/usr/bin/steam
+  steam_fakechroot_libs). X11 apps need DISPLAY/XAUTHORITY from KWin (engine XwaylandDisplay). Launch log:
+  `run-as com.powos.app cat files/run/open-task/steam.log`.
+
 ## The stack a Proton game runs on
 - Steam = native ARM64 (`~/.local/share/Steam`). Game: steam-launch-wrapper -> reaper -> FEX `fex-compat-tool` -> SLR_4
   `_v2-entry-point` -> Proton Experimental (CompatToolMapping in config.vdf: 274190 Broforce, 294100, 346010).

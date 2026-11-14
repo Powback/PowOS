@@ -14,7 +14,18 @@ for b in aarch64 i386 x86_64; do
   cmp -s /usr/lib/powos-sysvipc/$b/libsysvipc-emu.so "$L/$b/libsysvipc-emu.so" \
     || install -Dm755 /usr/lib/powos-sysvipc/$b/libsysvipc-emu.so "$L/$b/libsysvipc-emu.so"
 done
-export LD_PRELOAD="$L/aarch64/libsysvipc-emu.so $L/i386/libsysvipc-emu.so $L/x86_64/libsysvipc-emu.so${LD_PRELOAD:+ $LD_PRELOAD}"
+sysvipc_preload() {
+  if [ -n "${FAKECHROOT_BASE:-}" ]; then
+    # No root (the app's fakechroot engine): the engine already emulates SysV IPC for native programs
+    # (android-compat.c, Andromarchy patch 0004), so no aarch64 shim - two emulations would not see each other's
+    # semaphores. The x86 ones by HOST path: the dynamic loader opens LD_PRELOAD with raw syscalls, past fakechroot's
+    # path rewrite (every Steam process said "libsysvipc-emu.so from LD_PRELOAD cannot be preloaded", razr 11-14).
+    export LD_PRELOAD="$FAKECHROOT_BASE$L/i386/libsysvipc-emu.so $FAKECHROOT_BASE$L/x86_64/libsysvipc-emu.so${LD_PRELOAD:+ $LD_PRELOAD}"
+  else
+    export LD_PRELOAD="$L/aarch64/libsysvipc-emu.so $L/i386/libsysvipc-emu.so $L/x86_64/libsysvipc-emu.so${LD_PRELOAD:+ $LD_PRELOAD}"
+  fi
+}
+sysvipc_preload
 
 # IPC left behind by a Steam that didn't shut down (killed, crashed, the session restarted): the shim's semaphores are
 # files that a kernel would have released with their processes, so the next Steam waited on ones a dead process held
@@ -260,6 +271,20 @@ ln -sfn "$S/linuxarm64" "$HOME/.steam/sdkarm64"
 # -noshaders (no shader pre-caching: Steam's "Processing Vulkan shaders" held RimWorld's launch 28 s, 2026-10-23 05:46,
 # fossilize under FEX). Set only once measured (bf-coldstart env:POWOS_STEAM_ARGS=-noshaders).
 POWOS_STEAM_ARGS=${POWOS_STEAM_ARGS:-}
+# HACK: no root (the app's fakechroot engine, FAKECHROOT_BASE set): the dynamic loader is not fakechroot-aware, so the
+# engine's LD_LIBRARY_PATH names the rootfs's lib dirs by host path - and LD_LIBRARY_PATH outranks a library's RUNPATH.
+# The client's steamui.so (RUNPATH $ORIGIN) then bound the rootfs's older libSDL3 instead of the one beside it:
+# "undefined symbol: SDL_TryLockJoysticks, version SDL3_0.0.0" -> "Fatal error: Failed to load steamui.so", no window
+# (razr fold 11-14, files/run/open-task/steam.log). The client's dir first, by host path, restores $ORIGIN's precedence;
+# SYSTEM_LD_LIBRARY_PATH (what the client hands host tools: zenity, xdg-*, dbus-send) keeps the engine's own.
+# Rooted/desktop (no FAKECHROOT_BASE): nothing changes. Real fix: a fakechroot-aware loader (rootfs default lib dirs
+# searched after RUNPATH instead of LD_LIBRARY_PATH), or a real chroot.
+steam_fakechroot_libs() {
+  [ -n "${FAKECHROOT_BASE:-}" ] || return 0
+  export SYSTEM_LD_LIBRARY_PATH=${LD_LIBRARY_PATH:-}
+  export LD_LIBRARY_PATH=$FAKECHROOT_BASE$1${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}
+}
+steam_fakechroot_libs "$S/steamrtarm64"
 cd "$S/steamrtarm64" || exit 1
 # A steam:// URL (or any command line) for a client that already runs: Steam's own single-instance forwarding - this
 # binary writes the command line into ~/.steam/steam.pipe and exits; the client reads it, stashes it in registry.vdf

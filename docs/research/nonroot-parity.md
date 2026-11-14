@@ -54,6 +54,13 @@ feature calls `RootedGuest` - `su`, which isn't there.
 - Gap 4 (apps, windows, Steam): `ShellActivity` starts the image's `SessionService` without root once the image is
   installed; `Runtime.onEngineReady` turns on the PowOS session paths (`powosSession`): `powos-apps-export` in the image
   fills the drawer (same `run/powos-apps`), drawer/game launches go through `Guest.openAsTask` / `Guest.launch`.
+  Steam (razr 11-14, "steam doesnt launch"): two no-root gaps. (1) `/usr/bin/steam` (steam pkgrel 48): the engine's
+  LD_LIBRARY_PATH outranked steamui.so's RUNPATH $ORIGIN -> rootfs SDL3 -> "undefined symbol: SDL_TryLockJoysticks",
+  "Failed to load steamui.so"; now the client's dir by host path first (`steam_fakechroot_libs`). (2) the guest env had
+  WAYLAND_DISPLAY only: X11 programs got no DISPLAY/XAUTHORITY ("XOpenDisplay failed"); `XwaylandDisplay` reads them from
+  KWin's command line as rooted powos-run.sh does (APK). Tests: test-steam-fakechroot.sh, XwaylandDisplayTest.
+  Still open for games: pressure-vessel/bwrap (bwrap-shim drops the sandbox), FEX under fakechroot, the window as a
+  task (`PowosWebWindows: display helper not started: su` in the razr window log).
 - Gap 5 (terminals): `PtyTerminal`, `ShellTerminals`, terminal tiles and `PowosTerminalActivity` run `Guest.terminal`
   - lotfix-run into the image, `powos-tmux-shell` where the image has it, else `bash -l`; tmux list via `Guest.run`.
 - Gap 6 (AI page, mail, comms): `PowosAiChat`, `AgentMail`, `AgentsSpool`, `ShellErrors`, `ShellBridge` through

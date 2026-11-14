@@ -532,11 +532,13 @@ public class SessionService extends Service {
      * desktop's display, as a program the desktop started has it. archEnv drops WAYLAND_DISPLAY (KWin itself must not
      * get one, it'd start nested); without it every app the launcher opened died at once (Qt: no display, abort -6)
      * and powos-open-task said "failed: exited -6". KWin's socket in XDG_RUNTIME_DIR, as rooted mode's
-     * (RootedGuest.WAYLAND_DISPLAY).
+     * (RootedGuest.WAYLAND_DISPLAY). And its X display (XwaylandDisplay: DISPLAY + XAUTHORITY from KWin's command line,
+     * as rooted mode's powos-run.sh): without them X11 programs (Steam) found no display (razr fold 11-14).
      */
     static Map<String, String> guestEnv(Context ctx, File run) {
         Map<String, String> env = archEnv(ctx, run, daemonSocket(ctx));
         env.put("WAYLAND_DISPLAY", "wayland-0");
+        env.putAll(XwaylandDisplay.find());
         env.put("TERM", "xterm-256color");
         return env;
     }
