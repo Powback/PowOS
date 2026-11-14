@@ -3660,6 +3660,19 @@ html[data-sideways] .home.dock-right:not(.wide) > .bar { margin-right: var(--sid
 .webwindow-title.merged { background: none; border: 0; border-radius: 0; padding: 0; }
 .webwindow-title.merged > .tile { height: 100%; border-radius: 0; display: flex; align-items: center; }
 .webwindow-title.merged > .ww-title-label { padding: 0 12px; }
+/* TB1 (docs/WEB_WINDOWS.md "Title bar: native parity"): a maximised window whose app is immersive - its bar leaves the
+   layout (the body takes its room) and waits above the screen; a pull from the top slides it in OVER the app (no
+   relayout), under the status bar's room, as AOSP's immersive header. Transform only (the compositor's). */
+.webwindow.ww-bar-auto > .webwindow-title {
+  position: absolute; left: 0; right: 0; top: var(--inset-top, 0px); z-index: 2; border-radius: 0;
+  transform: translateY(calc(-100% - var(--inset-top, 0px))); pointer-events: none;
+  transition: transform var(--spring-fast-ms) var(--spring-fast);
+}
+.webwindow.ww-bar-auto.ww-bar-shown > .webwindow-title { transform: none; pointer-events: auto; }
+/* TB2: a full-screen Linux window's bar slid in (the host crops its layer under it): the page's width, its top edge. */
+.ww-full-bar { position: absolute; left: 0; right: 0; z-index: 30; border-radius: 0; animation: ww-full-bar-in var(--spring-fast-ms) var(--spring-fast) both; }
+@keyframes ww-full-bar-in { from { transform: translateY(-100%); } to { transform: none; } }
+@media (prefers-reduced-motion: reduce) { .webwindow.ww-bar-auto > .webwindow-title { transition: none; } .ww-full-bar { animation: none; } }
 /* Quick pages (ui/quickpage.tsx): one settings page as a compact card on the backdrop glass, the surface radius (--radius),
    springing out of what opened it (transform-origin: its anchor); folded a full-width sheet rising from the bottom. The
    scrim takes the tap outside (it closes); it paints nothing. */

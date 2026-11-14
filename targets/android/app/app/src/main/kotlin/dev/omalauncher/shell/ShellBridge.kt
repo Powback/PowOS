@@ -2032,14 +2032,24 @@ class ShellBridge(
         context.getSystemService(android.hardware.display.DisplayManager::class.java).registerDisplayListener(displayListener, main)
     }
 
-    /** The window's insets in CSS px, sent as "system.insets" when they change (the keyboard's included). */
-    fun insets(w: WindowInsets) {
+    /**
+     * The window's insets in CSS px, sent as "system.insets" when they change (the keyboard's included). [keepStatusRoom]
+     * (home): the top keeps the status bar's room while it is hidden.
+     */
+    fun insets(
+        w: WindowInsets,
+        keepStatusRoom: Boolean = false,
+    ) {
         val d = context.resources.displayMetrics.density
         val bars = w.getInsets(WindowInsets.Type.systemBars() or WindowInsets.Type.displayCutout())
         val ime = w.getInsets(WindowInsets.Type.ime())
+        // TB1: home keeps the status bar's room while it is hidden (a maximised immersive window's or a game's): it never
+        // re-lays out under a hidden or transient status bar - its windows' places and the revealed bar's top stay.
+        val room = if (keepStatusRoom) w.getInsetsIgnoringVisibility(WindowInsets.Type.statusBars()).top else 0
+        val top = maxOf(bars.top, room)
         val next =
             JSONObject()
-                .put("top", bars.top / d)
+                .put("top", top / d)
                 .put("bottom", bars.bottom / d)
                 .put("left", bars.left / d)
                 .put("right", bars.right / d)

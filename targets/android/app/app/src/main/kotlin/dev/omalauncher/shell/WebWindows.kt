@@ -787,6 +787,13 @@ class WebWindows(
          */
         var immersive = false
 
+        /**
+         * TB1 (docs/WEB_WINDOWS.md "Title bar: native parity"): its Android app asks its status bar hidden
+         * (TaskInfo.requestedVisibleTypes: AOSP's requestingImmersive) while its window is maximised on home - told to
+         * the page ("webwindows.immersive"), whose bar then auto-hides. Kept by [immersiveScan] only.
+         */
+        @Volatile var appImmersive = false
+
         /** When [linuxFull] last went on (uptime ms), and since when the page's "w.f" lists it as a plain window anyway (0: not): IR1. */
         var linuxFullAt = 0L
         var fullListedAt = 0L
@@ -942,6 +949,9 @@ class WebWindows(
         var alpha = 1f
         var scale = 1f
         var maximised = false
+
+        /** TB1: maximised and its bar auto-hidden (its app immersive, the top window): home's status bar hides ([immersiveBars]). */
+        var barHidden = false
 
         /** Maximised (the bar merges with the status bar): where its title ends and its controls start, else -1. */
         var titleEnd = -1
@@ -1780,7 +1790,8 @@ class WebWindows(
             visible = c.word() == "1"
             alpha = c.word().toFloat().coerceIn(0f, 1f)
             scale = c.word().toFloat().takeIf { it > MIN_ZOOM } ?: 1f
-            maximised = c.word() == "1"
+            // TB1: "2" = maximised with its bar auto-hidden (an older page sends only 0/1).
+            c.word().let { m -> maximised = m == "1" || m == "2"; barHidden = m == "2" }
             titleEnd = c.x()
             controls = c.x()
             // LH1: 1 = resizing, 2 = resizing and lifted, 3 = lifted only (the drag's end until the page's hole is back).
@@ -1832,6 +1843,81 @@ class WebWindows(
         lastFrameWall = System.currentTimeMillis()
         logFrame(frame, geos)
         orderCheckSoon(geos)
+        immersiveBars()
+        immersiveSoon()
+    }
+
+    // ---- TB1: the title bar's auto-hide (docs/WEB_WINDOWS.md "Title bar: native parity") -------------------------------
+
+    /** An [immersiveScan] is queued on [io]. */
+    private val immersivePending = java.util.concurrent.atomic.AtomicBoolean(false)
+
+    /**
+     * One [immersiveScan] [IMMERSIVE_POLL_MS] from now, unless one is queued. HACK: polled - a window's requested insets
+     * reach only the task organizer (WM Shell's onTaskInfoChanged, AOSP TaskOrganizerController.onTaskInfoChanged),
+     * never a task stack listener, so a launcher isn't told. Real fix: PowOS as a WM Shell task organizer (none for an
+     * app). Polls only while an Android window is maximised on home (or one was immersive); nothing otherwise.
+     */
+    private fun immersiveSoon() {
+        if (wins.isEmpty() || !immersivePending.compareAndSet(false, true)) return
+        io.postDelayed({
+            immersivePending.set(false)
+            immersiveScan()
+        }, IMMERSIVE_POLL_MS)
+    }
+
+    /** On [io]: each watched Android window's app's immersive request read; a change goes to the page. */
+    private fun immersiveScan() {
+        val all = runCatching { wins.values.toList() }.getOrNull() ?: return
+        val watched =
+            all.filter { w ->
+                immersiveWatched(w.linux != null, w.closed, w.shown && w.leftAt == 0L && !w.full && !w.pip && !w.minimised, w.taskId, w.geo?.maximised == true)
+            }
+        if (watched.isEmpty() && all.none { it.appImmersive }) return
+        @Suppress("DEPRECATION")
+        val running =
+            if (watched.isEmpty()) {
+                emptyList()
+            } else {
+                runCatching { context.getSystemService(android.app.ActivityManager::class.java).getRunningTasks(MAX_TASKS) }.getOrDefault(emptyList())
+            }
+        for (w in all) {
+            val types = if (w in watched) running.firstOrNull { it.taskId == w.taskId }?.let(::requestedVisibleTypes) ?: -1 else -1
+            val on = requestingImmersive(types)
+            if (on == w.appImmersive) continue
+            w.appImmersive = on
+            WindowLog.i(TAG, "window ${w.id} (${w.component.packageName}): its app ${if (on) "hides its status bar (immersive): its bar auto-hides" else "is not immersive (or not maximised): its bar stays"}")
+            main.post { emit("webwindows.immersive", mapOf("id" to w.id, "on" to on)) }
+        }
+        if (watched.isNotEmpty()) immersiveSoon()
+    }
+
+    /** HACK: TaskInfo.requestedVisibleTypes is hidden (reflected; AOSP fills it from the task's top main window). -1: unreadable. Real fix: none public. */
+    private fun requestedVisibleTypes(t: android.app.TaskInfo): Int =
+        runCatching { android.app.TaskInfo::class.java.getField("requestedVisibleTypes").getInt(t) }.getOrDefault(-1)
+
+    /** TB1: home's status bar is hidden for a window's auto-hidden bar ([immersiveBars]). */
+    private var barsHiddenForWindow = false
+
+    /**
+     * TB1: home's status bar hidden while a maximised window's bar is auto-hidden on screen (the page's maximised word
+     * 2: its app immersive, the top window), as AOSP's full immersive desktop task takes the whole screen; a swipe from
+     * the top shows it for a moment (BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE) while the page slides the bar in. Back when
+     * none is; a game's immersive full screen keeps it hidden. Main thread.
+     */
+    private fun immersiveBars() {
+        val want = barsHiddenFor(wins.values.map { w -> w.geo?.let { g -> g.barHidden && g.visible && w.shown && !w.closed } == true })
+        if (want == barsHiddenForWindow) return
+        barsHiddenForWindow = want
+        val c = web.windowInsetsController ?: return
+        val game = wins.values.any { it.linuxFull && it.immersive && !it.closed }
+        if (want) {
+            c.systemBarsBehavior = android.view.WindowInsetsController.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
+            c.hide(android.view.WindowInsets.Type.statusBars())
+        } else if (!game) {
+            c.show(android.view.WindowInsets.Type.statusBars())
+        }
+        WindowLog.i(TAG, "TB1: status bar ${if (want) "hidden: a maximised immersive window's bar auto-hides" else "back: no auto-hidden bar on screen"}")
     }
 
     // ---- the layer order check: SurfaceFlinger's composition against the page's z ----------------------------------------
@@ -2662,6 +2748,8 @@ class WebWindows(
             edgePull(e, ev)
             return false
         }
+        // TB2: a full-screen window's revealed bar is the page's (its buttons: back to a window, close).
+        if (revealedFull >= 0 && revealTouch(ev)) return false
         // A full-screen Linux window is over all of home (nothing of the page is on screen): every other touch is its.
         fullLinux()?.let { return linuxInput(it, ev) }
         val claimed = linuxTouch
@@ -2703,6 +2791,64 @@ class WebWindows(
 
     private var fullEdge: FullEdge? = null
 
+    /**
+     * TB2 (docs/WEB_WINDOWS.md "Title bar: native parity"): the full-screen Linux window whose bar a pull in from the top
+     * edge revealed (AOSP's full immersive header, shown with the transient status bar), else -1. Its layer's top is
+     * cropped under the page's bar ([fullLayer]); touches on the bar are the page's ([revealTouch]); hidden again
+     * [BAR_REVEAL_MS] after the last touch on it (SystemUI's AutoHideController), [BAR_USER_HIDE_MS] after a touch on
+     * the app. Main thread.
+     */
+    private var revealedFull = -1
+
+    /** The gesture now began on the revealed bar ([revealTouch]). */
+    private var revealTouching = false
+    private val revealHide = Runnable { revealFull(-1, "idle") }
+
+    /** The revealed bar's bottom in home's window px: under the status bar (its room kept while hidden), [TITLE_DP] tall. */
+    private fun revealBottom(): Int {
+        val insets = web.rootWindowInsets
+        val bar = insets?.getInsetsIgnoringVisibility(android.view.WindowInsets.Type.statusBars())?.top ?: 0
+        val cut = insets?.getInsets(android.view.WindowInsets.Type.displayCutout())?.top ?: 0
+        return maxOf(bar, cut) + (TITLE_DP * density()).toInt()
+    }
+
+    /** TB2: full-screen window [id]'s bar revealed (-1: hidden), told to the page ("webwindows.reveal"); [why]: the log's. */
+    private fun revealFull(
+        id: Int,
+        why: String,
+    ) {
+        main.removeCallbacks(revealHide)
+        if (id >= 0) main.postDelayed(revealHide, BAR_REVEAL_MS)
+        if (id == revealedFull) return
+        val was = revealedFull
+        revealedFull = id
+        revealTouching = false
+        if (was >= 0) emit("webwindows.reveal", mapOf("id" to was, "on" to false))
+        if (id >= 0) emit("webwindows.reveal", mapOf("id" to id, "on" to true))
+        WindowLog.i(TAG, "TB2: window ${if (id >= 0) id else was}: full-screen bar ${if (id >= 0) "revealed" else "hidden"} ($why)")
+        restateFull("TB2 bar ${if (id >= 0) "revealed" else "hidden"}")
+        quietCheck("TB2 bar reveal")
+    }
+
+    /**
+     * TB2: [ev] while a full-screen window's bar is revealed - true: the gesture began on the bar (the page's: it is
+     * passed on, and keeps the bar up until [BAR_REVEAL_MS] after it ends); a gesture on the app hides the bar soon.
+     */
+    private fun revealTouch(ev: MotionEvent): Boolean {
+        val a = ev.actionMasked
+        if (a == MotionEvent.ACTION_DOWN) {
+            revealTouching = yOf(ev) < revealBottom()
+            main.removeCallbacks(revealHide)
+            if (!revealTouching) main.postDelayed(revealHide, BAR_USER_HIDE_MS)
+        }
+        if (!revealTouching) return false
+        if (a == MotionEvent.ACTION_UP || a == MotionEvent.ACTION_CANCEL) {
+            revealTouching = false
+            main.postDelayed(revealHide, BAR_REVEAL_MS)
+        }
+        return true
+    }
+
     /** [ev]'s first finger's y in home's window px. */
     private fun yOf(ev: MotionEvent): Float = ev.getY(0) + IntArray(2).also(web::getLocationInWindow)[1]
 
@@ -2719,7 +2865,11 @@ class WebWindows(
         return if (side == 0) null else FullEdge(w.id, y, side)
     }
 
-    /** A pull in from [e]'s edge, past [EDGE_PULL_DP]: the window leaves full screen ([toWindow]). */
+    /**
+     * A pull in from [e]'s edge, past [EDGE_PULL_DP]: from the top, its bar slides in over it (TB2, [revealFull]: AOSP's
+     * immersive header comes with the transient status bar, the app stays full screen); from the bottom, the window
+     * leaves full screen ([toWindow]).
+     */
     private fun edgePull(
         e: FullEdge,
         ev: MotionEvent,
@@ -2733,8 +2883,12 @@ class WebWindows(
                 val dy = yOf(ev) - e.y0
                 if (dy * -e.side > EDGE_PULL_DP * density()) {
                     fullEdge = null
-                    WindowLog.i(TAG, "window ${e.id}: ${if (e.side < 0) "top" else "bottom"} edge pull: leaves full screen")
-                    toWindow(e.id)
+                    if (edgePullReveals(e.side)) {
+                        revealFull(e.id, "top edge pull")
+                    } else {
+                        WindowLog.i(TAG, "window ${e.id}: bottom edge pull: leaves full screen")
+                        toWindow(e.id)
+                    }
                 }
             }
         }
@@ -2763,7 +2917,7 @@ class WebWindows(
      */
     private fun quietCheck(
         why: String,
-        edge: Boolean = fullEdge != null,
+        edge: Boolean = fullEdge != null || revealedFull >= 0,
     ) {
         val gameFull = wins.values.any { it.linuxFull && it.immersive && !it.closed && it.linux != null }
         val want = GameBoost.pageQuiet(gameFull, underSwitcher || fullHidden || dev.omalauncher.system.Switcher.open, edge)
@@ -3220,7 +3374,11 @@ class WebWindows(
         dropLinux(w, handBack)
         WindowLog.i(TAG, "close window ${w.id} (${w.component.packageName}, display ${w.displayId}, task ${w.taskId}${if (w.full) ", full screen" else ""}): 1/4 layers off")
         releaseLayers(w)
-        main.post { publishBars() }
+        main.post {
+            publishBars()
+            immersiveBars()
+            if (revealedFull == w.id) revealFull(-1, "window closed")
+        }
         val displayId = w.displayId
         WebWindowDisplays.remove(displayId)
         WebWindowDisplays.windowGone(w.id)
@@ -3658,6 +3816,7 @@ class WebWindows(
         if (win.closed || win.linuxFull == on) return
         markLinuxFull(win, on)
         if (!on) win.fullAsked = false
+        if (!on && revealedFull == win.id) revealFull(-1, "left full screen")
         immersive(win, src, on)
         // Covers every web window now: a new window of its app opens as a task in front of it (WindowTasks.open).
         andro.marchy.WebWindowSource.shownFullScreen(src.kwin, on)
@@ -3766,8 +3925,10 @@ class WebWindows(
         // FL5: the app's area starts below the status bar, never under it (the user, 10-30 22:19: Dolphin's toolbar
         // drawn through the clock and icons).
         val area = fullScreenArea(win.immersive)
+        // TB2: its revealed bar's strip cropped off the top (the page's bar shows there; the app keeps its size).
+        val top = if (revealedFull == win.id) revealCrop(revealBottom(), area.top) else 0
         t.setPosition(c, area.left.toFloat(), area.top.toFloat()).setScale(c, 1f, 1f).setAlpha(c, 1f)
-            .setCrop(c, Rect(0, 0, area.width(), area.height())).setLayer(c, FULL_LAYER).setVisibility(c, fullVisible(win))
+            .setCrop(c, Rect(0, top, area.width(), area.height())).setLayer(c, FULL_LAYER).setVisibility(c, fullVisible(win))
         cornerRadius(t, c, 0f)
         win.linux?.content?.takeIf { it.isValid }?.let { m -> t.setPosition(m, 0f, 0f).setScale(m, 1f, 1f).setCrop(m, Rect(0, 0, area.width(), area.height())) }
         // N3b: its popups with it, at the full-screen origin - every restate too, so a page placement can't leave them behind.
@@ -3848,6 +4009,8 @@ class WebWindows(
         shown: Boolean,
     ) {
         val c = web.windowInsetsController ?: return
+        // TB1: a maximised immersive window's auto-hidden bar still wants it hidden ([immersiveBars]).
+        if (shown && barsHiddenForWindow) return
         if (shown) {
             c.show(android.view.WindowInsets.Type.statusBars())
         } else {
@@ -4878,8 +5041,47 @@ class WebWindows(
         /** A full-screen Linux window's edge strips stay home's at least this tall (dp): the status bar, the home gesture. */
         private const val EDGE_STRIP_DP = 24
 
-        /** How far in from an edge strip (dp) a pull leaves full screen. */
+        /** How far in from an edge strip (dp) a pull reveals the bar (top) or leaves full screen (bottom). */
         private const val EDGE_PULL_DP = 24
+
+        /** TB1: how often a maximised Android window's immersive request is read ([immersiveSoon]'s HACK poll). */
+        private const val IMMERSIVE_POLL_MS = 300L
+
+        /** TB2: a revealed bar hides this long after the last touch on it (SystemUI AutoHideController.AUTO_HIDE_TIMEOUT_MS). */
+        private const val BAR_REVEAL_MS = 2_250L
+
+        /** TB2: ... and this long after a touch on the app (AutoHideController.USER_AUTO_HIDE_TIMEOUT_MS). */
+        private const val BAR_USER_HIDE_MS = 350L
+
+        /** The page's bar height (ui/webwindows.tsx TITLE, CSS px = dp). */
+        private const val TITLE_DP = 36
+
+        /** WindowInsets.Type.statusBars() (AOSP: 1 << 0; the JVM tests have no android.view). */
+        private const val STATUS_BARS = 1
+
+        /** TB1: AOSP's TaskInfo.requestingImmersive - the app asks its status bar hidden. -1 (unreadable): not. */
+        fun requestingImmersive(requestedVisibleTypes: Int): Boolean = requestedVisibleTypes != -1 && requestedVisibleTypes and STATUS_BARS == 0
+
+        /** TB1: whose immersive request [immersiveScan] reads - an Android window on home (not left / full / PiP / minimised), with a task, maximised. */
+        fun immersiveWatched(
+            linux: Boolean,
+            closed: Boolean,
+            onHome: Boolean,
+            taskId: Int,
+            maximised: Boolean,
+        ): Boolean = !linux && !closed && onHome && taskId >= 0 && maximised
+
+        /** TB1: home's status bar hidden when any window's bar is auto-hidden on screen ([immersiveBars]). */
+        fun barsHiddenFor(autoHiddenOnScreen: List<Boolean>): Boolean = autoHiddenOnScreen.any { it }
+
+        /** TB2: a pull in from a full-screen window's top edge ([side] -1) reveals its bar; from the bottom it leaves full screen. */
+        fun edgePullReveals(side: Int): Boolean = side < 0
+
+        /** TB2: the full-screen layer's crop top under a revealed bar ending at [barBottom], the layer at [areaTop] (px). */
+        fun revealCrop(
+            barBottom: Int,
+            areaTop: Int,
+        ): Int = maxOf(0, barBottom - areaTop)
 
         /**
          * A full-screen Linux window's top on an [h] px tall screen whose status bar is [bar] px: below the bar, or the

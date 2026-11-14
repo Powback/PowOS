@@ -137,7 +137,8 @@ class ShellHost(
         // Insets to the page (CSS px), as they change: the bar sits above the navigation bar, the drawer clears
         // the status bar, the keyboard's height lifts the bar.
         web.setOnApplyWindowInsetsListener { v, insets ->
-            bridge.insets(insets)
+            // TB1: home (no mode) keeps the status bar's room while it is hidden; a lock face / AOD lays out without it.
+            bridge.insets(insets, keepStatusRoom = mode == null)
             v.onApplyWindowInsets(insets)
             WindowInsets.CONSUMED
         }

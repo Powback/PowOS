@@ -541,6 +541,68 @@ lift is ordinary geometry in `w.f`. Plasma does not do this, but on a phone it i
 
 ---
 
+### Title bar: native parity (TB1/TB2, 2026-11-14)
+
+The owner, 11-14: **"the titlebar isnt acting like the native one, with autohide on fullscreen apps etc, slide to
+reveal"**.
+
+**How the native caption behaves** (AOSP `frameworks/base` main, WM Shell; read 11-14):
+
+- `windowdecor/DesktopModeWindowDecoration.java` `updateRelayoutParams`: with `enableFullyImmersiveInDesktop`, a desktop
+  task **in full immersive** shows its header only while the status bar shows
+  (`showCaption = isStatusBarVisible && !isKeyguardVisibleAndOccluded`). Otherwise a freeform task **always** shows its
+  header (`taskInfo.isFreeform() || statusBarVisible`), whatever its app asks. A full-screen task's app handle follows
+  the status bar too, so an immersive full-screen app has no handle until a swipe.
+- In full immersive the header is **not an inset source** (`mIsInsetSource = isAppHeader && !inFullImmersiveMode`): it
+  overlays the app, which keeps its size. It is padded under the status bar (`mCaptionTopPadding` = the system bars'
+  top inset) and cannot be dragged or resized there.
+- `desktopmode/DesktopImmersiveController.kt`: full immersive = the freeform task at the whole display's bounds
+  (`setBounds(Rect())`), the header transient "below the status bar like in fullscreen immersive mode". The header's
+  maximise menu offers *Immersive* while `TaskInfo.requestingImmersive`
+  (`windowdecor/extension/TaskInfo.kt`: `requestedVisibleTypes and statusBars() == 0`, the app hid its status bar).
+  `DesktopTasksController.onTaskInfoChanged` leaves full immersive by itself when the app stops asking
+  (`ExitReason.APP_NOT_IMMERSIVE`).
+- The reveal is the system's transient bars: an immersive window (`BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE`) gets the
+  status bar for a moment on a swipe in from the top, and the header comes with it. SystemUI's `AutoHideController`
+  hides them `AUTO_HIDE_TIMEOUT_MS` = 2250 ms after the last touch on them and `USER_AUTO_HIDE_TIMEOUT_MS` = 350 ms
+  after a touch on the app. The app still gets the swipe's touches.
+- OxygenOS 16 (the phone) keeps this model. Its full-screen caption handle (`FullscreenCaptionHandleMenu`, see "An app
+  into a desktop window" below) is shown with the status bar and is hidden in immersive apps.
+
+**What PowOS did before (base `48bb8185`, before TB1)**:
+
+- The bar is DOM (`shell/ui/webwindows.tsx:3365 TitleBar`) and is always in the layout above the body
+  (`AppWindowEl`, `:4096`). Maximised, it merges into the status bar strip (`mergeOf`, `:2481`). An Android app going
+  immersive inside its web window (a video player's full screen on its virtual display) was not observed at all
+  (§3.4 U4), so the bar stayed and the app never got its room.
+- The bar's full-screen button and double tap (`fullScreen`, `:3201`; `DOUBLE_TAP_MS`, `:3155`): an Android app becomes
+  a real full-screen task on display 0 (`WebWindows.kt:3559 fullScreen`). Android's own caption handle and transient
+  bars then apply, so that path was already native.
+- A Linux full screen (`WebWindows.kt:3757 fullLayer`) covers the screen above home's buffer with no bar at all. A pull
+  in from its top edge (`:2723 edgePull`) **left full screen** outright. There was no slide-in and no transient bar.
+
+**The bar's features, kept** (rewrites keep every feature): drag to move (clamped, DB1), let go at an edge or corner to
+snap or tile, drag onto another bar to make tabs (WT1-WT3), a park at a side, double tap for full screen, the buttons
+(tile menu, minimise, full screen or restore, close), a pinch on the bar or an edge to scale (SC1) or content-zoom a
+tile (TS1), the merged maximised bar (TB1/TB2 of 10-31) and the own-frame (CSD) hand-off. All of them stay the same
+`TitleBar`. An auto-hidden bar is that element, out of the layout.
+
+**What changed (TB1: Android windows; TB2: Linux full screen)**:
+
+| | native | PowOS now |
+|---|---|---|
+| when it hides | full-immersive desktop task (app hid its status bar) | a **maximised** window whose app asks its status bar hidden (`barAutoHidden`); a floating or tiled window keeps its bar, as a freeform header does. A Linux full screen has none (as before) |
+| detection | `TaskInfo.requestedVisibleTypes` via the task organizer | the same field, read from `getRunningTasks` every 300 ms while an Android window is maximised on home (`WebWindows.immersiveScan`). HACK: launchers get no task-info callback. Real fix: PowOS as a WM Shell organizer. Sent as `"webwindows.immersive" {id, on}` |
+| content takes the space | task at display bounds, status bar hidden | the bar leaves the layout (`.ww-bar-auto`: the body is the whole frame), and the page's maximised word `2` (the window in front) makes the host hide home's status bar (`immersiveBars`, `BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE`). home's `system.insets` keeps the status bar's room while it is hidden (`ShellBridge.insets` keepStatusRoom), so home never relays out |
+| reveal | swipe in from the top: transient status bar + header, overlaying | a pull down (24 px) from the body's top edge (`ui/barreveal.ts edgeDown/edgeMove`) slides the bar in **over** the app (absolute, `transform` only; the body's rect is unchanged) under the status bar's room. The app gets the touches too. Linux full screen: a top-edge pull now calls `revealFull`: the host crops the full-screen layer's top under the bar (the app keeps its size), routes touches on the bar to the page (`revealTouch`), and the page shows `FullBar` (the app, *Back to window*, *Close*). The bottom-edge pull still leaves full screen (FL3) |
+| auto-hide | 2250 ms after the last touch on it, 350 ms after a touch on the app | the same timeouts (`BAR_REVEAL`, `WebWindows.BAR_REVEAL_MS`/`BAR_USER_HIDE_MS`); kept while pressed or while its tile menu is open |
+| leaving | app stops asking: back to normal | `"webwindows.immersive"` off (or not maximised any more): the bar is back in the layout, the status bar shows. Dragging the slid-in bar un-maximises the window, so its bar is back |
+
+Checks: gate `ww-bar-autohide` (control: a maximised bar in the layout; a floating immersive window keeps its bar; a
+press lower down never reveals). JVM `WebWindowsBarAutoHideTest`. Device: `tools/phone/verify/titlebar-autohide.sh`.
+Both screens and all rotations use the same code path: the bar is placed from the frame and `--inset-top`, never
+from fixed sizes.
+
 ## 4. First slice (W3): Chrome (Android) + Dolphin (Linux), behind `powos_web_windows`
 
 Order: de-risk first, then build. Each step is checked on the phone (unfolded, flag on), with a screenshot or trace

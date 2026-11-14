@@ -9664,6 +9664,147 @@ async function webWindowPipLeave() {
   return fails;
 }
 
+/**
+ * TB1/TB2 (the owner, 11-14: "the titlebar isnt acting like the native one, with autohide on fullscreen apps etc, slide
+ * to reveal"; docs/WEB_WINDOWS.md "Title bar: native parity"). Control first: a maximised window keeps its bar in the
+ * layout. Its app immersive ("webwindows.immersive" on): the bar auto-hides and the body takes its room, the entry's
+ * maximised word says 2 (the host hides the status bar); a floating immersive window keeps its bar (AOSP's freeform
+ * header). A pull down from the body's top edge slides the bar in OVER the app (the body unchanged), it hides again
+ * after BAR_REVEAL, stays while pressed, and a press lower down never reveals it. Immersive off: the bar is back.
+ * TB2: a full-screen window's "webwindows.reveal" shows its bar with Back to window (the host's toWindow) and Close.
+ */
+async function tbSteps(page) {
+  const fails = [];
+  for (const step of [tbSetup, tbAuto, tbReveal, tbHold, tbFull]) fails.push(...(await page.evaluate(step)));
+  return fails;
+}
+
+/** TB1/TB2's helpers on window.__tb (page.evaluate sends one function only); [done] puts the page back. */
+async function tbSetup() {
+  const S = await window.__gw.mod("./state.ts");
+  const W = await window.__gw.mod("./ui/webwindows.tsx");
+  const R = await window.__gw.mod("./ui/barreveal.ts");
+  const { powos } = await window.__gw.mod("./bridge.ts");
+  const until = async (ok, ms) => {
+    const t0 = performance.now();
+    while (!ok() && performance.now() - t0 < ms) await new Promise((r) => requestAnimationFrame(() => r()));
+    return ok();
+  };
+  const parts = (id) => {
+    const el = document.querySelector(`.webwindow[data-wwid="${id}"]`);
+    const bar = el?.querySelector(":scope > .webwindow-title");
+    const body = el?.querySelector(":scope > .webwindow-body");
+    return bar && body ? { f: el.getBoundingClientRect(), bar: bar.getBoundingClientRect(), body: body.getBoundingClientRect() } : null;
+  };
+  const near = (a, b) => Math.abs(a - b) < 1;
+  // In the layout: the body starts under the bar. Hidden: the bar entirely above the frame. Slid in: on the frame's top.
+  const laidOut = (p) => !!p && near(p.body.top, p.bar.bottom) && p.bar.top >= p.f.top - 1;
+  const hidden = (p) => !!p && p.bar.bottom <= p.f.top + 1 && near(p.body.top, p.f.top) && near(p.body.height, p.f.height);
+  const slidIn = (p) => !!p && p.bar.top >= p.f.top - 1 && p.bar.bottom > p.f.top + 20 && near(p.body.top, p.f.top);
+  const word = (id) => W.entry(W.webWins.value.find((w) => w.id === id))?.split(" ")[17];
+  const fire = (el, type, at, id) => el.dispatchEvent(new PointerEvent(type, { pointerId: id, pointerType: "touch", isPrimary: true, clientX: at.x, clientY: at.y, bubbles: true, cancelable: true }));
+  const pull = async (id, from, by) => {
+    const body = document.querySelector(`.webwindow[data-wwid="${id}"] > .webwindow-body`);
+    const r = body.getBoundingClientRect();
+    const x = r.left + r.width / 2;
+    fire(body, "pointerdown", { x, y: r.top + from }, 31);
+    for (let i = 1; i <= 4; i++) (fire(body, "pointermove", { x, y: r.top + from + (by * i) / 4 }, 31), await window.__gw.frames(1));
+    fire(body, "pointerup", { x, y: r.top + from + by }, 31);
+  };
+  const was = { page: S.page.value, ms: R.BAR_REVEAL.ms, after: R.BAR_REVEAL.afterApp, ww: powos.webwindows };
+  const back = [];
+  powos.webwindows = { ...(powos.webwindows ?? {}), input: async () => true, toWindow: async (id) => (back.push(id), true), close: async () => true };
+  Object.assign(R.BAR_REVEAL, { ms: 700, afterApp: 100 });
+  S.page.value = 0;
+  const done = () => {
+    W.webWins.value = [];
+    powos.webwindows = was.ww;
+    Object.assign(R.BAR_REVEAL, { ms: was.ms, afterApp: was.after });
+    S.page.value = was.page;
+  };
+  window.__tb = { S, W, until, parts, laidOut, hidden, slidIn, word, fire, pull, back, done, P: S.pages.value[0] };
+  return [];
+}
+
+/** TB1: control (a maximised bar laid out, word 1); immersive: hidden, the body takes its room, word 2; a floating one keeps it. */
+async function tbAuto() {
+  const { W, until, parts, laidOut, hidden, word, P } = window.__tb;
+  const fails = [];
+  W.webWins.value = [
+    { id: 982, key: "a:gate.tb/.Float", label: "Float", page: P, x: 60, y: 140, w: 300, h: 260, live: true, task: 3082 },
+    { id: 981, key: "a:gate.tb/.Video", label: "Video", page: P, x: 0, y: 0, w: 600, h: 700, restore: { x: 100, y: 120, w: 400, h: 400 }, live: true, task: 3081 },
+  ];
+  if (!(await until(() => parts(981) && parts(982), 1000))) return ["TB1: the windows never showed"];
+  if (!laidOut(parts(981))) fails.push("TB1 control: a maximised window's bar isn't in the layout before its app is immersive");
+  if (word(981) !== "1") fails.push(`TB1 control: a maximised window's maximised word is ${word(981)}, not 1`);
+  window.__mockEvents.emit("webwindows.immersive", { id: 981, on: true });
+  window.__mockEvents.emit("webwindows.immersive", { id: 982, on: true });
+  if (!(await until(() => hidden(parts(981)), 1000))) fails.push(`TB1: its app immersive, the maximised window's bar didn't auto-hide with the body taking its room (${JSON.stringify(parts(981))})`);
+  if (word(981) !== "2") fails.push(`TB1: an immersive maximised window in front sends maximised word ${word(981)}, not 2 (the host keeps the status bar)`);
+  if (!laidOut(parts(982))) fails.push("TB1: a floating window's bar went with its app's immersive (AOSP keeps a freeform header)");
+  return fails;
+}
+
+/** TB1: a pull down from the top edge slides the bar in over the app (the body unchanged); it auto-hides again. */
+async function tbReveal() {
+  const { until, parts, hidden, slidIn, pull } = window.__tb;
+  const fails = [];
+  const before = parts(981).body;
+  await pull(981, 6, 80);
+  if (!(await until(() => slidIn(parts(981)), 1000))) fails.push("TB1: a pull down from the top edge didn't slide the bar in");
+  const after = parts(981).body;
+  if (Math.abs(before.top - after.top) + Math.abs(before.height - after.height) > 1) fails.push("TB1: the slid-in bar relaid the app out (it must overlay it)");
+  if (!(await until(() => hidden(parts(981)), 2500))) fails.push("TB1: the slid-in bar never auto-hid again");
+  return fails;
+}
+
+/** TB1: a press on the slid-in bar keeps it past BAR_REVEAL, let go it goes; a pull from lower down never reveals; immersive off: back. */
+async function tbHold() {
+  const { until, parts, laidOut, hidden, slidIn, fire, pull } = window.__tb;
+  const fails = [];
+  await pull(981, 6, 80);
+  await until(() => slidIn(parts(981)), 1000);
+  const label = document.querySelector('.webwindow[data-wwid="981"] > .webwindow-title .ww-title-label');
+  const r = label.getBoundingClientRect();
+  const at = { x: r.left + 4, y: r.top + r.height / 2 };
+  fire(label, "pointerdown", at, 32);
+  await new Promise((r) => setTimeout(r, 1100));
+  if (!slidIn(parts(981))) fails.push("TB1: the slid-in bar hid while pressed");
+  fire(label, "pointerup", at, 32);
+  if (!(await until(() => hidden(parts(981)), 2500))) fails.push("TB1: let go, the slid-in bar never hid");
+  await pull(981, 200, 80);
+  await new Promise((r) => setTimeout(r, 300));
+  if (slidIn(parts(981))) fails.push("TB1 control: a pull from the middle of the app slid the bar in");
+  window.__mockEvents.emit("webwindows.immersive", { id: 981, on: false });
+  if (!(await until(() => laidOut(parts(981)), 1000))) fails.push("TB1: immersive off, the bar didn't come back into the layout");
+  return fails;
+}
+
+/** TB2: a full-screen window's bar - none until the host's reveal; then Close and Back to window (the host's toWindow); hidden by the host. */
+async function tbFull() {
+  const { W, until, back, done, P } = window.__tb;
+  const fails = [];
+  const bar = () => document.querySelector(".ww-full-bar");
+  try {
+    W.webWins.value = [{ id: 983, key: "l:gate.tb", label: "Dolphin", page: P, x: 60, y: 140, w: 300, h: 260, live: true, full: true }];
+    await window.__gw.frames(2);
+    if (bar()) fails.push("TB2 control: a full-screen window shows a bar before any reveal");
+    window.__mockEvents.emit("webwindows.reveal", { id: 983, on: true });
+    if (!(await until(bar, 1000))) return [...fails, "TB2: the host's reveal showed no bar for the full-screen window"];
+    if (!bar().querySelector('[aria-label="Close"]')) fails.push("TB2: the full-screen bar has no Close");
+    window.__mockEvents.emit("webwindows.reveal", { id: 983, on: false });
+    if (!(await until(() => !bar(), 1000))) fails.push("TB2: the host hid the bar, it stayed");
+    window.__mockEvents.emit("webwindows.reveal", { id: 983, on: true });
+    await until(bar, 1000);
+    bar()?.querySelector('[aria-label="Back to window"]')?.click();
+    await window.__gw.frames(2);
+    if (back.join() !== "983") fails.push(`TB2: its Back to window asked the host's toWindow for [${back}], not [983]`);
+  } finally {
+    done();
+  }
+  return fails;
+}
+
 /** TB4: its window on another page - home goes to that page, the window in front. */
 async function webDockTogglePage() {
   const { S, W, P, win, top, tap, step } = window.__dtg;
@@ -14097,6 +14238,9 @@ try {
   // back when expanded (ww-pip-leave; the user, 11-01 15:48: "the PowOS title bar still sticks around").
   if (process.env.SHELL_PAGES !== "0")
     runs.push(open(browser, `${ORIGIN}/index.html`, "ww-pip-leave", { width: 900, height: 1000 }).then((r) => whenReady(r, () => r.page.evaluate(webWindowPipLeave))));
+  // TB1/TB2: the bar auto-hides on an immersive maximised app, a pull from the top slides it in (ww-bar-autohide; the owner 11-14).
+  if (process.env.SHELL_PAGES !== "0")
+    runs.push(open(browser, `${ORIGIN}/index.html`, "ww-bar-autohide", { width: 900, height: 1000 }).then((r) => whenReady(r, () => tbSteps(r.page))));
   // WT-IDLE: the web windows' rAF tick does nothing while no window moves (ww-idle-tick).
   if (process.env.SHELL_PAGES !== "0")
     runs.push(open(browser, `${ORIGIN}/index.html`, "ww-idle-tick", { width: 900, height: 1000 }).then((r) => whenReady(r, async () => {

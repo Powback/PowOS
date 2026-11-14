@@ -17,6 +17,7 @@ import type { HostWebWindow, HostWebWindowsSnapshot, WebWindowRect } from "../ty
 import { Mark } from "./chrome.tsx";
 import { forgetQuickReturn, QuickBar, quickGone, quickIconKeys, quickPlace, quickShown, QUICK, type QuickInfo, type QuickRect } from "./quickpage.tsx";
 import { memo } from "./memo.ts";
+import { barReveal, edgeDown, edgeEnd, edgeMove, holdReveal, releaseReveal, revealGone, revealKept } from "./barreveal.ts";
 import { usePresence } from "./reveal.tsx";
 import { confirm as hapticConfirm, tick as hapticTick } from "./haptics.ts";
 import { dropAt, dropInto, freeRegion, insertAt, leaves, splitBox, tabAt, treeRects, zoneKey as dropKey, type Bar, type Tree, type Zone } from "./tiledrop.ts";
@@ -60,6 +61,12 @@ export interface WebWin {
   full?: boolean;
   /** Its app's task, once the host told it ("webwindows.full"). */
   task?: number;
+  /**
+   * TB1: its app asks its status bar hidden (immersive: a video full screen, a game) while the window is maximised
+   * ("webwindows.immersive", WebWindows.immersiveScan): its bar auto-hides, the body takes its room, a pull from the
+   * top slides it back in over the app ([barAutoHidden], ui/barreveal.ts).
+   */
+  immersive?: boolean;
   /** In a tile (see "Tiles" below): the floating frame it had before, where "float" puts it back. */
   untiled?: { x: number; y: number; w: number; h: number };
   /** Its app's content shows ("webwindows.live"): the body paints nothing; until then, the placeholder. */
@@ -972,6 +979,17 @@ function onFull(m: { id: number; on: boolean; task?: number }) {
 }
 /** The host lost or re-made layer state (a mirror made again, home's surface re-attached): every window's state again. */
 powos.on("webwindows.resend", () => resendNow());
+/** TB1: its app hides its status bar (immersive) or shows it again, while maximised (WebWindows.immersiveScan). */
+powos.on("webwindows.immersive", (m: { id: number; on: boolean }) => {
+  if (!!webWins.value.find((w) => w.id === m.id)?.immersive === m.on) return;
+  update(m.id, { immersive: m.on || undefined });
+  if (!m.on) revealGone(m.id);
+});
+/** TB2: a full-screen Linux window's bar slid in by a pull from the top edge, or hidden again (WebWindows.revealFull). */
+powos.on("webwindows.reveal", (m: { id: number; on: boolean }) => {
+  if (m.on) fullReveal.value = m.id;
+  else if (fullReveal.peek() === m.id) fullReveal.value = null;
+});
 /** Its app's first frame shows (WebWindows.liveWhenDrawn): the placeholder goes, the body is the app's. */
 powos.on("webwindows.live", (id: number) => update(id, { live: true }));
 /** Its app draws its own frame now, or no longer (WebWindows.linuxOwnFrame): its PowOS bar goes or comes. */
@@ -1205,7 +1223,8 @@ const windowsHere = (page: number) => webWins.value.filter((w) => w.page === pag
 export function WebWindowsOn({ page }: { page: number }) {
   const here = windowsHere(page);
   const strips = parkedOn(page);
-  if (!here.length && !strips.length && parkView.value?.page !== page) return null;
+  const revealed = fullBarOn(page);
+  if (!here.length && !strips.length && !revealed && parkView.value?.page !== page) return null;
   const t = tilings.value[page];
   const o = renderLayout().origin;
   const box = useRef<HTMLDivElement>(null);
@@ -1222,6 +1241,36 @@ export function WebWindowsOn({ page }: { page: number }) {
       {t && dividers(t, renderLayout().area).map((d) => <DividerEl key={d.ratio} page={page} d={d} o={o} />)}
       <Previews page={page} o={o} />
       {strips.map((p) => <ParkStrip key={p.id} p={p} o={o} />)}
+      {revealed && <FullBar key={revealed.id} win={revealed} o={o} />}
+    </div>
+  );
+}
+
+/** TB2: page [page]'s full-screen window whose bar is slid in ([fullReveal]), or null. */
+function fullBarOn(page: number): WebWin | null {
+  const id = fullReveal.value;
+  return id == null ? null : (webWins.value.find((w) => w.id === id && w.page === page && w.full) ?? null);
+}
+
+/**
+ * TB2 (docs/WEB_WINDOWS.md "Title bar: native parity"): a full-screen Linux window's bar, slid in by a pull from the
+ * top (WebWindows.revealFull: the host crops the app's layer under it - the app keeps its size - and hides it again
+ * 2250 ms after the last touch on it). AOSP's immersive header: the app, then back to a window and close.
+ */
+function FullBar({ win, o }: { win: WebWin; o: { x: number; y: number } }) {
+  const press = (f: () => void) => ({ onPointerDown: (e: PointerEvent) => e.stopPropagation(), onClick: (e: MouseEvent) => (e.stopPropagation(), f()) });
+  return (
+    <div class="webwindow-title tile ww-full-bar" style={{ top: `${rootTokens().inset - o.y}px`, height: `${TITLE}px` }} onPointerDown={(e) => e.stopPropagation()}>
+      <BarLabel win={win} aimed={null} merged={false} />
+      <div class="ww-spacer" />
+      <div class="ww-controls">
+        <button class="ww-button" aria-label="Back to window" {...press(() => void backInWindow(win.id))}>
+          <Mark kind="restore" />
+        </button>
+        <button class="ww-button ww-close" aria-label="Close" {...press(() => close(win.id))}>
+          <Mark kind="close" />
+        </button>
+      </div>
     </div>
   );
 }
@@ -2479,7 +2528,8 @@ function shown(el: HTMLElement): { clip: Clip; alpha: number } {
  * to a lone tile's bar, when the last tile was made a maximised window), and only while that bar is on the strip.
  */
 function mergeOf(w: WebWin, el: HTMLElement): string {
-  if (!w.restore || tiledOn(w.id) != null) return "-1 -1";
+  // TB1: an auto-hidden bar is never on the strip (slid in, it sits under the status bar's room).
+  if (!w.restore || tiledOn(w.id) != null || barAutoHidden(w)) return "-1 -1";
   const title = el.querySelector(".ww-title-label")?.getBoundingClientRect();
   const controls = el.querySelector(".ww-controls")?.getBoundingClientRect();
   const inset = rootTokens().inset || TITLE;
@@ -2501,8 +2551,32 @@ export function entry(w: WebWin): string | null {
   const { clip, alpha } = shown(body);
   const visible = !document.querySelector(OVERLAYS) && alpha > 0.01 && clip[2] > clip[0] && clip[3] > clip[1];
   const rects = [f.left, f.top, f.width, f.height, b.left, b.top, b.width, b.height, ...clip].map(px);
-  return [w.id, ...rects, RADIUS * scale, visible ? 1 : 0, px(alpha), px(scale), w.restore ? 1 : 0, mergeOf(w, el), sizeOf(w, body), fillOf()].join(" ");
+  return [w.id, ...rects, RADIUS * scale, visible ? 1 : 0, px(alpha), px(scale), maximisedWord(w), mergeOf(w, el), sizeOf(w, body), fillOf()].join(" ");
 }
+
+/**
+ * The entry's <maximised>: 0, 1, or (TB1) 2 - maximised with its bar auto-hidden, the window in front: the host hides
+ * home's status bar so the app has the whole screen (AOSP's full immersive desktop task), a swipe shows it for a moment.
+ */
+function maximisedWord(w: WebWin): number {
+  if (!w.restore) return 0;
+  return barAutoHidden(w) && frontWindow()?.id === w.id ? 2 : 1;
+}
+
+/**
+ * TB1 (docs/WEB_WINDOWS.md "Title bar: native parity"): window [w]'s bar auto-hides - its app is immersive while the
+ * window fills the work area (maximised, not tiled), as AOSP's desktop header in full immersive. A floating or tiled
+ * window keeps its bar whatever its app asks (AOSP: a freeform task's header is always shown).
+ */
+export function barAutoHidden(w: WebWin): boolean {
+  return !!w.immersive && !!w.restore && !w.ownFrame && tiledOn(w.id) == null;
+}
+
+/** TB2: the full-screen Linux window whose bar a pull from the top slid in (the host's "webwindows.reveal"), or null. */
+export const fullReveal = signal<number | null>(null);
+
+// A slid-in bar stays while its tile menu is open on it.
+revealKept.now = (id) => tileMenu.peek() === id;
 
 // ---- RS1/RS2: a resize drag paces the app's relayouts --------------------------------------------------------------
 // The frame (and the layer's crop) follows the finger every frame; the app's own size - what the host resizes its
@@ -3361,12 +3435,16 @@ function usePinch(win: WebWin) {
   return { onPointerDownCapture: down, onPointerMoveCapture: move, onPointerUpCapture: up, onPointerCancelCapture: up };
 }
 
-/** Its title bar: moves it (a drag), full screen (a double tap), snaps it to a tile (let go at an edge). */
-function TitleBar({ win }: { win: WebWin }) {
+/**
+ * Its title bar: moves it (a drag), full screen (a double tap), snaps it to a tile (let go at an edge). [auto] (TB1): it
+ * auto-hides - out of the layout, slid in over the app by a pull from the top (ui/barreveal.ts), kept while pressed.
+ */
+function TitleBar({ win, auto = false }: { win: WebWin; auto?: boolean }) {
   const drag = useRef<{ px: number; py: number; x: number; y: number; moved: boolean; tiled: boolean } | null>(null);
   const lastTap = useRef(0);
-  const merged = !!win.restore;
+  const merged = !!win.restore && !auto;
   const end = (e: PointerEvent, cancelled: boolean) => {
+    if (auto) releaseReveal(win.id);
     const d = drag.current;
     if (!d) return;
     e.stopPropagation();
@@ -3388,6 +3466,7 @@ function TitleBar({ win }: { win: WebWin }) {
       style={{ height: `${TITLE}px`, flex: `0 0 ${TITLE}px`, touchAction: "none" }}
       onPointerDown={(e) => {
         e.stopPropagation();
+        if (auto) holdReveal(win.id);
         raise(win.id);
         capture(e);
         drag.current = { px: e.clientX, py: e.clientY, x: win.x, y: win.y, moved: false, tiled: tiledOn(win.id) != null };
@@ -3966,6 +4045,8 @@ function Body({ win, body }: { win: WebWin; body: { current: HTMLDivElement | nu
   };
   const down = (e: PointerEvent) => {
     const p = pressed.current;
+    // TB1: a press at an auto-hidden bar's edge may be a pull that slides it in (the app gets the touch too, as Android's).
+    if (barAutoHidden(win) && body.current) edgeDown(win.id, e, body.current.getBoundingClientRect().top, rootTokens().inset);
     // A new touch: fingers whose up this body never saw end first (the app's gesture never keeps a stale finger).
     if (e.isPrimary && p.size) (p.clear(), toApp(e, "cancel"));
     if (!p.size) raise(win.id);
@@ -3985,6 +4066,7 @@ function Body({ win, body }: { win: WebWin; body: { current: HTMLDivElement | nu
   };
   bodyFinger.set(win.id, down);
   const end = (e: PointerEvent, action: "up" | "cancel") => {
+    edgeEnd(e.pointerId);
     const n = pressed.current.get(e.pointerId);
     if (n === undefined) return;
     pressed.current.delete(e.pointerId);
@@ -4001,6 +4083,7 @@ function Body({ win, body }: { win: WebWin; body: { current: HTMLDivElement | nu
       style={{ flex: 1, touchAction: "none", ...previewOf(win.id) }}
       onPointerDown={down}
       onPointerMove={(e) => {
+        edgeMove(e.pointerId, e.clientY);
         const n = pressed.current.get(e.pointerId);
         if (n !== undefined && !(n === 0 && appDragMove(win.id, e))) toApp(e, "move", n);
       }}
@@ -4116,12 +4199,13 @@ function AppWindowEl({ win, z, focused }: { win: WebWin; z: number; focused: boo
   // The outline and the tile menu leave on the spring (§6: both were gone in one frame).
   const outline = usePresence(sizing);
   const menu = usePresence(tileMenu.value === win.id);
-  const cls = frameClass(win, focused, sizing);
+  const auto = barAutoHidden(win);
+  const cls = frameClass(win, focused, sizing, auto);
   return (
     <>
       <WindowShadow win={win} z={z} focused={focused} />
       <div class={cls} data-wwid={win.id} data-z={z} style={{ ...frame, "--ww-k": s }} {...pinch}>
-        {(!win.ownFrame || orphaned(win.id)) && <TitleBar win={win} />}
+        {(!win.ownFrame || orphaned(win.id)) && <TitleBar win={win} auto={auto} />}
         <Body win={win} body={body} />
         {free && <Handles id={win.id} zones={zoneKey(win)} />}
         <SwapHint win={win} />
@@ -4138,9 +4222,13 @@ function previewOf(id: number) {
   return p?.id === id && p.k !== 1 ? { transform: `scale(${p.k})`, transformOrigin: "0 0" } : {};
 }
 
-/** The frame element's classes: maximised, live, focused (the top window: its grips, RZ1), being resized. */
-function frameClass(win: WebWin, focused: boolean, sizing: boolean): string {
-  const on: [boolean, string][] = [[!!win.restore, "maximised"], [!!win.live, "live"], [focused, "focused"], [sizing, "ww-resizing"], [gripsOn.value === win.id, "ww-grips"], [reflowing.value === win.page, "ww-reflow"], [zoomPreview.value?.id === win.id, "ww-zooming"]];
+/**
+ * The frame element's classes: maximised, live, focused (the top window: its grips, RZ1), being resized; TB1 [auto]:
+ * its bar auto-hides, and is slid in now.
+ */
+function frameClass(win: WebWin, focused: boolean, sizing: boolean, auto: boolean): string {
+  const shown = auto && barReveal.value === win.id;
+  const on: [boolean, string][] = [[!!win.restore, "maximised"], [!!win.live, "live"], [focused, "focused"], [sizing, "ww-resizing"], [gripsOn.value === win.id, "ww-grips"], [reflowing.value === win.page, "ww-reflow"], [zoomPreview.value?.id === win.id, "ww-zooming"], [auto, "ww-bar-auto"], [shown, "ww-bar-shown"]];
   return ["webwindow", ...on.filter(([b]) => b).map(([, c]) => c)].join(" ");
 }
 
