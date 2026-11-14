@@ -16,6 +16,13 @@
 // The two actions that DO need root (apply / roll back) are launched in a
 // Konsole window so the user sees progress and enters their password there —
 // the widget never tries to hold privileges itself.
+//
+// On a phone (/etc/powos/platform = phone) the image isn't bootc: PowOS updates
+// through the PowOS app (the app, the home screen, the Linux image - one run,
+// docs/PHONE-UPDATES.md). The widget shows the app's state instead
+// (`powos update status --json`, the app's run/powos-updates.json) and its
+// "check now" / "update now" ask the app for that run (`powos update now`,
+// android-request's "update"); 11-14: it said "not a bootc deployment" there.
 import QtQuick
 import QtQuick.Layouts
 import org.kde.plasma.plasmoid
@@ -50,13 +57,22 @@ PlasmoidItem {
     property var    srcDirty: []           // uncommitted edits: [{status, path}]
     property var    srcAhead: []           // commits ahead of image: [{hash, subject, type}]
 
+    // ── the phone (the PowOS app's updater, lib/phone-app-updates.sh) ──
+    property bool   onPhone: false
+    property var    phone: null            // the app's state: {checking, checked, error, summary, app, shell, via, waiting}
+    property string phoneCore: ""          // powos-core, the image's PowOS package
+    property bool   phoneAsking: false     // a run was asked for and hasn't shown up as "checking" yet
+    readonly property bool phoneRooted: phone !== null && phone.via === "ship"
+    readonly property bool phoneBusy: onPhone && (phoneAsking || (phone !== null && phone.checking === true))
+    readonly property var  phoneWaiting: (phone && phone.waiting) ? phone.waiting : []
+
     property bool   checking: false
     property bool   ranOnce: false
     property string lastError: ""
 
     // remote check only meaningful when we got both digests
     readonly property bool checkOk: curDigest !== "" && remoteDigest !== ""
-    readonly property bool updateAvailable: checkOk && curDigest !== remoteDigest
+    readonly property bool updateAvailable: onPhone ? phoneWaiting.length > 0 : (checkOk && curDigest !== remoteDigest)
     // Two DISTINCT source signals — never conflate them (this split is the whole
     // point of the fix; adding them together is what produced the alarming
     // "109 changes to apply"):
@@ -74,6 +90,10 @@ PlasmoidItem {
     // digest is looked up inside the script (it already has the ref from bootc),
     // so the whole check is a single round-trip.
     readonly property string statusCmd:
+        // The phone: the PowOS app's updater state + the image's powos-core (empty sections elsewhere).
+        "echo __PLATFORM__; P=$(cat /etc/powos/platform 2>/dev/null); echo \"$P\"; " +
+        "echo __PHONE__; [ \"$P\" = phone ] && powos update status --json 2>/dev/null; echo; " +
+        "echo __CORE__; [ \"$P\" = phone ] && pacman -Q powos-core 2>/dev/null; echo; " +
         "echo __VER__; powos version 2>/dev/null; " +
         // Booted image ref + digest via rpm-ostree — it reads as an unprivileged
         // user, whereas `bootc status --json` now REQUIRES root ("must be
@@ -122,8 +142,55 @@ PlasmoidItem {
         return m ? m[1] : ""
     }
 
+    // the phone's sections: the platform, the app's updater state, powos-core's version
+    function parsePhone(out) {
+        root.onPhone = section(out, "__PLATFORM__", "__PHONE__") === "phone"
+        var p = null
+        var pj = section(out, "__PHONE__", "__CORE__")
+        try { if (pj !== "") p = JSON.parse(pj) } catch (e) { p = null }
+        root.phone = root.onPhone ? p : null
+        var core = section(out, "__CORE__", "__VER__").split(/\s+/)
+        root.phoneCore = core.length > 1 ? core[1] : ""
+        if (p && p.checking) root.phoneAsking = false
+    }
+
+    // ask the PowOS app for its run (app, home screen, Linux); its state follows in its file
+    function phoneUpdate() {
+        root.phoneAsking = true
+        askTimeout.restart()
+        runner.connectSource("powos update now >/dev/null 2>&1")
+    }
+
+    // "3h ago" for the app's epoch-ms check time
+    function ago(ms) {
+        if (!ms) return "never"
+        var m = Math.floor((Date.now() - ms) / 60000)
+        if (m < 1) return "just now"
+        if (m < 60) return m + "m ago"
+        if (m < 48 * 60) return Math.floor(m / 60) + "h ago"
+        return Math.floor(m / 1440) + "d ago"
+    }
+
+    function phoneTitle() {
+        if (root.phone === null) return root.ranOnce ? "The PowOS app hasn’t reported" : "Checking…"
+        if (root.phoneRooted) return "Updated by your PowStation"
+        if (root.phoneBusy) return "Checking for updates…"
+        if (root.phoneWaiting.length > 0) return "Update ready to install"
+        if (root.phone.error) return "Couldn’t update"
+        if (!root.phone.checked) return "Not checked yet"
+        return root.phone.summary || "Up to date"
+    }
+    function phoneLine() {
+        if (root.phone === null) return "update the PowOS app: its Settings › system updates"
+        if (root.phoneRooted) return "rooted phone: the ship service keeps it current"
+        if (root.phoneWaiting.length > 0) return root.phoneWaiting[0]
+        if (root.phone.error) return root.phone.error
+        return "the app, the home screen and Linux · checked " + root.ago(root.phone.checked)
+    }
+
     function parse(out) {
         root.lastError = ""
+        parsePhone(out)
         // version
         var ver = section(out, "__VER__", "__BOOTC__")
         var mv = ver.match(/version\s+(\S+)/i);      root.curVersion = mv ? mv[1] : "?"
@@ -238,6 +305,10 @@ PlasmoidItem {
         onNewData: function (s, d) { disconnectSource(s) }
     }
 
+    // the phone: while a run was asked for or runs, read the app's state every 3 s
+    Timer { interval: 3000; repeat: true; running: root.phoneBusy; onTriggered: root.check() }
+    Timer { id: askTimeout; interval: 60 * 1000; onTriggered: root.phoneAsking = false }
+
     // updates don't move fast — poll every 30 min, and whenever the popup opens
     Timer { interval: 30 * 60 * 1000; running: true; repeat: true; triggeredOnStart: true; onTriggered: root.check() }
     onExpandedChanged: if (expanded) root.check()
@@ -275,6 +346,7 @@ PlasmoidItem {
             onClicked: root.expanded = !root.expanded
         }
         PC3.ToolTip.text: {
+            if (root.onPhone) return "PowOS Updates · " + root.phoneTitle()
             var base = root.updateAvailable ? "PowOS update available"
                      : root.checkOk ? "PowOS is up to date"
                      : "PowOS Updates"
@@ -314,8 +386,9 @@ PlasmoidItem {
                 }
                 PC3.ToolButton {
                     icon.name: "view-refresh"
-                    enabled: !root.checking
-                    onClicked: root.check()
+                    // the phone: the app's run (it checks and installs what's new); a rooted phone: read again only
+                    enabled: !root.checking && !root.phoneBusy
+                    onClicked: (root.onPhone && root.phone !== null && !root.phoneRooted) ? root.phoneUpdate() : root.check()
                     PC3.ToolTip.text: "Check now"
                     PC3.ToolTip.visible: hovered
                     PC3.ToolTip.delay: 600
@@ -340,7 +413,7 @@ PlasmoidItem {
 
                     Kirigami.Icon {
                         source: root.updateAvailable ? "software-update-available"
-                               : root.checkOk ? "vcs-normal" : "dialog-question"
+                               : (root.onPhone ? (root.phone !== null && !root.phone.error) : root.checkOk) ? "vcs-normal" : "dialog-question"
                         Layout.preferredWidth: Kirigami.Units.iconSizes.medium
                         Layout.preferredHeight: Kirigami.Units.iconSizes.medium
                     }
@@ -348,13 +421,16 @@ PlasmoidItem {
                         Layout.fillWidth: true
                         spacing: 0
                         PC3.Label {
-                            text: root.updateAvailable ? "Update available"
+                            text: root.onPhone ? root.phoneTitle()
+                                : root.updateAvailable ? "Update available"
                                 : root.checkOk ? "Up to date"
                                 : (root.ranOnce ? "Couldn’t reach the registry" : "Checking…")
                             font.bold: true
+                            elide: Text.ElideRight; Layout.fillWidth: true
                         }
                         PC3.Label {
-                            text: root.updateAvailable
+                            text: root.onPhone ? root.phoneLine()
+                                : root.updateAvailable
                                     ? ("local " + root.shortDigest(root.curDigest) + " → remote " + root.shortDigest(root.remoteDigest))
                                     : root.checkOk ? ("digest " + root.shortDigest(root.curDigest))
                                     : (root.curRef === "" ? "not a bootc deployment" : "remote digest unavailable")
@@ -362,8 +438,16 @@ PlasmoidItem {
                             elide: Text.ElideRight; Layout.fillWidth: true
                         }
                     }
+                    // the phone: the PowOS app's run (the app, the home screen, Linux)
                     PC3.Button {
-                        visible: root.updateAvailable
+                        visible: root.onPhone && root.phone !== null && !root.phoneRooted
+                        enabled: !root.phoneBusy
+                        text: "Update now"
+                        icon.name: "cloud-download"
+                        onClicked: root.phoneUpdate()
+                    }
+                    PC3.Button {
+                        visible: root.updateAvailable && !root.onPhone
                         text: "Install"
                         icon.name: "cloud-download"
                         onClicked: root.applyUpdate()
@@ -382,6 +466,19 @@ PlasmoidItem {
                     PC3.Label {
                         text: root.curVersion + (root.deployVersion !== "" ? "  ·  " + root.deployVersion : "")
                         font: Kirigami.Theme.smallFont
+                    }
+                }
+                // the phone: what the app's updater keeps current
+                Repeater {
+                    model: root.onPhone && root.phone !== null
+                        ? [["App", root.phone.app || "?"], ["Home screen", root.phone.shell || "—"], ["Linux", "powos-core " + (root.phoneCore || "?")]]
+                        : []
+                    delegate: RowLayout {
+                        required property var modelData
+                        Layout.fillWidth: true
+                        PC3.Label { text: modelData[0]; opacity: 0.6; font: Kirigami.Theme.smallFont }
+                        Item { Layout.fillWidth: true }
+                        PC3.Label { text: modelData[1]; font: Kirigami.Theme.smallFont }
                     }
                 }
                 RowLayout {

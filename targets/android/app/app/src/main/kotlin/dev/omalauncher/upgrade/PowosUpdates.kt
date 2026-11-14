@@ -151,6 +151,41 @@ object UpdatePlan {
             else -> "Updated: ${done.joinToString(", ")}"
         }
 
+    /**
+     * The phone updater's state as one object: Settings' "system updates" card (ShellScreens) and the Linux side's copy,
+     * run/powos-updates.json (`powos update status`, the desktop's update widget - a phone image isn't bootc, 11-14):
+     * the app's and the home screen's versions, the last check and its result, what waits on the person. [rooted]: the
+     * ship service updates this phone, the app's own run doesn't (no check offered).
+     */
+    data class Snapshot(
+        val checking: Boolean,
+        val checkedAt: Long?,
+        val error: String?,
+        val summary: String?,
+        val app: String,
+        val shell: String?,
+        val rooted: Boolean,
+        val apkWaiting: Boolean,
+    ) {
+        fun json(): JSONObject =
+            JSONObject()
+                .put("checking", checking)
+                .put("checked", checkedAt ?: JSONObject.NULL)
+                .put("error", error ?: JSONObject.NULL)
+                .put("summary", summary ?: JSONObject.NULL)
+                .put("app", app)
+                .put("shell", shell?.take(9)?.ifEmpty { null } ?: JSONObject.NULL)
+                .put("rooted", rooted)
+                .put("via", if (rooted) "ship" else "app")
+                .put("waiting", JSONArray(if (apkWaiting) listOf(APK_WAITING) else emptyList()))
+    }
+
+    /** What an APK the installer holds for the person's tap reads as (the notification is the way to install it). */
+    const val APK_WAITING = "the app: tap the PowOS update notification to install it"
+
+    /** The run's result for Settings and the widget once the store answered: "Updated: ..." or "PowOS is up to date". */
+    fun result(done: List<String>): String = summary(true, done, force = true)!!
+
     /** "3 Linux packages", null: none changed (or no Linux run). */
     fun packages(n: Int?): String? = n?.takeIf { it > 0 }?.let { "$it Linux package${if (it == 1) "" else "s"}" }
 
@@ -211,6 +246,43 @@ object PowosUpdates {
             internal set
         var error by mutableStateOf<String?>(null)
             internal set
+
+        /** The last run's result once the store answered ([UpdatePlan.result]), null: none since the app started. */
+        var summary by mutableStateOf<String?>(null)
+            internal set
+
+        /** A downloaded APK waits on the person's tap (PackageInstaller's PENDING_USER_ACTION). */
+        var apkWaiting by mutableStateOf(false)
+            internal set
+    }
+
+    /** Settings' card and run/powos-updates.json: the state now ([UpdatePlan.Snapshot]). */
+    fun snapshot(context: Context): UpdatePlan.Snapshot {
+        val s = status(context)
+        return UpdatePlan.Snapshot(
+            checking = s.checking,
+            checkedAt = s.checkedAt,
+            error = s.error,
+            summary = s.summary,
+            app = dev.omalauncher.AppVersion.name(context),
+            shell = runCatching { ShellSource.servedCommit(context) }.getOrNull(),
+            rooted = RootedGuest.enabled,
+            apkWaiting = s.apkWaiting,
+        )
+    }
+
+    /**
+     * The state for the Linux side: run/powos-updates.json (the image's XDG_RUNTIME_DIR, rooted /run/powos-app), written
+     * whole (rename) at the app's start and on every change - `powos update status` and the desktop's update widget
+     * read it; `powos update now` asks for a run through android-request's "update" verb (App).
+     */
+    fun publish(context: Context) {
+        runCatching {
+            val run = andro.marchy.SessionService.runDir(context).apply { mkdirs() }
+            val tmp = File(run, "powos-updates.json.tmp")
+            tmp.writeText(snapshot(context).json().toString())
+            check(tmp.renameTo(File(run, "powos-updates.json"))) { "rename" }
+        }.onFailure { Log.w(TAG, "status not published: $it") }
     }
 
     private val status = Status()
@@ -233,8 +305,8 @@ object PowosUpdates {
         context: Context,
         force: Boolean = false,
     ) {
-        if (RootedGuest.enabled) return
         val app = context.applicationContext
+        if (RootedGuest.enabled) return publish(app)
         if (!running.compareAndSet(false, true)) return
         Thread({
             try {
@@ -261,18 +333,21 @@ object PowosUpdates {
         val state = File(context.filesDir, STATE)
         state.writeText("$lastOk $now")
         status(context).checking = true
+        publish(context)
         try {
             val (reached, done) = runSteps(context)
             if (reached) {
                 val at = System.currentTimeMillis()
                 state.writeText("$at $now")
                 status.checkedAt = at
+                status.summary = UpdatePlan.result(done)
             }
             val summary = UpdatePlan.summary(reached, done, force, vpnUp(context))
             Log.i(TAG, "run done: ${summary ?: "nothing new"}")
             if (summary == null) UpdateNotes.cancel(context) else UpdateNotes.finished(context, summary)
         } finally {
             status.checking = false
+            publish(context)
         }
     }
 
@@ -362,9 +437,12 @@ object PowosUpdates {
                 confirm.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
                 val tap = PendingIntent.getActivity(context, 1, confirm, PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE)
                 UpdateNotes.finished(context, "PowOS update ready - tap to install", tap)
-            } else if (status != PackageInstaller.STATUS_SUCCESS) {
-                File(context.cacheDir, "powos-update.apk").delete()
+                PowosUpdates.status(context).apkWaiting = true
+            } else {
+                if (status != PackageInstaller.STATUS_SUCCESS) File(context.cacheDir, "powos-update.apk").delete()
+                PowosUpdates.status(context).apkWaiting = false
             }
+            PowosUpdates.publish(context)
         }
     }
 

@@ -14527,6 +14527,11 @@ try {
   // the user, 11-09: "proper device management and onboarding so I can use all of my devices").
   for (const [label, viewport] of [["folded", { width: 404, height: 900 }], ["unfolded", { width: 821, height: 883 }]])
     runs.push(open(browser, `${ORIGIN}/index.html?join=choose`, `join-${label}`, viewport).then((r) => whenReady(r, () => r.page.evaluate(async (l) => (await importShim("./dev/join-check.js")).joinFails(l), `join-${label}`))));
+  // Settings' "system updates" on a phone: found by "update" in the search, at the top of Settings, what the app's run
+  // keeps current, "check for updates" optimistic; rooted: the ship service, no check (dev/updates-check.js; the owner,
+  // 11-14: "theres no setting like that").
+  for (const [label, viewport, query] of [["folded", { width: 404, height: 900 }, ""], ["unfolded", { width: 821, height: 883 }, ""], ["rooted", { width: 404, height: 900 }, "?updates=rooted"]])
+    runs.push(open(browser, `${ORIGIN}/index.html${query}`, `updates-${label}`, viewport).then((r) => whenReady(r, () => r.page.evaluate(async ([l, rooted]) => (await importShim("./dev/updates-check.js")).updatesFails(l, rooted), [`updates-${label}`, label === "rooted"]))));
   // The non-root build's AI page before its user signs in: Sign in to Claude, Claude Code's own login (11-04; aiSigninInPage).
   if (process.env.SHELL_PAGES !== "0")
     for (const [label, viewport] of [["folded", { width: 404, height: 900 }], ["unfolded", { width: 821, height: 883 }]])

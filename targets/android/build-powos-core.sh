@@ -5,8 +5,9 @@
 #   bin/ -> /usr/bin, lib/ -> /usr/lib/powos (lib/self-phone.sh self_phone_apply: the manager and fleet_login.py,
 #   claude-login, the CLI and its libraries) and the phone's session scripts, shims and play/ launchers at the paths
 #   install-powos-android.sh installs them (tools/phone-files.sh reads them from there), plus claude-login's module in
-#   /usr/lib/claude-login (tools/stage-claude-login.sh; its /usr/bin wrapper is a shims/ file) - the build fails without
-#   it, since a phone whose base predates it gets it only from here (razr 11-14: "claude-login isn't installed").
+#   /usr/lib/claude-login (tools/stage-claude-login.sh; its /usr/bin wrapper is a shims/ file) and the desktop widgets
+#   (desktop/plasmoid -> /usr/share/plasma/plasmoids) - the build fails without claude-login,
+#   since a phone whose base predates it gets it only from here (razr 11-14: "claude-login isn't installed").
 #   claude-login's own changes don't change the version: they reach phones with the next PowOS code change.
 # Version: "<commit count>.g<sha9>" of the newest commit that touched those files - monotonic along origin's history
 # (a descendant always has more ancestors), and unchanged code keeps its version, so a ship without code changes
@@ -23,7 +24,7 @@ ROOT=$(cd "$HERE/../.." && pwd)
 BASE=${POWOS_BASE_BRANCH:-${POWOS_BASE:-main}}
 OUT=$HERE/out/powos-core
 PATHS=(bin lib targets/android/session targets/android/shims targets/android/play targets/android/install-powos-android.sh targets/android/tools/phone-files.sh
-  config/etc/profile.d units/phone targets/android/rootfs-packs.conf targets/android/tools/split-rootfs.py)
+  config/etc/profile.d units/phone targets/android/rootfs-packs.conf targets/android/tools/split-rootfs.py desktop/plasmoid)
 publish=""; [ "${1:-}" = --publish ] && publish=1
 if [ -n "$publish" ] && [ -z "${PUBLISH_ANY_COMMIT:-}" ] && ! git -C "$ROOT" merge-base --is-ancestor HEAD "origin/$BASE" 2>/dev/null; then
   echo "build-powos-core: not published - $(git -C "$ROOT" rev-parse --short HEAD) isn't on origin/$BASE"
@@ -74,6 +75,9 @@ package() {
   # What the base should hold, for lib/phone-base-sync.py (phone-update.sh's "base" step: an older base catches up).
   if [ -f targets/android/rootfs-packs.conf ]; then install -Dm 644 targets/android/rootfs-packs.conf "\$pkgdir/usr/share/powos/rootfs-packs.conf"; fi
   if [ -f targets/android/tools/split-rootfs.py ]; then install -Dm 755 targets/android/tools/split-rootfs.py "\$pkgdir/usr/lib/powos/split-rootfs.py"; fi
+  # PowOS's desktop widgets (QML only), as install-powos-android.sh puts them over the image's: a widget fix reaches an
+  # installed phone with the package, not a new base (11-14: the razr's update widget said "not a bootc deployment").
+  if [ -d desktop/plasmoid ]; then mkdir -p "\$pkgdir/usr/share/plasma/plasmoids" && cp -r desktop/plasmoid/. "\$pkgdir/usr/share/plasma/plasmoids/"; fi
 }
 EOF
   [ -n "${POWOS_CORE_STAGE:-}" ] && { echo "staged: $W"; exit 0; }

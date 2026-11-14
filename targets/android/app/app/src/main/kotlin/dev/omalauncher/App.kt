@@ -15,6 +15,13 @@ class App : Application() {
         // session's service connects to KWin - set lazily (by Runtime) KWin's "caps" could come first and it was never
         // told to open new windows as tasks.
         if (Application.getProcessName() == packageName) floatingWindows()
+        // PowOS's own updates for the Linux side (the desktop's update widget, `powos update status|now`): the state in
+        // run/powos-updates.json, a run on android-request's "update". Set before the session's service writes the
+        // verbs file, like the launcher's.
+        if (Application.getProcessName() == packageName) {
+            andro.marchy.AndroidRequests.update = java.util.function.Consumer { dev.omalauncher.upgrade.PowosUpdates.maybeRun(this, force = true) }
+            dev.omalauncher.upgrade.PowosUpdates.publish(this)
+        }
         // SystemUI's binding to the recents service (and with it the gesture input) back after the process dies.
         dev.omalauncher.system.RecentsWatchdog.start(this)
         // The smart glasses: reconnect if they were connected when the app last ran; `powos glasses`'s commands. In the

@@ -19,6 +19,7 @@ ui/remote.*             none
 ui/glasses.*            none
 ui/rich.*               none
 dev/join-check.js       ^join-.*$
+dev/updates-check.js    ^updates-.*$
 ui/assist.*             ^(assist-draw-.*|send-dictation-assist-.*)$
 dev/assist-draw-check.js  ^assist-draw-.*$
 ui/pet.*                ^pet$

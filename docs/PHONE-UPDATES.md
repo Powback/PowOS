@@ -50,7 +50,8 @@ launcher), which needs the owner's OK for a public route. The store's URLs here 
 
 - **The app, no root** (`dev.omalauncher.upgrade.PowosUpdates`): on the launcher's start at most every 6 h (30 min after
   a run that couldn't reach the store), on opening Settings (same throttle), and at once from Settings > system updates
-  > check. APK, then shell, then Linux; one "PowOS updates" notification with the progress and the result. Never while a
+  > check for updates (the card at the top of Settings; the launcher's search finds "Check for updates" by "update"),
+  or from the Linux side (below). APK, then shell, then Linux; one "PowOS updates" notification with the progress and the result. Never while a
   game runs (a web-window game in front, or one launched in the last 2 min; `phone-update.sh` also refuses while a game
   process runs, `--force` overrides).
 - **Each session start** (`SessionService` step 0b, `SessionPlan.packagesCommand`): the image's `phone-update.sh
@@ -59,8 +60,15 @@ launcher), which needs the owner's OK for a public route. The store's URLs here 
 - **By hand, in the image**: `powos update check`, `powos update` / `powos update packages` (the default run),
   `powos update system` (full `-Syu` with Arch Linux ARM's repos, `[powos]` first; the image's IgnorePkg keeps Plasma at
   our KWin's version).
+- **From the Linux side** (11-14: the desktop's update widget said "not a bootc deployment"): the app writes its state
+  to `run/powos-updates.json` (the image's `XDG_RUNTIME_DIR`; rooted `/run/powos-app`) at its start and on every change
+  - versions (app, home screen), last check, result, an APK waiting on its tap, `via: app|ship`. `powos update status
+  [--json]` reads it, `powos update now` asks the app for its run (android-request's `update` verb; listed in
+  `android-request.verbs` by an app that serves it) - `lib/phone-app-updates.sh`. The desktop's update widget
+  (`com.powos.updates`) shows exactly that on a phone, with Check now / Update now; `powos-core` carries the widgets
+  (`desktop/plasmoid` -> `/usr/share/plasma/plasmoids`), so a widget fix reaches a phone without a new base.
 - **Rooted phones** (the OnePlus): the ship service (`tools/phone/ship.sh`) installs APKs, pushes the shell and deploys
-  over adb; `PowosUpdates` doesn't run there. Each of those ships also publishes the pull updates above.
+  over adb; `PowosUpdates` doesn't run there (its card and the widget say so: "kept current by your PowStation"). Each of those ships also publishes the pull updates above.
 - **Dev shortcut**: `tools/phone/nonroot-sync.sh` pushes to an adb-paired non-root phone directly (no store round trip).
 
 ## Safety

@@ -1115,6 +1115,10 @@ _update_usage() {
     echo "  packages  - Update installed packages"
     echo "  overlays  - Rebuild overlays with latest upstream"
     echo "  apply     - Apply all updates (os + packages)"
+    if [[ "$(cat /etc/powos/platform 2>/dev/null)" == phone ]]; then
+        echo "  status    - The phone: what the PowOS app's updater runs (app, home screen, Linux), last check, result"
+        echo "  now       - The phone: ask the PowOS app to update everything now"
+    fi
 }
 
 cmd_update() {
@@ -1128,6 +1132,10 @@ cmd_update() {
             check) sh "$POWOS_LIB/phone-update.sh" --check; return ;;
             packages|apply|os) shift; sh "$POWOS_LIB/phone-update.sh" "$@"; return ;;
             system) shift; sh "$POWOS_LIB/phone-update.sh" --system "$@"; return ;;
+            # The whole phone run (the app, the home screen, the image) is the PowOS app's: its state, and asking it for
+            # a run (lib/phone-app-updates.sh; the desktop's update widget uses the same two).
+            status) shift; sh "$POWOS_LIB/phone-app-updates.sh" status "$@"; return ;;
+            now) sh "$POWOS_LIB/phone-app-updates.sh" now; return ;;
         esac
     fi
 

@@ -217,7 +217,8 @@ Key facts an agent should CHECK before starting:
     worst-offenders strips **grouped by owning container** (host vs container).
   - `com.powos.updates` (tray) — version + changelog, bootc update available
     (skopeo digest compare), one-click upgrade/rollback, and **apply local
-    `/var/lib/powos/src` changes** (`powos update self`).
+    `/var/lib/powos/src` changes** (`powos update self`). On a phone: the PowOS
+    app's updater instead (`powos update status|now`, docs/PHONE-UPDATES.md).
   - `com.powos.camera` (tray) — shows when the camera is in use AND **names the
     app(s)** holding `/dev/video*` (which KDE's stock indicator can't).
 - Dev / modding — TWO paths, pick by whether you want it committed:

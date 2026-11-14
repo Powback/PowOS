@@ -102,4 +102,38 @@ class PowosUpdatesTest {
         assertEquals("http://192.168.50.100/apk/powos-shell/abc.zip", UpdatePlan.viaHub("${UpdatePlan.STORE}/powos-shell/abc.zip"))
         assertNull(UpdatePlan.viaHub("http://example.com/apk/powos.ver"))
     }
+
+    /**
+     * The phone updater's state as the Linux side reads it (run/powos-updates.json: `powos update status`, the desktop's
+     * update widget) and Settings' card shows it (11-14: the widget said "not a bootc deployment" on the razr).
+     */
+    @Test
+    fun snapshotCarriesVersionsResultAndWhatWaits() {
+        val j =
+            UpdatePlan.Snapshot(
+                checking = false,
+                checkedAt = 1763100000000L,
+                error = null,
+                summary = UpdatePlan.result(listOf("the home screen")),
+                app = "3.41.7",
+                shell = "0123456789abcdef",
+                rooted = false,
+                apkWaiting = true,
+            ).json()
+        assertEquals(false, j.getBoolean("checking"))
+        assertEquals(1763100000000L, j.getLong("checked"))
+        assertTrue(j.isNull("error"))
+        assertEquals("Updated: the home screen", j.getString("summary"))
+        assertEquals("3.41.7", j.getString("app"))
+        assertEquals("012345678", j.getString("shell"))
+        assertEquals("app", j.getString("via"))
+        assertEquals(UpdatePlan.APK_WAITING, j.getJSONArray("waiting").getString(0))
+        // Nothing found: the run still says so (Settings and the widget show a result, not silence).
+        assertEquals("PowOS is up to date", UpdatePlan.result(emptyList()))
+        // Rooted: the ship service updates it; never checked, no shell stamp, nothing waiting.
+        val r = UpdatePlan.Snapshot(false, null, null, null, "3.41.7", "", rooted = true, apkWaiting = false).json()
+        assertEquals("ship", r.getString("via"))
+        assertTrue(r.isNull("checked") && r.isNull("shell") && r.isNull("summary"))
+        assertEquals(0, r.getJSONArray("waiting").length())
+    }
 }

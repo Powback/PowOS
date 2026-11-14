@@ -91,6 +91,19 @@ export interface LinuxStatus {
   log?: string[];
 }
 
+/**
+ * The phone's PowOS updates (upgrade/PowosUpdates.kt): what the app's run keeps current (the app, the home screen),
+ * the last run's result, what waits on a tap. via "ship": a rooted phone the ship service updates (no check offered).
+ */
+export interface PowosUpdates {
+  app: string;
+  shell: string | null;
+  summary: string | null;
+  rooted: boolean;
+  via: "app" | "ship";
+  waiting: string[];
+}
+
 export interface SettingsState {
   theme: string | null;
   linux: LinuxStatus;
@@ -104,6 +117,8 @@ export interface SettingsState {
     packages: string[];
     tools: string[];
     job: Job;
+    /** PowOS's own updater on a phone (PowosUpdates.kt UpdatePlan.Snapshot); missing on an older host. */
+    powos?: PowosUpdates;
   } | null;
   setup: Job;
   version: string;

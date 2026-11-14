@@ -132,6 +132,14 @@ export function mockScreens(events: Emitter): Bridge["screens"] {
         changed("aur");
       } else if (name === "storage" && (action === "add" || action === "remove" || action === "cancel")) {
         packJob(arg as string, action);
+      } else if (name === "settings" && (action === "check" || action === "update")) {
+        // PowosUpdates.maybeRun(force): checking, then the run's result (the gate's updates check, dev/updates-check.js).
+        const w = window as unknown as { __updatesAsked?: string[] };
+        (w.__updatesAsked ??= []).push(action);
+        // A new object each time, as the host's JSON is (the page keeps a state it was already handed).
+        const put = (updates: Record<string, unknown>) => ((state.settings = { ...state.settings, updates: { ...state.settings.updates, ...updates } }), changed("settings"));
+        setTimeout(() => put({ checking: true }), 300);
+        setTimeout(() => put({ checking: false, checked: Date.now(), powos: { ...state.settings.updates.powos, summary: "Updated: the home screen" } }), 900);
       } else if (name === "join") {
         joinAct(action, arg);
       } else if (name === "licenses" && action === "text") {
@@ -140,6 +148,12 @@ export function mockScreens(events: Emitter): Bridge["screens"] {
       return null;
     },
   };
+}
+
+/** PowosUpdates.kt's snapshot on the mock host: a phone without root, or (?updates=rooted) one the ship service updates. */
+function powosUpdates() {
+  const rooted = new URLSearchParams(location.search).get("updates") === "rooted";
+  return { app: "0.1.0-dev", shell: "0123abcde", summary: "PowOS is up to date", rooted, via: rooted ? "ship" : "app", waiting: [] as string[] };
 }
 
 /** The screens' sample states, painted from the fixture. */
@@ -157,7 +171,8 @@ function sampleState(f: Fixture): Record<string, any> {
       linux,
       powos: true,
       agent: "Claude Code",
-      updates: { checking: false, checked: Date.now() - 3 * 3600_000, error: null, packages: ["mesa", "firefox"], tools: [], job: null },
+      // A PowOS phone's card (ShellScreens.powosUpdates): the app's run; ?updates=rooted a rooted phone's (ship service).
+      updates: { checking: false, checked: Date.now() - 3 * 3600_000, error: null, packages: [], tools: [], job: null, powos: powosUpdates() },
       setup: null,
       version: "0.1.0-dev",
     },

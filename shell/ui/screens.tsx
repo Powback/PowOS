@@ -27,6 +27,7 @@ import {
   setInnerBack,
   type JoinState,
   partOf,
+  type PowosUpdates,
   type SettingsState,
   type StoreState,
   type StoreWidget,
@@ -142,15 +143,18 @@ function Action({
   onClick,
   tone,
   disabled,
+  setting,
 }: {
   icon: IconName;
   label: string;
   onClick?: () => void;
   tone?: "danger" | "muted" | "primary";
   disabled?: boolean;
+  /** Its name for the settings search's target (search.ts settingDestinations), when one opens on it. */
+  setting?: string;
 }) {
   return (
-    <button type={onClick ? "button" : "submit"} class={`scr-act ${tone ?? ""}`} onClick={onClick} disabled={disabled}>
+    <button type={onClick ? "button" : "submit"} class={`scr-act ${tone ?? ""}`} onClick={onClick} disabled={disabled} data-setting={setting}>
       <Icon name={icon} size={16} />
       <span>{label}</span>
     </button>
@@ -352,29 +356,66 @@ function linuxLine(l: LinuxStatus | undefined, powosSession: boolean) {
   }
 }
 
+/** What the card says now: a job, a check, the ship service (rooted), an error, else the last result. */
+function updatesLine(u: NonNullable<SettingsState["updates"]>, checking: boolean) {
+  if (u.job?.state === "working") return "updating…";
+  if (checking) return "checking…";
+  if (u.powos?.via === "ship") return "kept current by your PowStation (ship service)";
+  if (u.checked == null) return "not checked yet";
+  if (u.error) return u.error;
+  return u.powos ? powosResult(u.powos, u.checked) : archResult(u.packages, u.tools, u.checked);
+}
+
+/** A phone's last run: what waits on a tap, else its result. */
+const powosResult = (p: PowosUpdates, checked: number) => p.waiting[0] ?? `${p.summary ?? "up to date"} · checked ${ago(checked)}`;
+
+/** Omalauncher's Arch: the pending packages and tools. */
+const archResult = (packages: string[], tools: string[], checked: number) =>
+  packages.length + tools.length === 0
+    ? `up to date · checked ${ago(checked)}`
+    : [packages.length ? plural(packages.length, "package") : "", tools.join(", ")].filter(Boolean).join(" · ");
+
+/** A tap's "checking…" at once, until the host says it checks (or 15 s): [asked, ask]. */
+function useAsked(checking: boolean): [boolean, () => void] {
+  const [asked, setAsked] = useState(false);
+  useEffect(() => { if (checking) setAsked(false); }, [checking]);
+  useEffect(() => {
+    if (!asked) return;
+    const t = window.setTimeout(() => setAsked(false), 15_000);
+    return () => clearTimeout(t);
+  }, [asked]);
+  return [asked, () => setAsked(true)];
+}
+
+/** "update all" (Arch's pending), else "check for updates" - none while it works or on a rooted phone. */
+function UpdatesAction({ u, busy, check }: { u: NonNullable<SettingsState["updates"]>; busy: boolean; check: () => void }) {
+  if (busy || u.powos?.via === "ship") return null;
+  if (u.packages.length + u.tools.length > 0) return <Action icon="trayArrowDown" label="update all" tone="primary" onClick={() => act("settings", "update")} />;
+  return <Action icon="refresh" label="check for updates" tone="muted" setting="check for updates" onClick={check} />;
+}
+
+/**
+ * Settings' "system updates", at the top of the page: on a phone PowOS's own run (the app, the home screen, Linux -
+ * PowosUpdates.kt), what it keeps current and "check for updates" (found by the search too: the owner, 11-14, "theres
+ * no setting like that"); without PowOS, Omalauncher's Arch packages. A tap reads as checking at once (optimistic).
+ */
 function Updates({ u }: { u: NonNullable<SettingsState["updates"]> }) {
+  const [asked, ask] = useAsked(u.checking);
+  const p = u.powos;
   const working = u.job?.state === "working";
-  const count = u.packages.length + u.tools.length;
-  const status = working
-    ? "updating…"
-    : u.checking
-      ? "checking…"
-      : u.checked == null
-        ? "not checked yet"
-        : u.error
-          ? u.error
-          : count === 0
-            ? `up to date · checked ${ago(u.checked)}`
-            : [u.packages.length ? plural(u.packages.length, "package") : "", u.tools.join(", ")].filter(Boolean).join(" · ");
+  const checking = u.checking || asked;
+  const pending = !working && !checking && (u.packages.length + u.tools.length > 0 || !!p?.waiting.length);
+  const versions = p ? [`app ${p.app}`, p.shell ? `home screen ${p.shell}` : ""].filter(Boolean).join(" · ") : "";
   return (
     <div class="scr-card tile" data-setting="system updates">
       <div class="scr-row">
         <Icon name="update" size={22} class="scr-row-icon" />
         <div class="scr-row-text">
           <div>system updates</div>
-          <div class={`scr-sub ${count && !working ? "accent" : "muted"}`}>{status}</div>
+          <div class={`scr-sub ${pending ? "accent" : "muted"}`}>{updatesLine(u, checking)}</div>
+          {versions && <div class="scr-sub muted">{versions}</div>}
         </div>
-        {!working && !u.checking && (count > 0 ? <Action icon="trayArrowDown" label="update all" tone="primary" onClick={() => act("settings", "update")} /> : <Action icon="refresh" label="check" tone="muted" onClick={() => act("settings", "check")} />)}
+        <UpdatesAction u={u} busy={working || checking} check={() => (ask(), act("settings", "check"))} />
       </div>
       <JobLog job={u.job} />
     </div>

@@ -19,6 +19,7 @@ import dev.omalauncher.Runtime
 import dev.omalauncher.linux.AGENTS
 import dev.omalauncher.linux.JobState
 import dev.omalauncher.linux.LinuxState
+import dev.omalauncher.linux.POWOS
 import dev.omalauncher.linux.Package
 import dev.omalauncher.linux.RootedGuest
 import dev.omalauncher.linux.Stage
@@ -177,11 +178,13 @@ class ShellScreens(
         val text = (arg as? String).orEmpty()
         val result: Any? = when ("$name.$action") {
             "settings.check" -> {
-                if (runtime.bootstrap.isInstalled) scope.launch { runtime.updates.check(force = true) }
+                // PowOS: the store's run alone (Omalauncher's own Arch checker has no Arch to look at here).
+                if (runtime.bootstrap.isInstalled && !POWOS) scope.launch { runtime.updates.check(force = true) }
                 dev.omalauncher.upgrade.PowosUpdates.maybeRun(context, force = true)
                 null
             }
-            "settings.update" -> runtime.updateSystem()
+            // PowOS: "update now" is the same run (app, home screen, Linux image), never Omalauncher's pacman job.
+            "settings.update" -> if (POWOS) dev.omalauncher.upgrade.PowosUpdates.maybeRun(context, force = true) else runtime.updateSystem()
             "settings.retryUpdates" -> runtime.retryUpdates()
             "settings.android" -> start(Intent(Settings.ACTION_SETTINGS))
             "style.apply" -> theme(text)?.let { scope.launch { runtime.themes.apply(it) } }.let { null }
@@ -239,7 +242,9 @@ class ShellScreens(
             .put("linux", linuxState())
             .put("powos", runtime.powosSession)
             .put("agent", runtime.agents.default?.name ?: JSONObject.NULL)
-            .put("updates", if (installed) updates() else powosUpdates())
+            // PowOS (rooted or not): PowOS's own updater, never Omalauncher's Arch checker - "installed" is PowOS's image
+            // there, and that card said "couldn't reach the mirrors" for a proot that doesn't exist (11-14).
+            .put("updates", if (installed && !POWOS) updates() else powosUpdates())
             .put("setup", job(runtime.bootstrap.updates.value).takeIf { it != JSONObject.NULL && installed } ?: JSONObject.NULL)
             .put("version", dev.omalauncher.AppVersion.name(context))
             .put("join", dev.omalauncher.devices.PowStation.json(context))
@@ -258,10 +263,13 @@ class ShellScreens(
             .put("job", job(u.job))
     }
 
-    /** No Arch of Omalauncher's own: the card shows PowOS's pull updates (upgrade/PowosUpdates); none on a rooted phone. */
+    /**
+     * PowOS's pull updates (upgrade/PowosUpdates): what runs (app, home screen), the last check and its result, what
+     * waits on a tap - rooted phones too (11-14: "there's no setting like that"), whose card says the ship service
+     * updates them. The card's base fields (checking/checked/error) plus "powos" ([UpdatePlan.Snapshot]).
+     */
     private fun powosUpdates(): Any {
-        if (dev.omalauncher.linux.RootedGuest.enabled) return JSONObject.NULL
-        val p = dev.omalauncher.upgrade.PowosUpdates.status(context)
+        val p = dev.omalauncher.upgrade.PowosUpdates.snapshot(context)
         return JSONObject()
             .put("checking", p.checking)
             .put("checked", p.checkedAt ?: JSONObject.NULL)
@@ -269,6 +277,7 @@ class ShellScreens(
             .put("packages", JSONArray())
             .put("tools", JSONArray())
             .put("job", JSONObject.NULL)
+            .put("powos", p.json())
     }
 
     // --- storage

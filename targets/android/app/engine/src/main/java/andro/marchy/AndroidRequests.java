@@ -13,7 +13,7 @@ import java.nio.file.Files;
  * Requests from the Linux session for things only Android can do, written to run/android-request by the
  * android-request helper (atomically, by rename): "wifi-panel", "open <package>" (full screen; a floating window on the unfolded home, [openOptions]), "split <package>" (beside Andromarchy), "float <package>" (floating window),
  * "launcher <apps|ai> [how json]" (PowOS's one launcher, [launcher]), "pack <name>" (add a part of PowOS the base image
- * left out, [Packs]; progress in run/pack-NAME.state). A Linux job's progress is not a request but its own file,
+ * left out, [Packs]; progress in run/pack-NAME.state), "update <check|now>" (PowOS's own update run, [update]). A Linux job's progress is not a request but its own file,
  * run/progress-ID.state ([Progress], the powos-progress helper; "progress" in the verbs file says it is served).
  */
 public final class AndroidRequests implements DirWatch.Listener {
@@ -31,6 +31,12 @@ public final class AndroidRequests implements DirWatch.Listener {
      * second one in the Linux page. Kind "apps" or "ai", how the page's LauncherOpen JSON ("" for none). Set by App.
      */
     public static volatile java.util.function.BiConsumer<String, String> launcher = null;
+    /**
+     * "update <check|now>": the Linux side (`powos update now`, the desktop's update widget) asking for PowOS's own
+     * update run - the app, the home screen, the Linux image (dev.omalauncher.upgrade.PowosUpdates, set by App); its
+     * state comes back in run/powos-updates.json. The engine can't see the app module, so it hands it in.
+     */
+    public static volatile java.util.function.Consumer<String> update = null;
     private final Context ctx;
     private final File file;
     private DirWatch.Handle watch;
@@ -49,6 +55,8 @@ public final class AndroidRequests implements DirWatch.Listener {
         StringBuilder v = new StringBuilder("wifi-panel\nopen\nsplit\nfloat\npower\npack\nprogress\n");
         if (launcher != null)
             v.append("launcher\n");
+        if (update != null)
+            v.append("update\n");
         File out = new File(file.getParentFile(), "android-request.verbs");
         File tmp = new File(file.getParentFile(), "android-request.verbs.tmp");
         write(tmp, v.toString());
@@ -168,6 +176,14 @@ public final class AndroidRequests implements DirWatch.Listener {
                 Log.w(TAG, "no launcher host for: " + line);
             else
                 host.accept(arg[0], arg.length == 2 ? arg[1] : "");
+            return;
+        }
+        if (req[0].equals("update")) {
+            java.util.function.Consumer<String> run = update;
+            if (run == null)
+                Log.w(TAG, "no updater for: " + line);
+            else
+                run.accept(req.length == 2 ? req[1].trim() : "now");
             return;
         }
         if (req[0].equals("pack") && req.length == 2) { // e.g. powos-steam on a base install: "pack gaming"
