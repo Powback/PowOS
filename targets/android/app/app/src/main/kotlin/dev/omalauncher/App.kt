@@ -14,13 +14,12 @@ class App : Application() {
         // PowOS windows (KWin's, WindowTasks) float on the unfolded home like Android apps. Set here, before the
         // session's service connects to KWin - set lazily (by Runtime) KWin's "caps" could come first and it was never
         // told to open new windows as tasks.
-        if (Application.getProcessName() == packageName) floatingWindows()
-        // PowOS's own updates for the Linux side (the desktop's update widget, `powos update status|now`): the state in
-        // run/powos-updates.json, a run on android-request's "update". Set before the session's service writes the
-        // verbs file, like the launcher's.
+        // And PowOS's own updates for the Linux side (the desktop's update widget, `powos update status|now`): the
+        // state in run/powos-updates.json, a run on android-request's "update". Set before the session's service
+        // writes the verbs file, like the launcher's.
         if (Application.getProcessName() == packageName) {
-            andro.marchy.AndroidRequests.update = java.util.function.Consumer { dev.omalauncher.upgrade.PowosUpdates.maybeRun(this, force = true) }
-            dev.omalauncher.upgrade.PowosUpdates.publish(this)
+            floatingWindows()
+            powosUpdates()
         }
         // SystemUI's binding to the recents service (and with it the gesture input) back after the process dies.
         dev.omalauncher.system.RecentsWatchdog.start(this)
@@ -62,6 +61,12 @@ class App : Application() {
             // The verify queue's status pill while it tests on the phone (tools/phone/verify/queue.sh).
             dev.omalauncher.shell.VerifyRun.start(this, File(filesDir, "run"))
         }
+    }
+
+    /** The Linux side's "update" request runs PowOS's update; its state published for it (see onCreate). */
+    private fun powosUpdates() {
+        andro.marchy.AndroidRequests.update = java.util.function.Consumer { dev.omalauncher.upgrade.PowosUpdates.maybeRun(this, force = true) }
+        dev.omalauncher.upgrade.PowosUpdates.publish(this)
     }
 
     /** No root, the image installed: mail, the manager's wake and the agents' spool, as rooted (see onCreate). */

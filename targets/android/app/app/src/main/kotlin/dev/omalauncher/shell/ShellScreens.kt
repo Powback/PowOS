@@ -177,14 +177,8 @@ class ShellScreens(
     ): Any? {
         val text = (arg as? String).orEmpty()
         val result: Any? = when ("$name.$action") {
-            "settings.check" -> {
-                // PowOS: the store's run alone (Omalauncher's own Arch checker has no Arch to look at here).
-                if (runtime.bootstrap.isInstalled && !POWOS) scope.launch { runtime.updates.check(force = true) }
-                dev.omalauncher.upgrade.PowosUpdates.maybeRun(context, force = true)
-                null
-            }
-            // PowOS: "update now" is the same run (app, home screen, Linux image), never Omalauncher's pacman job.
-            "settings.update" -> if (POWOS) dev.omalauncher.upgrade.PowosUpdates.maybeRun(context, force = true) else runtime.updateSystem()
+            "settings.check" -> checkUpdates()
+            "settings.update" -> updateNow()
             "settings.retryUpdates" -> runtime.retryUpdates()
             "settings.android" -> start(Intent(Settings.ACTION_SETTINGS))
             "style.apply" -> theme(text)?.let { scope.launch { runtime.themes.apply(it) } }.let { null }
@@ -230,6 +224,15 @@ class ShellScreens(
         // Only what the page reads back (a license's text); the rest (Unit, a Job) is no answer.
         return result as? String
     }
+
+    /** Settings' "check for updates": PowOS's own run (the app, the home screen, Linux); Omalauncher's Arch check only off PowOS. */
+    private fun checkUpdates() {
+        if (runtime.bootstrap.isInstalled && !POWOS) scope.launch { runtime.updates.check(force = true) }
+        dev.omalauncher.upgrade.PowosUpdates.maybeRun(context, force = true)
+    }
+
+    /** "update all": on PowOS the same run as the check, never Omalauncher's pacman job. */
+    private fun updateNow() = if (POWOS) dev.omalauncher.upgrade.PowosUpdates.maybeRun(context, force = true) else runtime.updateSystem()
 
     private fun join(): JSONObject = dev.omalauncher.devices.PowStation.json(context)
 
