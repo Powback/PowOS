@@ -69,6 +69,16 @@ class PerfTest {
     }
 
     @Test
+    fun gpubusyTicksWhenThePercentIsDenied() {
+        put("class/kgsl/kgsl-3d0/gpubusy", "  25856  1003524\n")
+        val v = Perf(sys, { 1L }, { false }).value()
+        assertEquals(Num(25856 * 100.0 / 1003524), v.at("gpu"))
+        assertEquals(bool(false), v.at("gpuNeedsRoot"))
+        put("class/kgsl/kgsl-3d0/gpubusy", "0 0\n")
+        assertEquals(Num(0.0), Perf(sys, { 1L }, { false }).value().at("gpu"))
+    }
+
+    @Test
     fun nothingReadableIsNullNotAnError() {
         val v = Perf(sys, { 1L }, { false }).value()
         assertEquals(Null, v.at("cpu"))

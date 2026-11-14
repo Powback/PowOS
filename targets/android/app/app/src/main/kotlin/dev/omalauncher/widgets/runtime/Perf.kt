@@ -16,7 +16,8 @@ import java.io.File
  *    reads (null on the first);
  *  - cpuTemp / gpuTemp / skinTemp / battTemp (°C): the hottest `cpu*` zone, the hottest `gpu*` zone, the first skin-like
  *    zone, the battery zone; 0 when the phone has none;
- *  - gpu: null and gpuNeedsRoot true when kgsl can't be read and PowOS isn't rooted (the widget says so, not 0 %).
+ *  - gpu: kgsl's gpu_busy_percentage, else its `gpubusy` ticks (readable unrooted on the razr, 11-14: the tile said
+ *    "root" while gpubusy answered); null and gpuNeedsRoot true only when neither can be read and PowOS isn't rooted.
  * [sys] is `/sys` (a temp dir in the JVM test); [now] the wall clock in microseconds (cpuidle's unit).
  */
 class Perf(
@@ -31,7 +32,7 @@ class Perf(
 
     fun value(): Value {
         val zones = zones()
-        val gpuBusy = read(File(sys, "class/kgsl/kgsl-3d0/gpu_busy_percentage"))?.trim()?.split(Regex("\\s+"))?.firstOrNull()?.toDoubleOrNull()
+        val gpuBusy = gpuBusy()
         return Obj(
             mapOf(
                 "cpu" to (cpuLoad()?.let(::Num) ?: Null),
@@ -43,6 +44,20 @@ class Perf(
                 "battTemp" to Num(BATTERY.firstNotNullOfOrNull { zones[it] } ?: 0.0),
             ),
         )
+    }
+
+    /** kgsl's busy percent, else its `gpubusy` ticks; null when neither can be read. */
+    private fun gpuBusy(): Double? {
+        val kgsl = File(sys, "class/kgsl/kgsl-3d0")
+        return read(File(kgsl, "gpu_busy_percentage"))?.trim()?.split(Regex("\\s+"))?.firstOrNull()?.toDoubleOrNull()
+            ?: busyRatio(read(File(kgsl, "gpubusy")))
+    }
+
+    /** kgsl's `gpubusy` ("<busy> <total>" ticks of its last sample window) as a percent; an idle window (total 0) is 0 %. */
+    private fun busyRatio(text: String?): Double? {
+        val n = text?.trim()?.split(Regex("\\s+"))?.mapNotNull { it.toLongOrNull() } ?: return null
+        if (n.size < 2) return null
+        return if (n[1] > 0) (n[0] * 100.0 / n[1]).coerceIn(0.0, 100.0) else 0.0
     }
 
     /** type -> °C of every readable thermal zone with a plausible reading (unused sensors say -273 or 0). */

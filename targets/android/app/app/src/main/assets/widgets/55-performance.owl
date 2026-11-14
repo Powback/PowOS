@@ -1,5 +1,5 @@
 widget "performance" {
-  meta { owl: 7; description: "The phone under load: Adreno GPU busy and clock, CPU load, and how hot the CPU, GPU, skin and battery run (GPU load needs root)"; version: "1.2"; license: "MIT"; category: "system" }
+  meta { owl: 7; description: "The phone under load: Adreno GPU busy and clock, CPU load, and how hot the CPU, GPU, skin and battery run (GPU load needs root)"; version: "1.3"; license: "MIT"; category: "system" }
   page: 1
   order: 7
   size: 6x3
@@ -11,7 +11,9 @@ widget "performance" {
   // A value it can't read is -1 (never a missing word: the rest would shift). `optional`: without Linux, or where an
   // unrooted app can't read kgsl or /proc/stat, the numbers come from Android (`android.perf`: cpuidle load, thermal
   // zones - what any app may read) and the GPU's busy % says it needs root (nonroot-parity row 8).
-  source raw = cmd('k=/sys/class/kgsl/kgsl-3d0; b=-1 f=-1 g=-1 t0=-1 i0=-1; read b x < $k/gpu_busy_percentage; read f < $k/devfreq/cur_freq; read g < $k/temp; c=0; s=0; bt=0; for z in /sys/class/thermal/thermal_zone*; do read t < $z/type; read v < $z/temp || continue; [ "${t#cpu}" != "$t" ] && [ "$v" -gt "$c" ] && c=$v; [ "$t" = skin-msm-therm ] && s=$v; [ "$t" = battery ] && bt=$v; done 2>/dev/null; read _ u n y i w q r rest < /proc/stat && t0=$((u+n+y+i+w+q+r)) i0=$((i+w)); echo ${b:--1} ${f:--1} ${g:--1} $c $s $bt $t0 $i0') every 5s optional
+  // Unrooted, kgsl's gpu_busy_percentage is denied but gpubusy ("<busy> <total>" ticks) isn't: the busy % comes from it.
+  // `cpu*-trip*` zones are trip points (105 C), not readings: the razr's tile said 105° (11-14).
+  source raw = cmd('k=/sys/class/kgsl/kgsl-3d0; b=-1 f=-1 g=-1 t0=-1 i0=-1; read b x < $k/gpu_busy_percentage || { read gb gt < $k/gpubusy && b=$(( gt > 0 ? gb * 100 / gt : 0 )); }; read f < $k/devfreq/cur_freq; read g < $k/temp; c=0; s=0; bt=0; for z in /sys/class/thermal/thermal_zone*; do read t < $z/type; read v < $z/temp || continue; [ "${t#cpu}" != "$t" ] && [ "${t#*trip}" = "$t" ] && [ "$v" -gt "$c" ] && c=$v; [ "$t" = skin-msm-therm ] && s=$v; [ "$t" = battery ] && bt=$v; done 2>/dev/null; read _ u n y i w q r rest < /proc/stat && t0=$((u+n+y+i+w+q+r)) i0=$((i+w)); echo ${b:--1} ${f:--1} ${g:--1} $c $s $bt $t0 $i0') every 5s optional
   source ap = android.perf every 5s
 
   let v = words(raw ?? "").map(w => num(w, -1))

@@ -32,6 +32,11 @@ for i,t in enumerate(tiles,1):
     if re.search(r"needs root|not rooted|requires root|unavailable|error",s): f.append(f"tile {i} says: {t['t'][:60]}")
     for p in re.findall(r"(\d+)%",s):
         if int(p)>100: f.append(f"tile {i} reads {p}% ({t['t'][:50]})")
+    # A gauge whose number is the word "root" (55-performance's locked GPU) or a temperature of 100° or more (a trip
+    # point read as a sensor): both passed on 11-14 while the razr's tile showed "root" and "105°".
+    if re.search(r"(^| )root( |$)",s): f.append(f"tile {i} shows a 'root' face ({t['t'][:50]})")
+    for d in re.findall(r"(\d+)°",s):
+        if int(d)>=100: f.append(f"tile {i} reads {d}° ({t['t'][:50]})")
     if re.search(r"\b0 mhz\b",s): f.append(f"tile {i} reads 0 MHz ({t['t'][:50]})")
 if f: print("FAIL: "+"; ".join(f)); sys.exit(1)
 print(f"PASS: {len(tiles)} widget tiles render real content unrooted")
