@@ -29,7 +29,7 @@ import java.util.zip.GZIPInputStream;
 
 /**
  * The parts of PowOS a phone without root adds on demand over the base image (targets/android/rootfs-packs.conf,
- * tools/split-rootfs.py): "gaming" (Steam, FEX + its x86 rootfs, box64), "apps", "dev", "languages". The base lists them
+ * tools/split-rootfs.py): "gaming" (Steam, FEX + its x86 rootfs, box64), "apps", "dev", "rust" (powos app build's Rust toolchain), "languages". The base lists them
  * in rootfs/etc/powos/packs (name, download bytes, unpacked bytes); a rootfs without that file (the full one, rooted
  * phones) has every part already and no packs. Each pack is a tarball published beside the rootfs
  * (android.pow/apk/powos-pack-NAME.tar.gz), checked against the sha256 pinned in this APK

@@ -43,7 +43,7 @@ public class InstallActivity extends Activity {
      *  use, languages right after the install when Android's language isn't English. Rooted installs keep the full one. */
     static final String BASE_URL = "http://android.pow/apk/powos-rootfs-base.tar.gz";
     static final String BASE_PIN_ASSET = "powos-rootfs-base.sha256";
-    static final String[] PACKS = {"gaming", "apps", "dev", "languages"};
+    static final String[] PACKS = {"gaming", "apps", "dev", "rust", "languages"};
     private static final long NEEDED_BYTES = 12L << 30; // archive + extracted rootfs, with room for apps
     /** The base's need: its archive (1.04 GB) + unpacked (2.8 GiB) + room. Not the full rootfs's 12 GB: that refused
      *  the slim install on exactly the phones it is for (the 6 GB emulator, 4.3 GiB free). Packs are added later. */
