@@ -1,0 +1,8 @@
+#!/bin/sh
+# claude-login: the real `claude /login` run headless (~/Projects/claude-login), which PowOS's native Claude sign-in
+# (lib/ai/manager/fleet_login.py, direct mode) drives. Its module is in /usr/lib/claude-login, from the base image or
+# powos-core (tools/stage-claude-login.sh). Node isn't in the image; bun runs the ES module as is (checked on the razr).
+m=/usr/lib/claude-login/cli.js
+[ -s "$m" ] || { echo "claude-login isn't installed ($m missing: update PowOS)" >&2; exit 127; }
+if command -v node >/dev/null; then exec node "$m" "$@"; fi
+exec bun "$m" "$@"

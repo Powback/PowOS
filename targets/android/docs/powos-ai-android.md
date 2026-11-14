@@ -56,7 +56,10 @@ PowOS builds an OAuth URL or exchanges a code.
     `~/.claude/.credentials.json` (mode 600, straight to the file - the app never sees it). State from that file's
     presence/expiry/refresh token. The non-root image ships it (11-09): build-rootfs.sh stages claude-login's `dist/`
     (`CLAUDE_LOGIN_DIR`, default `~/Projects/claude-login`), install-powos-android.sh puts it in `/usr/bin/claude-login`
-    (bun runs it; no node in the image) and installs Claude Code itself into `/root/.local/bin`. A login that ends
+    (bun runs it; no node in the image) and installs Claude Code itself into `/root/.local/bin`. Installed phones get
+    it from powos-core (11-14: the razr's 11-09 base predated it, so "claude-login isn't installed"): build-powos-core.sh
+    packages `/usr/lib/claude-login` (tools/stage-claude-login.sh, the same staging) and the `shims/claude-login`
+    wrapper, and refuses to build without it (test-powos-core-claude-login.sh). A login that ends
     without a line of its own shows its stderr's last line ("the sign-in stopped: ...").
 - **Detection**: `powos manager --auth` says `relogin` (new word; `signin` stays "no login at all, direct"), a chat
   turn emits `{"kind": "relogin"}` (status 4), a failed turn asks again, the app re-asks every 10 min, and a terminal

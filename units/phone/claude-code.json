@@ -4,7 +4,7 @@
   "kind": "system",
   "owner": "system:powos-rootfs",
   "purpose": "`claude`: the CLI behind the PowOS manager (unit ai-manager), the agents and the terminals' AI. On the owner's devices it signs in through the fleet authority (ANTHROPIC_BASE_URL=http://claude-auth.pow + this device's own token from enrollment, /etc/powos/ai/endpoint.conf, exported to every login shell by /etc/profile.d/45-powos-claude-endpoint.sh) and never runs its own login; without endpoint.conf (a sellable install) PowOS's native sign-in (claude-login) signs it in. A command-line tool: it runs only inside the manager's or a terminal's session",
-  "installedBy": "targets/android/install-powos-android.sh (the rootfs build, so the no-root base image has it: the vendor's native installer into /root/.local, which keeps it updated there; claude-login from ~/Projects/claude-login)",
+  "installedBy": "targets/android/install-powos-android.sh (the rootfs build, so the no-root base image has it: the vendor's native installer into /root/.local, which keeps it updated there; claude-login from ~/Projects/claude-login; powos-core (build-powos-core.sh) brings the wrapper and module to already installed phones)",
   "files": [
     "/root/.local/bin/claude",
     "/root/.local/share/claude",

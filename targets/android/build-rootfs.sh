@@ -63,15 +63,9 @@ cp $("$HERE/tools/newest-pkgs.sh" "$OUT/pkgs") "$S/pkgs/"   # ours: kwin, fex-em
 "$HERE/tools/plasma-pin.sh" && cp -a "$OUT/plasma-pin" "$S/plasma-pin"
 cp -a "$HERE/session" "$HERE/shims" "$HERE/play" "$HERE/phone-rules.conf" "$HERE/tools/resolve-packages.py" "$HERE/tools/phone-parity.py" "$S/"
 install -m 755 "$HERE/install-powos-android.sh" "$S/"
-# claude-login (the native Claude sign-in's backend, install-powos-android.sh puts it in /usr/bin): its built ES module
-# from the local checkout (CLAUDE_LOGIN_DIR, default ~/Projects/claude-login), else github.com/Powback/claude-login
-# (private, so this host's git credentials) built here. dist/ is two plain .js files with no runtime dependencies.
-CL=${CLAUDE_LOGIN_DIR:-$HOME/Projects/claude-login}
-if [ ! -s "$CL/dist/cli.js" ]; then
-  CL=$W/claude-login && rm -rf "$CL" && git clone -q --depth 1 https://github.com/Powback/claude-login "$CL" &&
-    (cd "$CL" && npm ci --silent && npx tsc) || echo "build-rootfs: no claude-login - the image's Claude sign-in won't work" >&2
-fi
-[ -s "$CL/dist/cli.js" ] && mkdir -p "$S/claude-login" && cp "$CL"/dist/*.js "$S/claude-login/"
+# claude-login (the native Claude sign-in's backend, install-powos-android.sh puts it in /usr/lib/claude-login): the
+# same staging powos-core uses (tools/stage-claude-login.sh: ~/Projects/claude-login's dist/, else built from GitHub).
+"$HERE/tools/stage-claude-login.sh" "$S/claude-login" || echo "build-rootfs: no claude-login - the image's Claude sign-in won't work" >&2
 # The PowOS desktop widgets from this checkout (install-powos-android.sh puts them over the image content's).
 cp -a "$HERE/../../desktop/plasmoid" "$S/plasmoids"
 # The downloaded manifest supplies distro packages; ship this checkout's committed PowOS CLI and libraries.

@@ -4,7 +4,10 @@
 # Settings) instead of a new base image (docs/PHONE-UPDATES.md). Holds exactly what the image build puts there:
 #   bin/ -> /usr/bin, lib/ -> /usr/lib/powos (lib/self-phone.sh self_phone_apply: the manager and fleet_login.py,
 #   claude-login, the CLI and its libraries) and the phone's session scripts, shims and play/ launchers at the paths
-#   install-powos-android.sh installs them (tools/phone-files.sh reads them from there).
+#   install-powos-android.sh installs them (tools/phone-files.sh reads them from there), plus claude-login's module in
+#   /usr/lib/claude-login (tools/stage-claude-login.sh; its /usr/bin wrapper is a shims/ file) - the build fails without
+#   it, since a phone whose base predates it gets it only from here (razr 11-14: "claude-login isn't installed").
+#   claude-login's own changes don't change the version: they reach phones with the next PowOS code change.
 # Version: "<commit count>.g<sha9>" of the newest commit that touched those files - monotonic along origin's history
 # (a descendant always has more ancestors), and unchanged code keeps its version, so a ship without code changes
 # publishes nothing new (repo-merge.sh never replaces a package with an equal or older one).
@@ -13,6 +16,7 @@
 #   --publish   then merge it into the store's [powos] repo (publish-repo.sh); only from origin's history.
 #   POWOS_CORE_REF=<commit> build from that commit instead of HEAD; POWOS_CORE_PKGREL=<n> (default 1) a rebuild of the
 #   same code that phones still take as an update; PUBLISH_STORE=<dir> another store (a test repo: <dir>/repo).
+#   POWOS_CORE_STAGE=<dir> only writes the PKGBUILD and its sources there (no docker, no package): what tests read.
 set -euo pipefail
 HERE=$(cd "$(dirname "$0")" && pwd)
 ROOT=$(cd "$HERE/../.." && pwd)
@@ -31,15 +35,20 @@ code=$(git -C "$ROOT" log -1 --format=%H "$REF" -- "${PATHS[@]}")
 ver="$(git -C "$ROOT" rev-list --count "$code").g${code:0:9}"
 mkdir -p "$OUT"
 pkg=$(ls "$OUT"/powos-core-"$ver-$REL"-any.pkg.tar.* 2>/dev/null | head -1 || true)
-if [ -z "$pkg" ]; then
-  # Under $HOME: Colima shares only the home folder with Docker.
-  mkdir -p "$HOME/.cache"
-  W=$(mktemp -d "$HOME/.cache/powos-core.XXXXXX")
-  trap 'rm -rf "$W"' EXIT
+if [ -z "$pkg" ] || [ -n "${POWOS_CORE_STAGE:-}" ]; then
+  if [ -n "${POWOS_CORE_STAGE:-}" ]; then W=$POWOS_CORE_STAGE && mkdir -p "$W"; else
+    # Under $HOME: Colima shares only the home folder with Docker.
+    mkdir -p "$HOME/.cache"
+    W=$(mktemp -d "$HOME/.cache/powos-core.XXXXXX")
+    trap 'rm -rf "$W"' EXIT
+  fi
   # The paths that commit has (an older one may predate a file), and the map reader from this tree.
   have=(); for p in "${PATHS[@]}"; do git -C "$ROOT" cat-file -e "$code:$p" 2>/dev/null && have+=("$p"); done
   git -C "$ROOT" archive --format=tar --prefix=src/ "$code" -- "${have[@]}" > "$W/powos-src.tar"
   cp "$HERE/tools/phone-files.sh" "$W/phone-files.sh"
+  rm -rf "$W/claude-login" && "$HERE/tools/stage-claude-login.sh" "$W/claude-login" ||
+    { echo "build-powos-core: no claude-login - not built (installed phones would keep lacking the Claude sign-in)" >&2; exit 1; }
+  tar -C "$W" -cf "$W/claude-login.tar" claude-login
   cat > "$W/PKGBUILD" <<EOF
 pkgname=powos-core
 pkgver=$ver
@@ -49,8 +58,8 @@ arch=(any)
 url=https://github.com/powback/powos
 license=(custom)
 depends=(bash python)
-source=(powos-src.tar phone-files.sh)
-sha256sums=(SKIP SKIP)
+source=(powos-src.tar phone-files.sh claude-login.tar)
+sha256sums=(SKIP SKIP SKIP)
 options=(!strip !debug)
 
 package() {
@@ -60,15 +69,18 @@ package() {
   sh "\$srcdir/phone-files.sh" targets/android/install-powos-android.sh | while read -r mode src dest; do
     install -Dm "\$mode" "targets/android/\$src" "\$pkgdir\$dest"
   done
+  # claude-login's module (the wrapper in /usr/bin came with the shims/ map above).
+  install -Dm 644 -t "\$pkgdir/usr/lib/claude-login" "\$srcdir"/claude-login/*.js
   # What the base should hold, for lib/phone-base-sync.py (phone-update.sh's "base" step: an older base catches up).
   if [ -f targets/android/rootfs-packs.conf ]; then install -Dm 644 targets/android/rootfs-packs.conf "\$pkgdir/usr/share/powos/rootfs-packs.conf"; fi
   if [ -f targets/android/tools/split-rootfs.py ]; then install -Dm 755 targets/android/tools/split-rootfs.py "\$pkgdir/usr/lib/powos/split-rootfs.py"; fi
 }
 EOF
+  [ -n "${POWOS_CORE_STAGE:-}" ] && { echo "staged: $W"; exit 0; }
   # Built in the container's own /b (a macOS-shared folder can't take the builder's ownership), the package copied back.
   docker run --rm --platform linux/arm64 -v "$W:/w" menci/archlinuxarm:latest bash -c '
     command -v fakeroot >/dev/null || pacman -Sy --disable-sandbox --noconfirm --needed fakeroot >/w/pacman.log 2>&1 || { tail -5 /w/pacman.log; exit 1; }
-    useradd -m b && mkdir /b && cp /w/PKGBUILD /w/powos-src.tar /w/phone-files.sh /b/ && chown -R b /b &&
+    useradd -m b && mkdir /b && cp /w/PKGBUILD /w/powos-src.tar /w/phone-files.sh /w/claude-login.tar /b/ && chown -R b /b &&
       su b -c "cd /b && makepkg -f --noconfirm --nodeps" >/w/makepkg.log 2>&1 || { tail -20 /w/makepkg.log; exit 1; }
     cp /b/powos-core-*.pkg.tar.* /w/ && chmod 644 /w/powos-core-*.pkg.tar.*' 
   cp "$W"/powos-core-"$ver-$REL"-any.pkg.tar.* "$OUT/"

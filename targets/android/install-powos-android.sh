@@ -190,14 +190,12 @@ test -x /root/.local/bin/claude || { echo "powos: Claude Code missing after inst
 # Plain "$P/current/src/..." lines: tools/phone-files.sh maps them, so powos-core brings both to installed phones too.
 install -Dm 644 "$P/current/src/config/etc/profile.d/45-powos-claude-endpoint.sh" /etc/profile.d/45-powos-claude-endpoint.sh
 install -Dm 644 "$P/current/src/units/phone/claude-code.json" /etc/powos/units.d/claude-code.json
-# claude-login (~/Projects/claude-login, staged by build-rootfs.sh): the real `claude /login` run headless, which PowOS's
-# native Claude sign-in (lib/ai/manager/fleet_login.py, direct mode) drives. Without it the AI page's Login said "the
-# sign-in stopped - try again" at once. Node isn't in the image; bun runs its ES module as is (checked on the razr).
-if [ -s $P/claude-login/cli.js ]; then
-  install -Dm 644 -t /usr/lib/claude-login $P/claude-login/*.js
-  printf '#!/bin/sh\n# claude-login: headless `claude /login` (build-rootfs.sh stages it from ~/Projects/claude-login)\nif command -v node >/dev/null; then exec node /usr/lib/claude-login/cli.js "$@"; fi\nexec bun /usr/lib/claude-login/cli.js "$@"\n' > /usr/bin/claude-login
-  chmod 755 /usr/bin/claude-login
-fi
+# claude-login (~/Projects/claude-login, staged by build-rootfs.sh via tools/stage-claude-login.sh): the real `claude
+# /login` run headless, which PowOS's native Claude sign-in (lib/ai/manager/fleet_login.py, direct mode) drives. Without
+# it the AI page's Login said "the sign-in stopped - try again" at once. The /usr/bin wrapper is a plain shims/ line, so
+# tools/phone-files.sh maps it and powos-core (which also carries the module) brings both to installed phones (11-14).
+install -Dm 755 "$P/shims/claude-login" /usr/bin/claude-login
+if [ -s $P/claude-login/cli.js ]; then install -Dm 644 -t /usr/lib/claude-login $P/claude-login/*.js; fi
 mkdir -p /etc/powos && echo "$POWOS_TARGET" > /etc/powos/platform
 
 if [ "$POWOS_TARGET" = phone ]; then
