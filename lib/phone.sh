@@ -22,9 +22,13 @@ _phone_mode() {
 
 _phone_userns() { unshare -U true 2>/dev/null; }
 
+# "device" when PowOS has adb to the phone itself: rooted mode's 127.0.0.1:5555 or, without root, the app's Wireless
+# debugging link (lib/android.sh _android_pick, what's on file only - a status doesn't ask the app to look again).
 _phone_adb_state() {
     command -v adb >/dev/null || { echo "no adb"; return; }
-    adb -s 127.0.0.1:5555 get-state 2>/dev/null || echo "not connected"
+    declare -F _android_pick >/dev/null || source "${POWOS_LIB:-/usr/lib/powos}/android.sh" 2>/dev/null
+    declare -F _android_pick >/dev/null || { adb -s 127.0.0.1:5555 get-state 2>/dev/null || echo "not connected"; return; }
+    _android_pick --no-refresh >/dev/null && echo device || echo "not connected ($(_android_why))"
 }
 
 _phone_android_windows() {
@@ -75,7 +79,7 @@ _health_phone_android() {
         echo -e "  ${GREEN}✓${NC} adb to the phone itself: Android apps open as PowOS windows"
     else
         echo -e "  ${YELLOW}○${NC} adb to the phone itself: $s - Android apps open as floating Android windows instead"
-        echo -e "      Rooted mode: targets/android/rooted/rooted.sh deploy authorizes PowOS's adb key"
+        echo -e "      Rooted mode: targets/android/rooted/rooted.sh deploy authorizes PowOS's adb key; no root: powos android link"
         _health_warning
     fi
     echo ""

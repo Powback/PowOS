@@ -4,21 +4,94 @@
 # The other half of PowOS on Android (targets/android): the PowOS app shows PowOS in Android; this shows Android
 # to PowOS - to the user's shell and, through `powos help` (agents' prompts are generated from it), to PowOS AI.
 #
-# How: adb to the phone itself (127.0.0.1:5555 - rooted mode authorizes PowOS's adb key; the same link
-# powos-android-app and powos-android-tasks use). Android's apps as PowOS knows them: the android-<package>.desktop
-# entries the PowOS app writes (its drawer, the taskbar, the start menu).
+# How: adb to the phone itself. Rooted mode: 127.0.0.1:5555 (rooted.sh authorizes PowOS's adb key; the same link
+# powos-android-app and powos-android-tasks use). Without root: Android's Wireless debugging, whose port the PowOS app
+# finds with Android's mDNS (the image's adb has none under fakechroot) and hands over in run/adb-link (the app's
+# AdbLink.java: "connect 127.0.0.1:<port>", "package", "wireless on|off", "keep on|off"); the image's own key is paired
+# once with `powos android link` (the pairing code goes in through a notification). After a reboot or a Wi-Fi change
+# the port is new: the next call asks the app to look again (android-request adb-link) and reconnects.
+# Android's apps as PowOS knows them: the android-<package>.desktop entries the PowOS app writes (its drawer, the
+# taskbar, the start menu).
 
-_ANDROID_DEV=127.0.0.1:5555
+_ANDROID_ROOTED=127.0.0.1:5555
+_ANDROID_DEV=$_ANDROID_ROOTED
+
+_android_run() { echo "${XDG_RUNTIME_DIR:-/run/powos-app}"; }
+
+# A field of run/adb-link ("connect" -> 127.0.0.1:<port>, "package", "wireless", "keep"), or nothing.
+_android_link_field() { awk -v k="$1" '$1 == k { print $2; exit }' "$(_android_run)/adb-link" 2>/dev/null; }
+
+# Does this PowOS app take "adb-link" requests (an older APK doesn't)?
+_android_link_served() { grep -qx adb-link "$(_android_run)/android-request.verbs" 2>/dev/null; }
+
+# A request to the app (run/android-request, as the android-request helper writes it: atomically, by rename).
+_android_request() {
+    if command -v android-request >/dev/null 2>&1; then android-request "$@"; return; fi
+    local run; run=$(_android_run)
+    printf '%s\n' "$*" > "$run/.android-request.$$" && mv -f "$run/.android-request.$$" "$run/android-request"
+}
+
+# Ask the app to look for adbd again and wait (<= ANDROID_LINK_WAIT_S, 8) for run/adb-link to be rewritten.
+_android_link_refresh() {
+    _android_link_served || return 1
+    local f before i
+    f="$(_android_run)/adb-link"
+    before=$(date -r "$f" +%s 2>/dev/null || echo 0)
+    _android_request adb-link
+    for ((i = 0; i < ${ANDROID_LINK_WAIT_S:-8} * 5; i++)); do
+        sleep 0.2
+        [[ "$(date -r "$f" +%s 2>/dev/null || echo 0)" != "$before" ]] && return 0
+    done
+    return 1
+}
+
+# Is [dev] an adb device now (connecting it first when it is a host:port)?
+_android_try() {
+    local dev=$1
+    [[ -n "$dev" ]] || return 1
+    [[ "$(adb -s "$dev" get-state 2>/dev/null)" == device ]] && return 0
+    [[ "$dev" == *:* ]] || return 1
+    if command -v timeout >/dev/null 2>&1; then timeout 10 adb connect "$dev"; else adb connect "$dev"; fi >/dev/null 2>&1
+    [[ "$(adb -s "$dev" get-state 2>/dev/null)" == device ]]
+}
+
+# The link to use, printed: rooted mode's 127.0.0.1:5555, else the app's Wireless debugging port (asked anew once when
+# the one on file doesn't answer: a reboot or a new Wi-Fi moved it). --no-refresh: what is on file only (status).
+_android_pick() {
+    [[ "$(adb -s "$_ANDROID_ROOTED" get-state 2>/dev/null)" == device ]] && { echo "$_ANDROID_ROOTED"; return 0; }
+    local dev
+    dev=$(_android_link_field connect)
+    _android_try "$dev" && { echo "$dev"; return 0; }
+    [[ "${1:-}" == --no-refresh ]] && return 1
+    _android_link_refresh || return 1
+    dev=$(_android_link_field connect)
+    _android_try "$dev" && { echo "$dev"; return 0; }
+    return 1
+}
+
+# Why there is no link, in words, for the user.
+_android_why() {
+    if [[ ! -s "$(_android_run)/adb-link" ]]; then
+        _android_link_served && echo "not linked yet - run: powos android link" ||
+            echo "rooted mode, or a PowOS app with the adb link (update it), then: powos android link"
+    elif [[ "$(_android_link_field wireless)" == off ]]; then
+        echo "Wireless debugging is off (Developer options) - turn it on, or run: powos android link"
+    else
+        echo "Wireless debugging doesn't take this PowOS's key - run: powos android link"
+    fi
+}
 
 _android_need() {
     if ! command -v adb >/dev/null 2>&1; then
-        echo "powos android: no adb (only on a phone running PowOS, rooted mode)" >&2
+        echo "powos android: no adb (only on a phone running PowOS)" >&2
         return 1
     fi
-    if [[ "$(adb -s "$_ANDROID_DEV" get-state 2>/dev/null)" != device ]]; then
-        echo "powos android: no link to Android (adb $_ANDROID_DEV; rooted mode only)" >&2
+    local dev
+    if ! dev=$(_android_pick); then
+        echo "powos android: no link to Android ($(_android_why))" >&2
         return 1
     fi
+    _ANDROID_DEV=$dev
 }
 
 _android_sh() { adb -s "$_ANDROID_DEV" shell "$@"; }
@@ -86,7 +159,7 @@ _android_resolve() {
 
 android_help() {
     cat <<'EOF'
-powos android - Android, from PowOS (on a phone running PowOS, rooted mode)
+powos android - Android, from PowOS (on a phone running PowOS; without root: once `powos android link`)
 
   powos android apps                  Android's apps: package and name
   powos android open <app> [--full]   Open an app (package or name) as a PowOS window; --full: on the phone's
@@ -95,6 +168,13 @@ powos android - Android, from PowOS (on a phone running PowOS, rooted mode)
   powos android notifications         The phone's notifications: app, title, text
   powos android notify <title> [text] Post a notification on the phone
   powos android screenshot [file]     The screen that is on (cover or inner) as a PNG (default: ./android-<time>.png)
+  powos android input <args>          Android's input: tap X Y, swipe X1 Y1 X2 Y2 [ms], text T, keyevent K
+  powos android logcat [args]         Android's log (default: the last 200 lines, -d)
+  powos android dumpsys|am|pm|settings|cmd|getprop <args>   That Android command, as Android's shell user
+  powos android shell <command>       Any command as Android's shell user
+  powos android link [status|off]     Without root: link to Android through Wireless debugging (pair once with a
+                                      code; the app reconnects after a reboot or a Wi-Fi change). status: the
+                                      link; off: the app no longer turns Wireless debugging back on
   powos android help                  This help
 
 Window buttons do the rest: maximize on a PowOS window makes it its own Android task (Recents, split screen);
@@ -131,6 +211,62 @@ _android_notify() {
     local q_title q_text
     printf -v q_title '%q' "$title"; printf -v q_text '%q' "$text"
     _android_sh "cmd notification post -S bigtext -t $q_title powos-$RANDOM $q_text" >/dev/null
+}
+
+# `powos android link`: pair the image's adb key with Wireless debugging (the code through the app's notification:
+# run/adb-pair), connect, and let the app keep the link up (WRITE_SECURE_SETTINGS: it turns Wireless debugging back on).
+_android_link() {
+    case "${1:-}" in
+        status) _android_link_status; return ;;
+        off) _android_request adb-link keep off; echo "powos android: the app no longer turns Wireless debugging back on"; return ;;
+        "") ;;
+        *) echo "usage: powos android link [status|off]" >&2; return 2 ;;
+    esac
+    command -v adb >/dev/null 2>&1 || { echo "powos android: no adb" >&2; return 1; }
+    local dev
+    if ! dev=$(_android_pick); then
+        _android_link_served || { echo "powos android link: this PowOS app can't hand over its adb (update the app)" >&2; return 1; }
+        _android_link_pair || return 1
+        dev=$(_android_pick) || { echo "powos android link: paired, but Wireless debugging doesn't answer ($(_android_why))" >&2; return 1; }
+    fi
+    _android_link_keep "$dev"
+    echo "powos android: linked ($dev)"
+}
+
+# The pairing: the app looks for the pairing dialog's port and asks for the code in a notification; both land in
+# run/adb-pair ("127.0.0.1:<port> <code>"), read once and deleted here.
+_android_link_pair() {
+    local run f i hostport code
+    run=$(_android_run); f="$run/adb-pair"
+    rm -f "$f"
+    _android_request adb-link pair
+    echo "On the phone: Developer options > Wireless debugging (on) > Pair device with pairing code, then type the"
+    echo "six-digit code into the \"Link PowOS to Android\" notification. Waiting up to 5 minutes..."
+    for ((i = 0; i < ${ANDROID_PAIR_WAIT_S:-300}; i++)); do
+        [[ -s "$f" ]] && break
+        sleep 1
+    done
+    [[ -s "$f" ]] || { echo "powos android link: no pairing code came within 5 minutes" >&2; return 1; }
+    read -r hostport code < "$f"
+    rm -f "$f"
+    adb pair "$hostport" "$code" || { echo "powos android link: pairing failed (a new code? try again)" >&2; return 1; }
+    _android_link_refresh || true
+}
+
+# Linked: Android lets the app write secure settings (to turn Wireless debugging back on) and the app keeps the link.
+_android_link_keep() {
+    local dev=$1 pkg
+    [[ "$dev" == "$_ANDROID_ROOTED" ]] && return 0
+    pkg=$(_android_link_field package)
+    [[ -n "$pkg" ]] && adb -s "$dev" shell pm grant "$pkg" android.permission.WRITE_SECURE_SETTINGS >/dev/null 2>&1
+    _android_request adb-link keep on
+}
+
+_android_link_status() {
+    local dev
+    if dev=$(_android_pick --no-refresh); then echo "linked: $dev"; else echo "not linked: $(_android_why)"; fi
+    [[ -s "$(_android_run)/adb-link" ]] && sed 's/^/  /' "$(_android_run)/adb-link"
+    return 0
 }
 
 _android_screenshot() {
@@ -181,6 +317,21 @@ cmd_android() {
             ;;
         screenshot)
             _android_screenshot "$@"
+            ;;
+        link)
+            _android_link "$@"
+            ;;
+        input|dumpsys|am|pm|settings|cmd|getprop)
+            _android_need || return 1
+            _android_sh "$verb" "$@"
+            ;;
+        shell)
+            _android_need || return 1
+            _android_sh "$@"
+            ;;
+        logcat)
+            _android_need || return 1
+            if (($#)); then adb -s "$_ANDROID_DEV" logcat "$@"; else adb -s "$_ANDROID_DEV" logcat -d -t 200; fi
             ;;
         help|--help|-h)
             android_help

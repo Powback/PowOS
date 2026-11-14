@@ -12,6 +12,7 @@ import java.nio.file.Files;
 /**
  * Requests from the Linux session for things only Android can do, written to run/android-request by the
  * android-request helper (atomically, by rename): "wifi-panel", "open <package>" (full screen; a floating window on the unfolded home, [openOptions]), "split <package>" (beside Andromarchy), "float <package>" (floating window),
+ * "adb-link [pair|keep on|keep off]" (no root: the phone's own adb for the Linux side, [AdbLink]),
  * "launcher <apps|ai> [how json]" (PowOS's one launcher, [launcher]), "pack <name>" (add a part of PowOS the base image
  * left out, [Packs]; progress in run/pack-NAME.state), "update <check|now>" (PowOS's own update run, [update]). A Linux job's progress is not a request but its own file,
  * run/progress-ID.state ([Progress], the powos-progress helper; "progress" in the verbs file says it is served).
@@ -53,6 +54,8 @@ public final class AndroidRequests implements DirWatch.Listener {
      */
     private void writeVerbs() {
         StringBuilder v = new StringBuilder("wifi-panel\nopen\nsplit\nfloat\npower\npack\nprogress\n");
+        if (AdbLink.current != null)
+            v.append("adb-link\n");
         if (launcher != null)
             v.append("launcher\n");
         if (update != null)
@@ -140,6 +143,19 @@ public final class AndroidRequests implements DirWatch.Listener {
         }
     }
 
+    /** "adb-link" refresh run/adb-link now, "adb-link pair" pair the Linux side's key, "adb-link keep on|off". */
+    private static void adbLink(String arg) {
+        AdbLink l = AdbLink.current;
+        if (l == null)
+            Log.w(TAG, "adb-link: no link (rooted mode has 127.0.0.1:5555)");
+        else if (arg.equals("pair"))
+            l.pair();
+        else if (arg.startsWith("keep "))
+            l.keep(arg.endsWith(" on"));
+        else
+            l.refreshNow();
+    }
+
     @Override
     public void onEvent(int event, String path) {
         // A Linux job's progress (powos-progress: run/progress-ID.state, Powback/PowOS#11): its own file per job.
@@ -188,6 +204,10 @@ public final class AndroidRequests implements DirWatch.Listener {
         }
         if (req[0].equals("pack") && req.length == 2) { // e.g. powos-steam on a base install: "pack gaming"
             Packs.installAsync(ctx, req[1].trim());
+            return;
+        }
+        if (req[0].equals("adb-link")) { // no root: the phone's own adb for `powos android` (AdbLink)
+            adbLink(req.length == 2 ? req[1].trim() : "");
             return;
         }
         if (req[0].equals("power") && req.length == 2) { // Omarchy's shutdown / reboot / log out / suspend

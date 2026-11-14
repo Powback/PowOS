@@ -155,6 +155,12 @@ public class SessionService extends Service {
         // Requests from Linux for Android-only actions (Wi-Fi panel, launching Android apps).
         requests = new AndroidRequests(this, runDir(this));
         requests.startWatching();
+        // No root: the phone's own adb (Wireless debugging) handed to the Linux side in run/adb-link (AdbLink).
+        if (!RootMode.enabled()) {
+            adbLink = new AdbLink(this, runDir(this));
+            AdbLink.current = adbLink;
+            adbLink.refreshNow();
+        }
         // Android apps in PowOS's application menu (.desktop entries in the rootfs, launched through the requests above).
         apps = new AndroidApps(this);
         apps.register(this);
@@ -620,6 +626,7 @@ public class SessionService extends Service {
 
     /** Android's default network -> run/network ("wifi <strength> <ssid>" | "wired" | "none"), read by android-nm. */
     private AndroidRequests requests;
+    private AdbLink adbLink;
     private AndroidApps apps;
     private FoldWatcher fold;
 
@@ -649,6 +656,14 @@ public class SessionService extends Service {
                 writeState("network", "wifi " + strength + " " + ssid);
             } else
                 writeState("network", "wired"); // mobile data, USB, Ethernet: Quickshell only knows wired
+        }
+
+        // A new network: Wireless debugging's adbd restarts on another port (or is turned back on: AdbLink keep).
+        @Override
+        public void onAvailable(Network n) {
+            AdbLink l = adbLink;
+            if (l != null)
+                l.refreshSoon();
         }
 
         @Override
@@ -829,6 +844,10 @@ public class SessionService extends Service {
         unregisterReceiver(battery);
         getSystemService(ConnectivityManager.class).unregisterNetworkCallback(network);
         requests.stopWatching();
+        if (adbLink != null) {
+            AdbLink.current = null;
+            adbLink.stop();
+        }
         unregisterReceiver(apps);
         fold.stop();
         session.removeCallbacksAndMessages(null);

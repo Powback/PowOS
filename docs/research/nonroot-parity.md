@@ -463,3 +463,22 @@ no package update ever brought it back), services yes.
   packs with an empty rust pack. **Composing needs no Rust at all now**: powos-core carries the shared composed module
   prebuilt (apps/build.sh composed -> /usr/lib/powos/apps/composed: source, module.wasm, its stamp, bindings), which
   `powos compose` copies into every widget. `powos app new --template ui`: page + widget, `"module": null`, no bindings.
+
+
+## 11-14 (noroot-home-adb): `powos android` without root - the app hands over Wireless debugging
+
+- **Seen (razr no-root log, 11-14):** the Linux side had no adb at all - lib/android.sh only knew rooted mode's
+  127.0.0.1:5555, the app handed over no port or key, and the image's adb has no mDNS under fakechroot; a port scan
+  found adbd's TLS port but the image's key was never paired (`offline`). So no screenshot/input/dumpsys/logcat/am/
+  settings for the manager or agents without root.
+- **Now:** the app's `AdbLink` (engine, SessionService, no-root only) finds this phone's own `_adb-tls-connect._tcp`
+  with Android's NsdManager (services on its own addresses only - the LAN's other adbds are skipped) and writes
+  run/adb-link (`package`, `wireless on|off`, `keep on|off`, `connect 127.0.0.1:<port>`); refreshed at start, on a
+  new network (3 s later) and on request (`android-request adb-link`). `powos android link` pairs the image's key
+  once: the app looks for the pairing dialog's port and asks for the code in a notification (RemoteInput), hands both
+  over in run/adb-pair (read once, deleted), the Linux side runs `adb pair`, connects, `pm grant`s
+  WRITE_SECURE_SETTINGS and asks `adb-link keep on`: from then on the app turns Wireless debugging back on after a
+  reboot or a Wi-Fi change (as Shizuku) and lib/android.sh asks for the new port when the old one doesn't answer.
+- lib/android.sh `_android_pick`: 5555 (rooted) first, then the link; new verbs input/logcat/dumpsys/am/pm/settings/
+  cmd/getprop/shell/link. `powos status` shows the no-root link. Tests: AdbLinkTest (JVM), test-android-link.sh.
+- Left: a device check on the razr after the APK ships (pair once by hand: `powos android link`).
