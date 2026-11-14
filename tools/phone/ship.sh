@@ -279,7 +279,10 @@ run)
   # link_down FILE: FILE (a step's stderr/log) says adb.sh found the phone off the VPN ("phone offline", rc 69) - the
   # same as phone_offline, remembered so the next try waits SHIP_OFFLINE_POLL_S. Not "phone unavailable after
   # reconnect" (VPN up, adb flaked): that stays a link fault with its capped retries (apk_link_fault).
-  link_down() { grep -q 'adb\.sh: phone offline' "$1" 2>/dev/null || return 1
+  # adb's own transport errors count too ("error: closed", "device offline", "device '...' not found", "no devices"):
+  # 11-14 a sleeping phone's adb link closed mid modules-first check, the drag-folder ship (b21429cf) went HELD
+  # "waiting for a new origin commit" and would never have retried once the phone woke.
+  link_down() { grep -qE "adb\.sh: phone offline|^ *(adb: )?error: (closed|device offline|device '[^']*' not found|no devices)" "$1" 2>/dev/null || return 1
     [ -e "$Q/phone-offline" ] || echo "$(date +%T) the phone is offline (adb.sh) - what needs it waits, checked every ${SHIP_OFFLINE_POLL_S:-60} s"
     date +%s > "$Q/phone-offline"; }
   # offline_wait WHAT: logged once per tip and step - the step's requests stay pending, nothing is marked failed.
