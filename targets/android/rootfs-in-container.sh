@@ -16,7 +16,10 @@ A=/in/andromarchy
 
 # HACK: same pacman-sandbox workaround as the build container (Landlock not permitted in Docker).
 grep -q '^DisableSandbox' /etc/pacman.conf || sed -i '/^\[options\]/a DisableSandbox' /etc/pacman.conf
-pacman -Sy --noconfirm --needed libarchive curl >/dev/null
+# -Syu, never -Sy <pkg>: Arch supports no partial upgrade. 11-14: Arch Linux ARM moved to OpenSSL 4, and -Sy pulled the
+# new curl + openssl 4 into an image whose pacman/cryptsetup/libldap still need libcrypto.so.3: "could not satisfy
+# dependencies", every rootfs build failed here.
+pacman -Syu --noconfirm --needed libarchive curl >/dev/null
 
 # Fresh Arch Linux ARM base every build: a half-built rootfs from an interrupted run is not reusable.
 # The tarball itself (~790 MB) is kept on the persistent cache volume, re-fetched only when newer.
