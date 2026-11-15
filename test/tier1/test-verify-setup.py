@@ -34,6 +34,8 @@ class VerifySetup(unittest.TestCase):
                 (v / "game-lib.sh").write_text("game_gate() { :; }\n")
                 (t / "adb.sh").write_text('#!/bin/bash\ncase "$*" in *"dumpsys power"*) echo "$WAKE" ;; *"pgrep -x kwin_wayland"*) : ;; *) echo UNEXPECTED >&2; exit 99 ;; esac\n')
                 (t / "adb.sh").chmod(0o755)
+                (t / "user.sh").write_text("#!/bin/bash\necho none\n")
+                (t / "user.sh").chmod(0o755)
                 r = subprocess.run(["bash", str(v / "kwin-hung-client.sh"), str(t / "out")],
                                    text=True, capture_output=True, timeout=8,
                                    env={**os.environ, "WAKE": wake})
@@ -41,6 +43,29 @@ class VerifySetup(unittest.TestCase):
                 self.assertIn("released", r.stdout)
                 self.assertNotIn("restored", r.stdout)
                 self.assertNotIn("UNEXPECTED", r.stderr)
+
+    def test_kwin_query_distinguishes_absence_and_failure(self):
+        query = function(HUNG, "kwin_pid", 'killers() {')
+        for rc, output, expected_rc, expected in ((0, "42\n43", 0, "42"),
+                                                  (1, "", 0, "none"),
+                                                  (127, "", 1, ""),
+                                                  (2, "", 1, "")):
+            with self.subTest(rc=rc):
+                r = shell('set -o pipefail\n'
+                          'pgrep() { printf "%s" "$OUTPUT"; return "$RC"; }; export -f pgrep\n'
+                          'us() { bash -c "$1"; }\n' + query + '\nkwin_pid',
+                          {"RC": str(rc), "OUTPUT": output})
+                self.assertEqual(r.returncode, expected_rc, r.stderr)
+                self.assertEqual(r.stdout.strip(), expected)
+        for response in ('return 124', 'echo garbage', ':'):
+            r = shell('us() { ' + response + '; }\n' + query + '\nkwin_pid')
+            self.assertEqual(r.returncode, 1)
+            self.assertNotIn("none", r.stdout)
+        setup = HUNG[HUNG.index('K0=$(kwin_pid)'):HUNG.index('# No cleanup is armed')]
+        r = shell('kwin_pid() { return 1; }\n' + setup)
+        self.assertEqual(r.returncode, 1)
+        self.assertIn("FAIL: could not query", r.stdout)
+        self.assertNotIn("ENV:", r.stdout)
 
     def test_restore_only_after_setup_and_once(self):
         restore = function(HUNG, "restore", '. "$here/window-lock.sh"')

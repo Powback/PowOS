@@ -67,7 +67,16 @@ WW_DEADLINE=$DEADLINE
 export CDP_TIMEOUT_S=8 CDP_ADB_TIMEOUT_S=8
 ev() { bounded "$T/cdp.sh" eval "${2:-home}" "$1" | tr -d '\r' | tail -1 | python3 -c "$UNQ"; }
 plaunch() { ev "importShim('./state.ts').then(m=>m.launch('$1')).then(()=>'ok',e=>'ERR '+e)"; }
-kwin_pid() { sh_ "chroot /data/powos/root pgrep -x kwin_wayland | head -1"; }
+# user.sh enters powos-run.sh's session namespace and Linux PATH; a raw Android
+# chroot inherits Android's PATH and cannot resolve pgrep. Only pgrep rc=1 means
+# absent; command/transport errors must not become an ENV skip (or a KWin crash).
+kwin_pid() {
+  local answer
+  answer=$(us 'p=$(pgrep -x kwin_wayland); rc=$?; case $rc in 0) printf "%s\n" "$p" ;; 1) echo none ;; *) exit "$rc" ;; esac') || return 1
+  answer=${answer%%$'\n'*}
+  [[ "$answer" = none || "$answer" =~ ^[0-9]+$ ]] || return 1
+  printf '%s\n' "$answer"
+}
 killers() { us "pgrep -f 'kwin_killer_helper.*kwrite' | tr '\n' ' '"; }
 # live <w-id> <s>: the window's body shows its app's frames (not the placeholder) within s seconds.
 live() { local i lv=""; for i in $(seq 1 "$2"); do lv=$(wwel "$1" "e=>e.querySelector('.webwindow-body.live')?'live':'placeholder'"); [ "$lv" = live ] && return 0; sleep 1; done; return 1; }
@@ -87,7 +96,8 @@ qdbus6 org.kde.KWin /Scripting org.kde.kwin.Scripting.unloadScript khc >/dev/nul
 s=$(sh_ "dumpsys power | sed -n s/.*mWakefulness=//p | head -1")
 [ "$s" = Awake ] || { echo "the screen is ${s:-unknown (wakefulness query failed)} - not woken (rule); nothing done"; exit 3; }
 . "$(dirname "$0")/game-lib.sh"; game_gate   # the queue's test (Steam's reaper): `steam_app_` missed Broforce
-K0=$(kwin_pid); [ -n "$K0" ] || { echo "ENV: no kwin_wayland runs"; exit 5; }
+K0=$(kwin_pid) || { echo "FAIL: could not query kwin_wayland through the Linux session"; exit 1; }
+[ "$K0" != none ] || { echo "ENV: no kwin_wayland runs"; exit 5; }
 # No cleanup is armed before these read-only preconditions succeed.
 existing=$(us "pgrep -x kwrite; echo checked")
 [ "$existing" = checked ] || { echo "KWrite already runs or could not be checked: not now"; exit 3; }
@@ -122,13 +132,13 @@ for plat in xcb wayland; do
   live "$KT" 15 || fail "with $plat KWrite hung, Kate's window $KT never went live"
   [ "$(layer "$KT")" -ge 1 ] || fail "with $plat KWrite hung, Kate's window $KT has no powos-ww-${KT#w}-linux layer"
   pass "with $plat KWrite hung (prompt ${KP:-none}), Kate's window $KT is live with its ww-linux layer"
-  K=$(kwin_pid); [ "$K" = "$K0" ] || fail "KWin is pid ${K:-none} now, was $K0 (died with $plat KWrite hung)"
+  K=$(kwin_pid) || fail "could not query kwin_wayland through the Linux session"; [ "$K" = "$K0" ] || fail "KWin is pid ${K:-none} now, was $K0 (died with $plat KWrite hung)"
   # The hung client killed: its window goes, the prompt with it.
   us "kill -KILL $P" >/dev/null
   for _ in $(seq 1 15); do [ -z "$(killers)" ] && [ "$(wwhost "$KW" gone)" = true ] && break; sleep 1; done
   [ -z "$(killers)" ] || fail "the kill prompt $(killers) stayed 15 s after $plat KWrite died"
   [ "$(wwhost "$KW" gone)" = true ] || fail "$plat KWrite's window $KW stayed after it died"
-  K=$(kwin_pid); [ "$K" = "$K0" ] || fail "KWin is pid ${K:-none} now, was $K0"
+  K=$(kwin_pid) || fail "could not query kwin_wayland through the Linux session"; [ "$K" = "$K0" ] || fail "KWin is pid ${K:-none} now, was $K0"
   pass "$plat KWrite killed: its window and prompt gone, KWin still pid $K0"
   hcall webwindows.close "[${KT#w}]" "v=>String(v)" >/dev/null; sleep 2
   chk "$plat done"
