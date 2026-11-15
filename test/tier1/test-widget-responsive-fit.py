@@ -64,6 +64,28 @@ class ResponsiveFit(unittest.TestCase):
                         self.assertLessEqual(len(p['text']) * p['fontSize'] * .62, w - 24,
                                              (name, i, p))
 
+    def test_stacked_media_reserves_every_row_and_gap(self):
+        def budget(node):
+            p = node.get('p', {})
+            if 'size' in p:
+                return p['size']
+            if 'height' in p:
+                return p['height']
+            if node['k'] == 'Text':
+                return p['fontSize'] * 1.4 * p.get('maxLines', 1)
+            children = node.get('c', [])
+            heights = [budget(c) for c in children]
+            if node['k'] == 'Column':
+                return sum(heights) + p.get('gap', 4) * max(0, len(children) - 1)
+            return max(heights, default=0)
+
+        for name in ['97-now-playing', '97-now-playing~broken-art']:
+            trees = self.trees(name)
+            for i, (_, h) in enumerate(SIZES):
+                root = trees[str(i)]['c'][0]
+                if root['k'] == 'Column':
+                    self.assertLessEqual(budget(root), h - 24, (name, SIZES[i], budget(root)))
+
     def test_media_keeps_metadata_and_controls(self):
         for name in ['97-now-playing', '97-now-playing~broken-art']:
             trees = self.trees(name)

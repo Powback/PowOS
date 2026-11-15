@@ -30,7 +30,11 @@ widget "now playing" {
   let transportWidth = iw - floor(min(ih, iw * 0.42)) - 12
   let ctl = clamp(floor(min(ih > iw * 1.15 ? ih * 0.12 : ih * 0.3, (ih <= iw * 1.15 && transportWidth >= 110 ? transportWidth : iw) / 4.5)), 28, 84)
   let ls = clamp(floor(min(ih * 0.07, tw / 22)), 9, 18)
-  let words = (tall ? ih - artD - 8 : ih) - ctl - (dur > 0 ? ls * 1.4 + 8 : 0) - ls * 1.4 - 8
+  // Stacked children: art, metadata, progress, clocks, transport (four 8dp gaps).
+  // Metadata itself has the app row and two 2dp gaps. Account for the equalizer's 12dp minimum too.
+  // Previously only two outer gaps were reserved, so the weighted metadata column shrank its text at 196dp.
+  let stackWords = ih - artD - ctl - (dur > 0 ? 32 + clamp(round(ctl * 0.1), 3, 8) + ls * 1.4 : 16) - max(12, ls * 1.4) - 4
+  let words = tall ? stackWords : ih - ctl - (dur > 0 ? ls * 1.4 + 8 : 0) - ls * 1.4 - 8
   let fs = clamp(floor(min(tw / max(measure(title, 1, true), len(title) * 0.62, 2.4), words * 0.55 / 1.4)), 11, 44)
   // Keep artist and album; use two lines when the narrow card cannot hold both at readable size.
   let who = both
