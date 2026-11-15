@@ -37,7 +37,7 @@ except subprocess.TimeoutExpired:
 sys.exit(rc)' "$budget" "$@"
 }
 sh_() { bounded "$A" shell "su -c '$*'" </dev/null | tr -d '\r'; }
-us() { printf '%s\n' "$1" > "$OUT/u.sh"; bounded "$T/user.sh" "$OUT/u.sh" | grep -v "file pushed" | tr -d '\r'; }
+us() { printf '%s\n' "$1" > "$OUT/u.sh"; bounded "$T/user.sh" "$OUT/u.sh" | sed "/file pushed/d" | tr -d '\r'; }
 # $1 in the Plasma session's own environment (plasmashell's: WAYLAND_DISPLAY, DISPLAY, XAUTHORITY) - linux-float.sh.
 ses() { us "P=\$(pgrep -x plasmashell | head -1); while IFS= read -r -d '' kv; do export \"\$kv\"; done < /proc/\$P/environ; $1"; }
 irq() { sh_ "awk '\''/touch-0/{s+=\$2+\$3+\$4+\$5+\$6+\$7+\$8+\$9} END{print s}'\'' /proc/interrupts"; }
@@ -105,6 +105,17 @@ proc_state() { # PID original-starttime -> live:<state>, zombie, absent, reused
   read -r state start <<< "$record"
   [ "$start" = "$2" ] || { echo reused; return; }
   case $state in Z|X) echo zombie ;; [A-Zt]) echo "live:$state" ;; *) return 1 ;; esac
+}
+# Signal delivery is asynchronous: only a stopped original identity establishes
+# the hung-client precondition. A successful silent kill command is not enough.
+confirm_stopped() {
+  local state end=$((SECONDS + 3))
+  while :; do
+    state=$(proc_state "$P" "$PSTART") || return 1
+    case $state in live:T|live:t) return 0 ;; live:*) ;; *) return 1 ;; esac
+    [ "$SECONDS" -lt "$end" ] || { log "STOP not observed: $P:$state"; return 1; }
+    sleep 0.1
+  done
 }
 killers() {
   # Match the helper executable AND an exact --pid argument, not a title or
@@ -215,6 +226,7 @@ for plat in xcb wayland; do
   read -r state PSTART <<< "$rec"
   [[ "$PSTART" =~ ^[0-9]+$ ]] || fail "KWrite vanished before STOP"
   us "kill -STOP $P" >/dev/null || fail "could not stop KWrite $P"
+  confirm_stopped || fail "KWrite $P did not reach stopped state with its original identity"
   log "KWrite $P ($plat, window $KW) stopped"
   PROMPT_BEFORE=$(wwids l:kwin_killer_helper)
   sleep 1; close_kwin; log "KWin asked to close it (closeWindow: delete + ping)"

@@ -87,7 +87,7 @@ class VerifySetup(unittest.TestCase):
                     self.assertNotIn("restored", r.stdout)
 
     def test_process_identity_states(self):
-        fn = function(HUNG, "proc_state", "killers() {")
+        fn = function(HUNG, "proc_state", "# Signal delivery")
         for record, expected in (("S 90", "live:S"), ("T 90", "live:T"),
                                  ("Z 90", "zombie"), ("absent", "absent"),
                                  ("S 91", "reused")):
@@ -132,6 +132,26 @@ class VerifySetup(unittest.TestCase):
         self.assertIn("--pid 123( |$)", r.stderr)
         self.assertIn("(^|/)kwin_killer_helper ", r.stderr)
         self.assertEqual(r.stdout, "")
+
+    def test_user_transport_silent_and_filtered_status(self):
+        fn = function(HUNG, "us", "# $1 in the Plasma")
+        for output, rc in (("", 0), ("file pushed\n", 0), ("", 7), ("file pushed\n", 124)):
+            with tempfile.TemporaryDirectory() as tmp:
+                r = shell('set -o pipefail\nT=unused\n'
+                          'bounded() { printf "%s" "$OUTPUT"; return "$RC"; }\n'
+                          + fn + '\nus "kill -STOP 123"',
+                          {"OUT": tmp, "OUTPUT": output, "RC": str(rc)})
+            self.assertEqual(r.returncode, rc)
+            self.assertEqual(r.stdout, "")
+
+    def test_stop_requires_original_stopped_identity(self):
+        fn = function(HUNG, "confirm_stopped", "killers() {")
+        for state, expected in (("live:T", 0), ("live:t", 0), ("reused", 1),
+                                ("absent", 1), ("zombie", 1), ("live:S", 1)):
+            r = shell('P=1; PSTART=2\nproc_state() { echo "$STATE"; }\n'
+                      'log() { :; }; sleep() { SECONDS=$((SECONDS + 4)); }\n'
+                      + fn + '\nconfirm_stopped', {"STATE": state})
+            self.assertEqual(r.returncode, expected, state)
 
     def test_restore_only_after_setup_and_once(self):
         restore = function(HUNG, "restore", '. "$here/window-lock.sh"')
