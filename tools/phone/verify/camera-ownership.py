@@ -33,11 +33,44 @@ def tasks(text):
     return result, roots
 
 
+def empty_camera_clients(text):
+    """Only the completed INITIAL service-global section is client evidence.
+
+    Provider static metadata can time out much later. Keep that raw diagnostic,
+    but don't confuse it with an incomplete initial active-client snapshot.
+    """
+    lines = text.splitlines()
+    while lines and not lines[0].strip():
+        lines.pop(0)  # dumpsys may prefix its first section with blank lines
+    start = '== Service global info: =='
+    boundary = '== Camera service events log (most recent at top): =='
+    if not lines or lines[0] != start:
+        raise ValueError('camera global-info start missing/unknown; protected')
+    end = next((i for i in range(1, len(lines)) if lines[i].startswith('== ')), None)
+    if end is None or lines[end] != boundary:
+        raise ValueError('camera global-info boundary incomplete/unknown; protected')
+    initial = '\n'.join(lines[:end])
+    if re.search(r'error|permission|deni(?:ed|al)|SecurityException|timeout|timed out|'
+                 r'deadlock|no[ -]+(?:camera[ -]+)?HAL|Can.t find service|warning', initial, re.I):
+        raise ValueError('camera initial client snapshot reported an error; protected')
+    headers = [i for i in range(1, end) if lines[i] == 'Active Camera Clients:']
+    if len(headers) != 1:
+        raise ValueError('camera client header missing/ambiguous; protected')
+    # No arbitrary text or second header between the empty list and the next
+    # section: the allowed-users line proves this is a completed global snapshot.
+    tail = '\n'.join(lines[headers[0]:end])
+    if not re.fullmatch(r'Active Camera Clients:\n\[\]\nAllowed user IDs: [0-9]+(?:,? [0-9]+)*\n*', tail):
+        raise ValueError('camera clients present/incomplete/ambiguous; protected')
+
+
 def evidence(directory):
     d = Path(directory)
     texts = {k: (d / (k + '.txt')).read_text() for k in
              ('tasks', 'activities', 'recents', 'windows', 'clients', 'process')}
+    empty_camera_clients(texts['clients'])
     for k, text in texts.items():
+        if k == 'clients':
+            continue  # validated through the initial events-log boundary above
         if re.search(r'Permission Denial|SecurityException|Error:|DUMP TIMEOUT|Can.t find service', text, re.I):
             raise ValueError(k + ' probe reported an error')
     inventory, roots = tasks(texts['tasks'])
@@ -53,10 +86,6 @@ def guard(directory):
     text, _, _ = evidence(directory)
     if any(PKG in text[k] for k in ('tasks', 'activities', 'recents', 'windows')):
         raise ValueError('preexisting camera task/window/reference protected')
-    # Require an explicit empty active-client list, not absence of the package
-    # name in a potentially partial/unsupported dump. Any camera client is protected.
-    if not re.search(r'Active Camera Clients:\s*\[\s*\]', text['clients']):
-        raise ValueError('camera clients present or unknown; protected')
     if text['process'].strip() != 'ABSENT':
         raise ValueError('camera process present or unknown (may be cached, NOT proof of active use); protected')
     print('camera absent in recognized snapshots; no process/client to reuse')

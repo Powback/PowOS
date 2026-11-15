@@ -15,6 +15,28 @@ HOME = 'RootTask id=1 bounds=[0,0][100,100] displayId=0\n  taskId=10: dev.omalau
 CAM = 'RootTask id=22 bounds=[0,0][100,100] displayId=4\n  taskId=20: com.oplus.camera/.Camera bounds=[0,0][100,100] visible=true\n'
 
 
+# Sanitized, shortened shape of the saved 1115-0558 media.camera dump: global
+# snapshot completes, then events, then provider metadata which may time out.
+CLIENTS = '''
+== Service global info: ==
+
+Number of camera devices: 8
+Number of normal camera devices: 6
+Number of public camera devices visible to API1: 3
+    Device 0 maps to "0"
+Active Camera Clients:
+[]
+Allowed user IDs: 0
+
+== Camera service events log (most recent at top): ==
+  11-15 05:52:12 : ADD device 0, reason: (Device added)
+
+== Camera Provider HAL device static information: ==
+  android.sensor.info.activeArraySize: [0 0 100 100]
+'''
+TIMEOUT = "*** SERVICE 'media.camera' DUMP TIMEOUT (5000ms) EXPIRED ***\n"
+
+
 class Ownership(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
@@ -22,7 +44,7 @@ class Ownership(unittest.TestCase):
         self.d = Path(self.tmp.name)
         for k, text in dict(tasks=HOME, activities='ACTIVITY MANAGER ACTIVITIES',
                             recents='ACTIVITY MANAGER RECENT TASKS', windows='WINDOW MANAGER WINDOWS',
-                            clients='Active Camera Clients: []', process='ABSENT').items():
+                            clients=CLIENTS, process='ABSENT').items():
             (self.d / (k + '.txt')).write_text(text)
 
     def test_absent_recognized(self):
@@ -33,7 +55,7 @@ class Ownership(unittest.TestCase):
                            ('activities', 'ACTIVITY MANAGER ACTIVITIES com.oplus.camera'),
                            ('recents', 'ACTIVITY MANAGER RECENT TASKS com.oplus.camera'),
                            ('windows', 'WINDOW MANAGER WINDOWS com.oplus.camera'),
-                           ('clients', 'Active Camera Clients: [other.app]'), ('process', '1234')]:
+                           ('clients', CLIENTS.replace('\n[]\n', '\n[other.app]\n')), ('process', '1234')]:
             with self.subTest(key=key):
                 p = self.d / (key + '.txt')
                 old = p.read_text()
@@ -52,6 +74,39 @@ class Ownership(unittest.TestCase):
                     with self.assertRaises(ValueError):
                         policy.guard(self.d)
             p.write_text(old)
+
+    def test_completed_clients_accept_late_metadata_timeout_not_cached_pid(self):
+        path = self.d / 'clients.txt'
+        path.write_text(CLIENTS + TIMEOUT)
+        policy.guard(self.d)
+        self.assertTrue(path.read_text().endswith(TIMEOUT))
+        (self.d / 'process.txt').write_text('1234')
+        with self.assertRaisesRegex(ValueError, 'may be cached'):
+            policy.guard(self.d)
+
+    def test_initial_clients_fail_closed_at_section_boundary(self):
+        event = '== Camera service events log (most recent at top): =='
+        invalid = [
+            CLIENTS.replace('Active Camera Clients:', TIMEOUT + 'Active Camera Clients:'),
+            CLIENTS.replace('Allowed user IDs: 0', 'Allowed user IDs: 0\n' + TIMEOUT),
+            CLIENTS.replace('\n[]\n', '\n[other.app]\n') + 'Active Camera Clients:\n[]\n',
+            CLIENTS.replace('Active Camera Clients:\n[]\n', '') + 'Active Camera Clients:\n[]\n',
+            CLIENTS.replace('== Service global info: ==\n', ''),
+            CLIENTS.replace(event, '== Other section: =='),
+            CLIENTS.split(event)[0],
+            CLIENTS.replace('Allowed user IDs: 0\n', ''),
+            CLIENTS.replace('Active Camera Clients:', 'Active Camera Clients:\nActive Camera Clients:'),
+            CLIENTS.replace('\n[]\n', '\n[\n'),
+            CLIENTS.replace('\n[]\n', '\n[] extra\n'),
+        ]
+        for warning in ['Permission Denial', 'ERROR: failed', 'Camera service deadlock',
+                        'No camera HAL available', 'WARNING: incomplete snapshot']:
+            invalid.append(CLIENTS.replace('Number of camera devices:', warning + '\nNumber of camera devices:'))
+        for text in invalid:
+            with self.subTest(text=text):
+                (self.d / 'clients.txt').write_text(text)
+                with self.assertRaises(ValueError):
+                    policy.guard(self.d)
 
     def test_new_exact_task_and_exclusive_root_cleanup(self):
         after = self.d / 'after'
