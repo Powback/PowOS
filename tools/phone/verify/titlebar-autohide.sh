@@ -17,11 +17,24 @@
 set -uo pipefail
 NAME=titlebar-autohide; . "$(dirname "$0")/wwc-lib.sh"
 PORT=8765 CHROME=com.android.chrome SRV="" PAGE=$(mktemp -d "${TMPDIR:-/tmp}/tb-page.XXXXXX")
+CHROME_OWNED=0 REVERSE_OWNED=0
 wwc_extra() {
-  [ -n "$SRV" ] && kill "$SRV" 2>/dev/null
-  "$A" reverse --remove "tcp:$PORT" >/dev/null 2>&1
-  sh_ "am force-stop $CHROME" >/dev/null
-  rm -rf "$PAGE"; }
+  # wwc_skip cleans explicitly, then EXIT cleans again. Consume ownership before each action.
+  if [ "$CHROME_OWNED" = 1 ]; then CHROME_OWNED=0; sh_ "am force-stop $CHROME" >/dev/null; fi
+  if [ -n "$SRV" ]; then kill "$SRV" 2>/dev/null; SRV=""; fi
+  if [ "$REVERSE_OWNED" = 1 ]; then REVERSE_OWNED=0; "$A" reverse --remove "tcp:$PORT" >/dev/null 2>&1; fi
+  if [ -n "$PAGE" ]; then rm -rf "$PAGE"; PAGE=""; fi
+  return 0; }
+chrome_claim() {
+  local state
+  # Empty adb output is NOT proof of absence. Require a complete remote pidof result;
+  # rc 1 with empty output alone means absent; diagnostics or transport failure mean unknown.
+  state=$(sh_ "p=\$(pidof $CHROME 2>&1); r=\$?; if [ \"\$r\" = 1 ] && [ -z \"\$p\" ]; then echo stopped; elif [ \"\$r\" = 0 ] && [ -n \"\$p\" ]; then echo running; else echo unknown; fi") || wwc_skip "Chrome running state unknown (query failed)"
+  case $state in
+    stopped) CHROME_OWNED=1 ;;
+    running) wwc_skip "Chrome runs (the user's)" ;;
+    *) wwc_skip "Chrome running state unknown ($state)" ;;
+  esac; }
 until_() { local i; for i in $(seq 1 "$1"); do sleep 0.5; eval "$2" && return 0; done; return 1; }
 # The window's bar / body rects (CSS px "top bottom") and whether its bar is slid in.
 part() { wwel "$WID" "e=>{const b=e.querySelector(':scope > $1');if(!b)return '';const r=b.getBoundingClientRect(),f=e.getBoundingClientRect();return [r.top-f.top,r.bottom-f.top,r.height].map(Math.round).join(' ')}"; }
@@ -31,7 +44,6 @@ shown() { [ "$(wwel "$WID" "e=>e.classList.contains('ww-bar-shown')")" = true ];
 logged() { "$A" shell "logcat -d -T '$SINCE' -s PowosWebWindows:I" 2>/dev/null | tr -d '\r' | awk -v p="$1" 'index($0, p) {f=1} END {exit !f}'; }
 
 wwc_start
-[ -n "$(sh_ "pidof $CHROME")" ] && wwc_skip "Chrome runs (the user's)"
 cat > "$PAGE/tb.html" <<'HTML'
 <!doctype html><meta name="viewport" content="width=device-width">
 <body style="margin:0;height:100vh;background:#203040;color:#fff;font:24px sans-serif;display:grid;place-items:center"
@@ -39,6 +51,8 @@ cat > "$PAGE/tb.html" <<'HTML'
 HTML
 python3 -m http.server "$PORT" --bind 127.0.0.1 --directory "$PAGE" >/dev/null 2>&1 & SRV=$!
 "$A" reverse "tcp:$PORT" "tcp:$PORT" >/dev/null || wwc_skip "adb reverse failed"
+REVERSE_OWNED=1
+chrome_claim   # parent shell, immediately before launch; ownership survives ww_open's command substitution
 WID=$(ww_open "a:$CHROME" 40) || { bad "open Chrome: $WID"; wwc_end; }
 MINE_W="$MINE_W $WID"; say "opened Chrome as $WID"
 D=$(wwhost "$WID" display)

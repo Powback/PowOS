@@ -55,7 +55,7 @@ wwtop() { local ids; ids=$(printf "%s," "${@#w}")
 
 # --- Self-setup (11-07: ww-glue/ww-popups SKIPped "no web window" / "no viewable Steam main window" on an idle phone;
 # a check never SKIPs for state it can create itself). A check opens what it needs through home's own launch path
-# (the bridge call a tap makes: apps.launch, as float-windows.sh / steam-one-window.sh) and closes only what it opened.
+# (Android: state.ts launch; Linux: apps.launch) and closes only what it opened.
 # ww_us <script text>: run it in the PowOS session as the session user (user.sh), output back.
 ww_us() { local f; f=$(mktemp "${TMPDIR:-/tmp}/wwus.XXXXXX"); printf '%s\n' "$1" > "$f"; "$T/user.sh" "$f" 2>/dev/null | grep -v "file pushed" | tr -d '\r'; rm -f "$f"; }
 # ww_ready: home shows web windows here (unfolded, the host has the list) - else nothing a check can open.
@@ -66,11 +66,23 @@ ww_running() { [ -n "$(ww_us "for p in \$(pgrep -x '$1'); do grep -q '^State:.*Z
 # ww_procs <proc>: each of that app's processes in the session, one line: pid, state, parent (its name and state),
 # wchan, cgroup (frozen?), pending/blocked signals - why an app outlived its window's close.
 ww_procs() { ww_us "for p in \$(pgrep -x '$1'); do pp=\$(awk '/^PPid:/{print \$2}' /proc/\$p/status); cg=\$(sed -n 's/^0:://p' /proc/\$p/cgroup); echo \"\$p \$(grep -E '^(State|SigPnd|ShdPnd|SigBlk|SigIgn)' /proc/\$p/status | tr -s '\t\n' '  ') wchan=\$(cat /proc/\$p/wchan 2>/dev/null) parent \$pp:\$(cat /proc/\$pp/comm 2>/dev/null) \$(grep '^State' /proc/\$pp/status 2>/dev/null | tr -s '\t' ' ') cgroup \$cg frozen=\$(cat /sys/fs/cgroup\$cg/cgroup.freeze 2>/dev/null)\"; done"; }
-# ww_open <key> <secs>: launch it as a tap would (apps.launch), wait up to secs for a NEW web window of that key whose
+# ww_open <key> <secs>: launch it as a tap would, wait up to secs for a NEW web window of that key whose
 # body is live (its app's frames, not the launch placeholder); prints "w<id>" (rc 1 and the last state when none).
-ww_open() { local key=$1 s=$2 before r n="" i live=""
+# Android package keys resolve to a registered component, then use the page's launch (which requests a web window).
+# Linux deliberately retains apps.launch: its existing callers rely on that session launch path.
+ww_open() { local key=$1 s=$2 before r n="" i live="" requested=$1
+  if [[ $key = a:* ]]; then
+    r=$(ev "importShim('./state.ts').then(m=>{const k='$key';return m.apps.value.find(a=>k.includes('/')?a.key===k:a.key.startsWith(k+'/'))?.key||'ERR app absent'}).catch(e=>'ERR '+e)")
+    case $r in "$requested") [[ $r = */* ]] || { echo "resolve $requested: $r"; return 1; } ;; "$requested/"*) ;; *) echo "resolve $requested: $r"; return 1 ;; esac
+    key=$r
+  fi
   before=$(wwids "$key")
-  r=$(hcall apps.launch "['$key']" "()=>'ok'"); [ "$r" = ok ] || { echo "apps.launch $key: $r"; return 1; }
+  if [[ $key = a:* ]]; then
+    r=$(ev "importShim('./state.ts').then(m=>m.launch('$key')).then(()=>'ok',e=>'ERR '+e)")
+  else
+    r=$(hcall apps.launch "['$key']" "()=>'ok'")
+  fi
+  [ "$r" = ok ] || { echo "launch $key: $r"; return 1; }
   for i in $(seq 1 "$s"); do
     ww_late && { echo "no live $key window by the check's deadline (window ${n:-none} ${live:-})"; return 1; }
     sleep 1
