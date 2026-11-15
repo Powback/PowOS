@@ -23,7 +23,25 @@ def nodes(node):
         yield from nodes(child)
 
 
-@unittest.skipUnless(JAR.exists() and JAVA, 'requires cached OWL CLI and JAVA')
+def unavailable_reason():
+    if not JAR.exists():
+        return f'cached OWL CLI missing: {JAR}'
+    if not JAVA:
+        return 'no Java executable found; set JAVA to a usable JVM executable'
+    try:
+        probe = subprocess.run([JAVA, '-version'], capture_output=True, text=True, timeout=10)
+    except (OSError, subprocess.TimeoutExpired) as error:
+        return f'Java runtime unavailable ({JAVA}): {error}; set JAVA to a usable JVM executable'
+    if probe.returncode:
+        detail = (probe.stderr or probe.stdout).strip().splitlines()
+        return f'Java runtime unavailable ({JAVA}): {detail[0] if detail else probe.returncode}; set JAVA to a usable JVM executable'
+    return ''
+
+
+UNAVAILABLE = unavailable_reason()
+
+
+@unittest.skipIf(UNAVAILABLE, UNAVAILABLE)
 class ResponsiveFit(unittest.TestCase):
     def trees(self, name):
         variants = [dict(id=str(i), cols=3, rows=3, w=w, h=h)
