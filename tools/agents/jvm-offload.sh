@@ -17,6 +17,19 @@ AAD=${ANDROID_APP_DEV:-$HOME/Projects/android-app-dev}
 [ $# -gt 0 ] || set -- :app:testDebugUnitTest
 cd "$TOP"
 . "$HERE/../jobs/job.sh"
+# Consume the canonical source-built Android inputs; tests never fetch/build Rust implicitly.
+. "$TOP/sources/powstream/source.conf"
+native=targets/android/app/engine/powstream-native
+for input in arm64-v8a/libpowstream_client_core.so include/powstream_client_core.h include/powstream-source-revision; do
+  [ -s "$native/$input" ] || {
+    echo "jvm-offload.sh: missing PowStream native input $native/$input; run bash sources/powstream/build-android.sh first" >&2
+    exit 2
+  }
+done
+[ "$(cat "$native/include/powstream-source-revision")" = "$ANDROID_CLIENT_REV" ] || {
+  echo "jvm-offload.sh: stale PowStream native staging; run bash sources/powstream/build-android.sh for the pinned revision" >&2
+  exit 2
+}
 t0=$(date +%s)
 job_init jvm
 src=$(mktemp -d "${XDG_CACHE_HOME:-$HOME/.cache}/powos-jobs-src.XXXXXX")
@@ -26,7 +39,7 @@ trap 'exit 130' INT TERM HUP
 # The unit tests also read sources beside the app (File("../../...") from targets/android/app/app): KWin's patches +
 # PKGBUILD, session/ scripts, the oplus hook - staged too, or those tests fail with FileNotFoundException
 # (WebWindowsSwipeCloseTest, GameBoostTest).
-job_stage "$src" targets/android/app shell targets/android/pkgs/kwin targets/android/session targets/android/oplus-hook -- targets/android/app/app/bundled-apps targets/android/app/app/shell-build.txt &&
+job_stage "$src" targets/android/app shell targets/android/pkgs/kwin targets/android/session targets/android/oplus-hook -- targets/android/app/engine/powstream-native targets/android/app/app/bundled-apps targets/android/app/app/shell-build.txt &&
   mkdir -p "$src/_powterm" && (cd "$AAD/projects/powterm/app/src/main/java" && COPYFILE_DISABLE=1 tar -cf - .) | tar -xf - -C "$src/_powterm" ||
   { echo "jvm-offload.sh: staging the source failed" >&2; exit 2; }
 job_build apk "$src" || exit 2

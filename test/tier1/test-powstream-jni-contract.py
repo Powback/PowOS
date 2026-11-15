@@ -37,6 +37,22 @@ class Contract(unittest.TestCase):
         self.assertIn('-- targets/android/app/engine/powstream-native',
                       (ROOT / 'targets/android/tools/apk-job.sh').read_text())
 
+    def test_jvm_job_requires_and_carries_pinned_native_staging(self):
+        job = (ROOT / 'tools/agents/jvm-offload.sh').read_text()
+        self.assertIn('-- targets/android/app/engine/powstream-native', job)
+        self.assertIn('. "$TOP/sources/powstream/source.conf"', job)
+        for name in ('arm64-v8a/libpowstream_client_core.so',
+                     'include/powstream_client_core.h', 'include/powstream-source-revision'):
+            self.assertIn(name, job)
+        self.assertIn('[ -s "$native/$input" ]', job)
+        self.assertIn('"$(cat "$native/include/powstream-source-revision")" = "$ANDROID_CLIENT_REV"', job)
+        self.assertLess(job.index('missing PowStream native input'), job.index('job_init jvm'))
+        self.assertLess(job.index('stale PowStream native staging'), job.index('job_init jvm'))
+        # Build instruction is diagnostic text only; no implicit source/network build in tests.
+        self.assertNotIn('\n    bash ', job)
+        self.assertNotIn('\nbash ', job)
+        self.assertNotIn('--android-client-core', job)
+
 
 if __name__ == '__main__':
     unittest.main()
