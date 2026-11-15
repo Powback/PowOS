@@ -953,6 +953,9 @@ class WebWindows(
         /** TB1: maximised and its bar auto-hidden (its app immersive, the top window): home's status bar hides ([immersiveBars]). */
         var barHidden = false
 
+        /** The auto-hidden header is temporarily revealed: the next edge pull may open the shade. */
+        var barRevealed = false
+
         /** Maximised (the bar merges with the status bar): where its title ends and its controls start, else -1. */
         var titleEnd = -1
         var controls = -1
@@ -1790,8 +1793,12 @@ class WebWindows(
             visible = c.word() == "1"
             alpha = c.word().toFloat().coerceIn(0f, 1f)
             scale = c.word().toFloat().takeIf { it > MIN_ZOOM } ?: 1f
-            // TB1: "2" = maximised with its bar auto-hidden (an older page sends only 0/1).
-            c.word().let { m -> maximised = m == "1" || m == "2"; barHidden = m == "2" }
+            // TB1: 2/3 = auto-hidden header, currently hidden/revealed (older pages send 0/1/2).
+            c.word().let { m ->
+                maximised = m == "1" || m == "2" || m == "3"
+                barHidden = m == "2" || m == "3"
+                barRevealed = m == "3"
+            }
             titleEnd = c.x()
             controls = c.x()
             // LH1: 1 = resizing, 2 = resizing and lifted, 3 = lifted only (the drag's end until the page's hole is back).
@@ -1911,6 +1918,21 @@ class WebWindows(
     private fun barHiddenOnScreen(w: Win): Boolean {
         val g = w.geo ?: return false
         return g.barHidden && g.visible && w.shown && !w.closed
+    }
+
+    /** Queried at DOWN, not cached: a closed/minimised/off-page window cannot retain the edge. */
+    private fun headerOwnsTopEdge(x: Float): Boolean {
+        if (!web.isShown || web.windowVisibility != android.view.View.VISIBLE || underSwitcher) return false
+        fullLinux()?.let { return hiddenHeaderOwnsEdge(!it.minimised && !it.closed, it.immersive, revealedFull == it.id) }
+        return wins.values.any { w ->
+            val g = w.geo
+            g != null && x >= g.clip.left && x < g.clip.right &&
+                hiddenHeaderOwnsEdge(
+                    g.visible && w.shown && !w.closed && !w.minimised && !w.full && !w.pip,
+                    g.barHidden,
+                    g.barRevealed,
+                )
+        }
     }
 
     /** TB1: home's status bar is hidden for a window's auto-hidden bar ([immersiveBars]). */
@@ -5107,6 +5129,13 @@ class WebWindows(
             taskId: Int,
             maximised: Boolean,
         ): Boolean = android && onHome && taskId >= 0 && maximised
+
+        /** Gesture arbitration uses the rendered header, not an overlay window's possibly zero status inset. */
+        fun hiddenHeaderOwnsEdge(onScreen: Boolean, autoHidden: Boolean, revealed: Boolean): Boolean =
+            onScreen && autoHidden && !revealed
+
+        /** Main-thread gesture monitor: the first top pull belongs to the existing header reveal. */
+        fun headerRevealOwnsTopEdge(x: Float): Boolean = current?.headerOwnsTopEdge(x) == true
 
         /** TB1: home's status bar hidden when any window's bar is auto-hidden on screen ([immersiveBars]). */
         fun barsHiddenFor(autoHiddenOnScreen: List<Boolean>): Boolean = autoHiddenOnScreen.any { it }

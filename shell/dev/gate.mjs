@@ -9836,14 +9836,16 @@ async function tbAuto() {
 
 /** TB1: a pull down from the top edge slides the bar in over the app (the body unchanged); it auto-hides again. */
 async function tbReveal() {
-  const { until, parts, hidden, slidIn, pull } = window.__tb;
+  const { until, parts, hidden, slidIn, pull, word } = window.__tb;
   const fails = [];
   const before = parts(981).body;
   await pull(981, 6, 80);
   if (!(await until(() => slidIn(parts(981)), 1000))) fails.push("TB1: a pull down from the top edge didn't slide the bar in");
+  if (word(981) !== "3") fails.push("TB1: revealed header did not release native shade arbitration");
   const after = parts(981).body;
   if (Math.abs(before.top - after.top) + Math.abs(before.height - after.height) > 1) fails.push("TB1: the slid-in bar relaid the app out (it must overlay it)");
   if (!(await until(() => hidden(parts(981)), 2500))) fails.push("TB1: the slid-in bar never auto-hid again");
+  if (word(981) !== "2") fails.push("TB1: hidden header did not reclaim the first edge pull");
   return fails;
 }
 

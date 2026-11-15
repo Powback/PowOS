@@ -52,11 +52,32 @@ class WebWindowsBarAutoHideTest {
     /** The page's maximised word 2 is parsed as maximised AND bar hidden; the frame's apply re-checks the status bar. */
     @Test
     fun theMaximisedWordCarriesTheAutoHiddenBar() {
-        assertTrue(src.contains("maximised = m == \"1\" || m == \"2\"; barHidden = m == \"2\""))
+        assertTrue(src.contains("maximised = m == \"1\" || m == \"2\" || m == \"3\""))
+        assertTrue(src.contains("barHidden = m == \"2\" || m == \"3\""))
+        assertTrue(src.contains("barRevealed = m == \"3\""))
         val apply = body("    private fun apply(\n")
         assertTrue("apply no longer re-checks the status bar for an auto-hidden bar", apply.contains("immersiveBars()"))
         assertTrue("apply no longer keeps the immersive poll going", apply.contains("immersiveSoon()"))
         assertTrue("a game's status bar comes back over an auto-hidden bar", body("    private fun statusBar(\n").contains("if (shown && barsHiddenForWindow) return"))
+    }
+
+    @Test
+    fun onlyAHiddenImmersiveHeaderOwnsTheFirstPull() {
+        assertTrue(WebWindows.hiddenHeaderOwnsEdge(true, true, false))
+        assertFalse("normal header", WebWindows.hiddenHeaderOwnsEdge(true, false, false))
+        assertFalse("revealed header allows a followup shade pull", WebWindows.hiddenHeaderOwnsEdge(true, true, true))
+        for (reason in listOf("closed", "minimised", "page changed", "home stopped")) {
+            assertFalse(reason, WebWindows.hiddenHeaderOwnsEdge(false, true, false))
+        }
+        val owner = body("    private fun headerOwnsTopEdge(")
+        assertTrue(owner.contains("!w.closed && !w.minimised"))
+        assertTrue(owner.contains("g.visible && w.shown"))
+        assertTrue(owner.contains("web.windowVisibility"))
+        assertTrue(owner.contains("revealedFull == it.id"))
+        assertTrue(body("    private fun placeAll(").contains("win.shown = false"))
+        val shade = File("src/main/kotlin/dev/omalauncher/system/ShadeHost.kt").readText()
+        val decision = shade.substringAfter("private fun pullable(").substringBefore("private fun barPullable")
+        assertTrue(decision.indexOf("headerRevealOwnsTopEdge(x)") < decision.indexOf("barPullable()"))
     }
 
     /** TB2: the top pull reveals, the bottom pull still leaves full screen (FL3: a way home kept). */

@@ -2555,12 +2555,13 @@ export function entry(w: WebWin): string | null {
 }
 
 /**
- * The entry's <maximised>: 0, 1, or (TB1) 2 - maximised with its bar auto-hidden, the window in front: the host hides
+ * The entry's <maximised>: 0, 1, or (TB1) 2/3 - auto-hidden header, hidden/revealed, on the front window: the host hides
  * home's status bar so the app has the whole screen (AOSP's full immersive desktop task), a swipe shows it for a moment.
  */
 function maximisedWord(w: WebWin): number {
   if (!w.restore) return 0;
-  return barAutoHidden(w) && frontWindow()?.id === w.id ? 2 : 1;
+  if (!barAutoHidden(w) || frontWindow()?.id !== w.id) return 1;
+  return barReveal.peek() === w.id ? 3 : 2;
 }
 
 /**

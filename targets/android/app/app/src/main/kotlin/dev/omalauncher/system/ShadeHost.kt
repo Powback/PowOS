@@ -486,6 +486,9 @@ class ShadeHost(
             refreshHandles()
             return if (homePullable(x, y)) From.HOME else null
         }
+        // Decide at DOWN: never pilfer the first pull from a hidden immersive header.
+        // Its existing reveal owns this entire gesture; a later pull with the header visible is normal.
+        if (dev.omalauncher.shell.WebWindows.headerRevealOwnsTopEdge(x)) return null
         return if (!claimedOnBar(x, y) && barPullable()) From.STATUS_BAR else null
     }
 
