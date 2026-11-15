@@ -20,7 +20,7 @@ job_init apk
 src=$(mktemp -d "${XDG_CACHE_HOME:-$HOME/.cache}/powos-jobs-src.XXXXXX")
 trap 'job_cleanup; rm -rf "$src"' EXIT
 trap 'exit 130' INT TERM HUP
-job_stage "$src" targets/android/app shell -- targets/android/app/app/bundled-apps targets/android/app/app/shell-build.txt &&
+job_stage "$src" targets/android/app shell -- targets/android/app/engine/powstream-native targets/android/app/app/bundled-apps targets/android/app/app/shell-build.txt &&
   mkdir -p "$src/_powterm" && (cd "$AAD/projects/powterm/app/src/main/java" && COPYFILE_DISABLE=1 tar -cf - .) | tar -xf - -C "$src/_powterm" ||
   { echo "apk-job: staging the source failed" >&2; exit 1; }
 job_build apk "$src" || exit 1

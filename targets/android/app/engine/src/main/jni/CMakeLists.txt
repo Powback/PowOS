@@ -50,3 +50,21 @@ set_target_properties(fdhelper PROPERTIES
 )
 
 target_link_libraries(fdhelper log)
+
+# Built/staged by sources/powstream/build-android.sh before the APK pipeline.
+set(POWSTREAM_STAGE ${CMAKE_CURRENT_SOURCE_DIR}/../../../powstream-native)
+if(NOT EXISTS ${POWSTREAM_STAGE}/include/powstream_client_core.h)
+    message(FATAL_ERROR "Run sources/powstream/build-android.sh before native/APK builds")
+endif()
+file(STRINGS ${POWSTREAM_STAGE}/include/powstream-source-revision POWSTREAM_REV)
+if(NOT POWSTREAM_REV STREQUAL "42dd13d79b35056dcabeb1fae4cd56f4cc5c0eae")
+    message(FATAL_ERROR "PowStream staging revision does not match the Android source pin")
+endif()
+add_library(powstream_client_core SHARED IMPORTED)
+set_target_properties(powstream_client_core PROPERTIES IMPORTED_LOCATION
+    ${POWSTREAM_STAGE}/${ANDROID_ABI}/libpowstream_client_core.so)
+add_library(powstream_jni SHARED powstream_jni.c)
+target_include_directories(powstream_jni PRIVATE ${POWSTREAM_STAGE}/include)
+target_compile_options(powstream_jni PRIVATE -Wall -Wextra -Werror)
+target_link_options(powstream_jni PRIVATE -Wl,-z,max-page-size=16384)
+target_link_libraries(powstream_jni powstream_client_core)

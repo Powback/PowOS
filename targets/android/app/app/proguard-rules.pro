@@ -22,3 +22,6 @@
 
 # The web windows' display maker, run as the shell user with app_process from this APK (shell/WebWindowsHost.kt).
 -keep class dev.omalauncher.shell.WebWindowsHost { public static void main(java.lang.String[]); }
+
+# JNI names bind the single-owner native transport wrapper.
+-keep class andro.marchy.stream.PowStreamCore { *; }

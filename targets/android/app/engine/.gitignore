@@ -2,3 +2,5 @@
 src/main/jniLibs/
 .cxx/
 build/
+# Pinned PowStream source build output, staged before Gradle (not committed binaries).
+powstream-native/

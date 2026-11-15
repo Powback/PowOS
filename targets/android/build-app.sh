@@ -37,6 +37,7 @@ fi
 # 11-10: no island, no service). A line of bundled.list is an app of apps/ or another repo's app folder (~/Projects/
 # lights). apps/build.sh's caches make an unchanged app quick. POWOS_SKIP_APPS=1 for a deliberate local experiment
 # (the APK then ships whatever bundled-apps/ holds).
+bash "$ROOT/sources/powstream/build-android.sh"
 STAGE=$HERE/app/app/bundled-apps
 # An app's folder from its bundled.list line: a name under apps/, else a path (~ = $HOME).
 app_dir() { case $1 in */*) echo "${1/#\~/$HOME}" ;; *) echo "$ROOT/apps/$1" ;; esac; }

@@ -255,3 +255,70 @@ Repos: **PS** = PowStream (owner's; the changes are listed in §6, not committed
 - **P11 multi-session state**: `viewer_joined`/`viewer_left` restore semantics for N concurrent window sessions.
 - Docs: `docs/SPEC-android.md` and `spec-android.md` still say raw UDP + `powstream-server`; note B0-over-QUIC as the
   native transport (this note's §1).
+
+## Android receiver implementation slice (2026-11-15; not Phase 1 complete)
+
+Implemented in `engine/src/main/java/andro/marchy/stream/`: `PowStreamReceiver` accepts an **already
+trusted/authenticated** bootstrap (endpoint, signed token, decoded 32-byte certificate hash) and a borrowed,
+existing web-window `Surface`. It creates no window, renderer, public route, credential store or trust bypass.
+`progress()` is a volatile lifecycle snapshot; the eventual window owner must expose it in its existing pending UI.
+No entry point currently instantiates this receiver: this is the native/decoder integration layer, not a usable
+remote-window feature or a measured latency result.
+
+`PowStreamCore` and `powstream_jni.c` consume ABI v1's authoritative generated header. Native buffers are caller
+owned: `ps_poll_au` copies Annex-B only (no 32-byte FrameMeta prefix) into a direct buffer; BUFFER_SMALL retries
+later because the mailbox may have changed. No Rust allocation crosses JNI. A single HandlerThread owns every
+handle call and MediaCodec callback, so close is exclusive without a use-after-free race. `close()` only requests
+cancellation (nonblocking); `awaitClosed(0..5000)` returns false on timeout. Native shutdown has the core's 100 ms
+budget; vendor MediaCodec release/OS scheduling is not hard-realtime bounded. The caller must keep the Surface
+alive until retirement completes, and must not block the UI thread waiting. Surface loss/transport failure/codec
+failure are terminal; reopening requires a freshly authenticated bootstrap. Raw exception text and tokens are
+never exposed. Input forwarding is NOT implemented by this slice.
+
+H.264 policy is deliberately conservative and testable on the JVM (`H264ContinuityTest`): u32 frame-id gaps,
+width/height changes and changed in-band SPS/PPS invalidate the dependency chain. Drop queued decoder state and
+wait for one AU containing SPS + PPS + IDR before recreating the codec. IDR flag alone is insufficient. This can
+wait forever if a sender does not repeat parameter sets on recovery frames; progress stays WAITING_IDR and close
+still works. No IDR request protocol or invented parameter sets. SPS/PPS change with unchanged FrameMeta dimensions
+also recreates; MediaCodec reads actual SPS, reports output-format changes and writes to the same Surface. Metadata
+is used only for geometry validation, never as decoder bytes. At most one copied AU is held (4 MiB cap); no unbounded
+Java frame queue. Decoder input starvation therefore lets the core replace AUs, and the next frame-id gap forces
+recovery. Output release means submitted to Surface, NOT displayed on glass; timestamps across machines are not
+subtracted. Low-latency/priority keys are requested, not a claim that the hardware honors them.
+
+### Canonical build contract and parent-owned checks
+
+`sources/powstream/source.conf` pins Android to `42dd13d79b35056dcabeb1fae4cd56f4cc5c0eae`, independent of the
+Linux layer target. `bash sources/powstream/build-android.sh` checks out that immutable source in ignored
+`sources/powstream/upstream/android-<sha>`, runs PowStream's own bounded `.58` Android build (managed NDK r28c,
+Rust 1.97.0, ARM64 API29), and stages the unchanged `libpowstream_client_core.so` plus authoritative header under
+ignored `targets/android/app/engine/powstream-native/`. It neither installs toolchains nor consumes an arbitrary
+prebuilt library. Private source access and that managed worker image are prerequisites; no Mac fallback.
+`targets/android/build-app.sh` invokes this target before APK staging; `apk-job.sh` explicitly carries the ignored
+outputs into its source image. Warm/cold Gradle staging already copies the engine directory. CMake imports the
+original library and builds `libpowstream_jni.so` in the existing engine. Missing staging fails native configuration
+rather than quietly shipping a receiver with no library. Android app minimum remains API30 (existing engine).
+
+Commands for the coordinator, from the PowOS checkout (not run by this agent):
+
+```sh
+bash sources/powstream/build-android.sh
+# Compile-only canonical app path (includes engine Java compilation):
+tools/phone/compile-check.sh
+# In the managed Android builder, cwd targets/android/app, with existing PowTerm source available:
+./gradlew :engine:externalNativeBuildDebug :app:testDebugUnitTest --tests andro.marchy.stream.H264ContinuityTest
+# Full canonical APK pipeline (coordinator only; publishes as usual):
+POW_JOB_CONTEXT=pow58 targets/android/build-app.sh
+```
+
+Required verification still outstanding: JNI C compile/export/load against the produced ARM64 library, JVM tests,
+APK packaging (exactly one original core SONAME), real async decoder feed/output on a caller-owned Surface,
+close-before-open/close-during-handshake/close-during-input-starvation/Surface loss, malformed bitstream, repeated
+SPS resolution changes, bounded teardown including codec-driver stalls, and authenticated end-to-end glass/input.
+No build, device, service, Steam, deployment or queue operation was performed for this slice.
+
+Remaining Phase 1 integration: trusted bootstrap acquisition/PowAuth consumer path; WebWindows ownership and
+`openRemote`/placement/close hooks; progress presentation; input ABI forwarding with explicit backpressure and
+release-on-disconnect; Wi-Fi/ADPF lifecycle policy; real window capture and latency measurements. Keep the Phase 1
+checkboxes open until these and the real gates pass. The old proposed `libpowstream_core.so` name above is replaced
+by the actual canonical `libpowstream_client_core.so`; do not rename build artifacts to match the proposal.
