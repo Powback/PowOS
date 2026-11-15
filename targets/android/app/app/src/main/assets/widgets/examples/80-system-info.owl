@@ -19,7 +19,8 @@ widget "system" {
   let ih = tileHeight == null ? 106 : tileHeight - 24
   let up = replace(replace(replace(replace(replace(replace(replace(info.up ?? "", " minutes", "m"), " minute", "m"), " hours", "h"), " hour", "h"), " days", "d"), " day", "d"), ",", "")
   let rows = ["arch linux arm", "kernel ${info.kernel}", "${info.packages} packages", "up ${up}"]
-  let longest = max(max(rows.map(r => measure(r))), 1)
+  // Reserve the mono glyph budget as well as the measured advances, including the longest OS label.
+  let longest = max(max(rows.map(r => max(measure(r), len(r) * 0.62))), 1)
   let wide = iw > ih * 1.5
   let fs = clamp(floor(wide ? min((iw - 8) / 2 / longest - 3, (ih - 8) / 2 / 1.4 - 4) : min(iw / longest, ih / (4 * 1.4))), 9, 96)
 

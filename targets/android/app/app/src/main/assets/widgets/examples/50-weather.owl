@@ -25,9 +25,11 @@ widget "weather" {
   let sky = join(skyWords, " ")
   let where = trim(place ?? "")
   // Each line's width at 1 dp (em); the temperature at least two digits' wide, so "5°" doesn't outgrow "15°".
-  let mT = max(measure(temp), measure("00"))
-  let mS = max(measure(sky), 0.5)
-  let mP = max(measure(where), 0.5)
+  // The shell's mono face can be wider than the host's advance table (including fallback glyphs).
+  // Budget each line for both; don't let extra height make a narrow tile's text wider than its box.
+  let mT = max(measure(temp), len(temp) * 0.62, measure("00"))
+  let mS = max(measure(sky), len(sky) * 0.62, 0.5)
+  let mP = max(measure(where), len(where) * 0.62, 0.5)
   let tF = iw / mT
   let sF = sky == "" ? 0 : iw / mS
   let pF = where == "" ? 0 : iw / mP
@@ -52,15 +54,14 @@ widget "weather" {
   let half = max(1, floor(len(skyWords) / 2 + 0.5))
   let skyA = join(take(skyWords, half), " ")
   let skyB = join(drop(skyWords, half), " ")
-  let s2 = min(iw / max(measure(skyA), measure(skyB), 0.5), tz1 * 0.7, (room / 1.4 + sz1) / 2)
+  let s2 = min(iw / max(measure(skyA), measure(skyB), len(skyA) * 0.62, len(skyB) * 0.62, 0.5), tz1 * 0.7, (room / 1.4 + sz1) / 2)
   let split = len(skyWords) > 1 && s2 > sz1 * 1.3
   let tz = clamp(floor(tz1), 14, 200)
   let sz = clamp(floor(split ? s2 : sz1), 9, 80)
   let pz = clamp(floor(pz1), 8, 50)
 
   Column {
-    fill: height; align: center; gap: 0
-    Spacer { weight: 1 }
+    fill: height; align: center; justify: spaceBetween; gap: 0
     Text { text: temp; fontSize: tz; color: cyan; align: center; maxLines: 1 }
     if split {
       Text { text: skyA; fontSize: sz; align: center; maxLines: 1 }
@@ -71,6 +72,5 @@ widget "weather" {
     if withPlace {
       Text { text: where; fontSize: pz; color: muted; align: center; maxLines: 1 }
     }
-    Spacer { weight: 1 }
   }
 }
