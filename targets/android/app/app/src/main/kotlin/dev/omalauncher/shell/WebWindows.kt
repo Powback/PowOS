@@ -1924,16 +1924,18 @@ class WebWindows(
     private fun headerOwnsTopEdge(x: Float): Boolean {
         if (!web.isShown || web.windowVisibility != android.view.View.VISIBLE || underSwitcher) return false
         fullLinux()?.let { return hiddenHeaderOwnsEdge(!it.minimised && !it.closed, it.immersive, revealedFull == it.id) }
-        return wins.values.any { w ->
-            val g = w.geo
-            g != null && x >= g.clip.left && x < g.clip.right &&
-                hiddenHeaderOwnsEdge(
-                    g.visible && w.shown && !w.closed && !w.minimised && !w.full && !w.pip,
-                    g.barHidden,
-                    g.barRevealed,
-                )
-        }
+        return wins.values.any { hiddenHeaderAt(it, x) }
     }
+
+    /** A rendered web header under this horizontal edge position, still eligible for its first pull. */
+    private fun hiddenHeaderAt(w: Win, x: Float): Boolean {
+        val g = w.geo ?: return false
+        if (x < g.clip.left || x >= g.clip.right) return false
+        return hiddenHeaderOwnsEdge(headerOnScreen(w, g), g.barHidden, g.barRevealed)
+    }
+
+    private fun headerOnScreen(w: Win, g: Geo): Boolean =
+        g.visible && w.shown && !w.closed && !w.minimised && !w.full && !w.pip
 
     /** TB1: home's status bar is hidden for a window's auto-hidden bar ([immersiveBars]). */
     private var barsHiddenForWindow = false
