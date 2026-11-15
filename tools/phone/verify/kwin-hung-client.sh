@@ -67,15 +67,24 @@ WW_DEADLINE=$DEADLINE
 export CDP_TIMEOUT_S=8 CDP_ADB_TIMEOUT_S=8
 ev() { bounded "$T/cdp.sh" eval "${2:-home}" "$1" | tr -d '\r' | tail -1 | python3 -c "$UNQ"; }
 plaunch() { ev "importShim('./state.ts').then(m=>m.launch('$1')).then(()=>'ok',e=>'ERR '+e)"; }
-# user.sh enters powos-run.sh's session namespace and Linux PATH; a raw Android
-# chroot inherits Android's PATH and cannot resolve pgrep. Only pgrep rc=1 means
-# absent; command/transport errors must not become an ENV skip (or a KWin crash).
+# The session user's /proc hides live KWin despite its matching UID. Enumerate
+# as root with an absolute Linux executable (Android's inherited PATH is wrong),
+# scoped to powos's UID. Only rc=1 is absence; unknown visibility never grants
+# ownership for cleanup. This intentionally does not change runtime permissions.
+linux_pids() {
+  local answer pid
+  case $1 in kwin_wayland|kwrite|kate) ;; *) return 1 ;; esac
+  answer=$(sh_ "p=\$(chroot /data/powos/root /usr/bin/pgrep -u powos -x $1); rc=\$?; case \$rc in 0) echo \"\$p\" ;; 1) echo none ;; *) exit \"\$rc\" ;; esac") || return 1
+  [ -n "$answer" ] || return 1
+  if [ "$answer" != none ]; then
+    for pid in $answer; do [[ "$pid" =~ ^[0-9]+$ ]] || return 1; done
+  fi
+  printf '%s\n' "$answer"
+}
 kwin_pid() {
   local answer
-  answer=$(us 'p=$(pgrep -x kwin_wayland); rc=$?; case $rc in 0) printf "%s\n" "$p" ;; 1) echo none ;; *) exit "$rc" ;; esac') || return 1
-  answer=${answer%%$'\n'*}
-  [[ "$answer" = none || "$answer" =~ ^[0-9]+$ ]] || return 1
-  printf '%s\n' "$answer"
+  answer=$(linux_pids kwin_wayland) || return 1
+  printf '%s\n' "${answer%%$'\n'*}"
 }
 killers() { us "pgrep -f 'kwin_killer_helper.*kwrite' | tr '\n' ' '"; }
 # live <w-id> <s>: the window's body shows its app's frames (not the placeholder) within s seconds.
@@ -96,11 +105,11 @@ qdbus6 org.kde.KWin /Scripting org.kde.kwin.Scripting.unloadScript khc >/dev/nul
 s=$(sh_ "dumpsys power | sed -n s/.*mWakefulness=//p | head -1")
 [ "$s" = Awake ] || { echo "the screen is ${s:-unknown (wakefulness query failed)} - not woken (rule); nothing done"; exit 3; }
 . "$(dirname "$0")/game-lib.sh"; game_gate   # the queue's test (Steam's reaper): `steam_app_` missed Broforce
-K0=$(kwin_pid) || { echo "FAIL: could not query kwin_wayland through the Linux session"; exit 1; }
+K0=$(kwin_pid) || { echo "FAIL: could not query kwin_wayland through root Linux process lookup"; exit 1; }
 [ "$K0" != none ] || { echo "ENV: no kwin_wayland runs"; exit 5; }
 # No cleanup is armed before these read-only preconditions succeed.
-existing=$(us "pgrep -x kwrite; echo checked")
-[ "$existing" = checked ] || { echo "KWrite already runs or could not be checked: not now"; exit 3; }
+existing=$(linux_pids kwrite) || { echo "could not check existing KWrite processes: not now"; exit 3; }
+[ "$existing" = none ] || { echo "KWrite already runs or could not be checked: not now"; exit 3; }
 I0=$(irq); [[ "$I0" =~ ^[0-9]+$ ]] || { echo "touch counter unavailable: not now"; exit 3; }
 H0=$(sh_ "wc -l < $HYPR"); [[ "$H0" =~ ^[0-9]+$ ]] || { echo "KWin log unavailable: not now"; exit 3; }
 SETUP=1
@@ -114,7 +123,8 @@ for plat in xcb wayland; do
   KW=$(wwnew 30 "$before" l:); KW=${KW%% *}
   [ -n "$KW" ] || fail "$plat KWrite opened no web window in 30 s"
   live "$KW" 15 || fail "$plat KWrite's window $KW never went live"
-  P=$(us "pgrep -x kwrite | head -1"); [ -n "$P" ] || fail "no kwrite process"
+  P=$(linux_pids kwrite) || fail "could not query KWrite processes"
+  [[ "$P" =~ ^[0-9]+$ ]] || fail "expected exactly one kwrite process, got $P"
   us "kill -STOP $P" >/dev/null; log "KWrite $P ($plat, window $KW) stopped"
   sleep 1; close_kwin; log "KWin asked to close it (closeWindow: delete + ping)"
   # KWin's ping times out in killPingTimeout (5 s): the prompt's process starts then.
@@ -124,21 +134,21 @@ for plat in xcb wayland; do
   chk hung
   # The rest of Linux keeps rendering: a new Kate window goes live with its layer, while KWrite hangs.
   before=$(wwids l:)
-  kate_before=$(us "pgrep -x kate; echo checked")
-  case $kate_before in checked) KATE_MINE=1 ;; *checked) ;; *) fail "could not check existing Kate processes" ;; esac
+  kate_before=$(linux_pids kate) || fail "could not check existing Kate processes"
+  [ "$kate_before" != none ] || KATE_MINE=1
   [ "$(plaunch l:org.kde.kate)" = ok ] || fail "home's launch of Kate failed"
   KT=$(wwnew 30 "$before" l:); KT=${KT%% *}
   [ -n "$KT" ] || fail "with $plat KWrite hung, Kate opened no web window in 30 s"
   live "$KT" 15 || fail "with $plat KWrite hung, Kate's window $KT never went live"
   [ "$(layer "$KT")" -ge 1 ] || fail "with $plat KWrite hung, Kate's window $KT has no powos-ww-${KT#w}-linux layer"
   pass "with $plat KWrite hung (prompt ${KP:-none}), Kate's window $KT is live with its ww-linux layer"
-  K=$(kwin_pid) || fail "could not query kwin_wayland through the Linux session"; [ "$K" = "$K0" ] || fail "KWin is pid ${K:-none} now, was $K0 (died with $plat KWrite hung)"
+  K=$(kwin_pid) || fail "could not query kwin_wayland through root Linux process lookup"; [ "$K" = "$K0" ] || fail "KWin is pid ${K:-none} now, was $K0 (died with $plat KWrite hung)"
   # The hung client killed: its window goes, the prompt with it.
   us "kill -KILL $P" >/dev/null
   for _ in $(seq 1 15); do [ -z "$(killers)" ] && [ "$(wwhost "$KW" gone)" = true ] && break; sleep 1; done
   [ -z "$(killers)" ] || fail "the kill prompt $(killers) stayed 15 s after $plat KWrite died"
   [ "$(wwhost "$KW" gone)" = true ] || fail "$plat KWrite's window $KW stayed after it died"
-  K=$(kwin_pid) || fail "could not query kwin_wayland through the Linux session"; [ "$K" = "$K0" ] || fail "KWin is pid ${K:-none} now, was $K0"
+  K=$(kwin_pid) || fail "could not query kwin_wayland through root Linux process lookup"; [ "$K" = "$K0" ] || fail "KWin is pid ${K:-none} now, was $K0"
   pass "$plat KWrite killed: its window and prompt gone, KWin still pid $K0"
   hcall webwindows.close "[${KT#w}]" "v=>String(v)" >/dev/null; sleep 2
   chk "$plat done"

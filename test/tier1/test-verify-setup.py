@@ -32,7 +32,7 @@ class VerifySetup(unittest.TestCase):
                 (v / "window-lock.sh").write_text("window_lock() { :; }; wl_release() { echo released; }\n")
                 (v / "ww-lib.sh").write_text("")
                 (v / "game-lib.sh").write_text("game_gate() { :; }\n")
-                (t / "adb.sh").write_text('#!/bin/bash\ncase "$*" in *"dumpsys power"*) echo "$WAKE" ;; *"pgrep -x kwin_wayland"*) : ;; *) echo UNEXPECTED >&2; exit 99 ;; esac\n')
+                (t / "adb.sh").write_text('#!/bin/bash\ncase "$*" in *"dumpsys power"*) echo "$WAKE" ;; *"pgrep -u powos -x kwin_wayland"*) echo none ;; *) echo UNEXPECTED >&2; exit 99 ;; esac\n')
                 (t / "adb.sh").chmod(0o755)
                 (t / "user.sh").write_text("#!/bin/bash\necho none\n")
                 (t / "user.sh").chmod(0o755)
@@ -45,20 +45,20 @@ class VerifySetup(unittest.TestCase):
                 self.assertNotIn("UNEXPECTED", r.stderr)
 
     def test_kwin_query_distinguishes_absence_and_failure(self):
-        query = function(HUNG, "kwin_pid", 'killers() {')
+        query = function(HUNG, "linux_pids", 'killers() {')
         for rc, output, expected_rc, expected in ((0, "42\n43", 0, "42"),
                                                   (1, "", 0, "none"),
                                                   (127, "", 1, ""),
                                                   (2, "", 1, "")):
             with self.subTest(rc=rc):
                 r = shell('set -o pipefail\n'
-                          'pgrep() { printf "%s" "$OUTPUT"; return "$RC"; }; export -f pgrep\n'
-                          'us() { bash -c "$1"; }\n' + query + '\nkwin_pid',
+                          'chroot() { [ "$*" = "/data/powos/root /usr/bin/pgrep -u powos -x kwin_wayland" ] || exit 99; printf "%s" "$OUTPUT"; return "$RC"; }; export -f chroot\n'
+                          'us() { echo WRONG-TRANSPORT; return 99; }; sh_() { bash -c "$1"; }\n' + query + '\nkwin_pid',
                           {"RC": str(rc), "OUTPUT": output})
                 self.assertEqual(r.returncode, expected_rc, r.stderr)
                 self.assertEqual(r.stdout.strip(), expected)
         for response in ('return 124', 'echo garbage', ':'):
-            r = shell('us() { ' + response + '; }\n' + query + '\nkwin_pid')
+            r = shell('sh_() { ' + response + '; }\n' + query + '\nkwin_pid')
             self.assertEqual(r.returncode, 1)
             self.assertNotIn("none", r.stdout)
         setup = HUNG[HUNG.index('K0=$(kwin_pid)'):HUNG.index('# No cleanup is armed')]
@@ -66,6 +66,25 @@ class VerifySetup(unittest.TestCase):
         self.assertEqual(r.returncode, 1)
         self.assertIn("FAIL: could not query", r.stdout)
         self.assertNotIn("ENV:", r.stdout)
+
+    def test_ownership_guards_use_authoritative_lookup(self):
+        query = function(HUNG, "linux_pids", 'killers() {')
+        kwrite_guard = HUNG[HUNG.index('existing=$(linux_pids'):HUNG.index('I0=$(irq)')]
+        kate_guard = HUNG[HUNG.index('  kate_before=$(linux_pids'):HUNG.index('  [ "$(plaunch')]
+        for app, guard in (("kwrite", kwrite_guard), ("kate", kate_guard)):
+            for response, owns in (("echo none", True), ("echo 123", False), ("return 124", False)):
+                with self.subTest(app=app, response=response):
+                    # Session-user lookup lies about absence. It must never be used.
+                    r = shell('us() { echo none; }; sh_() { ' + response + '; }\n'
+                              'fail() { echo FAIL; exit 1; }; KATE_MINE=0\n' + query +
+                              '\n' + guard + '\necho accepted:$KATE_MINE')
+                    if app == "kwrite":
+                        self.assertEqual("accepted:" in r.stdout, owns)
+                    else:
+                        self.assertEqual("accepted:1" in r.stdout, owns)
+                        if response == "return 124":
+                            self.assertEqual(r.returncode, 1)
+                    self.assertNotIn("restored", r.stdout)
 
     def test_restore_only_after_setup_and_once(self):
         restore = function(HUNG, "restore", '. "$here/window-lock.sh"')
