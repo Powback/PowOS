@@ -21,9 +21,11 @@ class Contract(unittest.TestCase):
         receiver = (ENGINE / 'src/main/java/andro/marchy/stream/PowStreamReceiver.java').read_text()
         self.assertIn('Thread.currentThread() != owner', core)
         self.assertLess(core.index('handle = 0;'), core.index('closeNative(old)'))
-        self.assertIn('worker.postAtFrontOfQueue(this::finish)', receiver)
+        self.assertIn('lifecycle.requestClose(() -> worker.postAtFrontOfQueue(() -> {', receiver)
+        self.assertIn('lifecycle.closingOnWorker(() -> report(State.CLOSING,', receiver)
+        self.assertIn('if (!lifecycle.finishOnWorker()) return;', receiver)
         self.assertIn('worker.removeCallbacksAndMessages(null)', receiver)
-        self.assertIn('source != codec || closing.get()', receiver)
+        self.assertIn('source != codec || lifecycle.isClosing()', receiver)
         self.assertIn('stopped.await(timeoutMs, TimeUnit.MILLISECONDS)', receiver)
         self.assertNotIn('surface.release()', receiver)
 

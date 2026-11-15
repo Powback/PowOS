@@ -9,7 +9,6 @@ import java.nio.ByteBuffer;
 import java.util.ArrayDeque;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
-import java.util.concurrent.atomic.AtomicBoolean;
 
 /** Transport + async hardware decoder on an EXISTING window Surface. No auth acquisition or UI. */
 public final class PowStreamReceiver implements AutoCloseable {
@@ -23,7 +22,7 @@ public final class PowStreamReceiver implements AutoCloseable {
     private final HandlerThread thread = new HandlerThread("PowStreamReceiver");
     private final Handler worker;
     private final Surface surface; // Borrowed: never release the caller's Surface.
-    private final AtomicBoolean closing = new AtomicBoolean();
+    private final ReceiverLifecycle lifecycle = new ReceiverLifecycle();
     private final CountDownLatch stopped = new CountDownLatch(1);
     private final ArrayDeque<Integer> inputs = new ArrayDeque<>();
     private final H264Continuity continuity = new H264Continuity();
@@ -46,7 +45,7 @@ public final class PowStreamReceiver implements AutoCloseable {
         byte[] pin = certSha256.clone();
         thread.start(); worker = new Handler(thread.getLooper());
         worker.post(() -> {
-            if (closing.get()) return;
+            if (lifecycle.isClosing()) return;
             try {
                 core = new PowStreamCore(endpoint, token, pin);
                 tick();
@@ -58,7 +57,7 @@ public final class PowStreamReceiver implements AutoCloseable {
     private void report(State state, String detail) { progress = new Progress(state, detail); }
 
     private void tick() {
-        if (closing.get()) return;
+        if (lifecycle.isClosing()) return;
         try {
             if (!surface.isValid()) throw new IllegalStateException("Surface destroyed");
             int state = core.state();
@@ -66,7 +65,7 @@ public final class PowStreamReceiver implements AutoCloseable {
             if (state == 1 && progress.state == State.CONNECTING) report(State.WAITING_IDR, "Connected; awaiting SPS/PPS + IDR");
             if (!pending) receive();
             feed();
-            if (!closing.get()) worker.postDelayed(this::tick, 4);
+            if (!lifecycle.isClosing()) worker.postDelayed(this::tick, 4);
         } catch (Exception e) { fail("Receive/decode failed"); }
     }
     private void receive() throws Exception {
@@ -119,22 +118,22 @@ public final class PowStreamReceiver implements AutoCloseable {
     }
     private final MediaCodec.Callback callback = new MediaCodec.Callback() {
         @Override public void onInputBufferAvailable(MediaCodec source, int index) {
-            if (source != codec || closing.get()) return;
+            if (source != codec || lifecycle.isClosing()) return;
             try { inputs.addLast(index); feed(); }
             catch (Exception e) { fail("Decoder input failed"); }
         }
         @Override public void onOutputBufferAvailable(MediaCodec source, int index, MediaCodec.BufferInfo info) {
-            if (source != codec || closing.get()) return;
+            if (source != codec || lifecycle.isClosing()) return;
             try {
                 source.releaseOutputBuffer(index, true);
                 report(State.RENDERED, "Decoded output submitted to Surface (not a glass timestamp)");
             } catch (Exception e) { fail("Decoder output failed"); }
         }
         @Override public void onOutputFormatChanged(MediaCodec source, MediaFormat format) {
-            if (source == codec && !closing.get()) report(State.DECODING, "Decoder output format changed");
+            if (source == codec && !lifecycle.isClosing()) report(State.DECODING, "Decoder output format changed");
         }
         @Override public void onError(MediaCodec source, MediaCodec.CodecException error) {
-            if (source == codec && !closing.get()) fail("MediaCodec failure; close and reopen with fresh bootstrap");
+            if (source == codec && !lifecycle.isClosing()) fail("MediaCodec failure; close and reopen with fresh bootstrap");
         }
     };
     private void releaseCodec() {
@@ -143,15 +142,16 @@ public final class PowStreamReceiver implements AutoCloseable {
         if (old != null) old.release();
     }
     private void fail(String detail) {
+        if (!lifecycle.failOnWorker()) return;
         report(State.FAILED, detail);
-        closing.set(true);
         finish();
     }
     /** Nonblocking cancellation. No JNI call can race native close: all are on worker. */
     @Override public void close() {
-        if (!closing.compareAndSet(false, true)) return;
-        report(State.CLOSING, "Cancelling receiver");
-        worker.postAtFrontOfQueue(this::finish);
+        lifecycle.requestClose(() -> worker.postAtFrontOfQueue(() -> {
+            lifecycle.closingOnWorker(() -> report(State.CLOSING, "Cancelling receiver"));
+            finish();
+        }));
     }
     /** Bounded wait for callers OFF the UI/receiver thread. False means resources still closing.
      * Android vendor codec release is not a hard-realtime operation; never free Surface on timeout.
@@ -162,8 +162,9 @@ public final class PowStreamReceiver implements AutoCloseable {
         return stopped.await(timeoutMs, TimeUnit.MILLISECONDS);
     }
     private void finish() {
+        if (!lifecycle.finishOnWorker()) return;
         worker.removeCallbacksAndMessages(null);
-        boolean failed = progress.state == State.FAILED;
+        boolean failed = lifecycle.failedOnWorker();
         try {
             if (core != null) { PowStreamCore old = core; core = null; old.close(); }
         } catch (Exception e) { failed = true; }
