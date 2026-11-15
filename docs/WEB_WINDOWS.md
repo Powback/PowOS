@@ -543,6 +543,15 @@ lift is ordinary geometry in `w.f`. Plasma does not do this, but on a phone it i
 
 ### Title bar: native parity (TB1/TB2, 2026-11-14)
 
+Verification delivery (11-15): the 03:20 titlebar run displayed Chrome `ERR_EMPTY_RESPONSE` before cleanup;
+its native hide/reveal failures do **not** establish an immersive fault. `adb reverse` through powos-vadb
+terminates in the adb container namespace, not Mac loopback. `titlebar-autohide.sh` now serves a unique document
+on phone loopback from PowOS's chroot (like `window-max.sh`), with a bounded server and owned cleanup. Read-only
+Chrome CDP (not home's WebView) must confirm the visible, loaded document before input, then real
+`document.fullscreenElement` plus fullscreen events/promise outcomes before native assertions and after exit.
+Delivery/navigation diagnostics are saved beside the screenshots. Device-free regressions cover these preconditions;
+the native behavior still needs a queued phone run. No native implementation changed for this delivery fix.
+
 The owner, 11-14: **"the titlebar isnt acting like the native one, with autohide on fullscreen apps etc, slide to
 reveal"**.
 

@@ -425,3 +425,5 @@ rest. Keep the blur - make it cheap.
 - Ship only pushed commits (ship-apk enforces it); commit, rebase, push, then ship.
 - Cross-cutting causes (endless animations, nativeglass MutationObserver, inherited custom properties): handbook
   "Rendering cost". Each new one found goes there, not only here.
+
+- Verify fixture delivery: `adb reverse` through powos-vadb ends in the adb container, not Mac loopback. Use the phone-local PowOS Python pattern (`window-max.sh`, `titlebar-autohide.sh`); confirm the unique document through Chrome's `chrome_devtools_remote`, not home's WebView, before input/native verdicts.

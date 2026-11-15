@@ -1,0 +1,25 @@
+<!doctype html><meta name="viewport" content="width=device-width">
+<title>Titlebar fullscreen check</title>
+<body style="margin:0;height:100vh;background:#203040;color:#fff;font:24px sans-serif;display:grid;place-items:center">tap: full screen</body>
+<script>
+const tb = {token: location.pathname.split('/')[1], ready: false, action: '', outcome: '', events: [], error: ''};
+document.addEventListener('fullscreenchange', () => tb.events.push({type: 'change', full: !!document.fullscreenElement}));
+document.addEventListener('fullscreenerror', () => { tb.error = 'fullscreenerror'; tb.events.push({type: 'error'}); });
+document.body.onclick = async () => {
+  tb.action = document.fullscreenElement ? 'exit' : 'enter';
+  tb.outcome = 'pending';
+  try {
+    await (tb.action === 'exit' ? document.exitFullscreen() : document.documentElement.requestFullscreen());
+    tb.outcome = 'resolved';
+  } catch (e) { tb.outcome = 'rejected'; tb.error = String(e); }
+};
+window.tbProbe = (stage, token) => {
+  const full = !!document.fullscreenElement;
+  const loaded = tb.token === token && tb.ready && document.readyState === 'complete' && document.visibilityState === 'visible';
+  const clean = !tb.error && tb.outcome !== 'rejected';
+  const transitioned = action => tb.action === action && tb.outcome === 'resolved' && tb.events.some(e => e.type === 'change' && e.full === full);
+  return {ok: loaded && clean && (stage === 'load' ? !full && !tb.action : stage === 'enter' ? full && transitioned('enter') : !full && transitioned('exit')),
+    href: location.href, state: document.readyState, visible: document.visibilityState, full, ...tb};
+};
+tb.ready = true;
+</script>

@@ -6,6 +6,7 @@ from pathlib import Path
 import subprocess
 import shlex
 import unittest
+import tempfile
 
 ROOT = Path(__file__).resolve().parents[2]
 VERIFY = ROOT / 'tools/phone/verify'
@@ -88,7 +89,7 @@ class Ownership(unittest.TestCase):
         functions = TITLE[TITLE.index('wwc_extra()'):TITLE.index('until_()')]
         code = '''
 set -uo pipefail
-CHROME=com.android.chrome CHROME_OWNED=0 REVERSE_OWNED=0 SRV='' PAGE='' PORT=8765
+CHROME=com.android.chrome CHROME_OWNED=0 SERVER_OWNED=0 FORWARD='' PAGE=''
 pidof() {
  case "$MODE" in
  stopped) return 1 ;; running) echo 123; return 0 ;;
@@ -138,7 +139,93 @@ wwc_skip() { echo "SKIP $*"; wwc_extra; exit 3; }
     def test_claim_precedes_launch_in_parent(self):
         self.assertIn('chrome_claim   # parent shell', TITLE)
         self.assertLess(TITLE.index('\nchrome_claim   #'), TITLE.index('\nWID=$(ww_open'))
-        self.assertIn('CHROME_OWNED=0 REVERSE_OWNED=0', TITLE)
+        self.assertIn('CHROME_OWNED=0 SERVER_OWNED=0', TITLE)
+
+
+class Delivery(unittest.TestCase):
+    def test_phone_namespace_and_bounded_owned_server(self):
+        server = (VERIFY / 'titlebar-server.py').read_text()
+        self.assertNotIn('"$A" reverse', TITLE)
+        self.assertNotIn('python3 -m http.server', TITLE)
+        self.assertIn('ww_us "mktemp -d /tmp/titlebar-$TOKEN.XXXXXX"', TITLE)
+        self.assertIn("setsid -f timeout 245 python3", TITLE)
+        self.assertIn("HTTPServer(('127.0.0.1', 0)", server)
+        self.assertIn('time.monotonic() + 240', server)
+        self.assertIn("(root / 'stop').exists()", server)
+        self.assertNotIn('pkill -', TITLE)
+
+    def test_owned_server_and_forward_cleanup_once(self):
+        functions = TITLE[TITLE.index('wwc_extra()'):TITLE.index('chrome_claim()')]
+        with tempfile.TemporaryDirectory() as tmp:
+            r = bash("""
+set -u
+CHROME_OWNED=0 SERVER_OWNED=1 FORWARD=12345 PAGE=/tmp/owned OUT="$TEST_OUT"
+A=adb_stub
+adb_stub() { echo "ADB $*" >> "$TEST_OUT/adb.log"; }
+ww_us() { echo "PHONE $*" >&2; }
+""" + functions + '\nwwc_extra; wwc_extra', TEST_OUT=tmp)
+            self.assertEqual(Path(tmp, 'adb.log').read_text().splitlines(), ['ADB forward --remove tcp:12345'])
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertEqual(r.stderr.count('PHONE '), 1)
+        self.assertIn("touch '/tmp/owned/stop'", r.stderr)
+        self.assertIn("if [ -f '/tmp/owned/done' ]", r.stderr)
+
+    def test_chrome_socket_and_ordered_preconditions(self):
+        self.assertIn('forward tcp:0 localabstract:chrome_devtools_remote', TITLE)
+        self.assertIn('cdp_warm_run "$FORWARD"', TITLE)
+        self.assertIn('chrome_cdp eval "$URL"', TITLE)
+        self.assertLess(TITLE.index('require_page load\nuntil_ 8 laid'), TITLE.index('sh_ "input tap'))
+        self.assertLess(TITLE.index('require_page enter\nuntil_'), TITLE.index('until_ 4 hid'))
+        self.assertLess(TITLE.index('require_page exit'), TITLE.index('until_ 4 laid'))
+
+    def test_load_gate_rejects_error_missing_and_nonboolean_results(self):
+        functions = TITLE[TITLE.index('page_ready()'):TITLE.index('require_page()')]
+        with tempfile.TemporaryDirectory() as tmp:
+            for result, expected in [('no page chrome-error://chromewebdata/', 1),
+                                     ('{"ok":false,"error":"fixture missing"}', 1),
+                                     ('{"ok":"true"}', 1), ('{"ok":true}', 0)]:
+                r = bash('OUT="$TEST_OUT"; URL=http://test; TOKEN=owned; '
+                         'chrome_cdp() { printf "%s" "$RESULT"; };\n' + functions +
+                         '\npage_ready load', TEST_OUT=tmp, RESULT=result)
+                self.assertEqual(r.returncode, expected, r.stderr)
+
+    def test_document_states_and_real_fullscreen(self):
+        html = (VERIFY / 'titlebar-page.html').read_text()
+        script = html.split('<script>')[1].split('</script>')[0]
+        js = """
+const assert=require('node:assert/strict');
+const events={}; let reject=false;
+global.location={pathname:'/owned/tb.html',href:'http://127.0.0.1:1/owned/tb.html'};
+global.window=global;
+global.document={readyState:'loading',visibilityState:'visible',fullscreenElement:null,
+ body:{}, addEventListener:(k,f)=>events[k]=f,
+ documentElement:{requestFullscreen:async()=>{if(reject)throw Error('denied')}},
+ exitFullscreen:async()=>{}};
+""" + script + """
+(async()=>{
+ assert.equal(tbProbe('load','owned').ok,false);
+ document.readyState='complete';
+ assert.equal(tbProbe('load','wrong').ok,false);
+ assert.equal(tbProbe('load','owned').ok,true);
+ document.visibilityState='hidden'; assert.equal(tbProbe('load','owned').ok,false);
+ document.visibilityState='visible';
+ await document.body.onclick();
+ assert.equal(tbProbe('enter','owned').ok,false); // resolved promise is NOT fullscreen
+ document.fullscreenElement={}; events.fullscreenchange();
+ assert.equal(tbProbe('enter','owned').ok,true);
+ await document.body.onclick();
+ assert.equal(tbProbe('exit','owned').ok,false); // promise alone is NOT exit
+ document.fullscreenElement=null; events.fullscreenchange();
+ assert.equal(tbProbe('exit','owned').ok,true);
+ reject=true; await document.body.onclick();
+ assert.equal(tbProbe('enter','owned').outcome,'rejected');
+ assert.equal(tbProbe('enter','owned').ok,false);
+ events.fullscreenerror(); assert.equal(tbProbe('enter','owned').error,'fullscreenerror');
+ assert.equal(tbProbe('enter','owned').ok,false);
+})().catch(e=>{console.error(e);process.exitCode=1});
+"""
+        r = subprocess.run(['node', '-e', js], capture_output=True, text=True)
+        self.assertEqual(r.returncode, 0, r.stderr)
 
 
 if __name__ == '__main__':
