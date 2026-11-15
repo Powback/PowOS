@@ -86,6 +86,53 @@ class VerifySetup(unittest.TestCase):
                             self.assertEqual(r.returncode, 1)
                     self.assertNotIn("restored", r.stdout)
 
+    def test_process_identity_states(self):
+        fn = function(HUNG, "proc_state", "killers() {")
+        for record, expected in (("S 90", "live:S"), ("T 90", "live:T"),
+                                 ("Z 90", "zombie"), ("absent", "absent"),
+                                 ("S 91", "reused")):
+            r = shell('proc_record() { echo "$RECORD"; }\n' + fn + '\nproc_state 10 90',
+                      {"RECORD": record})
+            self.assertEqual(r.stdout.strip(), expected)
+
+    def test_retirement_samples_windows_even_with_live_helper(self):
+        fn = function(HUNG, "retirement_sample", "retire_client() {")
+        for state, gone, success in (("live:S", "true", False), ("zombie", "true", True),
+                                     ("absent", "true", True), ("reused", "true", True),
+                                     ("absent", "false", False), ("unknown", "true", False)):
+            r = shell('P=1; PSTART=10; KW=w1; HELPERS="2:20"; PROMPT_WINDOWS=w2\n'
+                      'proc_state() { [ "$1" = 1 ] && echo absent || echo "$STATE"; }\n'
+                      'wwhost() { echo sampled-$1 >&2; echo "$GONE"; }\n'
+                      'hcall() { echo [inventory]; }; remember_helpers() { :; }; log() { echo "$*"; }\n'
+                      + fn + '\nretirement_sample', {"STATE": state, "GONE": gone})
+            self.assertEqual(r.returncode == 0, success, r.stdout)
+            self.assertIn("sampled-w1", r.stderr)
+            self.assertIn("sampled-w2", r.stderr)
+            self.assertIn('windows=[inventory]', r.stdout)
+
+    def test_kill_failure_records_evidence_before_failure(self):
+        fn = function(HUNG, "retire_client", "# live <w-id>")
+        r = shell('P=1; PSTART=10\nkill_owned_client() { return 1; }\n'
+                  'retirement_sample() { echo evidence; return 1; }\n'
+                  'fail() { echo "FAIL $*"; exit 1; }\n' + fn + '\nretire_client')
+        self.assertEqual(r.returncode, 1)
+        self.assertTrue(r.stdout.startswith("evidence\nFAIL SIGKILL failed"))
+
+    def test_reused_pid_never_signalled(self):
+        fn = function(HUNG, "kill_owned_client", "retirement_sample() {")
+        r = shell('P=1; PSTART=10\nproc_state() { echo reused; }\n'
+                  'sh_() { echo SIGNAL; }; log() { echo "$*"; }\n' + fn + '\nkill_owned_client')
+        self.assertEqual(r.returncode, 1)
+        self.assertNotIn("SIGNAL", r.stdout)
+
+    def test_helper_lookup_has_exact_client_argument(self):
+        fn = function(HUNG, "killers", "remember_helpers() {")
+        r = shell('P=123\nsh_() { echo "$1" >&2; echo none; }\n' + fn + '\nkillers')
+        self.assertEqual(r.returncode, 0)
+        self.assertIn("--pid 123( |$)", r.stderr)
+        self.assertIn("(^|/)kwin_killer_helper ", r.stderr)
+        self.assertEqual(r.stdout, "")
+
     def test_restore_only_after_setup_and_once(self):
         restore = function(HUNG, "restore", '. "$here/window-lock.sh"')
         with tempfile.TemporaryDirectory() as tmp:
