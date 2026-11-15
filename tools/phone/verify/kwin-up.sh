@@ -14,8 +14,8 @@
 #   kwin_up MIN             both: install, and restart only if the running KWin is stale (older package or old files).
 #   kwin_state              "kwin=<pid|-> kwin_new=<0|1>" (1: its libkwin is the installed file, not a deleted one).
 KWIN_ROOT=$(cd "$T/../.." && pwd)
-_kw_sh() { "$T/adb.sh" shell "su -c '$*'" 2>/dev/null | tr -d '\r'; }
-_kw_rs() { printf '%s\n' "$1" > "$OUT/kw-r.sh"; "$T/root.sh" "$OUT/kw-r.sh" 2>/dev/null | grep -v "file pushed" | tr -d '\r'; }
+_kw_sh() ( set -o pipefail; "$T/adb.sh" shell "su -c '$*'" 2>/dev/null | tr -d '\r'; )
+_kw_rs() ( set -o pipefail; printf '%s\n' "$1" > "$OUT/kw-r.sh"; "$T/root.sh" "$OUT/kw-r.sh" 2>/dev/null | sed '/file pushed/d' | tr -d '\r'; )
 _kw_us() { printf '%s\n' "$1" > "$OUT/kw-u.sh"; "$T/user.sh" "$OUT/kw-u.sh" 2>/dev/null | grep -v "file pushed" | tr -d '\r'; }
 _kw_log() { if declare -F log >/dev/null; then log "$*"; else echo "$*"; fi; }
 _kw_fail() { if declare -F fail >/dev/null; then fail "$*"; else echo "FAIL: $*"; fi; exit 1; }  # some callers' fail goes on
@@ -30,12 +30,24 @@ kwin_install() {
   KWIN_HAD=$(kwin_installed)
   _kw_log "kwin installed $KWIN_HAD, newest package $want (${pkg:-none})"
   if [ -n "${pkg:-}" ] && [ "$KWIN_HAD" != "$want" ] && [ "$(_kw_rs "vercmp '$want' '$KWIN_HAD'" | tail -1)" -gt 0 ] 2>/dev/null; then
-    "$T/adb.sh" push "$pkg" /data/local/tmp/powos-kwin.pkg.tar.xz >/dev/null
-    _kw_sh "mv /data/local/tmp/powos-kwin.pkg.tar.xz /data/powos/root/var/tmp/"
-    _kw_rs "set -e; mkdir -p /var/cache/powos
+    local rc installed
+    _kw_log "kwin transfer: start $want (deadline ${POWOS_ADB_TRANSFER_TIMEOUT_S:-120}s)"
+    if "$T/adb.sh" push "$pkg" /data/local/tmp/powos-kwin.pkg.tar.xz >/dev/null; then
+      _kw_log "kwin transfer: complete $want"
+    else
+      rc=$?; _kw_log "FAIL kwin transfer: rc=$rc; install not started"; exit "$rc"
+    fi
+    _kw_log "kwin staging: move package into root"
+    if _kw_sh "mv /data/local/tmp/powos-kwin.pkg.tar.xz /data/powos/root/var/tmp/"; then :
+    else rc=$?; _kw_log "FAIL kwin staging: rc=$rc; install not started"; exit "$rc"; fi
+    _kw_log "kwin install: start $want (backup + pacman)"
+    if installed=$(_kw_rs "set -e; mkdir -p /var/cache/powos
 pacman -Qlq kwin | while read -r f; do [ -f \"\$f\" ] && echo \"\$f\"; done | tar -cf /var/cache/powos/kwin-$KWIN_HAD-files.tar -T -
-pacman -U --noconfirm /var/tmp/powos-kwin.pkg.tar.xz >/dev/null && rm -f /var/tmp/powos-kwin.pkg.tar.xz
-pacman -Q kwin" | tail -1 | while read -r l; do _kw_log "installed: $l"; done
+pacman -U --noconfirm /var/tmp/powos-kwin.pkg.tar.xz >/dev/null
+rm -f /var/tmp/powos-kwin.pkg.tar.xz
+pacman -Q kwin"); then
+      _kw_log "kwin install: complete $(printf '%s\n' "$installed" | tail -1)"
+    else rc=$?; _kw_log "FAIL kwin install: rc=$rc"; exit "$rc"; fi
   fi
   local kv; kv=$(kwin_installed)
   [ "$(_kw_rs "vercmp '$kv' '$min'" | tail -1)" -ge 0 ] 2>/dev/null || _kw_fail "the installed KWin $kv is older than $min"

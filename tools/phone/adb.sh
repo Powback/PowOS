@@ -171,7 +171,75 @@ if [ ${#mounts[@]} -eq 0 ] && [ ${#cp_in[@]} -eq 0 ] && [ ${#cp_out[@]} -eq 0 ];
 fi
 run=(--network container:powos-vadb ${mounts[@]+"${mounts[@]}"} --entrypoint /opt/android-sdk/platform-tools/adb
   android-app-dev-android-builder:latest -s "$serial" "${args[@]}")
-[ ${#cp_in[@]} -eq 0 ] && [ ${#cp_out[@]} -eq 0 ] && exec docker run --rm -i "${run[@]}"
+if [ ${#cp_in[@]} -eq 0 ] && [ ${#cp_out[@]} -eq 0 ]; then
+  # A Docker client dying does NOT stop its container. Own just this transfer,
+  # including when the queue cancels its host process tree. No shared build slot:
+  # a file transfer must not serialize builds or unrelated service work.
+  # The daemon-side timeout also bounds work if the host supervisor is SIGKILLed.
+  exec python3 -c '
+import os, signal, subprocess, sys, time, uuid
+budget = os.environ.get("POWOS_ADB_TRANSFER_TIMEOUT_S", "120")
+if not budget.isdigit() or int(budget) < 1:
+    sys.exit("adb.sh: POWOS_ADB_TRANSFER_TIMEOUT_S must be a positive integer")
+budget = int(budget)
+name = "powos-adb-transfer-" + uuid.uuid4().hex
+parent = os.getppid()
+status = 0
+child = None
+def cancelled(sig, frame):
+    global status
+    if not status:
+        status = 128 + sig
+for sig in (signal.SIGTERM, signal.SIGINT, signal.SIGHUP):
+    signal.signal(sig, cancelled)
+deadline = time.monotonic() + budget
+def run(argv):
+    global child, status
+    if status:
+        return status
+    child = subprocess.Popen(argv, stdout=subprocess.DEVNULL if argv[1] == "create" else None)
+    while child.poll() is None:
+        if os.getppid() != parent and not status:
+            status = 143
+        if time.monotonic() >= deadline and not status:
+            print("adb.sh: transfer timed out after %ss" % budget, file=sys.stderr, flush=True)
+            status = 124
+        if status:
+            return status
+        time.sleep(0.05)
+    return child.returncode if child.returncode >= 0 else 128 - child.returncode
+try:
+    args = sys.argv[1:]
+    # Keep the existing mount/network/argv handling; wrap only the container command.
+    entry = args.index("--entrypoint")
+    args[entry + 1] = "/usr/bin/timeout"
+    image = entry + 2
+    args[image + 1:image + 1] = ["--signal=TERM", "--kill-after=5", str(budget),
+                                    "/opt/android-sdk/platform-tools/adb"]
+    rc = run(["docker", "create", "--name", name, "--rm", "-i"] + args)
+    if not rc and not status:
+        rc = run(["docker", "start", "-ai", name])
+finally:
+    # Do not let repeated queue signals interrupt cleanup or replace the original rc.
+    for sig in (signal.SIGTERM, signal.SIGINT, signal.SIGHUP):
+        signal.signal(sig, signal.SIG_IGN)
+    if child is not None and child.poll() is None:
+        child.terminate()
+        try:
+            child.wait(timeout=2)
+        except subprocess.TimeoutExpired:
+            child.kill()
+            child.wait()
+    # rm -f synchronously kills/removes ONLY our unique container, never powos-vadb.
+    try:
+        # --rm may already have removed a completed container.
+        subprocess.run(["docker", "rm", "-f", name], stdout=subprocess.DEVNULL,
+                       stderr=subprocess.DEVNULL, timeout=5)
+    except subprocess.TimeoutExpired:
+        print("adb.sh: transfer cleanup timed out: " + name, file=sys.stderr)
+sys.exit(status or rc)
+' "${run[@]}"
+fi
 # docker cp: create the container, copy the files in, run it attached, copy results out, remove it.
 c=$(docker create -i "${run[@]}"); sk=$(mktemp -d)
 trap 'docker rm -f "$c" >/dev/null 2>&1 || true; rm -rf "$sk"' EXIT
