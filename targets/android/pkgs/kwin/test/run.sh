@@ -6,5 +6,7 @@
 set -euo pipefail
 here=$(cd "$(dirname "$0")/.." && pwd)
 tree=$("$here/src-tree.sh" "${KWIN_TREE:-$here/out/src-tree}" | grep '^/' | head -1 | cut -d' ' -f1)
+# Structural only for KillPrompt; the real two-protocol hung-client gate is still mandatory.
+python3 -I "$here/test/killprompt-source-test.py" "$tree"
 docker run --rm -v "$here/test:/test:ro" -v "$tree/src/backends/anland:/anland:ro" -v "$tree/src/utils:/utils:ro" -w /tmp gcc:14 sh -c \
   'gcc -std=gnu11 -Wall -Wextra -I/anland -o r /test/reconnect-test.c /anland/display_producer.c /anland/socket_utils.c -lpthread && ./r && g++ -std=c++17 -Wall -Wextra -Werror -I/utils -o s /test/xnativesnap-test.cpp && ./s && g++ -std=c++17 -Wall -Wextra -Werror -I/anland -o t /test/task-policy-test.cpp && ./t && g++ -std=c++17 -Wall -Wextra -Werror -I/utils -o f /test/fullscreenleave-test.cpp && ./f'

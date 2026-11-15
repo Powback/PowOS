@@ -1239,3 +1239,44 @@ pairing (owner 11-09): pairing makes them available, the user picks them.
 - **Not yet**: live state (running/asleep) on the icon and tap-to-wake, pinning to the home grid (ShellHome pins
   Android/Linux shortcuts only; dock and quick launch take it), SVG/data: icons (the letter icon shows), PowApps
   reading the launcher's installed list (it keeps its own).
+
+
+## Hung-client helper retirement (2026-11-15, KWin 6.7.5-3.80)
+
+The 3.79 XCB check `~/.cache/powos-verify-queue/done/20261115-020427-36457-a-hung-game-crashes-kwin-and-kills-all-linux-app.log`
+failed retirement: KWrite PID 6267 was absent and window w16 gone, but the exact helper
+8887 (start time 4200956) remained `live:S` through the deadline. Kate w17 rendered and
+KWin PID 11055 survived. The companion full log is
+`~/.cache/powos-verify/kwin-hung-client-1115-0205/kwin.log`. This run establishes an orphaned
+helper, not a KWin crash; it stopped on XCB, so does not establish the Wayland result.
+
+Source inspection: X11 `releaseWindow`/`destroyWindow` and `XdgSurfaceWindow::destroyWindow`
+emit `Window::closed()` before `unref()`. Upstream KillPrompt did not listen to close;
+pong and the X11/XdgToplevel destructors only called `quit()` (QProcess::terminate).
+A logically deleted Window retained by references is the leading explanation for the
+missing retirement, **not runtime-proven**: that log does not trace close delivery,
+reference counts or destructor entry. No reference-retention cause is claimed fixed.
+
+Patch 0073 retires the owned helper on logical close using the owned QProcess as the
+connection context (KillPrompt is not a QObject). Close is terminal for that owner;
+ordinary pong retirement still permits a future prompt. Repeated quit is idempotent.
+Quit during Starting is latched and honored on `started`; a second start cannot race
+an existing Starting process. No PID is saved/signaled, no broad process cleanup,
+blocking wait, permission changes, or forced-kill fallback is introduced. This is an
+owner-lifecycle correction, not a platform workaround (no new HACK registry entry).
+
+Diagnostics distinguish `owner closed`, `late start after quit`, `helper error`,
+`helper retired`, and `helper still active after quit` (a non-blocking, context-bound
+3-second diagnostic timer only). A close log followed by a still-active warning means
+close was delivered but retirement did not complete; absence of the close log is a
+different investigation. A terminate request is not represented as proof of exit.
+
+Validation: `targets/android/pkgs/kwin/test/killprompt-source-test.py TREE` checks the
+canonical patched source for close-before-unref in both protocols, process-scoped
+connections, close/Starting guards, idempotence, diagnostics and preserved destructor
+paths. **Structural only:** it does not execute Qt signals, hold an actual Window
+reference, create a real Starting process, compile KWin, or prove helper termination.
+No build/deploy/device check was run by the patch agent. The coordinator must build
+with `targets/android/build-pkgs.sh kwin`, then run the unchanged
+`tools/phone/verify/kwin-hung-client.sh` via the verify queue for **both XCB and Wayland**;
+exact helper identity retirement, Kate rendering and KWin survival remain required.

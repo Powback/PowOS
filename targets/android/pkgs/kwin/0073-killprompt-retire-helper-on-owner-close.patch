@@ -1,0 +1,110 @@
+diff --git a/src/killprompt.cpp b/src/killprompt.cpp
+index 6256e49..1fbb9e6 100644
+--- a/src/killprompt.cpp
++++ b/src/killprompt.cpp
+@@ -17,7 +17,9 @@
+ #include "x11window.h"
+ #endif
+ 
++#include <QDebug>
+ #include <QDir>
++#include <QTimer>
+ #include <QFileInfo>
+ #include <QString>
+ 
+@@ -33,6 +35,39 @@ KillPrompt::KillPrompt(Window *window)
+     Q_ASSERT(qobject_cast<XdgToplevelWindow *>(window));
+ #endif
+ 
++    // A closed Window can be retained by effects. Retire its helper at logical
++    // close, not only when the Window (and this KillPrompt) is destroyed.
++    // KillPrompt is not a QObject: the owned process is the connection context.
++    QObject::connect(window, &Window::closed, &m_process, [this] {
++        m_ownerClosed = true;
++        qInfo() << "KillPrompt: owner closed; helper" << m_process.processId() << "state" << m_process.state();
++        quit();
++    });
++    QObject::connect(&m_process, &QProcess::started, &m_process, [this] {
++        if (m_quitRequested) {
++            qInfo() << "KillPrompt: late start after quit; terminating helper" << m_process.processId();
++            m_process.terminate();
++        }
++    });
++    QObject::connect(&m_process, &QProcess::finished, &m_process, [this](int code, QProcess::ExitStatus status) {
++        m_retirementTimer.stop();
++        if (m_quitRequested) {
++            qInfo() << "KillPrompt: helper retired; ownerClosed" << m_ownerClosed << "exit" << code << status;
++        }
++    });
++    QObject::connect(&m_process, &QProcess::errorOccurred, &m_process, [this](QProcess::ProcessError error) {
++        qWarning() << "KillPrompt: helper error" << error << m_process.errorString() << "ownerClosed" << m_ownerClosed;
++    });
++    m_retirementTimer.setSingleShot(true);
++    m_retirementTimer.setInterval(3000);
++    QObject::connect(&m_retirementTimer, &QTimer::timeout, &m_process, [this] {
++        if (m_quitRequested && m_process.state() != QProcess::NotRunning) {
++            // Diagnostic only: never signal a remembered PID or block KWin.
++            qWarning() << "KillPrompt: helper still active after quit; ownerClosed" << m_ownerClosed
++                       << "helper" << m_process.processId() << "state" << m_process.state();
++        }
++    });
++
+     m_process.setProcessChannelMode(QProcess::ForwardedChannels);
+ 
+     const QFileInfo binaryInfo(KWIN_KILLER_BIN);
+@@ -52,9 +87,11 @@ bool KillPrompt::isRunning() const
+ 
+ void KillPrompt::start(quint32 timestamp)
+ {
+-    if (isRunning()) {
++    if (m_ownerClosed || m_process.state() != QProcess::NotRunning) {
+         return;
+     }
++    m_quitRequested = false;
++    m_retirementTimer.stop();
+ 
+     QProcessEnvironment env = kwinApp()->processStartupEnvironment();
+ 
+@@ -106,7 +143,18 @@ void KillPrompt::start(quint32 timestamp)
+ 
+ void KillPrompt::quit()
+ {
+-    m_process.terminate();
++    if (m_quitRequested) {
++        return;
++    }
++    m_quitRequested = true;
++    if (m_process.state() == QProcess::NotRunning) {
++        return;
++    }
++    m_retirementTimer.start();
++    if (m_process.state() == QProcess::Running) {
++        m_process.terminate();
++    }
++    // Starting has no usable child yet; started above honors this request.
+ }
+ 
+ } // namespace KWin
+diff --git a/src/killprompt.h b/src/killprompt.h
+index 64f41f9..8933ebe 100644
+--- a/src/killprompt.h
++++ b/src/killprompt.h
+@@ -7,6 +7,7 @@
+ #pragma once
+ 
+ #include <QProcess>
++#include <QTimer>
+ 
+ namespace KWin
+ {
+@@ -39,6 +40,10 @@ public:
+ 
+ private:
+     Window *m_window = nullptr;
++    bool m_ownerClosed = false;
++    bool m_quitRequested = false;
++    QTimer m_retirementTimer;
++    // Destroy the connection context first, while callback state is still alive.
+     QProcess m_process;
+ };
+ 

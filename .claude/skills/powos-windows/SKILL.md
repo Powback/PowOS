@@ -688,3 +688,9 @@ clipboard/notifications. Paused host: hotkey, dictation, theme mirror, widget pi
   surface (check linux-session.sh). Full-screen apps from Plasma still become their own tasks (deliberate).
 - Next: popups of task windows clipped (DESKTOP-NATIVE slice 4, KWin); user's decision on the design note (board
   native-desktop-architecture, waiting).
+
+- KWin helper lifecycle (0073, 3.80): `Window::closed()` precedes `unref()` on X11 release/destroy and XdgSurface
+  destroy; the Window destructor may be delayed. KillPrompt is not QObject: scope its close/started callbacks
+  to its owned QProcess, latch quit while Starting, and disallow new starts after owner close. See
+  docs/WEB_WINDOWS.md "Hung-client helper retirement"; source regression is structural, never substitutes for
+  the unchanged XCB + Wayland `kwin-hung-client.sh` device gate.
