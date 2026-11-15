@@ -2743,6 +2743,16 @@ class WebWindows(
 
     private fun onTouch(ev: MotionEvent): Boolean {
         val a = ev.actionMasked
+        // TB1 evidence: cancellation alone does not identify its owner (SystemUI, WebView,
+        // another gesture). Keep native receipt and actual status visibility separate from
+        // the app's requested hidden state. Never reveal a title bar just on CANCEL.
+        if (barsHiddenForWindow && a != MotionEvent.ACTION_MOVE) {
+            val status = web.rootWindowInsets?.isVisible(android.view.WindowInsets.Type.statusBars())
+            WindowLog.i(TAG, "TB1 input: home action=$a raw=${ev.rawX},${ev.rawY} local=${ev.x},${ev.y} fingers=${ev.pointerCount} statusVisible=$status hiddenWindows=${wins.values.filter(::barHiddenOnScreen).map { it.id }}")
+            if (a == MotionEvent.ACTION_CANCEL) main.postDelayed({
+                WindowLog.i(TAG, "TB1 input: after cancel statusVisible=${web.rootWindowInsets?.isVisible(android.view.WindowInsets.Type.statusBars())} hiddenRequested=$barsHiddenForWindow")
+            }, 100)
+        }
         imeGesture(a)
         if (popupGesture(ev)) return true
         if (a == MotionEvent.ACTION_DOWN) {

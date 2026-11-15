@@ -45,7 +45,35 @@ part() { wwel "$WID" "e=>{const b=e.querySelector(':scope > $1');if(!b)return ''
 laid() { local b; b=$(part .webwindow-title); [ "$(part .webwindow-body | cut -d' ' -f1)" = "$(echo "$b" | cut -d' ' -f2)" ] && [ "${b%% *}" -ge 0 ]; }
 hid() { [ "$(part .webwindow-body | cut -d' ' -f1)" = 0 ] && [ "$(part .webwindow-title | cut -d' ' -f2)" -le 0 ]; }
 shown() { [ "$(wwel "$WID" "e=>e.classList.contains('ww-bar-shown')")" = true ]; }
-logged() { "$A" shell "logcat -d -T '$SINCE' -s PowosWebWindows:I" 2>/dev/null | tr -d '\r' | awk -v p="$1" 'index($0, p) {f=1} END {exit !f}'; }
+# Date is not privileged. Do not nest its quotes in sh_'s su -c single quotes.
+mark_native() {
+  local stamp
+  stamp=$("$A" shell "date '+%m-%d %H:%M:%S.000'" 2>> "$OUT/native-errors.log") || return 1
+  stamp=$(printf '%s' "$stamp" | tr -d '\r')
+  [[ "$stamp" =~ ^[0-9]{2}-[0-9]{2}\ [0-9]{2}:[0-9]{2}:[0-9]{2}\.000$ ]] || return 1
+  SINCE=$stamp
+  printf '%s\n' "$SINCE" > "$OUT/native-since.txt"
+}
+native_snapshot() {
+  [ -n "${SINCE:-}" ] || return 1
+  "$A" shell "logcat -d -T '$SINCE' -s PowosWebWindows:I" > "$OUT/native-latest.log" 2>> "$OUT/native-errors.log" || return 1
+  # Append, rather than overwrite, so an earlier interval survives logcat rotation.
+  cat "$OUT/native-latest.log" >> "$OUT/native.log"
+}
+logged() { native_snapshot && awk -v p="$1" 'index($0, p) {f=1} END {exit !f}' "$OUT/native-latest.log"; }
+# Read-only: retain the original tap coordinates, compare with CURRENT body geometry,
+# DOM hit stack and native input windows. No synthetic click or guessed coordinate fix.
+tap_diagnostics() {
+  local label=$1
+  {
+    echo "$label tap physical=$cx,$cy display=$D"
+    wwel "$WID" "e=>{const b=e.querySelector('.webwindow-body'),r=b?.getBoundingClientRect(),s=b&&getComputedStyle(b),x=$cx/devicePixelRatio,y=$cy/devicePixelRatio;return JSON.stringify({visible:document.visibilityState,dpr:devicePixelRatio,viewport:[innerWidth,innerHeight],frame:e.className,body:r&&{x:r.x,y:r.y,width:r.width,height:r.height},style:s&&{visibility:s.visibility,display:s.display,pointerEvents:s.pointerEvents},tapCSS:[x,y],inside:!!r&&x>=r.left&&x<r.right&&y>=r.top&&y<r.bottom,hits:document.elementsFromPoint(x,y).slice(0,8).map(n=>({tag:n.tagName,id:n.id,cls:n.className}))})}"
+    wwbody "$WID"
+    wwhost "$WID" display
+  } >> "$OUT/tap-diagnostics.log" 2>&1
+  "$A" shell dumpsys input > "$OUT/input-$label.txt" 2>> "$OUT/native-errors.log"
+  native_snapshot || true
+}
 
 # Chrome has its own devtools socket. Never read fullscreen state from home's WebView.
 chrome_cdp() {
@@ -60,6 +88,7 @@ page_ready() {
 }
 require_page() {
   until_ 8 "page_ready $1" && { say "Chrome document confirmed: $1 ($URL)"; return; }
+  native_snapshot || true
   chrome_cdp pages >> "$OUT/navigation.log" 2>&1 || true
   ww_us "cat '$PAGE/server.log'" >> "$OUT/server.log"
   bad "precondition $1: Chrome document not ready/fullscreen transition unconfirmed; see navigation.log and server.log (no native verdict)"
@@ -90,7 +119,7 @@ require_page load
 ev "importShim('./ui/webwindows.tsx').then(m=>{const w=m.webWins.value.find(w=>w.id===${WID#w});if(w&&!w.restore)m.toggleMaximise(w.id);return 'ok'})" >/dev/null
 require_page load
 until_ 8 laid || bad "control: maximised, not immersive - its bar isn't laid out (bar '$(part .webwindow-title)', body '$(part .webwindow-body)')"
-SINCE=$(sh_ "date '+%m-%d %H:%M:%S.000'")
+mark_native || { bad "precondition native timestamp: invalid/failed device date (see native-errors.log); no native verdict"; wwc_end; }
 c=$(wwbody "$WID"); set -- $c; cx=$(( ($1 + $3) / 2 )) cy=$(( ($2 + $4) / 2 ))
 sh_ "input tap $cx $cy"; say "tapped the page at $cx $cy (full screen)"
 require_page enter
@@ -100,11 +129,14 @@ logged "TB1: status bar hidden" || bad "hide: the host never hid the status bar"
 before=$(part .webwindow-body)
 sh_ "input swipe $cx 4 $cx 260 250"; say "swiped down from the top edge at x $cx"
 until_ 2 shown || bad "reveal: a swipe from the top didn't slide the bar in"
+native_snapshot || bad "evidence: native reveal log capture failed (see native-errors.log)"
 [ "$(part .webwindow-body)" = "$before" ] || bad "reveal: the body moved ('$before' -> '$(part .webwindow-body)'): the bar relaid the app out"
 sleep 4
 shown && bad "idle: the slid-in bar still shows 4 s later"
 require_page enter
+tap_diagnostics before-exit
 sh_ "input tap $cx $cy"; say "tapped the page again (leave full screen)"
+tap_diagnostics after-exit
 require_page exit
 until_ 4 laid || bad "leave: 2 s after the app left full screen its bar isn't back (bar '$(part .webwindow-title)')"
 until_ 4 'logged "TB1: status bar back"' || bad "leave: the host never showed the status bar again"

@@ -228,5 +228,58 @@ global.document={readyState:'loading',visibilityState:'visible',fullscreenElemen
         self.assertEqual(r.returncode, 0, r.stderr)
 
 
+
+# Also discovered by unittest imports; move the entry point below these regressions.
+class NativeEvidence(unittest.TestCase):
+    def test_device_date_is_validated_and_transport_errors_survive(self):
+        functions = TITLE[TITLE.index('mark_native()'):TITLE.index('logged()')]
+        with tempfile.TemporaryDirectory() as tmp:
+            for value, rc in [('11-15 03:33:41.000\r', 0), ('', 1),
+                              ('date: Max 1 argument allowed', 1), ('11-15', 1)]:
+                r = bash('OUT="$TEST_OUT"; A=adb_stub; SINCE="";\n'
+                         'adb_stub() { [ "$1" = shell ] || return 9; '
+                         '[ "$2" = "date \'+%m-%d %H:%M:%S.000\'" ] || return 8; '
+                         'printf "%s\\n" "$STAMP"; };\n' + functions + '\nmark_native',
+                         TEST_OUT=tmp, STAMP=value)
+                self.assertEqual(r.returncode, rc, r.stdout + r.stderr)
+            r = bash('OUT="$TEST_OUT"; A=adb_stub; SINCE=""; '
+                     'adb_stub() { echo transport-failed >&2; return 7; };\n' + functions +
+                     '\nmark_native', TEST_OUT=tmp)
+            self.assertNotEqual(r.returncode, 0)
+            self.assertIn('transport-failed', Path(tmp, 'native-errors.log').read_text())
+
+    def test_native_log_errors_cannot_count_as_absence(self):
+        functions = TITLE[TITLE.index('native_snapshot()'):TITLE.index('# Read-only:')]
+        with tempfile.TemporaryDirectory() as tmp:
+            r = bash('OUT="$TEST_OUT"; A=adb_stub; SINCE="11-15 03:33:41.000"; '
+                     'adb_stub() { echo requested-line; echo logcat-failed >&2; return 1; };\n' +
+                     functions + '\nlogged requested-line', TEST_OUT=tmp)
+            self.assertNotEqual(r.returncode, 0)
+            self.assertIn('logcat-failed', Path(tmp, 'native-errors.log').read_text())
+
+    def test_valid_edge_pull_and_cancel_are_distinct(self):
+        # Execute the real TS module, not a copy of its decision logic. No browser/build.
+        js = r'''
+const fs=require('node:fs'), vm=require('node:vm'), assert=require('node:assert/strict');
+const ts=require(process.env.ROOT+'/shell/node_modules/typescript');
+const source=fs.readFileSync(process.env.ROOT+'/shell/ui/barreveal.ts','utf8');
+const box={exports:{},setTimeout:()=>1,clearTimeout:()=>{},require:n=>{
+ assert.equal(n,'@preact/signals'); return {signal:value=>({value,peek(){return this.value}})};
+}};
+vm.runInNewContext(ts.transpileModule(source,{compilerOptions:{module:ts.ModuleKind.CommonJS}}).outputText,box);
+const r=box.exports;
+const down=(pid,y)=>r.edgeDown(7,{pointerId:pid,clientY:y},0,0);
+down(1,2); r.edgeMove(1,27); assert.equal(r.barReveal.value,7); r.revealGone(7);
+down(2,2); r.edgeMove(2,12); r.edgeEnd(2); r.edgeMove(2,100);
+assert.equal(r.barReveal.value,null,'ordinary cancel cannot reveal, even on later move');
+down(3,50); r.edgeMove(3,100); assert.equal(r.barReveal.value,null,'body drag is not edge pull');
+down(4,2); r.edgeMove(4,-30); r.edgeEnd(4); assert.equal(r.barReveal.value,null);
+down(5,2); r.edgeMove(5,26); assert.equal(r.barReveal.value,null,'threshold unchanged');
+r.edgeMove(5,27); assert.equal(r.barReveal.value,7);
+'''
+        r = subprocess.run(['node', '-e', js], text=True, capture_output=True,
+                           env={**os.environ, 'ROOT': str(ROOT)})
+        self.assertEqual(r.returncode, 0, r.stderr)
+
 if __name__ == '__main__':
     unittest.main()
