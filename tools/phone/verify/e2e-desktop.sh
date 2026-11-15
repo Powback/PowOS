@@ -7,10 +7,10 @@
 # (board manager-end-to-end-user-journeys-on-the-phone-qa; e2e-lib.sh has the rules: screenshots + steps.txt in
 # /home/powos/design-qa/e2e-desktop/<round>/, never the verify pill, only its own windows closed, layout untouched).
 # Queue it (tools/phone/verify/e2e-queue.sh queues a whole round: the 3 parts of this one, then e2e-appapi.sh).
-#   part 1 apps:    Chrome from the drawer, Kate from search, Calculator and Dolphin from the dock (each put away in
+#   part 1 apps:    Chrome from the drawer, Kate from search, Calculator (dock if pinned, otherwise app registry) and Dolphin from the dock (each put away in
 #                   the dock after its look: a floating window covers the drawer), an image from Dolphin (KIO's open,
 #                   what Dolphin does: Gwenview), Gwenview and Dolphin closed by their title bars' close button
-#   part 2 windows: Calculator from the dock - dragged by its bar, resized by its grip (4 frames mid-drag), minimised
+#   part 2 windows: Calculator (dock if pinned, otherwise app registry) - dragged by its bar, resized by its grip (4 frames mid-drag), minimised
 #                   and restored from the dock, pages swiped beside it, moved to page 2 and back over the screen's
 #                   edge, reopened from recents, the shade pulled over it and pushed away, closed by its bar
 #   part 3 home:    scrolling inside a window (Chrome) down and up, the drawer's two-stage pull-up (the drawer; pulled
@@ -44,6 +44,27 @@ open_drawer() {
 dock_tap() { local p v; v=$(ev "document.visibilityState"); [ "$v" = visible ] || { fail "no dock to tap for $2: home's page isn't on screen ($v)"; return 1; }
   p=$(pt "$(dockel "$1")"); case $p in none|off|"") fail "no dock cell for $2 ($p)"; return 1 ;; esac
   set -- $p "$2"; tap "$1" "$2" "$3's dock cell"; }
+# A user's dock is not a fixture. Keep the real dock launch when pinned; otherwise
+# discover the installed activity in home's app registry and use its normal launch
+# path. The running-app dock entry must still pass all minimise/restore assertions.
+calculator_open() {
+  local p key result visible
+  visible=$(ev "document.visibilityState")
+  [ "$visible" = visible ] || { fail "no home to launch Calculator ($visible)"; return 1; }
+  CALC_SOURCE=dock
+  p=$(pt "$(dockel "a:$CALC/")")
+  case $p in
+    none)
+      CALC_SOURCE="home's app registry"
+      key=$(ev "importShim('./state.ts').then(m=>m.apps.value.find(a=>a.key.startsWith('a:$CALC/'))?.key||'none')")
+      case $key in "a:$CALC/"*) ;; *) fail "Calculator not found in home's apps ($key)"; return 1 ;; esac
+      result=$(ev "importShim('./state.ts').then(m=>m.launch('$key')).then(()=>'ok',e=>'ERR '+e)")
+      [ "$result" = ok ] || { fail "Calculator launch failed ($result)"; return 1; }
+      note "Calculator is not dock-pinned; launched from home's app registry without changing the dock"
+      ;;
+    *) dock_tap "a:$CALC/" Calculator || return 1 ;;
+  esac
+}
 # put_away <window key> <dock key prefix> <name>: a dock tap on the focused window's app minimises it.
 put_away() {
   local wl='l=>JSON.stringify(l.map(w=>({id:w.id,pkg:w.pkg,app:w.app,min:w.minimised,away:w.away,b:w.bounds})))'
@@ -138,13 +159,13 @@ part1_search_kate() {
     fi ;;
   esac
 }
-# Calculator from the dock (Android, every lane); Dolphin + the image it opens (Gwenview) need the Linux session -
+# Calculator (dock if pinned, otherwise app registry; Android, every lane); Dolphin + the image it opens (Gwenview) need the Linux session -
 # --android-only skips them, a NOTE not a FAIL. Split out of part1() to keep it under the length budget - same
 # steps, same CT/DT/GT globals part2/part3 read.
 part1_dock_and_image() {
-  dock_tap "a:$CALC/" Calculator && { sleep 2.5; chk calc
-    CT=$(waitwin $CALC 6); step calculator "Calculator opened from the dock"
-    [ "$CT" != none ] && floating "$CT" Calculator && pass "Calculator opened as a floating window (task $CT)" || fail "Calculator from the dock: window $CT"
+  calculator_open && { sleep 2.5; chk calc
+    CT=$(waitwin $CALC 6); step calculator "Calculator opened from $CALC_SOURCE"
+    [ "$CT" != none ] && floating "$CT" Calculator && pass "Calculator opened as a floating window (task $CT)" || fail "Calculator from $CALC_SOURCE: window $CT"
     [ "$CT" != none ] && put_away $CALC "a:$CALC/" Calculator calculator-away; }
   if [ "$ANDROID_ONLY" = 1 ]; then
     skip_linux dolphin "Dolphin from the dock, and an image opened from it (Gwenview) - needs the Linux session"
@@ -314,9 +335,9 @@ part2_shade() {
 }
 
 part2() {
-  dock_tap "a:$CALC/" Calculator || return
+  calculator_open || return
   chk calc; CT=$(waitwin $CALC 6)
-  step calculator "Calculator opened from the dock"
+  step calculator "Calculator opened from $CALC_SOURCE"
   [ "$CT" != none ] && floating "$CT" Calculator && pass "Calculator floats (task $CT, $(tbounds "$CT"))" || { fail "no floating Calculator ($CT)"; return; }
 
   part2_drag; part2_resize; part2_minimise

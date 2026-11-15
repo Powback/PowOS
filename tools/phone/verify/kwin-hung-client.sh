@@ -11,36 +11,61 @@
 #     placeholder) and has its powos-ww-<id>-linux layer in SurfaceFlinger (the user's symptom: no ww-linux layers);
 # then the hung client killed: its window goes, the prompt goes with it within 15 s (it stayed 5 h on 2026-11-06),
 # KWin still the same process.
-# Always restores: KWrite/Kate this started killed, any prompt this caused ended, home, `cmd device_state state reset`.
+# Always restores: KWrite/Kate this started killed, any prompt this caused ended, home (this check does not change the fold override).
 # Exit: 0 passed; 1 FAIL; 3 a real touch / no free window / not now (re-queued); 5 can't run.
 set -uo pipefail
 here=$(cd "$(dirname "$0")" && pwd); T=$here/..; A="$T/adb.sh"
 OUT=${1:-$HOME/.cache/powos-verify/kwin-hung-client-$(date +%m%d-%H%M)}; mkdir -p "$OUT"
-L=$HOME/.cache/powos-verify.lock
 HYPR=/data/powos/root/run/powos-app/hyprland.log
-sh_() { "$A" shell "su -c '$*'" 2>/dev/null | tr -d '\r'; }
-us() { printf '%s\n' "$1" > "$OUT/u.sh"; "$T/user.sh" "$OUT/u.sh" 2>/dev/null | grep -v "file pushed" | tr -d '\r'; }
+# Bound the entire local transport tree, not just adb's remote command. Killing
+# only the wrapper leaves docker/adb holding the output pipe open indefinitely.
+CALL_S=10
+DEADLINE=$((SECONDS + 230))
+bounded() {
+  local budget=$CALL_S left=$((DEADLINE - SECONDS))
+  [ "$left" -gt 0 ] || { echo "ERR deadline" >&2; return 124; }
+  [ "$left" -ge "$budget" ] || budget=$left
+  python3 -c 'import os, signal, subprocess, sys
+p = subprocess.Popen(sys.argv[2:], start_new_session=True)
+try:
+    rc = p.wait(timeout=int(sys.argv[1]))
+except subprocess.TimeoutExpired:
+    os.killpg(p.pid, signal.SIGKILL)
+    p.wait()
+    print("ERR transport deadline: " + sys.argv[2], file=sys.stderr)
+    rc = 124
+sys.exit(rc)' "$budget" "$@"
+}
+sh_() { bounded "$A" shell "su -c '$*'" </dev/null | tr -d '\r'; }
+us() { printf '%s\n' "$1" > "$OUT/u.sh"; bounded "$T/user.sh" "$OUT/u.sh" | grep -v "file pushed" | tr -d '\r'; }
 # $1 in the Plasma session's own environment (plasmashell's: WAYLAND_DISPLAY, DISPLAY, XAUTHORITY) - linux-float.sh.
 ses() { us "P=\$(pgrep -x plasmashell | head -1); while IFS= read -r -d '' kv; do export \"\$kv\"; done < /proc/\$P/environ; $1"; }
 irq() { sh_ "awk '\''/touch-0/{s+=\$2+\$3+\$4+\$5+\$6+\$7+\$8+\$9} END{print s}'\'' /proc/interrupts"; }
-KATE_MINE=0
+KATE_MINE=0 SETUP=0 H0=0
 restore() {
+  [ "$SETUP" = 1 ] || return 0
+  SETUP=0
+  DEADLINE=$((SECONDS + 35))
   us "pkill -CONT -x kwrite; pkill -KILL -x kwrite; [ $KATE_MINE = 1 ] && pkill -x kate; pkill -f 'kwin_killer_helper.*kwrite'; true" >/dev/null
-  sh_ "am start -a android.intent.action.MAIN -c android.intent.category.HOME >/dev/null; cmd device_state state reset"
+  sh_ "am start -a android.intent.action.MAIN -c android.intent.category.HOME >/dev/null"
   [ -n "${LOGPID:-}" ] && kill "$LOGPID" 2>/dev/null
   sh_ "tail -n +$((H0 + 1)) $HYPR" > "$OUT/kwin.log" 2>/dev/null
   echo "restored"
 }
 . "$here/window-lock.sh"
 window_lock kwin-hung-client.sh
-H0=$(sh_ "wc -l < $HYPR"); H0=${H0:-0}
-trap 'restore; [ "${LOCK_HELD:-0}" = 1 ] || rm -rf "$L"' EXIT
-I0=$(irq)
-chk() { [ "$(irq)" = "$I0" ] || { echo "STOP: a real touch at $1 - restoring"; exit 3; }; }
-fail() { echo "FAIL: $*" | tee -a "$OUT/log.txt"; "$T/shot.sh" "$OUT/fail.png" >/dev/null 2>&1; exit 1; }
+DEADLINE=$((SECONDS + 230))
+trap 'rc=$?; restore; wl_release; exit "$rc"' EXIT
+trap 'exit 143' TERM
+trap 'exit 130' INT
+chk() { [ "$SECONDS" -lt "$DEADLINE" ] || fail "check deadline at $1"; [ "$(irq)" = "$I0" ] || { echo "STOP: a real touch at $1 - restoring"; exit 3; }; }
+fail() { echo "FAIL: $*" | tee -a "$OUT/log.txt"; bounded "$T/shot.sh" "$OUT/fail.png" >/dev/null 2>&1; exit 1; }
 pass() { echo "PASS: $*" | tee -a "$OUT/log.txt"; }
 log() { echo "$*" | tee -a "$OUT/log.txt"; }
 . "$here/ww-lib.sh"
+WW_DEADLINE=$DEADLINE
+export CDP_TIMEOUT_S=8 CDP_ADB_TIMEOUT_S=8
+ev() { bounded "$T/cdp.sh" eval "${2:-home}" "$1" | tr -d '\r' | tail -1 | python3 -c "$UNQ"; }
 plaunch() { ev "importShim('./state.ts').then(m=>m.launch('$1')).then(()=>'ok',e=>'ERR '+e)"; }
 kwin_pid() { sh_ "chroot /data/powos/root pgrep -x kwin_wayland | head -1"; }
 killers() { us "pgrep -f 'kwin_killer_helper.*kwrite' | tr '\n' ' '"; }
@@ -60,12 +85,17 @@ qdbus6 org.kde.KWin /Scripting org.kde.kwin.Scripting.unloadScript khc >/dev/nul
 }
 
 s=$(sh_ "dumpsys power | sed -n s/.*mWakefulness=//p | head -1")
-[ "$s" = Awake ] || { echo "the screen is $s - not woken (rule); nothing done"; exit 3; }
+[ "$s" = Awake ] || { echo "the screen is ${s:-unknown (wakefulness query failed)} - not woken (rule); nothing done"; exit 3; }
 . "$(dirname "$0")/game-lib.sh"; game_gate   # the queue's test (Steam's reaper): `steam_app_` missed Broforce
 K0=$(kwin_pid); [ -n "$K0" ] || { echo "ENV: no kwin_wayland runs"; exit 5; }
+# No cleanup is armed before these read-only preconditions succeed.
+existing=$(us "pgrep -x kwrite; echo checked")
+[ "$existing" = checked ] || { echo "KWrite already runs or could not be checked: not now"; exit 3; }
+I0=$(irq); [[ "$I0" =~ ^[0-9]+$ ]] || { echo "touch counter unavailable: not now"; exit 3; }
+H0=$(sh_ "wc -l < $HYPR"); [[ "$H0" =~ ^[0-9]+$ ]] || { echo "KWin log unavailable: not now"; exit 3; }
+SETUP=1
 log "KWin pid $K0, hyprland.log at line $H0"
 sh_ "am start -W -a android.intent.action.MAIN -c android.intent.category.HOME >/dev/null"; sleep 2; chk home
-us "pkill -KILL -x kwrite; true" >/dev/null; sleep 1
 
 for plat in xcb wayland; do
   log "== $plat KWrite, hung"
@@ -84,7 +114,8 @@ for plat in xcb wayland; do
   chk hung
   # The rest of Linux keeps rendering: a new Kate window goes live with its layer, while KWrite hangs.
   before=$(wwids l:)
-  [ -n "$(us "pgrep -x kate | head -1")" ] || KATE_MINE=1
+  kate_before=$(us "pgrep -x kate; echo checked")
+  case $kate_before in checked) KATE_MINE=1 ;; *checked) ;; *) fail "could not check existing Kate processes" ;; esac
   [ "$(plaunch l:org.kde.kate)" = ok ] || fail "home's launch of Kate failed"
   KT=$(wwnew 30 "$before" l:); KT=${KT%% *}
   [ -n "$KT" ] || fail "with $plat KWrite hung, Kate opened no web window in 30 s"
