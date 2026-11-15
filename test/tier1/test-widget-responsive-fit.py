@@ -86,6 +86,20 @@ class ResponsiveFit(unittest.TestCase):
                 if root['k'] == 'Column':
                     self.assertLessEqual(budget(root), h - 24, (name, SIZES[i], budget(root)))
 
+    def test_short_wide_media_uses_width_for_readable_title(self):
+        for name in ['97-now-playing', '97-now-playing~broken-art']:
+            root = self.trees(name)[str(SIZES.index((245, 196)))]['c'][0]
+            self.assertEqual(root['k'], 'Row', 'short landscape card should not stack art above text')
+            art, metadata = root['c']
+            width = 245 - 24 - art['p']['size'] - root['p']['gap']
+            self.assertGreaterEqual(width, 160)
+            texts = [n['p'] for n in nodes(metadata) if n['k'] == 'Text']
+            title = next(p for p in texts if p['text'] == 'Weightless')
+            self.assertGreaterEqual(title['fontSize'], 20)
+            self.assertLessEqual(len(title['text']) * title['fontSize'] * .62, width)
+            controls = [n for n in nodes(metadata) if n['k'] == 'Box' and 'onTap' in n.get('h', [])]
+            self.assertEqual([n['p']['size'] for n in controls], [24, 28, 24])
+
     def test_media_keeps_metadata_and_controls(self):
         for name in ['97-now-playing', '97-now-playing~broken-art']:
             trees = self.trees(name)

@@ -18,8 +18,10 @@ widget "now playing" {
   // Compact cards keep the full-width text/transport layout; no control is shrunk to make room for art.
   let iw = tileWidth == null ? 340 : tileWidth - 24
   let ih = tileHeight == null ? 106 : tileHeight - 24
-  // Stack whenever height can hold art plus the complete transport and metadata, not only at a portrait ratio.
-  let tall = ih >= 160 && ih > iw * 0.65
+  // A landscape card that can hold minimum art + gutter + readable metadata should use that width.
+  // Stacking those same elements wastes its short axis on artwork and four extra row gaps.
+  let sideRoom = iw >= 40 + 12 + 160
+  let tall = ih >= 160 && ih > iw * 0.65 && (!sideRoom || ih >= iw)
   let title = m.title ?? ""
   let both = [m.artist, m.album].filter(x => x != null && x != "").join(" · ")
   // Tall cards reserve room for words and transport before spending it on artwork.
