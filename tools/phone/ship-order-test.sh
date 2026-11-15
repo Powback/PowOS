@@ -204,6 +204,16 @@ export DURING_BUILD="cd $T/B && git pull -q --rebase && echo 'export const ai = 
 S7=$(git -C "$T/B" rev-parse HEAD)
 grep -q '"S7"' "$PHONE/files/shell/ui/ai.tsx" 2>/dev/null && [ "$(cat "$SHIP_DIR/apk/shell-tip" 2>/dev/null)" = "$S7" ] &&
   ok "re-applied from origin's current tip, recorded as the phone's shell" || { bad "re-apply from the tip (rc $rc)"; cat "$T/ship.out"; }
+# 7. Origin advances only APK widget assets while A builds: no shell push means stamp A, not B.
+(cd "$T/A" && git pull -q --ff-only 2>/dev/null); A7=$(git -C "$T/A" rev-parse HEAD)
+export DURING_BUILD="cd $T/B && git pull -q --rebase && mkdir -p targets/android/app/assets/widgets && echo widget > targets/android/app/assets/widgets/example.owl && git add targets && git commit -qm widget && git push -q origin HEAD:main"
+: > "$LOG"; ship; rc=$?; unset DURING_BUILD
+B7=$(git -C "$T/B" rev-parse HEAD)
+[ $rc = 0 ] && [ "$A7" != "$B7" ] && ! grep -q '^PUSH' "$LOG" &&
+  [ "$(cat "$SHIP_DIR/apk/shell-tip")" = "$A7" ] &&
+  [ "$(cat "$HOME/.cache/powos-installed-commit")" = "$A7" ] &&
+  ok "APK-only origin advance: no push, actual APK shell stamp A (B still uninstalled)" ||
+  { bad "APK-only origin advance stamp (rc $rc)"; cat "$T/ship.out"; }
 unset SHIP_DIR
 
 [ $fails -eq 0 ] && echo "all pass" || echo "$fails failed"

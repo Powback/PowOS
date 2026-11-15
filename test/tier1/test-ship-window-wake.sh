@@ -71,5 +71,60 @@ grep -q '^  windows_same "\$wl0" "\$wl1"$' "$src/tools/phone/verify/window-rende
 awk '/^  window_gate\(\) \{/,/^  \}/' "$src/tools/phone/ship.sh" | grep -A4 'if \[ \$wrc = 2 \]' | grep -q 'return 2' \
   && ok "ship.sh: a NOT JUDGED check (rc 2) waits, not WINDOWS BROKEN" || bad "ship.sh: rc 2 waits"
 
+# Exercise the real reap/check functions with an isolated Git history; no runner/device operations.
+(
+  export HOME="$T/home" GIT_CONFIG_GLOBAL="$T/gitconfig" GIT_CONFIG_NOSYSTEM=1
+  mkdir -p "$HOME/.cache" "$T/repo"; cd "$T/repo" || exit 1
+  git init -q; git config user.email t@t; git config user.name t
+  mkdir -p shell/ui shell/dev shell/test targets/android/app/assets/widgets
+  echo original > shell/ui/home.tsx; git add .; git commit -qm A; A=$(git rev-parse HEAD)
+  echo widget > targets/android/app/assets/widgets/example.owl; git add .; git commit -qm B; B=$(git rev-parse HEAD)
+  echo dev > shell/dev/check; echo test > shell/test/check; echo generated > shell/shell-build.txt
+  echo tooling > shell/push.sh; git add .; git commit -qm nonpayload; Bmeta=$(git rev-parse HEAD)
+  echo changed > shell/ui/home.tsx; git add .; git commit -qm C; C=$(git rev-parse HEAD)
+  Q="$T/reap"; mkdir -p "$Q/apk" "$Q/done"
+  # Source only production function definitions (not the runner's dispatch).
+  eval "$(sed -n '/^  shell_diff() {/,/^  apk_inputs() /p' "$src/tools/phone/ship.sh")"
+  eval "$(sed -n '/^  shell_check() {/,/^  own_apk() /p' "$src/tools/phone/ship.sh")"
+  eval "$(sed -n '/^  reap_apk_installed() {/,/^  }/p' "$src/tools/phone/ship.sh")"
+  served_shell() { echo "$A"; }
+  mail() { echo "$*" >> "$Q/mail"; }
+  units_publish() { :; }; render_watch() { :; }; e2e_round() { :; }
+  done_req() { mv "$1" "$Q/done/"; }
+  window_gate() { return "$verdict"; }
+  expect() { "$@" || exit 1; }
+  shell_contains "$Bmeta" "$A" || exit 1
+  expect test -z "$(delta "$A" "$Bmeta")"
+  if shell_contains "$C" "$A"; then exit 1; fi
+  # Legacy inflated live B also converges without a false reapply. Two unjudged retries then PASS.
+  echo "$B" > "$Q/live"; echo "$A" > "$Q/apk/shell-tip"
+  printf 'sha=%s\n' "$A" > "$Q/a.req"; printf 'sha=%s\n' "$B" > "$Q/widget.req"
+  for verdict in 2 2; do
+    reap_apk_installed "$A"; rc=$?
+    expect test "$rc" = 2; expect test -f "$Q/a.req"; expect test -f "$Q/widget.req"
+    expect test ! -f "$Q/failed-apk"; expect test ! -f "$Q/mail"
+  done
+  verdict=0; reap_apk_installed "$A" || exit 1
+  expect test "$(cat "$Q/live")" = "$A"
+  expect test -f "$Q/done/a.req"; expect test -f "$Q/widget.req"
+  expect test ! -f "$Q/failed-apk"; expect test ! -f "$Q/mail"
+  inst=$A; pending_apk "$B" || exit 1
+  # A real newer shell still fails/reapplies, and is NOT labelled a window failure.
+  rm -f "$Q/apk/shell-want"
+  echo "$C" > "$Q/live"; printf 'sha=%s\n' "$A" > "$Q/a.req"
+  verdict=2; reap_apk_installed "$A"; expect test "$?" = 2
+  verdict=0; reap_apk_installed "$A" > "$Q/failure.log"
+  expect test "$(cat "$Q/failed-apk")" = "$A"; expect test -f "$Q/a.req"
+  expect grep -q 'APK installed but SHELL BEHIND' "$Q/failure.log"
+  if grep -q 'WINDOWS BROKEN' "$Q/failure.log"; then exit 1; fi
+  expect grep -q 're-applying' "$Q/mail"
+  # A real window failure remains a failure independently of payload equivalence.
+  rm -f "$Q/apk/shell-want"
+  echo "$A" > "$Q/live"; verdict=1; reap_apk_installed "$A" > "$Q/window.log"
+  expect grep -q 'APK installed but WINDOWS BROKEN' "$Q/window.log"
+  expect test -f "$Q/a.req"
+) && ok "APK-only A->B: retries then PASS, payload equivalence, widget pending; real shell/window failures retained" ||
+  bad "APK reap stamp/payload regression"
+
 [ $fails = 0 ] && echo "all passed" || echo "$fails failed"
 exit $(( fails > 0 ))

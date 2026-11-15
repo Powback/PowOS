@@ -139,7 +139,7 @@ apk_delta() {   # shell files at commit $1 the APK's bundled shell lacks or has 
   git archive "$1" shell | tar -x -C "$d/tip"
   # What build.gradle.kts's copyShell leaves out of the APK, and dev/test (no live page).
   (cd "$d/tip/shell" && find . -type f | sed 's|^\./||' | sort |
-    grep -vE '^(DESIGN\.md|push\.sh|package(-lock)?\.json|tsconfig\.json|\.gitignore)$|^(dev|test|node_modules)/' |
+    grep -vE '^(shell-build\.txt|DESIGN\.md|push\.sh|package(-lock)?\.json|tsconfig\.json|\.gitignore)$|^(dev|test|node_modules)/' |
     while read -r f; do cmp -s "$f" "$d/apk/assets/shell/$f" || echo "$f"; done)
   rm -rf "$d"
 }
@@ -320,9 +320,9 @@ gone=$(unzip -Z1 "$apk" 'assets/shell/*' 2>/dev/null | sed 's|^assets/shell/||' 
   while read -r f; do git cat-file -e "$tip2:shell/$f" 2>/dev/null || echo "$f"; done)
 [ -z "$gone" ] || echo "ship-apk: note - the APK carries shell files origin's tip deleted (an override can't remove them): $(echo $gone)"
 # What the phone's shell now IS, for the ship service's live record (tools/phone/ship.sh reap_apk): origin's tip
-# when the re-apply landed (or there was nothing to re-apply), else only this APK's own build - the service then
+# only when the re-apply landed. No payload delta means no push/stamp: keep this APK's actual stamp. The service then
 # pushes everything newer itself instead of believing the older live record (f0b895fa, 2026-10-30).
-if [ -n "$pushok" ]; then shell_at=$tip2; else shell_at=$(git rev-parse HEAD); fi
+if [ -n "$full" ] && [ -n "$pushok" ]; then shell_at=$tip2; else shell_at=$(git rev-parse HEAD); fi
 [ -d "$sq/apk" ] && echo "$shell_at" > "$sq/apk/shell-tip"
 # The shell the phone now runs decodes the phone's live modules only with bindings of their shape (home couldn't read
 # local-pet's rows twice on 2026-10-21; powos-agents' work.try_line on 2026-10-30): checked AFTER the re-apply, with

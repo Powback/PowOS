@@ -222,7 +222,12 @@ run)
       [ -n "$p" ] && ! kill -0 "$p" 2>/dev/null && rm -rf "$SL" && mkdir "$SL" 2>/dev/null; } || return 1
     echo "$(git rev-parse --short HEAD) ship-runner pid $$ $(date +%H:%M:%S)" > "$SL/who"; }
   # delta A B: shell files changed between A and B (no dev/test), relative to shell/; "+f" exists at B, "-f" deleted.
-  delta() { git diff --name-only "$1" "$2" -- shell/ 2>/dev/null | grep -vE '^shell/(dev|test)/' |
+  # Same payload exclusions as ship-apk's apk_delta; shell-build.txt is generated, not content.
+  shell_diff() { git diff "$@" -- shell/ ':!shell/dev' ':!shell/test' ':!shell/node_modules' \
+    ':!shell/DESIGN.md' ':!shell/push.sh' ':!shell/package.json' ':!shell/package-lock.json' \
+    ':!shell/tsconfig.json' ':!shell/.gitignore' ':!shell/shell-build.txt'; }
+  shell_contains() { git merge-base --is-ancestor "$1" "$2" 2>/dev/null || shell_diff --quiet "$1" "$2" 2>/dev/null; }
+  delta() { shell_diff --name-only "$1" "$2" 2>/dev/null |
     while read -r f; do git cat-file -e "$2:$f" 2>/dev/null && echo "+${f#shell/}" || echo "-${f#shell/}"; done; }
   apk_inputs() { git diff --name-only "$1" "$2" -- targets/android/app targets/android/build-app.sh 2>/dev/null | grep -v 'app/version.properties$'; }
   # apps_changed A B: apps/<app>/ dirs (ones with a powos-app.json - never apps/build.sh, apps/registry etc.) that
@@ -613,7 +618,7 @@ run)
   shell_check() { local want=$1 a=$2 s r
     [ -n "$want" ] || return 0
     s=$(served_shell); [ -n "$s" ] || { echo "$(date +%T) ${a:0:9}: the phone's served shell commit couldn't be read - not judged"; return 0; }
-    git merge-base --is-ancestor "$want" "$s" 2>/dev/null && { echo "$(date '+%F %T') ${a:0:9} apk shell-check PASS (serves ${s:0:9}, live ${want:0:9})" >> "$Q/shipped.log"; return 0; }
+    shell_contains "$want" "$s" && { echo "$(date '+%F %T') ${a:0:9} apk shell-check PASS (serves ${s:0:9}, live ${want:0:9})" >> "$Q/shipped.log"; return 0; }
     echo "$(date '+%F %T') ${a:0:9} apk SHELL BEHIND - the phone serves ${s:0:9}, older than the shipped ${want:0:9}" >> "$Q/shipped.log"
     echo "$(date +%T) ${a:0:9}: SHELL BEHIND after the install (serves ${s:0:9}, shipped ${want:0:9}) - re-applying the newer shell"
     echo "$s" > "$Q/live"
@@ -730,8 +735,11 @@ run)
   # reap_apk_installed A: reap_apk's installed case (rc 0, or the phone reports A installed): the live record,
   # the window/shell checks, then its requests done. rc 2 = the window check was NOT JUDGED ($Q/apk stays).
   reap_apk_installed() {
-    local A=$1 live st wg r n sha ht
+    local A=$1 live st wg r n sha ht failure=
     live=$(cat "$Q/live" 2>/dev/null || true)
+    # Keep the pre-install obligation across NOT JUDGED retries: live below records actual content.
+    [ -f "$Q/apk/shell-want" ] || printf '%s\n' "$live" > "$Q/apk/shell-want"
+    live=$(cat "$Q/apk/shell-want")
     # The install RESET every override, then re-pushed what origin's tip had differently from the APK: the phone's
     # shell is what ship-apk says it left there ($Q/apk/shell-tip: the tip it re-applied, or the APK's own build
     # when that push failed) - never the older "live" record kept as is (2026-10-30: APK f0b895fa installed, the
@@ -740,7 +748,7 @@ run)
     st=$(cat "$Q/apk/shell-tip" 2>/dev/null || true)
     git cat-file -e "${st:-x}^{commit}" 2>/dev/null || st=$A
     echo "$st" > "$Q/live"
-    if [ -n "$live" ] && [ "$live" != "$st" ] && ! git merge-base --is-ancestor "$live" "$st" 2>/dev/null; then
+    if [ -n "$live" ] && [ "$live" != "$st" ] && ! shell_contains "$live" "$st"; then
       echo "$(date +%T) ${A:0:9}: the install left the phone's shell at ${st:0:9}, behind the live ${live:0:9} - re-applying the newer shell"
       r=$Q/$(date +%Y%m%d-%H%M%S)-reapply-$$.req
       printf 'sha=%q\nnote=\nsilent=1\nwho=ship-apk-reapply\nat=%s\n' "$live" "$(date +%s)" > "$r.tmp" && mv "$r.tmp" "$r"
@@ -752,9 +760,12 @@ run)
     if [ $wg = 2 ]; then date +%s > "$Q/apk/window-wait"; return 2; fi
     rm -f "$Q/apk/window-wait"
     # What the phone RENDERS, not the record: older than the shipped shell = the APK failed, the shell re-applied.
-    [ -n "$live" ] && ! shell_check "$live" "$A" && wg=1
+    [ $wg = 0 ] || failure="WINDOWS BROKEN"
+    if [ -n "$live" ] && ! shell_check "$live" "$A"; then
+      wg=1; failure="${failure:+$failure; }SHELL BEHIND"
+    fi
     if [ $wg = 0 ]; then rm -f "$Q/failed-apk"
-    else echo "$A" > "$Q/failed-apk"; echo "$(date +%T) ${A:0:9}: APK installed but WINDOWS BROKEN - its requests kept, waiting for a new origin commit"; fi
+    else echo "$A" > "$Q/failed-apk"; echo "$(date +%T) ${A:0:9}: APK installed but $failure - its requests kept, waiting for a new origin commit"; fi
     # A shell held for this APK came with its install (ship-apk pushes origin's tip shell after it).
     { read -r ht _ < "$Q/shell-held" && git merge-base --is-ancestor "$ht" "$A"; } 2>/dev/null && rm -f "$Q/shell-held"
     # The records above first, THEN its requests done: a watcher seeing them done sees the records too.
