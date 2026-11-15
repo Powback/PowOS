@@ -38,7 +38,7 @@ Run on gpu-195 in a checkout containing this integration:
 ```sh
 bash hosts/gpu-195/gpu-unlock/build.sh ampere
 sudo python3 hosts/gpu-195/gpu-unlock/control.py enable \
-  --rpm "$HOME/.cache/powos-gpu-unlock/ampere/rpmbuild/RPMS/x86_64/powos-gpu-unlock-1.0.0-4.x86_64.rpm"
+  --rpm "$HOME/.cache/powos-gpu-unlock/ampere/kernels/$(uname -r)/rpmbuild/RPMS/x86_64/powos-gpu-unlock-1.0.0-4.x86_64.rpm"
 python3 hosts/gpu-195/gpu-unlock/control.py status
 ```
 
@@ -47,7 +47,7 @@ For a desktop RTX 4090 host, build **on that host** against its kernel headers:
 ```sh
 bash hosts/gpu-195/gpu-unlock/build.sh ada
 sudo python3 hosts/gpu-195/gpu-unlock/control.py enable \
-  --rpm "$HOME/.cache/powos-gpu-unlock/ada/rpmbuild/RPMS/x86_64/powos-gpu-unlock-1.1.1-3.x86_64.rpm"
+  --rpm "$HOME/.cache/powos-gpu-unlock/ada/kernels/$(uname -r)/rpmbuild/RPMS/x86_64/powos-gpu-unlock-1.1.1-3.x86_64.rpm"
 ```
 
 To select one card, add `--targets <full PCI address from lspci -D>`.
@@ -58,10 +58,42 @@ The CLI checks the profile recorded in the RPM, not a user-supplied architecture
 The build uses the target's existing compiler and matching kernel headers. Upstream
 firmware inputs and generated payloads are hash-verified, and upstream tests run
 before packaging. RPM tooling lives in a disposable rootless Fedora container.
-The source, firmware and RPM remain in `~/.cache/powos-gpu-unlock/<profile>`;
-the hash-verified download cache is shared, but generated assets and payloads are
-isolated by profile/revision. Older 1.0.0-1 artifacts stay untouched in the original
-`rpmbuild/` directory; rebuild to use the new PCI/profile checks.
+The source, firmware and RPM now remain in
+`~/.cache/powos-gpu-unlock/<profile>/kernels/<kernelrelease>/`; the hash-verified
+`inputs/` download cache is shared, but source builds, generated assets, payloads
+and RPM workspaces are isolated by profile/target (and sources/assets by revision).
+The RPM filename is unchanged, so retain its target directory when storing it.
+Old profile-level and original `rpmbuild/` artifacts stay untouched. Existing
+build commands still select the running kernel, but consumers must use the new
+kernel-keyed output path shown above.
+
+### Build only for an explicit target kernel
+
+On an x86_64 builder with the compiler and prepared target kernel-devel tree
+already available (the script does not install headers):
+
+```sh
+bash hosts/gpu-195/gpu-unlock/build.sh ampere \
+  --kernel "$TARGET_KERNEL_RELEASE" --kdir "$TARGET_KERNEL_HEADERS"
+```
+
+`--kernel` defaults to `uname -r`; `--kdir` defaults to
+`/usr/src/kernels/<selected release>`. A custom header tree may be absolute or
+relative to the invocation directory. Its `make kernelrelease` must exactly match
+the selected release before any source fetch, asset generation or module build.
+Module vermagic must also match; firmware validation, profile-specific upstream
+tests and the exact RPM `kernel-core-uname-r` dependency are not bypassed.
+`GPU_UNLOCK_CACHE` still overrides the cache root.
+
+**This is build-only support, not a safe kernel-transition workflow.** No candidate
+kernel has been built or verified by this change. `control.py` target-aware
+installation/staged-deployment validation and a verified candidate (kernel,
+NVIDIA compatibility, firmware, initramfs and boot/recovery checks) remain
+outstanding. Do not pass a different-kernel RPM to the current enable flow or
+force its dependencies. Building an RPM does not stage, install or reboot anything.
+
+Device-free orchestration regressions (command stubs, not real module/RPM builds):
+`python3 test/tier1/test-gpu-unlock-build.py`.
 
 Enable requires administrator authentication. It layers the RPM into rpm-ostree,
 enables local initramfs regeneration, verifies the staged image contains the module,
