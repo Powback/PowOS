@@ -2741,7 +2741,7 @@ class WebWindows(
     /** The KWin window that last got "focus" from a touch here: told again only when another one is touched. */
     private var linuxFocused = -1
 
-    private fun onTouch(ev: MotionEvent): Boolean {
+    private fun logImmersiveTouch(ev: MotionEvent) {
         val a = ev.actionMasked
         // TB1 evidence: cancellation alone does not identify its owner (SystemUI, WebView,
         // another gesture). Keep native receipt and actual status visibility separate from
@@ -2753,6 +2753,11 @@ class WebWindows(
                 WindowLog.i(TAG, "TB1 input: after cancel statusVisible=${web.rootWindowInsets?.isVisible(android.view.WindowInsets.Type.statusBars())} hiddenRequested=$barsHiddenForWindow")
             }, 100)
         }
+    }
+
+    private fun onTouch(ev: MotionEvent): Boolean {
+        val a = ev.actionMasked
+        logImmersiveTouch(ev)
         imeGesture(a)
         if (popupGesture(ev)) return true
         if (a == MotionEvent.ACTION_DOWN) {
