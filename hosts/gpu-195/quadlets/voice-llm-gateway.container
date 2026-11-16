@@ -3,7 +3,8 @@
 [Unit]
 Description=PowOS voice LLM gateway and GPU lease manager
 After=network-online.target voice-network.service voice-llm.service llm-pool.service
-Wants=network-online.target voice-network.service voice-llm.service llm-pool.service
+Wants=network-online.target voice-network.service voice-llm.service
+# llm-pool is externally installed/started by local-llm-stack; ordering is not ownership.
 
 [Container]
 ContainerName=voice-llm-gateway

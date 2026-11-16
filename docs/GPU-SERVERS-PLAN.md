@@ -1,3 +1,14 @@
+<!-- Pool installation ownership (2026-11-16): current contract overrides historical deployment notes below. -->
+**Pool ownership:** `local-llm-stack/hosts/gpu-195/install-llm-pool.sh` owns the deployed
+`llm-pool.container`, `~/.config/llm-pool/{config.yaml,flash-next.json}` and
+`localhost/llm-pool` image. Install that project first. PowOS's voice installer checks those
+files before any mutation, but does not build, copy, register, start or restart the pool.
+The gateway retains ordering after the pool without pulling it into its start transaction.
+PowOS's duplicate pool sources are retained as historical references, not deployment inputs;
+`units/gpu-195/llm-pool.json` is an external-ownership reference, not registered by this installer.
+Existing pool configuration, runtime data and model caches are never removed by voice installation.
+A prerequisite check proves installation, not pool health; pool lifecycle remains with its owner.
+
 # GPU servers: the plan (2026-10-21)
 
 PowOS now has real GPU servers on the LAN. This is how inference (voice, LLMs, everything AI) is laid out across

@@ -3,6 +3,12 @@ name: powos-voice
 description: Use before touching PowOS phone dictation (Speech.kt, GpuSpeech.kt, dictation.ts, side button, stt.pow, "recognizer is busy"/doubled words, mic staying open) or the LAN's GPU servers (gpu-195, .58, llm.pow/stt.pow/voiceagent.pow routes, model loads, benchmarks, units, fan noise).
 ---
 
+## Pool ownership
+`local-llm-stack/hosts/gpu-195/install-llm-pool.sh` owns the deployed pool image,
+quadlet and config. PowOS `hosts/gpu-195/install.sh` installs voice only and requires
+that pool installation first; it must never overwrite/build/start/restart the pool.
+Its duplicate pool sources and manifest are reference-only. The topology below is historical.
+
 ## Quick recipe
 - Files: `targets/android/app/.../ui/{Speech,GpuSpeech}.kt`, `shell/ui/dictation.ts`, `WhisperJunk.kt`; GPU servers:
   `hosts/gpu-195/{install.sh,bench/*.py}`, `units/<host>/*.json`, `docs/GPU-SERVERS-PLAN.md`.
