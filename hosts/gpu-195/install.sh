@@ -32,7 +32,10 @@ for asset in "$QUADLETS/llm-pool.container" "$HOME/.config/llm-pool/config.yaml"
     }
 done
 
-mkdir -p "$QUADLETS" "$CONF" /var/lib/powos/models/{hf,torch,vllm} /var/lib/powos/voiceagent
+GPU_LEASE_DIR="${POWOS_GPU_LEASE_DIR:-/var/lib/powos/gpu-lease}"
+mkdir -p "$QUADLETS" "$CONF" /var/lib/powos/models/{hf,torch,vllm} /var/lib/powos/voiceagent "$GPU_LEASE_DIR"
+# GPU0 wake-room lease lock: voice-llm-gateway and local-llm-stack's llm-pool flock it (same path in its installer).
+[[ -e "$GPU_LEASE_DIR/gpu0-wake-room.lock" ]] || : > "$GPU_LEASE_DIR/gpu0-wake-room.lock"
 # Explicit ownership list: adding a quadlet must not silently adopt an external service.
 for unit in voice.network voice-stt.container voice-tts.container voice-llm.container stt-batch.container voice-llm-gateway.container voice-agent.container voice-web.container; do
     install -m 644 "$HERE/quadlets/$unit" "$QUADLETS/"

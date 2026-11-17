@@ -37,8 +37,11 @@ class InstallerOwnership(unittest.TestCase):
                                   ' $*" >> "$TEST_LOG"\n' +
                                   ('echo Linger=yes\n' if command == 'loginctl' else ''))
                 script.chmod(0o755)
+            lease_dir = home / 'gpu-lease'
+            lease_dir.mkdir()
             env = dict(os.environ, HOME=str(home), USER='test', TEST_LOG=str(log),
                        VOICEAGENT_DIR=str(home / 'Projects/VoiceAgent'),
+                       POWOS_GPU_LEASE_DIR=str(lease_dir),
                        PATH=str(bindir) + ':/usr/bin:/bin')
             result = subprocess.run(['/bin/bash', str(INSTALLER)] +
                                     (['--no-build'] if no_build else []),
@@ -61,6 +64,7 @@ class InstallerOwnership(unittest.TestCase):
                 self.assertEqual((voice / 'voiceagent.env').read_bytes(),
                                  (ROOT / 'hosts/gpu-195/voiceagent.env').read_bytes())
                 self.assertIn('restart voice-agent.service voice-web.service', commands)
+                self.assertTrue((lease_dir / 'gpu0-wake-room.lock').is_file())
                 self.assertIn('start voice-stt.service voice-tts.service voice-llm.service stt-batch.service voice-llm-gateway.service', commands)
                 self.assertIn('voice-agent.json', commands)
                 builds = [line for line in commands.splitlines() if line.startswith('podman build')]

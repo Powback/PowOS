@@ -13,14 +13,12 @@ Network=voice.network
 PublishPort=8100:8080
 SecurityLabelDisable=true
 Volume=/var/lib/powos/voiceagent:/state
+# GPU0 wake-room lease lock, shared with llm-pool (both installers create it).
+Volume=/var/lib/powos/gpu-lease:/gpu-lease
 Environment=VOICE_LLM_URL=http://voice-llm:8000
-Environment=LLM_POOL_URL=http://host.containers.internal:9292
 Environment=VOICE_LLM_IDLE_SECONDS=300
-Environment=GPU0_VOICE_RESERVE_GIB=8
-# Pool models allowed to borrow voice-llm's GPU0 wake room while it sleeps (local-llm-stack llm-pool: Flash Next's
-# dual lease, whole-card --borrow-voice-wake-room profiles). If one holds GPU0, wait for its natural TTL unload;
-# never force-stop an active local generation. Keep in sync with llm-pool/config.yaml.
-Environment=VOICE_WAKE_BORROWERS=flash-next,swift-27b,nanbeige-33b
+# A pool model borrowing voice-llm's GPU0 wake room holds the flock mounted above (local-llm-stack llm-pool/gpu0_lease.py);
+# waking voice waits for it (natural TTL unload) up to the drain timeout; never force-stops an active generation.
 Environment=VOICE_GPU_DRAIN_TIMEOUT=1800
 Label=io.powos.unit=voice-llm-gateway
 PodmanArgs=--memory=512m --memory-swap=512m --cpus=1 --pids-limit=256

@@ -14,7 +14,8 @@
   "files": [
     "/var/home/powos/.config/containers/systemd/llm-pool.container",
     "/var/home/powos/.config/llm-pool/config.yaml",
-    "/var/home/powos/.config/llm-pool/flash-next.json"
+    "/var/home/powos/.config/llm-pool/flash-next.json",
+    "/var/lib/powos/gpu-lease/gpu0-wake-room.lock"
   ],
   "processes": [
     {
@@ -45,7 +46,8 @@
       "/var/home/powos/.config/containers/systemd/llm-pool.container",
       "/var/home/powos/.config/llm-pool/config.yaml",
       "/var/home/powos/.config/llm-pool/flash-next.json",
-      "localhost/llm-pool:latest and llm-pool.service (manage through local-llm-stack)"
+      "localhost/llm-pool:latest and llm-pool.service (manage through local-llm-stack)",
+      "/var/lib/powos/gpu-lease (GPU0 wake-room lease lock, shared with voice-llm-gateway)"
     ]
   },
   "vramNote": "GPU1 shared with stt-batch; Flash Next may lease GPUs 0+1 only when the gateway confirms voice LLM weights are offloaded to host RAM"

@@ -4,6 +4,7 @@ The vLLM sleep/wake endpoints are deliberately never forwarded to clients.
 The public :8100 listener only accepts OpenAI /v1 routes and /health.
 """
 import asyncio
+import fcntl
 import json
 import logging
 import os
@@ -23,16 +24,12 @@ log = logging.getLogger("voice-llm-gateway")
 logging.getLogger("httpx").setLevel(logging.WARNING)
 
 VOICE_URL = os.getenv("VOICE_LLM_URL", "http://voice-llm:8000").rstrip("/")
-POOL_URL = os.getenv("LLM_POOL_URL", "http://host.containers.internal:9292").rstrip("/")
 IDLE_SECONDS = max(30, int(os.getenv("VOICE_LLM_IDLE_SECONDS", "300")))
 GPU_DRAIN_TIMEOUT = max(60, int(os.getenv("VOICE_GPU_DRAIN_TIMEOUT", "1800")))
-GPU0_VOICE_RESERVE_BYTES = int(float(os.getenv("GPU0_VOICE_RESERVE_GIB", "8")) * 1024**3)
 STATE_FILE = Path(os.getenv("VOICE_GPU_STATE_FILE", "/state/voice-gpu-state.json"))
-# Pool models that may hold voice-llm's GPU0 wake room while it sleeps (llm-pool pool-gpu --borrow-voice-wake-room
-# profiles and Flash Next's dual-GPU lease). Every other pool model leaves that room free by construction.
-WAKE_BORROWERS = frozenset(
-    m.strip() for m in os.getenv("VOICE_WAKE_BORROWERS", "flash-next,swift-27b,nanbeige-33b").split(",") if m.strip()
-)
+# GPU0 wake-room lease (shared with local-llm-stack llm-pool/gpu0_lease.py). A pool model that borrows voice-llm's GPU0
+# room while it sleeps holds this flock for its whole life; waking voice takes it first. Created by install.sh.
+GPU0_LEASE_LOCK = Path(os.getenv("GPU0_LEASE_LOCK", "/gpu-lease/gpu0-wake-room.lock"))
 STATE_FILE.parent.mkdir(parents=True, exist_ok=True)
 
 client = httpx.AsyncClient(
@@ -95,72 +92,48 @@ async def is_sleeping() -> bool | None:
         return None
 
 
-async def gpu0_memory_used_bytes() -> int | None:
-    """Read host GPU memory from llama-swap's global metrics, available during generation."""
+def lease_holder() -> str:
     try:
-        response = await client.get(f"{POOL_URL}/metrics", timeout=5)
-        response.raise_for_status()
-        for line in response.text.splitlines():
-            if line.startswith("llamaswap_gpu_memory_used_bytes{") and 'id="0"' in line:
-                return int(float(line.rsplit(maxsplit=1)[1]))
-    except (httpx.HTTPError, ValueError, IndexError) as exc:
-        log.warning("could not read GPU0 memory from llama-swap metrics: %s", exc)
-    return None
+        return GPU0_LEASE_LOCK.read_text().strip() or "unknown holder"
+    except OSError:
+        return "unknown holder"
 
 
-def running_borrowers(running: list[dict]) -> list[str]:
-    return sorted({str(m.get("model")) for m in running if m.get("model") in WAKE_BORROWERS})
+async def take_gpu0_wake_room() -> int | None:
+    """Block (bounded) until no pool model borrows GPU0's wake room; never kill a live session.
 
-
-async def free_gpu0_wake_room() -> None:
-    """Wait only when a wake-room borrower actually holds GPU0; never kill a live session."""
+    Called after the state file says "waking", so a launcher that takes the lock afterwards re-reads the state, backs
+    off, and releases it. Returns the held fd (release after the wake), or None when the lock file is missing: then no
+    launcher can borrow either (they never create it), so voice wakes.
+    """
+    try:
+        fd = os.open(GPU0_LEASE_LOCK, os.O_RDWR | os.O_CLOEXEC)
+    except OSError as exc:
+        log.error("GPU0 lease lock %s unavailable (%s); pool borrowing is off, waking voice", GPU0_LEASE_LOCK, exc)
+        return None
     deadline = time.monotonic() + GPU_DRAIN_TIMEOUT
-    next_note = time.monotonic()
-    needs_gpu0 = False
-    while time.monotonic() < deadline:
+    next_note = time.monotonic() + 1
+    while True:
         try:
-            response = await client.get(f"{POOL_URL}/running", timeout=5)
-            response.raise_for_status()
-            running = response.json().get("running", [])
-        except (httpx.HTTPError, ValueError) as exc:
-            raise RuntimeError(f"cannot verify local model sessions; refusing to interrupt them: {exc}") from exc
-
-        borrowers = running_borrowers(running)
-        if not borrowers:
-            if needs_gpu0:
-                log.info("GPU0 borrower exited naturally; GPU0 is clear for voice")
-            return
-
-        # The upstream metrics route is subject to flash-next's concurrencyLimit
-        # and returns 429 during generation. llama-swap's global /metrics is not;
-        # use GPU0's actual VRAM to distinguish a GPU1-only session from a dual-GPU
-        # lease, even while the coding model is actively generating.
-        gpu0_used = await gpu0_memory_used_bytes()
-        if gpu0_used is not None and gpu0_used < GPU0_VOICE_RESERVE_BYTES:
-            log.info(
-                "%s not using GPU0 (%.1f GiB used, %.1f GiB reserve threshold); waking voice alongside the active session",
-                ",".join(borrowers),
-                gpu0_used / 1024**3,
-                GPU0_VOICE_RESERVE_BYTES / 1024**3,
+            fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            return fd
+        except BlockingIOError:
+            pass
+        if time.monotonic() >= deadline:
+            os.close(fd)
+            raise RuntimeError(
+                f"GPU0 wake room still borrowed after {GPU_DRAIN_TIMEOUT}s ({lease_holder()}); "
+                "leaving its session untouched; retry voice request"
             )
-            return
-
-        needs_gpu0 = True
         if time.monotonic() >= next_note:
-            if gpu0_used is None:
-                log.info("GPU0 lease is unknown; waiting safely without interrupting the running model")
-            else:
-                log.info(
-                    "%s holds GPU0 (%.1f GiB); waiting for its session and natural unload before waking voice",
-                    ",".join(borrowers),
-                    gpu0_used / 1024**3,
-                )
+            log.info("GPU0 wake room borrowed by %s; waiting for its session and natural unload", lease_holder())
             next_note = time.monotonic() + 30
-        await asyncio.sleep(1)
+        await asyncio.sleep(0.25)
 
-    raise RuntimeError(
-        f"a GPU0 borrower still holds voice's wake room after {GPU_DRAIN_TIMEOUT}s; leaving its session untouched; retry voice request"
-    )
+
+def release_gpu0_wake_room(fd: int | None) -> None:
+    if fd is not None:
+        os.close(fd)  # closing the only descriptor drops the flock
 
 
 async def wake_voice_if_needed() -> None:
@@ -178,18 +151,23 @@ async def wake_voice_if_needed() -> None:
         raise RuntimeError("vLLM sleep state endpoint unavailable after startup wait")
 
     write_state("waking")
-    await free_gpu0_wake_room()
-    response = await client.post(f"{VOICE_URL}/wake_up", timeout=180)
-    response.raise_for_status()
-    deadline = time.monotonic() + 180
-    while time.monotonic() < deadline:
-        sleeping = await is_sleeping()
-        if sleeping is False:
-            write_state("awake")
-            log.info("voice LLM woke; dual-GPU lease returned to voice")
-            return
-        await asyncio.sleep(0.25)
-    raise RuntimeError("voice LLM wake timed out")
+    lease = await take_gpu0_wake_room()
+    try:
+        response = await client.post(f"{VOICE_URL}/wake_up", timeout=180)
+        response.raise_for_status()
+        deadline = time.monotonic() + 180
+        while time.monotonic() < deadline:
+            sleeping = await is_sleeping()
+            if sleeping is False:
+                write_state("awake")
+                log.info("voice LLM woke; GPU0 wake room returned to voice")
+                return
+            await asyncio.sleep(0.25)
+        raise RuntimeError("voice LLM wake timed out")
+    finally:
+        # Released while the state says "awake" or "waking": a launcher that then gets the lock reads a non-sleeping
+        # state and does not borrow.
+        release_gpu0_wake_room(lease)
 
 
 async def acquire_voice_request() -> None:

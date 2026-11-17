@@ -1,7 +1,13 @@
 #!/usr/bin/env python3
-"""Device-free checks: gpu-195 voice units name their GPU by CDI UUID, units match quadlets, gateway borrower logic."""
+"""Device-free checks: gpu-195 voice units name their GPU by CDI UUID, units match quadlets, gateway GPU0 lease lock."""
 import ast
+import asyncio
+import fcntl
 import json
+import logging
+import os
+import tempfile
+import time
 import re
 import unittest
 from pathlib import Path
@@ -48,33 +54,75 @@ class Placement(unittest.TestCase):
                 self.assertTrue(dev.startswith('GPU-'), f'{path.name}: {dev}')
 
 
-class GatewayBorrowers(unittest.TestCase):
-    def load(self):
+class GatewayLease(unittest.TestCase):
+    """Real flock on a tmp lock: the gateway's wake waits for a GPU0 borrower and never preempts it."""
+
+    def setUp(self):
         src = (ROOT / 'hosts/gpu-195/voice-llm-gateway/gateway.py').read_text()
+        self.src = src
         tree = ast.parse(src)
-        fn = next(n for n in tree.body if isinstance(n, ast.FunctionDef) and n.name == 'running_borrowers')
-        scope = {'WAKE_BORROWERS': frozenset({'flash-next', 'swift-27b', 'nanbeige-33b'})}
-        exec(compile(ast.Module([fn], []), 'gateway', 'exec'), scope)
-        return scope['running_borrowers'], src
+        wanted = {'lease_holder', 'take_gpu0_wake_room', 'release_gpu0_wake_room'}
+        fns = [n for n in tree.body if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef)) and n.name in wanted]
+        self.assertEqual({f.name for f in fns}, wanted)
+        self.tmp = tempfile.TemporaryDirectory()
+        self.lock = Path(self.tmp.name) / 'gpu0-wake-room.lock'
+        self.lock.write_text('')
+        self.scope = {'os': os, 'fcntl': fcntl, 'time': time, 'asyncio': asyncio, 'Path': Path,
+                      'log': logging.getLogger('test'), 'GPU0_LEASE_LOCK': self.lock, 'GPU_DRAIN_TIMEOUT': 1}
+        exec(compile(ast.Module(fns, []), 'gateway', 'exec'), self.scope)
 
-    def test_running_borrowers(self):
-        running_borrowers, _ = self.load()
-        self.assertEqual(running_borrowers([{'model': 'general'}, {'model': 'embed'}]), [])
-        self.assertEqual(running_borrowers([{'model': 'swift-27b'}, {'model': 'embed'}]), ['swift-27b'])
-        self.assertEqual(running_borrowers([{'model': 'flash-next'}, {}]), ['flash-next'])
+    def tearDown(self):
+        self.tmp.cleanup()
 
-    def test_default_and_quadlet_lists_agree(self):
-        _, src = self.load()
-        default = re.search(r'"VOICE_WAKE_BORROWERS", "([^"]+)"', src).group(1)
-        quadlet = re.search(r'^Environment=VOICE_WAKE_BORROWERS=(\S+)$',
-                            (QUADLETS / 'voice-llm-gateway.container').read_text(), re.M).group(1)
-        self.assertEqual(set(default.split(',')), set(quadlet.split(',')))
-        self.assertEqual(set(quadlet.split(',')), {'flash-next', 'swift-27b', 'nanbeige-33b'})
+    def borrower(self):
+        fd = os.open(self.lock, os.O_RDWR)
+        fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        os.pwrite(fd, b'{"holder": "swift-27b"}', 0)
+        return fd
 
-    def test_wake_waits_on_borrowers(self):
-        _, src = self.load()
-        self.assertIn('await free_gpu0_wake_room()', src)
-        self.assertNotIn('free_dual_gpu_flash_next', src)
+    def test_wake_waits_for_borrower_then_proceeds(self):
+        fd = self.borrower()  # started, maybe not allocated yet: the lock alone blocks the wake
+
+        async def scenario():
+            asyncio.get_running_loop().call_later(0.3, os.close, fd)  # model unloads naturally
+            return await self.scope['take_gpu0_wake_room']()
+        held = asyncio.run(scenario())
+        self.assertIsInstance(held, int)
+        other = os.open(self.lock, os.O_RDWR)
+        with self.assertRaises(BlockingIOError):  # a launcher can't borrow while voice wakes
+            fcntl.flock(other, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        self.scope['release_gpu0_wake_room'](held)
+        fcntl.flock(other, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        os.close(other)
+
+    def test_bounded_wait_names_holder_and_leaves_borrower(self):
+        fd = self.borrower()
+        with self.assertRaisesRegex(RuntimeError, 'swift-27b'):
+            asyncio.run(self.scope['take_gpu0_wake_room']())
+        with self.assertRaises(BlockingIOError):  # still held: the gateway did not interrupt the model
+            probe = os.open(self.lock, os.O_RDWR)
+            try:
+                fcntl.flock(probe, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            finally:
+                os.close(probe)
+        os.close(fd)
+
+    def test_missing_lock_wakes_voice(self):
+        self.lock.unlink()
+        self.assertIsNone(asyncio.run(self.scope['take_gpu0_wake_room']()))
+        self.assertFalse(self.lock.exists())
+
+    def test_wake_order_and_wiring(self):
+        body = self.src[self.src.index('async def wake_voice_if_needed'):]
+        self.assertLess(body.index('write_state("waking")'), body.index('await take_gpu0_wake_room()'))
+        self.assertIn('release_gpu0_wake_room(lease)', body)
+        quadlet = (QUADLETS / 'voice-llm-gateway.container').read_text()
+        self.assertIn('Volume=/var/lib/powos/gpu-lease:/gpu-lease\n', quadlet)
+        self.assertIn('"/gpu-lease/gpu0-wake-room.lock"', self.src)
+        self.assertIn('gpu0-wake-room.lock', (ROOT / 'hosts/gpu-195/install.sh').read_text())
+        for name in ('voice-llm-gateway', 'llm-pool'):
+            files = json.loads((UNITS / f'{name}.json').read_text())['files']
+            self.assertIn('/var/lib/powos/gpu-lease/gpu0-wake-room.lock', files)
 
 
 if __name__ == '__main__':
