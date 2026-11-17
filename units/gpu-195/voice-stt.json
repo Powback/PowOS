@@ -29,7 +29,7 @@
     "pids": 512
   },
   "autosleep": "never",
-  "gpu": "nvidia.com/gpu=0",
+  "gpu": "nvidia.com/gpu=GPU-1a118f88-9cb5-2316-ddda-1ea80ff0af37",
   "vramBudget": "3g",
   "vramMeasured": "2.3 GiB",
   "health": "http://192.168.50.195:8000/health",
@@ -46,5 +46,5 @@
       "/var/lib/powos/models/hf"
     ]
   },
-  "vramNote": "GPU0 belongs to the realtime voice path (docs/GPU-SERVERS-PLAN.md); nothing else allocates on it"
+  "vramNote": "GPU1 (PCI 02:00.0) beside stt-batch and voice-tts since 2026-11-18, so GPU0 stays free for games and voice-llm; llm-pool places its models around these residents (local-llm-stack llm-pool/pool-gpu.py)"
 }

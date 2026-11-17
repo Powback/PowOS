@@ -2,8 +2,9 @@
 # hosts/gpu-195/install.sh - (re)deploy the realtime voice path on the GPU server gpu-195 (192.168.50.195).
 # Run as the user powos on the box, from the PowOS checkout (~/Projects/PowOS, `git pull` first). Idempotent.
 #
-#   GPU0: realtime voice (STT + TTS + Qwen3-8B-AWQ); voice LLM weights offload to host RAM after 5 min without API requests
-#   GPU1: stt-batch (the same whisper-fast, for files and dictation: http://stt.pow), resident
+#   GPU0: voice LLM (Qwen3-8B-AWQ); weights offload to host RAM after 5 min without API requests. Monitor/games card.
+#   GPU1: voice STT + TTS (since 2026-11-18) and stt-batch (the same whisper-fast, for files and dictation:
+#         http://stt.pow), resident. Devices are pinned by CDI UUID name (CDI index names follow device minors).
 #         llm-pool is an external prerequisite owned by local-llm-stack/hosts/gpu-195; never deployed here
 #   CPU:  voice-agent (VoiceAgent backend, /ws) + voice-web (Astro UI)
 #

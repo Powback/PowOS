@@ -1,7 +1,7 @@
 # gpu-195: speech to text for everything that isn't the realtime voice path - files and recordings from any PowOS
 # (`powos transcribe`) or any OpenAI-compatible client, behind http://stt.pow (Traefik on .100, PowStation
 # config/traefik/dynamic/stt.yml). Same whisper-fast image and model as voice-stt, but on GPU1 with its own copy of
-# the model: a long file never queues voice-agent's turns (GPU0 is the voice path's alone, docs/GPU-SERVERS-PLAN.md),
+# the model: a long file never queues voice-agent's turns (separate process; since 2026-11-18 voice-stt shares GPU1),
 # and CPU contention goes to the voice path first (2 CPUs at a low cpu weight; voice-stt has 4 at the default).
 # File settings: Silero VAD skips silence, uploads up to 500 MB, at most 4 requests running or waiting (then 503).
 # OpenAI API: POST /v1/audio/transcriptions (json|text|verbose_json|srt|vtt, stream=true for SSE deltas), GET /health.
@@ -15,7 +15,8 @@ Wants=network-online.target
 ContainerName=stt-batch
 Image=localhost/voice-stt-fast:latest
 PublishPort=8001:8000
-AddDevice=nvidia.com/gpu=1
+# GPU1 by UUID (CDI "1"); same card as before.
+AddDevice=nvidia.com/gpu=GPU-1a118f88-9cb5-2316-ddda-1ea80ff0af37
 SecurityLabelDisable=true
 Volume=/var/lib/powos/models/hf:/root/.cache/huggingface
 Environment=WHISPER__MODEL=deepdml/faster-whisper-large-v3-turbo-ct2

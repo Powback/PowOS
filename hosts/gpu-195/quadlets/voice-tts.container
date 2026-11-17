@@ -1,8 +1,8 @@
-# gpu-195 voice core: text to speech. Kokoro-FastAPI (GPU build), voice bf_emma, resident on GPU0 (~1.5 GB).
+# gpu-195 voice core: text to speech. Kokoro-FastAPI (GPU build), voice bf_emma, resident on GPU1 (~1 GiB).
 # OpenAI API: POST /v1/audio/speech. The model ships inside the image.
 # Unit: powos units show voice-tts  (repo units/gpu-195/voice-tts.json)
 [Unit]
-Description=PowOS voice core - TTS (Kokoro, GPU0)
+Description=PowOS voice core - TTS (Kokoro, GPU1)
 After=network-online.target
 Wants=network-online.target
 
@@ -11,7 +11,10 @@ ContainerName=voice-tts
 Image=ghcr.io/remsky/kokoro-fastapi-gpu:latest
 Network=voice.network
 PublishPort=8880:8880
-AddDevice=nvidia.com/gpu=0
+# GPU1 (PCI 02:00.0) by UUID, beside stt-batch: GPU0 stays free for games and voice-llm (user, 2026-11-18). CDI
+# index names follow the device minors (CDI "0" is GPU0 = /dev/nvidia1), a UUID cannot drift. With one device
+# injected, CUDA inside the container sees it as device 0, the default the service already uses.
+AddDevice=nvidia.com/gpu=GPU-1a118f88-9cb5-2316-ddda-1ea80ff0af37
 SecurityLabelDisable=true
 Label=io.powos.unit=voice-tts
 PodmanArgs=--memory=4g --memory-swap=4g --cpus=2 --pids-limit=512

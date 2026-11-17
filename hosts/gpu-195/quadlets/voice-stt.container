@@ -1,11 +1,11 @@
-# gpu-195 voice core: speech to text. faster-whisper (CUDA) large-v3-turbo, float16, resident on GPU0 (~2 GB).
+# gpu-195 voice core: speech to text. faster-whisper (CUDA) large-v3-turbo, float16, resident on GPU1 (~2.3 GiB).
 # OpenAI API: POST /v1/audio/transcriptions (VoiceAgent sends no model, so WHISPER__MODEL is the one used).
 # Image: whisper-fast (~/Projects/VoiceAgent services/whisper-fast, built by install.sh on top of
 # faster-whisper-server's CUDA image): greedy, no timestamps, encoder window sized to the audio. A 2 s turn
 # transcribes in ~105 ms instead of faster-whisper-server's ~250-300 ms (beam 5, timestamps, 30 s window).
 # Unit: powos units show voice-stt  (repo units/gpu-195/voice-stt.json)
 [Unit]
-Description=PowOS voice core - STT (faster-whisper large-v3-turbo, GPU0)
+Description=PowOS voice core - STT (faster-whisper large-v3-turbo, GPU1)
 After=network-online.target
 Wants=network-online.target
 
@@ -14,7 +14,10 @@ ContainerName=voice-stt
 Image=localhost/voice-stt-fast:latest
 Network=voice.network
 PublishPort=8000:8000
-AddDevice=nvidia.com/gpu=0
+# GPU1 (PCI 02:00.0) by UUID, beside stt-batch: GPU0 stays free for games and voice-llm (user, 2026-11-18). CDI
+# index names follow the device minors (CDI "0" is GPU0 = /dev/nvidia1), a UUID cannot drift. With one device
+# injected, CUDA inside the container sees it as device 0, the default the service already uses.
+AddDevice=nvidia.com/gpu=GPU-1a118f88-9cb5-2316-ddda-1ea80ff0af37
 SecurityLabelDisable=true
 Volume=/var/lib/powos/models/hf:/root/.cache/huggingface
 Environment=WHISPER__MODEL=deepdml/faster-whisper-large-v3-turbo-ct2

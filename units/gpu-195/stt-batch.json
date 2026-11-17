@@ -29,7 +29,7 @@
     "pids": 512
   },
   "autosleep": "never",
-  "gpu": "nvidia.com/gpu=1",
+  "gpu": "nvidia.com/gpu=GPU-1a118f88-9cb5-2316-ddda-1ea80ff0af37",
   "vramBudget": "3g",
   "vramMeasured": "2.4 GiB",
   "health": "http://192.168.50.195:8001/health",
@@ -46,5 +46,5 @@
       "localhost/voice-stt-fast:latest (voice-stt's image)"
     ]
   },
-  "vramNote": "GPU1 is the general pool (docs/GPU-SERVERS-PLAN.md): this resident 2.4 GiB plus llm-pool's on-demand models (19.2 GiB budget). Off GPU0 on purpose: the voice path never waits behind a file"
+  "vramNote": "GPU1 (PCI 02:00.0) is the pool card by default: this resident 2.3 GiB, voice-stt 2.3 GiB and voice-tts 0.9 GiB (since 2026-11-18) leave ~17.7 GiB for llm-pool's on-demand models; a long file never queues a voice turn (separate process)"
 }

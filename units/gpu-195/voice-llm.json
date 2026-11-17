@@ -27,7 +27,7 @@
     "pids": 4096
   },
   "autosleep": "gateway sleeps vLLM level 1 after five minutes without OpenAI API requests; next request wakes weights from host RAM",
-  "gpu": "nvidia.com/gpu=0",
+  "gpu": "nvidia.com/gpu=GPU-589a4c17-7c2d-78bc-1188-2aadb37ba2b4",
   "vramBudget": "11g",
   "vramMeasured": "10.9 GiB",
   "health": "private on voice.network; public health and OpenAI API are via voice-llm-gateway :8100",
@@ -45,5 +45,5 @@
       "/var/lib/powos/models/vllm"
     ]
   },
-  "vramNote": "GPU0 is leased to Flash Next only while the voice gateway confirms vLLM is asleep; voice requests preempt dual-GPU Flash Next before waking"
+  "vramNote": "GPU0 (PCI 01:00.0, monitor/games). Pool models never take its 0.45 wake room; only borrowers (Flash Next dual lease, swift-27b, nanbeige-33b) use GPU0 while the voice gateway confirms vLLM is asleep, and voice waits for their natural unload before waking"
 }

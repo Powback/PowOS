@@ -28,6 +28,11 @@ IDLE_SECONDS = max(30, int(os.getenv("VOICE_LLM_IDLE_SECONDS", "300")))
 GPU_DRAIN_TIMEOUT = max(60, int(os.getenv("VOICE_GPU_DRAIN_TIMEOUT", "1800")))
 GPU0_VOICE_RESERVE_BYTES = int(float(os.getenv("GPU0_VOICE_RESERVE_GIB", "8")) * 1024**3)
 STATE_FILE = Path(os.getenv("VOICE_GPU_STATE_FILE", "/state/voice-gpu-state.json"))
+# Pool models that may hold voice-llm's GPU0 wake room while it sleeps (llm-pool pool-gpu --borrow-voice-wake-room
+# profiles and Flash Next's dual-GPU lease). Every other pool model leaves that room free by construction.
+WAKE_BORROWERS = frozenset(
+    m.strip() for m in os.getenv("VOICE_WAKE_BORROWERS", "flash-next,swift-27b,nanbeige-33b").split(",") if m.strip()
+)
 STATE_FILE.parent.mkdir(parents=True, exist_ok=True)
 
 client = httpx.AsyncClient(
@@ -103,8 +108,12 @@ async def gpu0_memory_used_bytes() -> int | None:
     return None
 
 
-async def free_dual_gpu_flash_next() -> None:
-    """Wait only when Flash Next actually holds GPU0; never kill a live session."""
+def running_borrowers(running: list[dict]) -> list[str]:
+    return sorted({str(m.get("model")) for m in running if m.get("model") in WAKE_BORROWERS})
+
+
+async def free_gpu0_wake_room() -> None:
+    """Wait only when a wake-room borrower actually holds GPU0; never kill a live session."""
     deadline = time.monotonic() + GPU_DRAIN_TIMEOUT
     next_note = time.monotonic()
     needs_gpu0 = False
@@ -116,9 +125,10 @@ async def free_dual_gpu_flash_next() -> None:
         except (httpx.HTTPError, ValueError) as exc:
             raise RuntimeError(f"cannot verify local model sessions; refusing to interrupt them: {exc}") from exc
 
-        if not any(model.get("model") == "flash-next" for model in running):
+        borrowers = running_borrowers(running)
+        if not borrowers:
             if needs_gpu0:
-                log.info("Flash Next exited naturally; GPU0 is clear for voice")
+                log.info("GPU0 borrower exited naturally; GPU0 is clear for voice")
             return
 
         # The upstream metrics route is subject to flash-next's concurrencyLimit
@@ -128,7 +138,8 @@ async def free_dual_gpu_flash_next() -> None:
         gpu0_used = await gpu0_memory_used_bytes()
         if gpu0_used is not None and gpu0_used < GPU0_VOICE_RESERVE_BYTES:
             log.info(
-                "Flash Next is not using GPU0 (%.1f GiB used, %.1f GiB reserve threshold); waking voice alongside the active session",
+                "%s not using GPU0 (%.1f GiB used, %.1f GiB reserve threshold); waking voice alongside the active session",
+                ",".join(borrowers),
                 gpu0_used / 1024**3,
                 GPU0_VOICE_RESERVE_BYTES / 1024**3,
             )
@@ -140,14 +151,15 @@ async def free_dual_gpu_flash_next() -> None:
                 log.info("GPU0 lease is unknown; waiting safely without interrupting the running model")
             else:
                 log.info(
-                    "Flash Next currently uses GPU0 (%.1f GiB); waiting for its session and natural unload before waking voice",
+                    "%s holds GPU0 (%.1f GiB); waiting for its session and natural unload before waking voice",
+                    ",".join(borrowers),
                     gpu0_used / 1024**3,
                 )
             next_note = time.monotonic() + 30
         await asyncio.sleep(1)
 
     raise RuntimeError(
-        f"Flash Next still holds both GPUs after {GPU_DRAIN_TIMEOUT}s; leaving its session untouched; retry voice request"
+        f"a GPU0 borrower still holds voice's wake room after {GPU_DRAIN_TIMEOUT}s; leaving its session untouched; retry voice request"
     )
 
 
@@ -166,7 +178,7 @@ async def wake_voice_if_needed() -> None:
         raise RuntimeError("vLLM sleep state endpoint unavailable after startup wait")
 
     write_state("waking")
-    await free_dual_gpu_flash_next()
+    await free_gpu0_wake_room()
     response = await client.post(f"{VOICE_URL}/wake_up", timeout=180)
     response.raise_for_status()
     deadline = time.monotonic() + 180

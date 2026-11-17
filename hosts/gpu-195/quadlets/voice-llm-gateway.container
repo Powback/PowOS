@@ -17,7 +17,10 @@ Environment=VOICE_LLM_URL=http://voice-llm:8000
 Environment=LLM_POOL_URL=http://host.containers.internal:9292
 Environment=VOICE_LLM_IDLE_SECONDS=300
 Environment=GPU0_VOICE_RESERVE_GIB=8
-# If Flash Next owns both cards, wait for its natural TTL unload; never force-stop an active local generation.
+# Pool models allowed to borrow voice-llm's GPU0 wake room while it sleeps (local-llm-stack llm-pool: Flash Next's
+# dual lease, whole-card --borrow-voice-wake-room profiles). If one holds GPU0, wait for its natural TTL unload;
+# never force-stop an active local generation. Keep in sync with llm-pool/config.yaml.
+Environment=VOICE_WAKE_BORROWERS=flash-next,swift-27b,nanbeige-33b
 Environment=VOICE_GPU_DRAIN_TIMEOUT=1800
 Label=io.powos.unit=voice-llm-gateway
 PodmanArgs=--memory=512m --memory-swap=512m --cpus=1 --pids-limit=256
