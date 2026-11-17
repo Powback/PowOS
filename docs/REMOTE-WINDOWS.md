@@ -317,8 +317,65 @@ close-before-open/close-during-handshake/close-during-input-starvation/Surface l
 SPS resolution changes, bounded teardown including codec-driver stalls, and authenticated end-to-end glass/input.
 No build, device, service, Steam, deployment or queue operation was performed for this slice.
 
-Remaining Phase 1 integration: trusted bootstrap acquisition/PowAuth consumer path; WebWindows ownership and
+Remaining Phase 1 integration: server-side trusted bootstrap (see "Bootstrap contract" below; the client exists); WebWindows ownership and
 `openRemote`/placement/close hooks; progress presentation; input ABI forwarding with explicit backpressure and
 release-on-disconnect; Wi-Fi/ADPF lifecycle policy; real window capture and latency measurements. Keep the Phase 1
 checkboxes open until these and the real gates pass. The old proposed `libpowstream_core.so` name above is replaced
 by the actual canonical `libpowstream_client_core.so`; do not rename build artifacts to match the proposal.
+
+### Bootstrap contract (2026-11-18; client landed, server trust missing)
+
+Read from PowStream at the pinned `ANDROID_CLIENT_REV` `42dd13d` (`bins/powstream-webrtc-server/src/{main.rs,b0.rs}`,
+`crates/powstream-session/src/token.rs`, `docs/NATIVE-CLIENT-CORE.md`); master `eca64b5` and every branch through
+`fix/http-body-reader` `b22b9e5` have the same bootstrap surface. **What exists on the server:**
+
+| step | request | response |
+|---|---|---|
+| login | `POST https://<desk>:8090/api/login` `{"user","pass"}` (shared `POWSTREAM_USER`/`POWSTREAM_PASS`, default `pow`/`pow`) | `Set-Cookie: powstream_session=<user>:<expiry>:<hmac-hex>` (24 h, HttpOnly) |
+| bootstrap | `GET https://<desk>:8090/b0/session.json`, `Cookie: powstream_session=…` | `200 {"certHashHex":<64 hex>,"wtPort":47800,"path":"/b0","token":"b0:<expiry>:<hmac>"}`; `401 {"error":"unauthorized"}`; `200 {"error":"B0 is disabled…"}` |
+| connect | WebTransport `https://<desk>:<wtPort>/b0?token=…`, cert pinned by `certHashHex` (the core's `ps_open`) | token: one connect within 120 s |
+
+**What is missing (the native bootstrap, PowStream P2/P10), and why the phone cannot use the above as-is:**
+
+1. **Trusted HTTPS.** `:8090` serves an `rcgen` self-signed certificate generated fresh on every server start
+   (`main.rs build_tls`), so there is no stable identity to verify and no CA the phone trusts. The app has no
+   `networkSecurityConfig`: platform trust is the system CAs only. Needed, either:
+   (a) the server behind a TLS terminator with a publicly trusted certificate (it already supports `--no-tls` for
+   Traefik) on a name the phone resolves on the LAN/VPN, with `/b0/session.json` exempted from browser forwardAuth
+   only because it carries its own credential below (an explicit route exception, never a blanket bypass); or
+   (b) a stable server certificate issued by the PowOS realm CA plus a `network_security_config` that trusts that
+   CA for that host only. `certHashHex` is trusted only because it arrives over this channel.
+2. **A native credential.** The only credential is the shared web login password; the upstream doc says native
+   login/pairing is intentionally not implemented. Needed: `/b0/session.json` accepting
+   `Authorization: Bearer <ticket>` where the ticket is a PowAuth/`powos-deviced` stream ticket validated by the
+   server on loopback (device-ecosystem D6, P10). PowOS stores no PowStream password.
+3. Same response body as today (the client already parses it), plus `Cache-Control: no-store` (already sent).
+
+**Client (landed):** `engine/.../stream/PowStreamBootstrap.java`. `fetch(origin, credential, timeoutMs)` takes a bare
+`https://host[:port]` origin, does `GET /b0/session.json` with `HttpsURLConnection` under unmodified platform trust
+and hostname verification (no TrustManager/HostnameVerifier/pin override, no redirects, no cache, 8 KiB body cap),
+and returns `Bootstrap{endpoint, token(), certSha256()}` for `PowStreamReceiver`. The endpoint host is always the
+verified origin's host, never taken from the body; path must be `/b0`, port 1..65535, hash 64 hex, token in the
+core's alphabet (`[A-Za-z0-9:]`, ≤4096). Failures are typed (`UNTRUSTED`, `UNAUTHORIZED`, `DISABLED`, `UNREACHABLE`,
+`INVALID`) with fixed, secret-free messages a window can show. The credential is borrowed for one request;
+`Credential.sessionCookie` covers today's server and is the only constructor until P10 adds the ticket header. Token
+and pin are never logged or persisted; `Bootstrap.close()` wipes the pin; `fresh()` = under 60 s (server TTL 120 s),
+and every receiver open fetches a new one. Against today's `.58` server it fails closed with `UNTRUSTED` (the
+self-signed cert). There is no insecure, fake or demo mode. Tests: `PowStreamBootstrapTest` (JVM),
+`test/tier1/test-powstream-bootstrap-contract.py` (source invariants).
+
+**Remote window host: not started this pass, by design.** With no trusted bootstrap there is nothing it could open
+without a trust bypass. The shape is fixed by §2 and the receiver's contract: `WebWindows.openRemote(origin)` puts a
+pending window on the page at once (progress text = `PowStreamReceiver.progress()`, polled each frame tick, plus the
+bootstrap step "Signing in to Desk" before it), fetches the bootstrap off the UI thread, creates the
+`powos-ww-<id>-remote` buffer layer + `Surface(content)` exactly as `openLinux` does, and starts the receiver.
+Resize = layer buffer size + (later) `wm.resize`; no codec restart. Close and Surface loss: `receiver.close()`
+first, `awaitClosed(≤5000)` on a background thread, and only after it returns true release the Surface and remove
+the layer (on timeout keep the layer hidden and retry; never free the Surface under a live codec). Failure shows the
+typed message in the window with Retry (fresh bootstrap). Next after that: input forwarding (`ps_send_input`
+reliable stream, explicit BACKPRESSURE handling, release-on-disconnect), Wi-Fi low-latency lock, ADPF hint.
+
+**Live validation needs:** PowStream P2/P10 deployed on `.58` (trusted cert + ticket), a PowOS caller that obtains the
+ticket from PowAuth/deviced, the remote window host above, then on the Open: open "Desk (remote)", see the progress
+states in the window, first frame, close mid-handshake and mid-stream (no leaked codec/layer:
+`dumpsys SurfaceFlinger --list`, `dumpsys media.codec`).
