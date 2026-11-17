@@ -1,0 +1,22 @@
+{
+  "id": "display-gpu-env",
+  "name": "DXVK on the display GPU (session environment.d)",
+  "kind": "system",
+  "host": "gpu195",
+  "hostNote": "gpu-195 (192.168.50.195, Bazzite 44 KDE Wayland, 2x RTX 3090; monitor on GPU0 01:00.0)",
+  "owner": "system:gpu-195-desktop",
+  "purpose": "Proton/DXVK games render on the GPU that drives the monitor instead of the other identical 3090 (cross-GPU PRIME copies cost FPS). One line in the user session environment: DXVK_FILTER_DEVICE_UUID=<display GPU UUID, derived at install from the connected DRM connector -> PCI -> nvidia-smi>. A per-game launch option still overrides it; vkd3d-proton (DX12) has no UUID filter and is not covered. Podman/CDI AI containers do not inherit it.",
+  "installedBy": "bash hosts/gpu-195/display-gpu/install.sh (as powos, no sudo; --dry-run shows, --remove undoes)",
+  "files": [
+    "/var/home/powos/.config/environment.d/60-powos-display-gpu.conf"
+  ],
+  "unbounded": "one environment variable, nothing resident",
+  "remove": {
+    "stop": [],
+    "commands": [
+      "bash hosts/gpu-195/display-gpu/install.sh --remove"
+    ],
+    "keep": []
+  },
+  "decide": "Takes effect for Steam started after the next Plasma login (or systemctl --user daemon-reload, then a full Steam restart). Re-run the installer after moving the monitor to the other card."
+}

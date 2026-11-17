@@ -1125,3 +1125,20 @@ can overlap when Flash Next has a single-GPU lease. It is still one model
 generation slot: the two-slot trial above was 45.6% slower in aggregate, so
 additional agent and subagent requests share the fair queue rather than
 overcommitting the engine.
+
+### Games render on the display GPU (2026-11-17)
+
+Measured: Halo MCC (Proton/DXVK) rendered on GPU1 (02:00.0) while the monitor is on GPU0 (01:00.0,
+GPU-589a4c17-..., `/dev/nvidia1`: device minors are reversed), with an NVKMS PRIME import error and dxvk-submit stuck
+in the kernel. `DXVK_FILTER_DEVICE_UUID=589a4c177c2d78bc11882aadb37ba2b4 %command%` fixed the FPS. Host default instead
+of per-game options: `bash hosts/gpu-195/display-gpu/install.sh` (as powos; `--dry-run`, `--remove`; unit
+`display-gpu-env`) writes `~/.config/environment.d/60-powos-display-gpu.conf` with that variable, the UUID derived
+from the GPU whose DRM connector is `connected` (fails if none or two). The systemd user manager reads it at start
+and on `systemctl --user daemon-reload`; Steam (Plasma launches it as `app-steam@<id>.service`) inherits it and
+pressure-vessel passes it to Proton. Effective for a Steam started after the next login (or daemon-reload + full Steam
+quit/start). A per-game launch option still overrides it.
+
+Limit: vkd3d-proton (DX12) only has `VKD3D_FILTER_DEVICE_NAME` (identical cards share the name) and
+`VKD3D_VULKAN_DEVICE` (a zero-based enumeration index, not an identity; checked in libs/vkd3d/device.c), so DX12
+games are not pinned. If one shows the same symptom, use a per-game `VKD3D_VULKAN_DEVICE=<n>` after checking the order
+with `vulkaninfo --summary` in that game's runtime.
