@@ -378,6 +378,16 @@ Access, idle windows and on-device rules: the powos-phone skill (adb/root/idle/c
   Launch 134 s (557340 21:52): not windows - Steam's own CheckShaderDepotManifest 55 s + SynchronizingCloud 54 s
   (cloud_log: "AutoCloud checking local state" -> 54 s -> "already synced"): a ~54 s network timeout per request in a
   Steam resumed from its freeze; Besiege 2 min later: 4 s for the same steps.
+- Wine's screen follows the container (steam pkgrel 49, 11-19; user_settings.py follow_screen): Proton defaults
+  EmulateModeset ON (win32u add_modes: host modes cut to one, the app's current mode kept from the registry), so after
+  any fold/rotate Wine kept the LAUNCH size as the app's monitor and mapped X geometry through scale + centre offset.
+  That was every "oversized DRI3 import" (4567x5431, 2484x5529, 4609x4959: the stale ratio) and Besiege's withdraw at
+  cover portrait: Win32 rect (-2206,0)-(3322,2484) + KWin's 1116x2484 with SWP_NOMOVE = wholly off-screen, winex11
+  WM_STATE 1 -> 0 (game-resize 11-18 23:43, WINEDEBUG +win,+x11drv). WINE_DISABLE_FULLSCREEN_HACK doesn't change it.
+  Fix: "EmulateModeset"="N" in pfx/user.reg [Software\\Wine\\X11 Driver] (Proton's import, before Wine; user's value
+  kept); Valve does the same under gamescope. Trace a game's Wine side: game-resize GAME_ENV=PROTON_LOG=1,WINEDEBUG=
+  +timestamp,+tid,+win,+x11drv -> ~/steam-<appid>.log (grep "config changed", "WM_STATE", "xinerama_init").
+  /usr/bin/steam now syncs user_settings.py into each Proton on every call (a launch forward too).
 - Window override (11-11, owner-approved option a): `powos game <appid> window borderless|default` (unity-screen
   --window; steam-compat.json apps.<id>.window). For a Unity game that forces exclusive full screen itself (Besiege's
   Config.xml beats -screen-fullscreen 0): at each launch at render scale 100, before the game starts, unity-screen sets
