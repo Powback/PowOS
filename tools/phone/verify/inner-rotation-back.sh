@@ -105,6 +105,8 @@ say "owned camera task $CAMTASK: $moved"
 r=""; for _ in $(seq 1 16); do r=$(rot); [ "$r" = "$r0" ] && break; sleep 0.25; done
 hr=$(wlog | grep "PowosHomeRotation")
 [ -n "$hr" ] && say "$hr"
+# The turn can be over before a poll sees it (11-18 21:34: launch -> window -> back in 0.7 s): HomeRotation's own line says it.
+if [ "$maxr" = "$r0" ]; then t=$(printf '%s\n' "$hr" | sed -nE 's/.*still at rotation ([0-3]) .*/\1/p' | head -1); [ -n "$t" ] && maxr=$t; fi
 if [ "$r" = "$r0" ] && [ -z "$hr" ] && [ "$maxr" = "$r0" ]; then
   say "NOT EXERCISED: the camera never turned display 0 (rotation $r0 throughout)"; wwc_clean; exit 3; fi
 [ "$r" = "$r0" ] || bad "display 0 stays at rotation $r after the camera moved into its window (home's was $r0)"
