@@ -39,11 +39,17 @@ if [ "${POWOS_DEVICE:-phone}" != emu ] && [ -z "$cdp_mac" ] && [ "${CDP_FWD_CACH
   if [ "$rc" != 3 ] && [ "$rc" != 75 ]; then [ -z "$res" ] || printf '%s\n' "$res"; exit "$rc"; fi
   rm -f "$fwd_cache"
 fi
-out=$(cadb shell 'echo "pid=$(pidof com.powos.app)"; grep -ao "@webview_devtools_remote_[0-9]*" /proc/net/unix 2>/dev/null | sort -u' 2>&1 | tr -d '\r') || { echo "cdp: adb failed (devtools lookup on $serial): $(tail -1 <<<"$out")" >&2; exit 2; }
+out=$(cadb shell 'echo "pid=$(pidof com.powos.app)"; grep -q "^Num" /proc/net/unix 2>/dev/null && echo unix=r; grep -ao "@webview_devtools_remote_[0-9]*" /proc/net/unix 2>/dev/null | sort -u' 2>&1 | tr -d '\r') || { echo "cdp: adb failed (devtools lookup on $serial): $(tail -1 <<<"$out")" >&2; exit 2; }
 pids=$(sed -n 's/^pid=//p' <<<"$out" | head -1)
 socks=$(sed -n 's/^@webview_devtools_remote_\([0-9][0-9]*\)$/\1/p' <<<"$out")
 pid=
 for p in $pids; do [[ "$p" =~ ^[0-9]+$ ]] || continue; [ -n "$socks" ] || { pid=$p; break; }; grep -qx "$p" <<<"$socks" && { pid=$p; break; }; done
+# /proc/net/unix readable and no devtools socket at all: no WebView page is up in any process (the app runs without
+# its home/shell page in front - 11-11 on the razr: Motorola's style panel). Say so; forwarding to pidof's pid then
+# only gave cdp.ts's "no devtools endpoint on port 9378 (TypeError: fetch failed)", which reads like a broken forward.
+if [ -z "$pid" ] && [ -z "$socks" ] && grep -qx 'unix=r' <<<"$out" && [[ "${pids%% *}" =~ ^[0-9]+$ ]]; then
+  echo "cdp: com.powos.app (pid $pids) on $serial has no WebView devtools socket - no PowOS page is up (not in front?)" >&2; exit 1
+fi
 if [ -z "$pid" ]; then
   [[ "${pids%% *}" =~ ^[0-9]+$ ]] || { echo "com.powos.app isn't running on $serial${out:+ ($(head -c 200 <<<"$out" | tr '\n' ' '))}" >&2; exit 1; }
   echo "cdp: com.powos.app (pid $pids) on $serial has no devtools socket yet (sockets: $(tr '\n' ' ' <<<"$socks"))" >&2; exit 1

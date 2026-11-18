@@ -12,14 +12,25 @@ ADB=${ADB:-$HOME/Library/Android/sdk/platform-tools/adb}
 # name, so this SKIPped and the board task sat at 3/4 without a check). CDP goes through the Mac's adb too (cdp.sh
 # CDP_MAC_ADB).
 export PHONE_SERIAL=${PHONE_SERIAL:-$("$ADB" devices | awk '/^(adb-ZY22MQL54Q[^ \t]*|192\.168\.50\.203:[0-9]+)[ \t]+device$/{print $1; exit}')}
-[ -n "$PHONE_SERIAL" ] || { echo "SKIP: ENV: the razr isn't on the Mac's adb (adb mdns services)"; exit 5; }
+# Away (11-18: off the network all day) or not showing PowOS's home: rc 3, the job STAYS QUEUED until the razr is back
+# with the home up. These were SKIPs (rc 5), which ended the job - the board kept 11-11's "no CDP answer ... port 9378"
+# as the task's last check (the Motorola style panel was in front, so no PowOS WebView, so no devtools socket) and
+# nothing ran it again; the 11-14 PASS was by hand, off the queue.
+[ -n "$PHONE_SERIAL" ] || { echo "the razr isn't on the Mac's adb (adb mdns services: no adb-ZY22MQL54Q) - stays queued"; exit 3; }
 export CDP_MAC_ADB=${CDP_MAC_ADB:-$ADB}
 js='JSON.stringify([...document.querySelectorAll(".home-tile")].filter(e=>e.getBoundingClientRect().height>0).map(e=>({t:(e.innerText||"").replace(/\s+/g," ").trim().slice(0,120),live:!!e.querySelector(".xterm-screen,canvas,video,img")})))'
 out=$(perl -e 'alarm 60; exec @ARGV' tools/phone/cdp.sh eval home "$js" 2>&1 | tr -d '\\' | tail -1)
 echo "widgets-nonroot ($PHONE_SERIAL): $out"
 # No answer: say what's in front (the home's WebView exists only while PowOS's home is up; 11-10 the razr's user was in
 # Motorola's own wallpaper/style panel, so the PowOS process ran without a page to read).
-case "$out" in *'['*) ;; *) echo "widgets-nonroot: in front: $("$ADB" -s "$PHONE_SERIAL" shell dumpsys activity activities 2>/dev/null | awk '/ResumedActivity/{for (i = 1; i <= NF; i++) if ($i ~ /\//) { print $i; exit }}')" ;; esac
+case "$out" in *'['*) ;; *)
+  front=$("$ADB" -s "$PHONE_SERIAL" shell dumpsys activity activities 2>/dev/null | awk '/ResumedActivity/{for (i = 1; i <= NF; i++) if ($i ~ /\//) { print $i; exit }}')
+  echo "widgets-nonroot: in front: $front"
+  # PowOS's home isn't the page in front (another app, Motorola's launcher/style panel): its WebView isn't up, so
+  # there is no devtools socket to read - not a widget failure, and the check must not open anything on the user's
+  # phone. Wait for the razr to show it.
+  case "$front" in com.powos.app/*) ;; *) echo "PowOS home not in front on the razr ($front) - stays queued"; exit 3 ;; esac ;;
+esac
 python3 - "$out" <<'PY'
 import sys,json,re
 m=re.search(r"\[.*\]",sys.argv[1])
