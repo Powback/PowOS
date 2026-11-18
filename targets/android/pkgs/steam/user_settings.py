@@ -231,8 +231,79 @@ def _iscript():
     sys.exit = exit_and_record
 
 
+# The game's screen follows its Android container (fold, rotate, a floating task): Wine's display mode emulation off in
+# every Proton prefix. Proton defaults EmulateModeset on (win32u add_modes): the host's modes are cut to ONE and the
+# app's "current mode" is kept from the registry, so after KWin's output (Xwayland's root) changes, Wine keeps the
+# LAUNCH size as the app's monitor and maps every X geometry through a scale + centre offset (an emulated mode change
+# nobody asked for). Besiege 346010 (game-resize 11-18 23:43, WINEDEBUG +win,+x11drv): app monitor stuck 1116x2484;
+# cover landscape -> the Win32 rect became (-2206,0)-(3322,2484) (2484x1116 x 2484/1116, centred), the portrait's
+# 1116x2484 ConfigureNotify kept that x (SWP_NOMOVE) -> (-2206,0)-(-1090,2484), wholly off the virtual screen, and
+# winex11 withdrew the window (WM_STATE 1 -> 0) for good. The same scale sized DXVK's swapchains 4567x5431 / 2484x5529
+# / 2484x2309 (Xwayland's KGSL import refused them, "failed to import KGSL DRI3 dma-buf"; DXVK "Failed to create Vulkan
+# swapchain", the game stopped drawing). WINE_DISABLE_FULLSCREEN_HACK doesn't touch this (11-18 23:51 run: same scaling).
+# With "EmulateModeset"="N" (HKCU\Software\Wine\X11 Driver) Wine takes Xwayland's real mode list (the output's mode +
+# Xwayland's emulated ones) and the current mode follows the root: 346010 folded-portrait / unfolded-again PASS
+# (11-19 00:02). Valve turns it off itself under gamescope (a compositor that owns the screen, as KWin does here); a
+# game's own ChangeDisplaySettings then goes to Xwayland's RandR emulation (viewport-scaled, per client), upstream's
+# default. Written into pfx/user.reg before Wine starts (Proton imports this file first); a value already there - the
+# user's own "Y" - is left alone. A prefix not made yet gets it at its next launch.
+# Real fix: Wine following a host mode change when no app-set mode is in force (add_modes keeps the stale virtual
+# mode), upstream.
+X11_DRIVER = b"[Software\\\\Wine\\\\X11 Driver]"
+FOLLOW_SCREEN = b'"EmulateModeset"="N"'
+
+
+def follow_screen(reg):
+    """Puts "EmulateModeset"="N" into user.reg's X11 Driver section (made if missing). Returns what it did."""
+    try:
+        with open(reg, "rb") as f:
+            s = f.read()
+    except OSError:
+        return "no user.reg"
+    lines = s.split(b"\n")
+    at = next((i for i, l in enumerate(lines) if l.startswith(X11_DRIVER + b" ") or l == X11_DRIVER), None)
+    if at is not None:
+        j = at + 1
+        while j < len(lines) and lines[j].strip() and not lines[j].startswith(b"["):
+            if lines[j].lower().startswith(b'"emulatemodeset"='):
+                return "kept " + lines[j].decode("ascii", "replace")
+            j += 1
+        k = at + 1
+        while k < j and lines[k].startswith((b"#", b"@")):
+            k += 1  # after #time= / a default value
+        lines.insert(k, FOLLOW_SCREEN)
+        out = b"\n".join(lines)
+    else:
+        body = s.rstrip(b"\n")
+        out = body + b"\n\n" + X11_DRIVER + b" %d\n" % int(time.time()) + FOLLOW_SCREEN + b"\n"
+    tmp = reg + ".powos-tmp"
+    try:
+        with open(tmp, "wb") as f:
+            f.write(out)
+            f.flush()
+            os.fsync(f.fileno())
+        try:
+            os.chmod(tmp, os.stat(reg).st_mode & 0o7777)
+        except OSError:
+            pass
+        os.replace(tmp, reg)
+    except OSError as e:
+        return "can't write: %s" % e
+    return "set"
+
+
+def _follow_screen():
+    data = os.environ.get("STEAM_COMPAT_DATA_PATH", "")
+    if data:
+        follow_screen(os.path.join(data, "pfx", "user.reg"))
+
+
 if __name__ == "user_settings":  # Proton's own import (sitecustomize.py loads it under another name, for its functions)
     try:
         _iscript()
     except Exception as e:  # never break a launch over this
+        sys.stderr.write("PowOS user_settings: %s\n" % e)
+    try:
+        _follow_screen()
+    except Exception as e:
         sys.stderr.write("PowOS user_settings: %s\n" % e)

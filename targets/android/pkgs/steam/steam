@@ -131,16 +131,6 @@ case $(readlink "/proc/${steam_pid:-0}/exe" 2>/dev/null) in
     # Which way each game runs - its native Linux build, ARM64 Proton or x86 Proton, the fastest that worked
     # (powos-steam-compat: per-game policy, measured launches): written into config.vdf now, while no Steam runs.
     command -v powos-steam-compat >/dev/null && timeout 20 powos-steam-compat apply 2>&1 | sed 's/^/steam: /' >&2
-    # PowOS's Proton user_settings.py (/usr/lib/powos-steam/user_settings.py: skips the install script evaluator when it
-    # has nothing to do, ~/.config/powos/proton-settings.json) in every Proton, unless that Proton has the user's own.
-    for d in "${XDG_DATA_HOME:-$HOME/.local/share}"/Steam/steamapps/common/Proton* \
-             "${XDG_DATA_HOME:-$HOME/.local/share}"/Steam/compatibilitytools.d/*; do
-      [ -f "$d/proton" ] && [ -f /usr/lib/powos-steam/user_settings.py ] || continue
-      if [ ! -e "$d/user_settings.py" ] || head -1 "$d/user_settings.py" | grep -q '^# PowOS user_settings'; then
-        cmp -s /usr/lib/powos-steam/user_settings.py "$d/user_settings.py" \
-          || install -m644 /usr/lib/powos-steam/user_settings.py "$d/user_settings.py"
-      fi
-    done
     # HACK: FEX's Vulkan thunk inside pressure-vessel. Valve's FEX compat tool (FEX-2607) builds its thunk overlay paths
     # from @PREFIX_LIB@ with a multiarch test on its RootFS - empty inside the container, so it takes the Fedora
     # layout (.../overrides/lib64) while pressure-vessel puts the x86_64 loader at
@@ -323,6 +313,18 @@ cm_link() {  # 0 logged on over a live link, 1 not yet (reconnecting, or its lin
   awk -v p=":$(printf '%04X' "$lp")" 'FNR > 1 && substr($2, length($2) - 4) == p && $4 == "01" { f = 1 } END { exit !f }' \
     /proc/net/tcp /proc/net/tcp6 2>/dev/null || return 1
 }
+# PowOS's Proton user_settings.py (/usr/lib/powos-steam/user_settings.py: skips the install script evaluator when it
+# has nothing to do, ~/.config/powos/proton-settings.json, the screen-following EmulateModeset) in every Proton, unless
+# that Proton has the user's own. On every call, also a launch forwarded into a running Steam (cmp only): a package
+# update reaches the next game launch, not only the next Steam start (11-19).
+for d in "${XDG_DATA_HOME:-$HOME/.local/share}"/Steam/steamapps/common/Proton* \
+         "${XDG_DATA_HOME:-$HOME/.local/share}"/Steam/compatibilitytools.d/*; do
+  [ -f "$d/proton" ] && [ -f /usr/lib/powos-steam/user_settings.py ] || continue
+  if [ ! -e "$d/user_settings.py" ] || head -1 "$d/user_settings.py" | grep -q '^# PowOS user_settings'; then
+    cmp -s /usr/lib/powos-steam/user_settings.py "$d/user_settings.py" \
+      || install -m644 /usr/lib/powos-steam/user_settings.py "$d/user_settings.py"
+  fi
+done
 # A pre-booted Wine session for the game (/usr/lib/powos-steam/py/powos_preboot.py, off unless POWOS_WINE_PREBOOT=1 or
 # `powos game <appid> preboot on`): booted while Steam prepares the launch, joined by the game through the ARM64 gate.
 # In the background; it decides itself whether it applies (switch, the game on powos-proton-arm64, a prior launch).
