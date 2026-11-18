@@ -168,11 +168,23 @@ object FreeformTasks {
     fun fullScreen(
         context: Context,
         hiddenToo: Boolean = false,
+        misses: MutableList<String>? = null,
     ): List<Pair<Int, String?>> {
         HiddenApi.allow()
         @Suppress("DEPRECATION")
         val tasks = runCatching { context.getSystemService(ActivityManager::class.java).getRunningTasks(MAX_TASKS) }.getOrDefault(emptyList())
-        return tasks.filter { isFullScreenApp(it, hiddenToo) }.map { it.taskId to (it.baseActivity ?: it.topActivity)?.packageName }
+        val (full, rest) = tasks.partition { isFullScreenApp(it, hiddenToo) }
+        // Why a visible task isn't one (WindowFrames' adopt line): its display, mode and type as read here.
+        misses?.addAll(rest.filter { runCatching { android.app.TaskInfo::class.java.getField("isVisible").getBoolean(it) }.getOrDefault(false) }.map(::describe))
+        return full.map { it.taskId to (it.baseActivity ?: it.topActivity)?.packageName }
+    }
+
+    /** Task [t] as "id pkg display mode type" (for a log line). */
+    private fun describe(t: ActivityManager.RunningTaskInfo): String {
+        val wc = runCatching { windowConfiguration(t) }.getOrNull()
+        val mode = wc?.let { runCatching { it.javaClass.getMethod("getWindowingMode").invoke(it) }.getOrNull() }
+        val type = wc?.let { runCatching { it.javaClass.getMethod("getActivityType").invoke(it) }.getOrNull() }
+        return "${t.taskId} ${(t.baseActivity ?: t.topActivity)?.packageName} d${dev.omalauncher.shell.WebWindowDisplays.displayOf(t)} mode=$mode type=$type web=${dev.omalauncher.shell.WebWindowDisplays.isWebWindow(t)}"
     }
 
     /**

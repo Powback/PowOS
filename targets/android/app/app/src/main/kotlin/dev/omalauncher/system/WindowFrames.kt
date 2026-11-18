@@ -516,8 +516,41 @@ class WindowFrames(
             windowed.clear()
             fullBefore.clear()
             buttonFull.clear()
+            skipLogged.clear()
         }
-        return floating && !keyguard && !Switcher.open && adopt()
+        val held = AdoptGate.held(floating, keyguard, Switcher.open)
+        logGate(held, floating)
+        return held == null && adopt()
+    }
+
+    /** The adopt gate's verdict, once per change (logcat PowosWindowFrames): which one held a stray app back. */
+    private fun logGate(
+        held: String?,
+        floating: Boolean,
+    ) {
+        val c = context.resources.configuration
+        val key = "${held ?: "open"} sw=${c.smallestScreenWidthDp}dp"
+        if (key == gateLogged) return
+        gateLogged = key
+        val freeform = Settings.Global.getInt(context.contentResolver, "enable_freeform_support", 0)
+        Log.i(TAG, "adopt gate: ${held ?: "open"} (floating=$floating sw=${c.smallestScreenWidthDp}dp freeform=$freeform keyguard=$keyguard switcher=${Switcher.open})")
+    }
+
+    private var gateLogged: String? = null
+
+    /** Full-screen tasks adopt skipped, with the reason, so each (task, reason) is logged once. */
+    private val skipLogged = mutableSetOf<String>()
+
+    /** FreeformTasks.fullScreen, logging (once each) a visible task it isn't and a full-screen one adopt will skip. */
+    private fun fullScreenLogged(): List<Pair<Int, String?>> {
+        val misses = mutableListOf<String>()
+        val full = FreeformTasks.fullScreen(context, misses = misses)
+        misses.filter { skipLogged.add("miss $it") }.forEach { Log.i(TAG, "visible task not a full-screen app here: $it") }
+        full.forEach { (id, pkg) ->
+            val why = AdoptGate.skip(pkg == null || pkg == context.packageName, id in adopted, id in windowed, dev.omalauncher.shell.WebWindowDisplays.fullScreenWindow(id) != null)
+            if (why != null && skipLogged.add("$id $why")) Log.i(TAG, "task $id ($pkg) full screen, not adopted: $why")
+        }
+        return full
     }
 
     /**
@@ -527,7 +560,7 @@ class WindowFrames(
     private fun strayFull(id: Int): Boolean = id !in adopted && id !in windowed && dev.omalauncher.shell.WebWindowDisplays.fullScreenWindow(id) == null
 
     private fun adopt(): Boolean {
-        val full = FreeformTasks.fullScreen(context)
+        val full = fullScreenLogged()
         // A window that is full screen now went there by its app's own request (a video, a game: Activity.
         // requestFullscreenMode): left so - no frame, no dock over it - and floats again where it was when it leaves.
         full.filter { (id, _) -> id in windowed && id !in fullBefore }.forEach { (id, pkg) ->

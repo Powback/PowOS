@@ -87,7 +87,9 @@ for _ in $(seq 1 30); do
     moved=$(sh_ "logcat -d -T \"$MARK\" -s PowosWebWindows:I" | grep -E "app.s task $CAMTASK moved onto display" | tail -1)
   fi
   [ -n "$moved" ] && break; sleep 0.5; done
-[ -n "$moved" ] || { bad "the camera never moved into a web window (15 s)"; wwc_end; }
+# The adopt path's own words (WindowFrames' "adopt gate" / skip lines, SystemFloat, WebWindows) kept with the evidence.
+sh_ "logcat -d -T \"$MARK\" -s PowosWindowFrames:I PowosSystemFloat:I PowosWebWindows:I PowosHomeRotation:I" >"$OUT/adopt-log.txt" 2>&1
+[ -n "$moved" ] || { bad "the camera never moved into a web window (15 s; adopt path: $OUT/adopt-log.txt)"; grep -E "adopt gate|not adopted|not a full-screen|was full screen" "$OUT/adopt-log.txt" | head -8 | while read -r l; do say "$l"; done; wwc_end; }
 say "owned camera task $CAMTASK: $moved"
 r=""; for _ in $(seq 1 16); do r=$(rot); [ "$r" = "$r0" ] && break; sleep 0.25; done
 hr=$(sh_ "logcat -d -T \"$MARK\" -s PowosHomeRotation:I" | grep -v "^-" | tr -d "\r")
