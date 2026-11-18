@@ -529,11 +529,15 @@ class WindowFrames(
         floating: Boolean,
     ) {
         val c = context.resources.configuration
-        val key = "${held ?: "open"} sw=${c.smallestScreenWidthDp}dp"
+        val key = "${held ?: "open"} sw=${c.smallestScreenWidthDp}dp ${AppWindows.smallestDp(context)}dp"
         if (key == gateLogged) return
         gateLogged = key
         val freeform = Settings.Global.getInt(context.contentResolver, "enable_freeform_support", 0)
-        Log.i(TAG, "adopt gate: ${held ?: "open"} (floating=$floating sw=${c.smallestScreenWidthDp}dp freeform=$freeform keyguard=$keyguard switcher=${Switcher.open})")
+        // The window log (files/window-log.txt) keeps it past logcat's few minutes.
+        dev.omalauncher.shell.WindowLog.i(
+            TAG,
+            "adopt gate: ${held ?: "open"} (floating=$floating display0=${AppWindows.smallestDp(context)}dp config sw=${c.smallestScreenWidthDp}dp freeform=$freeform keyguard=$keyguard switcher=${Switcher.open})",
+        )
     }
 
     private var gateLogged: String? = null
@@ -545,10 +549,10 @@ class WindowFrames(
     private fun fullScreenLogged(): List<Pair<Int, String?>> {
         val misses = mutableListOf<String>()
         val full = FreeformTasks.fullScreen(context, misses = misses)
-        misses.filter { skipLogged.add("miss $it") }.forEach { Log.i(TAG, "visible task not a full-screen app here: $it") }
+        misses.filter { skipLogged.add("miss $it") }.forEach { dev.omalauncher.shell.WindowLog.i(TAG, "visible task not a full-screen app here: $it") }
         full.forEach { (id, pkg) ->
             val why = AdoptGate.skip(pkg == null || pkg == context.packageName, id in adopted, id in windowed, dev.omalauncher.shell.WebWindowDisplays.fullScreenWindow(id) != null)
-            if (why != null && skipLogged.add("$id $why")) Log.i(TAG, "task $id ($pkg) full screen, not adopted: $why")
+            if (why != null && skipLogged.add("$id $why")) dev.omalauncher.shell.WindowLog.i(TAG, "task $id ($pkg) full screen, not adopted: $why")
         }
         return full
     }
@@ -599,7 +603,7 @@ class WindowFrames(
         adopted.add(id)
         val web = AppWindows.webDesktop(context)
         val ok = if (web) dev.omalauncher.shell.SystemFloat.toWebWindow(id) else FreeformTasks.toWindow(context, id, AppWindows.nextBounds(context))
-        Log.i(TAG, "task $id ($pkg) was full screen: ${if (!ok) "can't float it" else if (web) "now a web window" else "now a window"}")
+        dev.omalauncher.shell.WindowLog.i(TAG, "task $id ($pkg) was full screen: ${if (!ok) "can't float it" else if (web) "now a web window" else "now a window"}")
     }
 
     /**

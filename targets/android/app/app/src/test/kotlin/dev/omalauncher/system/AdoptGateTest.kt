@@ -24,4 +24,13 @@ class AdoptGateTest {
         assertNotNull(AdoptGate.skip(own = false, adopted = false, windowed = true, buttonFull = false))
         assertNotNull(AdoptGate.skip(own = false, adopted = false, windowed = false, buttonFull = true))
     }
+
+    /** The desktop width from display 0's live size: inner screen 2268 px at 442 dpi = 821 dp, the cover 1116 px = 404 dp. */
+    @Test
+    fun innerScreenIsTheDesktopByItsLiveSize() {
+        assertEquals(821, AppWindows.dp(2268, 442))
+        assertEquals(403, AppWindows.dp(1116, 442))
+        assertEquals(0, AppWindows.dp(0, 442))
+        assertEquals(0, AppWindows.dp(2268, 0))
+    }
 }

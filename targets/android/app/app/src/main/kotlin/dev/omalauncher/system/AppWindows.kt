@@ -29,8 +29,30 @@ object AppWindows {
 
     /** Whether apps opened now get a floating window. */
     fun floating(context: Context): Boolean =
-        context.resources.configuration.smallestScreenWidthDp >= DESKTOP_MIN_DP &&
+        smallestDp(context) >= DESKTOP_MIN_DP &&
             Settings.Global.getInt(context.contentResolver, "enable_freeform_support", 0) == 1
+
+    /**
+     * Display 0's smaller side in dp, as it is now (DisplayManager's live display info), not the caller's
+     * configuration: WindowFrames asks with its overlay window context, whose configuration can be the screen it was
+     * made on (board inner-screen-stays-landscape-after-an-app-moves, 11-18: the camera full screen on the unfolded
+     * inner screen was never adopted into a web window - adopt never ran). Unreadable: the configuration, as before.
+     */
+    fun smallestDp(context: Context): Int {
+        val live =
+            runCatching {
+                val d = context.getSystemService(android.hardware.display.DisplayManager::class.java).getDisplay(android.view.Display.DEFAULT_DISPLAY)
+                val m = android.util.DisplayMetrics().also { @Suppress("DEPRECATION") d.getRealMetrics(it) }
+                dp(minOf(m.widthPixels, m.heightPixels), m.densityDpi)
+            }.getOrNull()
+        return live?.takeIf { it > 0 } ?: context.resources.configuration.smallestScreenWidthDp
+    }
+
+    /** [px] at [dpi] in dp (0 when unknown). */
+    fun dp(
+        px: Int,
+        dpi: Int,
+    ): Int = if (px <= 0 || dpi <= 0) 0 else px * 160 / dpi
     /**
      * The unfolded desktop with web windows on (`powos_web_windows` = 1): every app window is a web window then
      * (docs/WEB_WINDOWS.md) - whatever opened it. A task that still comes up as an Android freeform window (an intent
