@@ -29,7 +29,7 @@ class AdoptGateTest {
     @Test
     fun innerScreenIsTheDesktopByItsLiveSize() {
         assertEquals(821, AppWindows.dp(2268, 442))
-        assertEquals(403, AppWindows.dp(1116, 442))
+        assertEquals(404, AppWindows.dp(1116, 442)) // the folded cover: config sw=404dp (window-log 11-18 21:08:24)
         assertEquals(0, AppWindows.dp(0, 442))
         assertEquals(0, AppWindows.dp(2268, 0))
     }

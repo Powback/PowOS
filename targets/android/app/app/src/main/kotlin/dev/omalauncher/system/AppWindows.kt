@@ -48,11 +48,11 @@ object AppWindows {
         return live?.takeIf { it > 0 } ?: context.resources.configuration.smallestScreenWidthDp
     }
 
-    /** [px] at [dpi] in dp (0 when unknown). */
+    /** [px] at [dpi] in dp, rounded as the configuration's sw (2268 px at 442 dpi = 820.99 -> 821; 0 when unknown). */
     fun dp(
         px: Int,
         dpi: Int,
-    ): Int = if (px <= 0 || dpi <= 0) 0 else px * 160 / dpi
+    ): Int = if (px <= 0 || dpi <= 0) 0 else (px * 160 + dpi / 2) / dpi
     /**
      * The unfolded desktop with web windows on (`powos_web_windows` = 1): every app window is a web window then
      * (docs/WEB_WINDOWS.md) - whatever opened it. A task that still comes up as an Android freeform window (an intent

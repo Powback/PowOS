@@ -206,6 +206,8 @@ class ShellActivity : Activity() {
         super.onResume()
         if (leaveStaleHome()) return
         dockLog("resumed")
+        // An app that turned display 0 and stayed full screen there (no web window for it) left: home's rotation back.
+        HomeRotation.resumed(this)
         inFront = true
         WebWindowLaunch.homeInFront = true
         UnlockLog.homeResumed(host.web)

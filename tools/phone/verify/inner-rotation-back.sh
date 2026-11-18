@@ -75,8 +75,17 @@ tr -d '\r' <"$OUT/launch.txt" | grep -qE '^Status: ok$' &&
   grep -qE '^Activity: com[.]oplus[.]camera/' "$OUT/launch.txt" &&
   ! grep -qE 'Warning:|Error:' "$OUT/launch.txt" || {
     bad "camera launch not confirmed as new; cleanup withheld (evidence $OUT/launch.txt)"; wwc_end; }
-moved="" maxr=$r0
-for _ in $(seq 1 30); do
+# The window log (files/window-log.txt, WindowLog: WindowFrames' adopt gate/skips, WebWindows' moves, HomeRotation) from
+# the launch on: logcat's ring on this phone holds ~1-2 min, so the 11-18 21:10 run's logcat capture came back EMPTY.
+WLOG=/data/data/com.powos.app/files
+# wlog [N]: from MARK on; N = only the last N lines of the current file (the poll: no ~1 MB read every 0.5 s).
+wlog() { local src="cat $WLOG/window-log.1.txt $WLOG/window-log.txt"; [ -n "${1:-}" ] && src="tail -n $1 $WLOG/window-log.txt"
+  "$A" exec-out "su -c '$src 2>/dev/null'" </dev/null 2>/dev/null | tr -d '\r' | awk -v s="$MARK" '$1" "$2 >= s'; }
+# Target: adopted at the camera's first task event (11-18 21:11:09.687, ~0.3 s after its launch) + its window's display
+# (a cold display helper ~1.2 s) + the task move: well inside 10 s. A wall-clock deadline - the old 30 probe rounds
+# (am stack list + logcat, each up to 12 s) ran 75 s for a "15 s" wait.
+moved="" maxr=$r0 deadline=$((SECONDS + 10))
+while :; do
   r=$(rot); [ "$r" != "$r0" ] && maxr=$r
   if [ -z "$CAMTASK" ] && probe "$OUT/after-tasks.txt" 'timeout 5 am stack list'; then
     CAMTASK=$(python3 -I "$POLICY" owned "$OUT/prelaunch" "$OUT/after-tasks.txt" 2>"$OUT/ownership.txt") || CAMTASK=""
@@ -84,15 +93,17 @@ for _ in $(seq 1 30); do
   # A generic last adoption log could belong to ANY app. Only our new camera
   # task's exact ID is evidence of the rotation transition under test.
   if [ -n "$CAMTASK" ]; then
-    moved=$(sh_ "logcat -d -T \"$MARK\" -s PowosWebWindows:I" | grep -E "app.s task $CAMTASK moved onto display" | tail -1)
+    moved=$(wlog 400 | grep -E "app.s task $CAMTASK moved onto display" | tail -1)
   fi
-  [ -n "$moved" ] && break; sleep 0.5; done
-# The adopt path's own words (WindowFrames' "adopt gate" / skip lines, SystemFloat, WebWindows) kept with the evidence.
-sh_ "logcat -d -T \"$MARK\" -s PowosWindowFrames:I PowosSystemFloat:I PowosWebWindows:I PowosHomeRotation:I" >"$OUT/adopt-log.txt" 2>&1
-[ -n "$moved" ] || { bad "the camera never moved into a web window (15 s; adopt path: $OUT/adopt-log.txt)"; grep -E "adopt gate|not adopted|not a full-screen|was full screen" "$OUT/adopt-log.txt" | head -8 | while read -r l; do say "$l"; done; wwc_end; }
+  [ -n "$moved" ] && break; [ "$SECONDS" -ge "$deadline" ] && break; sleep 0.5; done
+# The adopt path's own words (WindowFrames' "adopt gate" / skip lines, SystemFloat, WebWindows, HomeRotation) kept with
+# the evidence: the window log from the launch on, and logcat's tags for what it still holds.
+wlog >"$OUT/adopt-log.txt"
+sh_ "logcat -d -T \"$MARK\" -s PowosWindowFrames:I PowosSystemFloat:I PowosWebWindows:I PowosHomeRotation:I" >"$OUT/adopt-logcat.txt" 2>&1
+[ -n "$moved" ] || { bad "the camera never moved into a web window (10 s; adopt path: $OUT/adopt-log.txt, $(wc -l <"$OUT/adopt-log.txt" | tr -d ' ') lines)"; grep -E "adopt gate|not adopted|not a full-screen|was full screen|refused|fallback|root made" "$OUT/adopt-log.txt" | head -8 | while read -r l; do say "$l"; done; wwc_end; }
 say "owned camera task $CAMTASK: $moved"
 r=""; for _ in $(seq 1 16); do r=$(rot); [ "$r" = "$r0" ] && break; sleep 0.25; done
-hr=$(sh_ "logcat -d -T \"$MARK\" -s PowosHomeRotation:I" | grep -v "^-" | tr -d "\r")
+hr=$(wlog | grep "PowosHomeRotation")
 [ -n "$hr" ] && say "$hr"
 if [ "$r" = "$r0" ] && [ -z "$hr" ] && [ "$maxr" = "$r0" ]; then
   say "NOT EXERCISED: the camera never turned display 0 (rotation $r0 throughout)"; wwc_clean; exit 3; fi

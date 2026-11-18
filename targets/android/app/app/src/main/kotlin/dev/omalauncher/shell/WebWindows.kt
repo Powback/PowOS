@@ -982,7 +982,14 @@ class WebWindows(
         root?.takeIf { it.isValid }?.let { return it.also { rootAgain(it) } }
         val attached = web.rootSurfaceControl ?: return null.also { WindowLog.w(TAG, "home's window has no surface yet") }
         val sc = SurfaceControl.Builder().setName("powos-webwindows").build()
-        val t = underHome(sc, "made") ?: return null.also { sc.release(); WindowLog.w(TAG, "home's surface refused a child") }
+        // Home stopped (an app full screen over it on display 0): its window surface is gone until it shows again. The
+        // root is made anyway, unparented, and hung on home's next surface ([reattach], surfaceCreated) - 11-18 21:11 the
+        // camera's adopt (the first window since the app started) returned -1 here ("home's surface refused a child"),
+        // its task stayed full screen and display 0 stayed landscape. Its window's display and task move don't need it.
+        val t =
+            underHome(sc, "made") ?: SurfaceControl.Transaction().also {
+                WindowLog.i(TAG, "windows' root made while home has no surface (an app full screen over it): hung on home's next one")
+            }
         t.setVisibility(sc, !underSwitcher).apply()
         root = sc
         watchSurface()
