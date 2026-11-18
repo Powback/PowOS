@@ -1,0 +1,86 @@
+diff --git a/src/backends/anland/anland_backend.cpp b/src/backends/anland/anland_backend.cpp
+index 4892e20..94a8778 100644
+--- a/src/backends/anland/anland_backend.cpp
++++ b/src/backends/anland/anland_backend.cpp
+@@ -315,6 +315,10 @@ void AnlandBackend::setAndroidScreen(const QSize &screen)
+     // is no longer full screen to Wine, which takes it out of full screen (Besiege on a rotation, 11-07 03:15).
+     followWindowScreen(screen);
+     publishScreenSize(screen);
++    // PowOS (kwin 0074): ... and the full-screen windows with it, not when their tasks' new sizes come.
++    if (m_windowTasks) {
++        m_windowTasks->followScreen(screen);
++    }
+ }
+ 
+ void AnlandBackend::publishScreenSize(const QSize &screen)
+diff --git a/src/backends/anland/anland_task_policy.h b/src/backends/anland/anland_task_policy.h
+index f84b90f..b2356f3 100644
+--- a/src/backends/anland/anland_task_policy.h
++++ b/src/backends/anland/anland_task_policy.h
+@@ -76,4 +76,15 @@ inline bool drawsOwnFrame(bool clientSideDecorated, bool undecoratedByHints, boo
+     return undecoratedByHints && resizable && !coversOutput;
+ }
+ 
++/**
++ * PowOS (kwin 0074): a task's window takes the app's new screen with the output and Xwayland's root (followScreen)
++ * only when the screen IS its task's size: the app's own full-screen task ([appFullScreen], immersive, the whole
++ * screen) shows a full-screen window ([windowFullScreen]) whose geometry the task keeps ([keptByTask],
++ * powosKeepFullScreenGeometry). A floating task, or a full-screen window in a floating task, waits for its task's size.
++ */
++inline bool followsScreenWithRoot(bool appFullScreen, bool windowFullScreen, bool keptByTask)
++{
++    return appFullScreen && windowFullScreen && keptByTask;
++}
++
+ } // namespace KWin::AnlandTaskPolicy
+diff --git a/src/backends/anland/anland_window_task.cpp b/src/backends/anland/anland_window_task.cpp
+index 350da71..175953d 100644
+--- a/src/backends/anland/anland_window_task.cpp
++++ b/src/backends/anland/anland_window_task.cpp
+@@ -2700,6 +2700,30 @@ void AnlandWindowTasks::closeAll()
+     }
+ }
+ 
++void AnlandWindowTasks::followScreen(const QSize &screen)
++{
++    // A full-screen game's window covers Wine's monitor (the X root) only while both are the screen's size. The root
++    // follows the app's screen at once (0061), the window only when its task reports its new size ("size") - seconds
++    // later on a fold, or never when the task's surface is re-made (game-resize 11-11 03:19: Besiege on the cover,
++    // landscape -> portrait, no "full screen follows its task" at all). Meanwhile the 2484x1116 window sat in a 1116x2484
++    // root: Wine asked to leave full screen, Unity re-made its window at 473x2484 (and 1135x1365 / 390x2484 in other
++    // runs) and the task was left without a full-screen game. The app's own full-screen task covers the whole screen
++    // (immersive, _POWOS_SCREEN_SIZE), so its size is known now: taken here, the window and the root change in the
++    // same event, and Wine's leave from the moment between them is within 0072's grace (refused).
++    if (!screen.isValid()) {
++        return;
++    }
++    for (AnlandWindowTask *task : std::as_const(m_tasks)) {
++        Window *window = task->window();
++        if (!window || !AnlandTaskPolicy::followsScreenWithRoot(task->appFullScreen(), window->isFullScreen(),
++                                                                window->property("powosKeepFullScreenGeometry").toBool())) {
++            continue;
++        }
++        qCInfo(KWIN_ANLAND) << "window task" << task->id() << "full screen takes the new screen with the root:" << screen;
++        task->resizeTo(screen);
++    }
++}
++
+ void AnlandWindowTasks::remove(AnlandWindowTask *task)
+ {
+     if (!m_tasks.remove(task->id())) {
+diff --git a/src/backends/anland/anland_window_task.h b/src/backends/anland/anland_window_task.h
+index f83a0d6..438d8d5 100644
+--- a/src/backends/anland/anland_window_task.h
++++ b/src/backends/anland/anland_window_task.h
+@@ -398,6 +398,11 @@ public:
+     int liveAudioFd(const AnlandWindowTask *except) const;
+     /** Every task, now (the compositor is going): windows back on the desktop, buffers released. */
+     void closeAll();
++    /**
++     * PowOS (kwin 0074): the app's screen is now [screen] (a rotate/fold): every task-kept full-screen window takes it
++     * in the same step as the output and Xwayland's root, not when its task's new size comes (setAndroidScreen).
++     */
++    void followScreen(const QSize &screen);
+ 
+ public Q_SLOTS:
+     /** Shows the window (its KWin internal id) as its own Android task, or brings its task to the front. */

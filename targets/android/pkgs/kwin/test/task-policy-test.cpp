@@ -50,6 +50,14 @@ int main()
     // Not undecorated by hints and no frame extents (a splash, an odd toolkit): PowOS's bar.
     CHECK(!drawsOwnFrame(false, false, true, false, false));
 
+    // 0074: the app's own full-screen task keeps a full-screen window's geometry -> it takes the new screen with the
+    // root (game-resize 11-11 03:20: Besiege on the cover, landscape -> portrait, left at 2484x1116 in a 1116x2484 root).
+    CHECK(followsScreenWithRoot(true, true, true));
+    // A floating task (its size is not the screen's), a window not full screen, or geometry not the task's: wait.
+    CHECK(!followsScreenWithRoot(false, true, true));
+    CHECK(!followsScreenWithRoot(true, false, true));
+    CHECK(!followsScreenWithRoot(true, true, false));
+
     if (failures) {
         return 1;
     }

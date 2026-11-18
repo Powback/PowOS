@@ -135,6 +135,11 @@
 #               full screen, their tasks closed and came back as floats (1221x1262, 393x2484; game-resize 11-10 09:43).
 #
 #   0073        ours (3.80): retire the owned kill helper on Window::closed, including a late process start.
+#   0074        ours (3.81): a task-kept full-screen window takes the app's new screen in the same step as the output and
+#               Xwayland's root (AnlandWindowTasks::followScreen from setAndroidScreen), not when its task's new size
+#               comes: on the cover's landscape -> portrait the task's surface was re-made and the size never came, the
+#               2484x1116 window sat in a 1116x2484 root, Wine left full screen and Unity re-made its window 473x2484
+#               (game-resize 346010 11-11 03:20). Any leave from the moment between is within 0072's grace.
 # HACK: same pkgname as Arch's kwin with pkgrel 3.1 (makepkg allows only integer[.integer]; ".1" = ours), so every Plasma package's
 # "depends=(kwin)" is satisfied by ours and pacman sees it as newer than 6.7.5-3. The real fix is
 # getting the Anland backend upstream into KWin; until then each Plasma update means rebasing
@@ -143,7 +148,7 @@
 pkgname=kwin
 pkgver=6.7.5
 _dirver=$(echo $pkgver | cut -d. -f1-3)
-pkgrel=3.80
+pkgrel=3.81
 pkgdesc='An easy to use, but flexible, Wayland compositor (PowOS: Anland backend for Android)'
 arch=(aarch64)
 url='https://kde.org/plasma-desktop/'
@@ -230,11 +235,12 @@ _patches=(0001-Add-support-for-Anland-display-daemon-kwin-6.7.patch
           0069-X11-a-task-kept-full-screen-window-s-leave-at-a-stale-size-is-refused.patch
           0070-backends-anland-a-full-screen-task-s-window-takes-the-task-s-size-not-its-stale-buffers.patch
           0072-X11-a-task-kept-full-screen-window-s-leave-right-after-its-task-resized-it-is-refused.patch
-          0073-killprompt-retire-helper-on-owner-close.patch)
+          0073-killprompt-retire-helper-on-owner-close.patch
+          0074-backends-anland-a-full-screen-task-s-window-takes-a-new-screen-with-the-root.patch)
 source=(https://download.kde.org/stable/plasma/$_dirver/$pkgname-$pkgver.tar.xz
         "${_patches[@]}")
 sha256sums=('6baa910b732d93c48c90f9c1cc685cc93d0b8de0cdf138c24192c045bc3a48e2'
-            SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP)
+            SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP)
 
 prepare() {
   cd $pkgname-$pkgver

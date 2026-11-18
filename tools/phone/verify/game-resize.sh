@@ -167,7 +167,7 @@ rotate() { "$A" shell "settings put system accelerometer_rotation 0; settings pu
 # consumer went live - logcat had rotated away by the time anyone looked, so it's kept here.
 lc0=$("$A" shell date "'+%m-%d %H:%M:%S.000'" | tr -d '\r'); kl0=$("$A" shell "su -c 'wc -l < /data/powos/root/run/powos-app/hyprland.log'" | tr -d '\r ')
 evidence() { "$A" logcat -d -v time -T "$lc0" -s PowosWindow:I WindowTasks:I Andromarchy:I > "$OUT/logcat.txt" 2>/dev/null
-  "$A" shell "su -c 'tail -n +$((${kl0:-0} + 1)) /data/powos/root/run/powos-app/hyprland.log | grep -E \"window task|app.s screen|output|imported buffer|Xwayland|minimi\" | grep -vE \"frames: last|draw: \"'" > "$OUT/kwin.txt" 2>/dev/null; }
+  "$A" shell "su -c 'tail -n +$((${kl0:-0} + 1)) /data/powos/root/run/powos-app/hyprland.log | grep -E \"window task|app.s screen|output|imported buffer|Xwayland|minimi|full screen kept\" | grep -vE \"frames: last|draw: \"'" > "$OUT/kwin.txt" 2>/dev/null; }
 skip() { fails=$((fails + 1)); sizes+=" $1=not-reached"; log "  $1 bad: not-reached ($(left) s of the ${BUDGET_S} s budget left)"; }
 if room; then probe unfolded; else skip unfolded; fi
 if room 6; then rotate 1; log "rotated landscape"; probe unfolded-landscape; else skip unfolded-landscape; fi

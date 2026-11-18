@@ -361,6 +361,12 @@ Access, idle windows and on-device rules: the powos-phone skill (adb/root/idle/c
       with WINE_DISABLE_FULLSCREEN_HACK=1 for 346010 (`powos game 346010` env / launch option) to see whether Xwayland's
       own RandR emulation keeps the window = task; only then decide the generic default for exclusive-fullscreen games.
       Result (02:55): the hack off didn't help (870x5529 / 2484x2309 still, Unity still recreated its window) - rejected.
+- kwin 0074 (3.81, 11-18): a full-screen game's window takes the app's new screen in the SAME step as the output and
+  Xwayland's root (AnlandWindowTasks::followScreen from setAndroidScreen; AnlandTaskPolicy::followsScreenWithRoot),
+  not when its task's "size" comes. 11-11 03:20 (Besiege, borderless): cover landscape -> portrait re-made the task's
+  surface, no "full screen follows its task" ever came, the 2484x1116 window sat in a 1116x2484 root, Wine left full
+  screen and Unity re-made its window 473x2484 (unmapped, unfocused, kept on unfold). Log line: "full screen takes the
+  new screen with the root". game-resize's kwin.txt now also keeps "PowOS: full screen kept" (0069/0072 refusals).
 - Window override (11-11, owner-approved option a): `powos game <appid> window borderless|default` (unity-screen
   --window; steam-compat.json apps.<id>.window). For a Unity game that forces exclusive full screen itself (Besiege's
   Config.xml beats -screen-fullscreen 0): at each launch at render scale 100, before the game starts, unity-screen sets
