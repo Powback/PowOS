@@ -67,6 +67,11 @@ I0=$(irq); touched() { [ "$(irq)" != "$I0" ] && { log "user input - stopping"; r
 printf 'v=$(pacman -Q kwin | cut -d" " -f2); echo "$v $(vercmp "$v" %s)"\n' "$MIN" > "$OUT/q.sh"
 kv=$("$P/root.sh" "$OUT/q.sh" 2>/dev/null | tail -1 | tr -d '\r'); log "kwin $kv (needs >= $MIN)"
 [ "${kv##* }" -ge 0 ] 2>/dev/null || { log "FAIL: KWin ${kv%% *} older than $MIN (queue kwin-install.sh $MIN first)"; exit 1; }
+# The RUNNING KWin must be that package too (11-18: kwin 3.81-3.83 were installed by the rooted deploy, but the session's
+# kwin_wayland was 4 h old - every game-resize run "on 3.82" ran the old compositor). Its libkwin mapped as deleted = stale.
+printf 'k=$(pgrep -x kwin_wayland | head -1); n=0; [ -n "$k" ] && ! grep -q "libkwin.*(deleted)" /proc/$k/maps && n=1; echo "kwin=${k:--} kwin_new=$n"\n' > "$OUT/q2.sh"
+ks=$("$P/root.sh" "$OUT/q2.sh" 2>/dev/null | tail -1 | tr -d '\r'); log "running $ks"
+[[ $ks == *kwin_new=1* ]] || { log "FAIL: the running KWin is not the installed ${kv%% *} ($ks) - queue kwin-install.sh $MIN first"; exit 1; }
 
 touched && exit 3
 pill "${WIN_NAME:-app $APP} up"
