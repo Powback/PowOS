@@ -140,6 +140,10 @@
 #               comes: on the cover's landscape -> portrait the task's surface was re-made and the size never came, the
 #               2484x1116 window sat in a 1116x2484 root, Wine left full screen and Unity re-made its window 473x2484
 #               (game-resize 346010 11-11 03:20). Any leave from the moment between is within 0072's grace.
+#   0075        ours (3.82): a window exported while a full-screen task (a game) stands - live, or within 3 s of a
+#               fold/rotate's surface swap - that did not take the focus is held off screen until it does or no
+#               full-screen task stands: Steam's main window, re-exported by the unfold's "export-new 1", opened as a
+#               floating task in front of My Friend Pedro (game-resize 557340 11-18 21:55, the game never focused/drew).
 # HACK: same pkgname as Arch's kwin with pkgrel 3.1 (makepkg allows only integer[.integer]; ".1" = ours), so every Plasma package's
 # "depends=(kwin)" is satisfied by ours and pacman sees it as newer than 6.7.5-3. The real fix is
 # getting the Anland backend upstream into KWin; until then each Plasma update means rebasing
@@ -148,7 +152,7 @@
 pkgname=kwin
 pkgver=6.7.5
 _dirver=$(echo $pkgver | cut -d. -f1-3)
-pkgrel=3.81
+pkgrel=3.82
 pkgdesc='An easy to use, but flexible, Wayland compositor (PowOS: Anland backend for Android)'
 arch=(aarch64)
 url='https://kde.org/plasma-desktop/'
@@ -236,11 +240,12 @@ _patches=(0001-Add-support-for-Anland-display-daemon-kwin-6.7.patch
           0070-backends-anland-a-full-screen-task-s-window-takes-the-task-s-size-not-its-stale-buffers.patch
           0072-X11-a-task-kept-full-screen-window-s-leave-right-after-its-task-resized-it-is-refused.patch
           0073-killprompt-retire-helper-on-owner-close.patch
-          0074-backends-anland-a-full-screen-task-s-window-takes-a-new-screen-with-the-root.patch)
+          0074-backends-anland-a-full-screen-task-s-window-takes-a-new-screen-with-the-root.patch
+          0075-backends-anland-a-window-that-doesn-t-take-a-full-screen-game-s-focus-is-held-off-screen.patch)
 source=(https://download.kde.org/stable/plasma/$_dirver/$pkgname-$pkgver.tar.xz
         "${_patches[@]}")
 sha256sums=('6baa910b732d93c48c90f9c1cc685cc93d0b8de0cdf138c24192c045bc3a48e2'
-            SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP)
+            SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP)
 
 prepare() {
   cd $pkgname-$pkgver

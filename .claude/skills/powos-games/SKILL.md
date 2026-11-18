@@ -367,6 +367,17 @@ Access, idle windows and on-device rules: the powos-phone skill (adb/root/idle/c
   surface, no "full screen follows its task" ever came, the 2484x1116 window sat in a 1116x2484 root, Wine left full
   screen and Unity re-made its window 473x2484 (unmapped, unfocused, kept on unfold). Log line: "full screen takes the
   new screen with the root". game-resize's kwin.txt now also keeps "PowOS: full screen kept" (0069/0072 refusals).
+- Steam over the game (kwin 0075, 3.82; 11-18 game-resize 557340 FAIL): the unfold's "export-new 1" re-exports every
+  window (setExportNew); Steam's main window (empty caption, no task) didn't take the focus, 0066's 400 ms wait ended
+  while the game's task was "in the background" for the fold's surface swap, so it opened as a floating task IN FRONT of
+  the game (X focus on it; game never focused/drew). Now a window exported while a full-screen task stands (live, or <3 s
+  in the background) that didn't take the focus is held: log "didn't take the focus from full-screen window task N:
+  held off screen"; it opens on its activation or when no full-screen task stands ("held window ... it opens").
+  Open: 346010 11-18 22:08 - an EXISTING Steam task (KWin task 3, no "open") went live over Besiege at folded portrait:
+  Android raised it (logcat was gone; capture `logcat -s WindowTasks PowosWebWindows ActivityTaskManager` on a repeat).
+  Launch 134 s (557340 21:52): not windows - Steam's own CheckShaderDepotManifest 55 s + SynchronizingCloud 54 s
+  (cloud_log: "AutoCloud checking local state" -> 54 s -> "already synced"): a ~54 s network timeout per request in a
+  Steam resumed from its freeze; Besiege 2 min later: 4 s for the same steps.
 - Window override (11-11, owner-approved option a): `powos game <appid> window borderless|default` (unity-screen
   --window; steam-compat.json apps.<id>.window). For a Unity game that forces exclusive full screen itself (Besiege's
   Config.xml beats -screen-fullscreen 0): at each launch at render scale 100, before the game starts, unity-screen sets

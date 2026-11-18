@@ -1,0 +1,246 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: powos-agent <agent@powos>
+Date: Wed, 18 Nov 2026 22:24:02 +0100
+Subject: [PATCH] backends/anland: a window that doesn't take a full-screen
+ game's focus is held off screen, never in front of it
+
+11-18 21:51 (game-resize 557340, My Friend Pedro; kwin 3.80): the unfold turned "export-new 1" on, and setExportNew
+re-exported every window - Steam's main window (empty caption, borderless, no task since the launch) among them. It
+didn't take the focus; 0066's 400 ms activation wait ran out while the game's task was "in the background" for the
+fold's surface swap, so fullScreenTask() saw no live full-screen task and it opened "as before": a floating task in front
+of the game (Steam's store over Bananas in the screenshot, X focus on it, the game never focused, never drew).
+
+1. A full-screen task STANDS while live or within screenSwapGraceMs (3 s) of going to the background (a fold/rotate
+   recreates its surface: "in the background", then live again within ~1 s).
+2. A new window exported while one stands that did not take the focus (after 0066's wait), is not of a process with a
+   task (the game's own dialog: relatedTask, unchanged) and is not full screen itself, is HELD off screen: no task, no
+   web window. It opens once it takes the focus (its app brought forward: Steam's raise of its window) or once no
+   full-screen task stands (the game closed, left full screen, or out of sight past the grace: the user went home).
+   An explicit show (the app's "show <id>": a tap on Steam in the dock/launcher) is not affected.
+
+Decisions in anland_task_policy.h (heldBehindFullScreen, fullScreenTaskStands; test/task-policy-test.cpp).
+---
+ src/backends/anland/anland_task_policy.h   | 23 +++++++
+ src/backends/anland/anland_window_task.cpp | 79 ++++++++++++++++++++++
+ src/backends/anland/anland_window_task.h   | 11 +++
+ 3 files changed, 113 insertions(+)
+
+diff --git a/src/backends/anland/anland_task_policy.h b/src/backends/anland/anland_task_policy.h
+index b2356f3..9828cb3 100644
+--- a/src/backends/anland/anland_task_policy.h
++++ b/src/backends/anland/anland_task_policy.h
+@@ -25,6 +25,29 @@ inline bool opensOverFullScreen(bool fullScreenTaskShown, bool newWindowActive,
+ /** How long a new window may take to get the activation it was started with (an xdg-activation token, an X11 map). */
+ constexpr int64_t activationWaitMs = 400;
+ 
++/**
++ * PowOS (0075): a full-screen task (a game) still stands while it is live, or out of sight only for the moment a fold or
++ * a rotation swaps its surface (the app recreates it: "in the background", then "live" again within ~1 s).
++ */
++constexpr int64_t screenSwapGraceMs = 3000;
++inline bool fullScreenTaskStands(bool live, int64_t msSinceBackground)
++{
++    return live || (msSinceBackground >= 0 && msSinceBackground < screenSwapGraceMs);
++}
++
++/**
++ * PowOS (0075): a window that is exported while a full-screen task stands but did NOT take the focus (after
++ * activationWaitMs) is held off screen - no task, no web window - until it takes the focus (the user brings its app
++ * forward) or no full-screen task stands any more. Opened "as before" (a floating task / a web window that brings home
++ * forward) it went in front of the game: Steam's main window, re-exported when the unfold turned "export-new" on, took
++ * the front over My Friend Pedro (game-resize 557340, 11-18 21:55: the game never focused, never drew). A window of the
++ * game's own process (relatedTask: its dialog) and one going full screen itself (a game of its own) are not held.
++ */
++inline bool heldBehindFullScreen(bool fullScreenTaskStanding, bool newWindowActive, bool relatedToATask, bool newWindowFullScreen)
++{
++    return fullScreenTaskStanding && !newWindowActive && !relatedToATask && !newWindowFullScreen;
++}
++
+ enum class RestoreWatch {
+     Wait, // nothing to do yet
+     Kick, // the restored window has the focus and draws nothing: minimize and restore it again, the way the app sees
+diff --git a/src/backends/anland/anland_window_task.cpp b/src/backends/anland/anland_window_task.cpp
+index 175953d..6a72846 100644
+--- a/src/backends/anland/anland_window_task.cpp
++++ b/src/backends/anland/anland_window_task.cpp
+@@ -42,6 +42,8 @@
+ #endif
+ 
+ #include <QDBusConnection>
++#include <QDateTime>
++#include <QTimer>
+ #include <QProcess>
+ #include <QSocketNotifier>
+ #include <cerrno>
+@@ -710,6 +712,7 @@ void AnlandWindowTask::goLive()
+         return;
+     }
+     m_state = State::Live;
++    m_backgroundSince = -1;
+     m_tasks->backend()->updateAudio(); // PowOS (0067): with no desktop consumer, the sound goes out on this task's
+     qCInfo(KWIN_ANLAND) << "window task" << m_id << "live," << m_bufferSize << "pre-rotated" << get_buffer_transform(m_display)
+                         << "for" << (m_window ? m_window->caption() : QString());
+@@ -909,6 +912,15 @@ void AnlandWindowTask::enterFallback()
+     // where it is (on the tasks desktop) until the task comes back or is closed.
+     qCInfo(KWIN_ANLAND) << "window task" << m_id << "in the background";
+     m_state = State::Fallback;
++    m_backgroundSince = QDateTime::currentMSecsSinceEpoch();
++    // PowOS (0075): a full-screen task out of sight for longer than a fold's surface swap no longer holds windows back.
++    if (fullScreen() || appFullScreen()) {
++        QTimer::singleShot(AnlandTaskPolicy::screenSwapGraceMs + 100, m_tasks, [tasks = QPointer<AnlandWindowTasks>(m_tasks)]() {
++            if (tasks) {
++                tasks->retryHeld();
++            }
++        });
++    }
+     m_tasks->backend()->updateAudio(this); // PowOS (0067): the library closes its audio socket right after this
+     cancelTouches();
+     if (m_inputNotifier) {
+@@ -2312,6 +2324,9 @@ void AnlandWindowTasks::onFullScreenChanged(Window *window)
+     } else if (task && task->setAppFullScreen(false)) {
+         send({QStringLiteral("fullscreen"), QString::number(task->id()), QStringLiteral("0")});
+     }
++    if (!window->isFullScreen()) {
++        QMetaObject::invokeMethod(this, &AnlandWindowTasks::retryHeld, Qt::QueuedConnection); // PowOS (0075)
++    }
+ }
+ 
+ void AnlandWindowTasks::setExportNew(bool on)
+@@ -2434,6 +2449,17 @@ void AnlandWindowTasks::exportNew(Window *window)
+         return;
+     }
+     m_activationWaited.remove(window);
++    // PowOS (0075): still not active after that wait, over a full-screen task that stands (live, or swapping its surface
++    // for a fold/rotate - the unfold's "export-new 1" re-exports every window right then): held off screen, never in
++    // front of the game. It opens once it takes the focus (its app brought forward) or no full-screen task stands.
++    if (AnlandWindowTask *cover = standingFullScreenTask(window);
++        AnlandTaskPolicy::heldBehindFullScreen(cover != nullptr, window->isActive(), relatedTask(window) != nullptr, window->isFullScreen())) {
++        holdBehindFullScreen(window, cover);
++        return;
++    }
++    if (const auto held = m_heldBehindFull.take(window)) {
++        disconnect(held);
++    }
+     if (show(window)) {
+         qCInfo(KWIN_ANLAND) << "new window" << window->caption() << "(" << window->desktopFileName() << ") opened as a task";
+     }
+@@ -2598,6 +2624,58 @@ bool AnlandWindowTasks::show(Window *window, bool fullScreen)
+     return true;
+ }
+ 
++int64_t AnlandWindowTask::msInBackground() const
++{
++    return m_state == State::Live || m_backgroundSince < 0 ? -1 : QDateTime::currentMSecsSinceEpoch() - m_backgroundSince;
++}
++
++AnlandWindowTask *AnlandWindowTasks::standingFullScreenTask(const Window *window) const
++{
++    for (AnlandWindowTask *task : m_tasks) {
++        const Window *w = task->window();
++        if (w && w != window && !w->isDeleted() && !w->isMinimized() && !task->isPopupSurface()
++            && (task->fullScreen() || task->appFullScreen() || w->isFullScreen())
++            && AnlandTaskPolicy::fullScreenTaskStands(task->live(), task->msInBackground())) {
++            return task;
++        }
++    }
++    return nullptr;
++}
++
++void AnlandWindowTasks::holdBehindFullScreen(Window *window, AnlandWindowTask *cover)
++{
++    if (m_heldBehindFull.contains(window)) {
++        return;
++    }
++    qCInfo(KWIN_ANLAND) << "new window" << window->caption() << "(" << window->desktopFileName() << ") didn't take the focus from full-screen window task"
++                        << cover->id() << ": held off screen until it does or no full-screen task stands";
++    m_heldBehindFull.insert(window, connect(window, &Window::activeChanged, this, [this, w = QPointer<Window>(window)]() {
++        if (w && w->isActive() && m_heldBehindFull.contains(w.data())) {
++            qCInfo(KWIN_ANLAND) << "held window" << w->caption() << "took the focus: it opens";
++            exportNew(w);
++        }
++    }));
++    connect(window, &Window::closed, this, [this, raw = window]() {
++        if (const auto held = m_heldBehindFull.take(raw)) {
++            disconnect(held);
++        }
++    }, Qt::SingleShotConnection);
++}
++
++void AnlandWindowTasks::retryHeld()
++{
++    if (m_heldBehindFull.isEmpty()) {
++        return;
++    }
++    const auto held = m_heldBehindFull.keys();
++    for (Window *window : held) {
++        if (m_heldBehindFull.contains(window) && !window->isDeleted() && !standingFullScreenTask(window)) {
++            qCInfo(KWIN_ANLAND) << "held window" << window->caption() << ": no full-screen task stands now, it opens";
++            exportNew(window);
++        }
++    }
++}
++
+ AnlandWindowTask *AnlandWindowTasks::fullScreenTask(const Window *window) const
+ {
+     for (AnlandWindowTask *task : m_tasks) {
+@@ -2732,6 +2810,7 @@ void AnlandWindowTasks::remove(AnlandWindowTask *task)
+     task->deleteLater();
+     // After the window went back (the task's destructor).
+     QMetaObject::invokeMethod(this, &AnlandWindowTasks::dropTasksDesktopIfUnused, Qt::QueuedConnection);
++    QMetaObject::invokeMethod(this, &AnlandWindowTasks::retryHeld, Qt::QueuedConnection); // PowOS (0075)
+ }
+ 
+ VirtualDesktop *AnlandWindowTasks::tasksDesktop()
+diff --git a/src/backends/anland/anland_window_task.h b/src/backends/anland/anland_window_task.h
+index 438d8d5..1e42d9e 100644
+--- a/src/backends/anland/anland_window_task.h
++++ b/src/backends/anland/anland_window_task.h
+@@ -97,6 +97,8 @@ public:
+     {
+         return m_state == State::Live;
+     }
++    /** PowOS (0075): ms since it went to the background ([enterFallback]); -1 while live or never shown. */
++    int64_t msInBackground() const;
+     /** PowOS (0067): its connection's audio socket while live (not a popup's surface: those carry no sound); -1. */
+     int audioFd() const;
+     /**
+@@ -263,6 +265,7 @@ private:
+     bool m_keyboardShown = false; // the last setKeyboard (sent again when the task goes live)
+     display_ctx *m_display = nullptr;
+     State m_state = State::Handshake;
++    qint64 m_backgroundSince = -1; // PowOS (0075): QDateTime ms of its last enterFallback, -1 while live
+     QSocketNotifier *m_ctrlNotifier = nullptr;
+     QSocketNotifier *m_inputNotifier = nullptr;
+     QSocketNotifier *m_bufReadyNotifier = nullptr;
+@@ -365,6 +368,8 @@ class AnlandWindowTasks : public QObject
+     Q_CLASSINFO("D-Bus Interface", "org.powos.WindowTasks")
+ 
+ public:
++    /** PowOS (0075): the windows held behind a full-screen task asked again (it ended / left full screen / went away). */
++    void retryHeld();
+     AnlandWindowTasks(AnlandBackend *backend, const QString &socketPath);
+     ~AnlandWindowTasks() override;
+ 
+@@ -425,6 +430,10 @@ private:
+     AnlandWindowTask *relatedTask(const Window *window) const;
+     /** PowOS (0066): a live task whose window is full screen (a game), other than [window]'s, or null. */
+     AnlandWindowTask *fullScreenTask(const Window *window) const;
++    /** PowOS (0075): a full-screen task that stands (live, or only swapping its surface for a fold/rotate), or null. */
++    AnlandWindowTask *standingFullScreenTask(const Window *window) const;
++    /** PowOS (0075): [window] held off screen behind [cover] (exportNew) until it takes the focus or no cover stands. */
++    void holdBehindFullScreen(Window *window, AnlandWindowTask *cover);
+     /** An Android app's own window (powos-android-app): back to Android, the app itself in front. */
+     static QString offeredAppId(const Window *window);
+     bool handBackAndroidApp(Window *window);
+@@ -468,6 +477,8 @@ private:
+     QSet<Window *> m_waitingSurface;
+     /** PowOS (0066): new windows given their activation wait over a full-screen task (exportNew): one wait each. */
+     QSet<Window *> m_activationWaited;
++    /** PowOS (0075): windows held off screen behind a full-screen task (holdBehindFullScreen) -> their focus watch. */
++    QHash<Window *, QMetaObject::Connection> m_heldBehindFull;
+     /** PowOS (0066): task id -> the full-screen task it opened in front of (show); the cover gets the focus back. */
+     QHash<uint32_t, uint32_t> m_overFull;
+     QPointer<VirtualDesktop> m_desktop;
+-- 
+2.50.1 (Apple Git-155)
+

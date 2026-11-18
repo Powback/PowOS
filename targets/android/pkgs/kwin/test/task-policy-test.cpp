@@ -58,6 +58,24 @@ int main()
     CHECK(!followsScreenWithRoot(true, false, true));
     CHECK(!followsScreenWithRoot(true, true, false));
 
+    // 0075: a window exported over a standing full-screen task that did not take the focus is held off screen (Steam's
+    // main window re-exported by the unfold's "export-new 1" went in front of My Friend Pedro, 11-18 21:55).
+    CHECK(heldBehindFullScreen(true, false, false, false));
+    // It took the focus (a prompt: 0066 opens it in front; the user brought its app forward): not held.
+    CHECK(!heldBehindFullScreen(true, true, false, false));
+    // The game's own dialog (same process as a task), or a full-screen window (a game of its own): not held.
+    CHECK(!heldBehindFullScreen(true, false, true, false));
+    CHECK(!heldBehindFullScreen(true, false, false, true));
+    // No full-screen task stands: opens as before.
+    CHECK(!heldBehindFullScreen(false, false, false, false));
+    // A full-screen task stands while live, and through a fold/rotate's surface swap ("in the background" ~1 s)...
+    CHECK(fullScreenTaskStands(true, -1));
+    CHECK(fullScreenTaskStands(false, 0));
+    CHECK(fullScreenTaskStands(false, screenSwapGraceMs - 1));
+    // ...but not once it has been out of sight longer (the user went home), nor if it never was live.
+    CHECK(!fullScreenTaskStands(false, screenSwapGraceMs));
+    CHECK(!fullScreenTaskStands(false, -1));
+
     if (failures) {
         return 1;
     }
