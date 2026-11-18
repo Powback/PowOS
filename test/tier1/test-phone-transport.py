@@ -19,6 +19,8 @@ class TransportTest(unittest.TestCase):
 case "$1" in
  inspect) echo "$MOCK_RUNNING" ;;
  run) printf '%s\\n' "$@" ;;
+ create) printf '%s\\n' "$@" > "$MOCK_CREATE_ARGS"; echo mock-container ;;
+ start|rm) exit 0 ;;
  exec)
    case "$*" in
      *get-state*) echo offline; exit 1 ;;
@@ -32,7 +34,8 @@ esac
         docker.chmod(0o755)
         self.env = dict(os.environ, PATH=f'{self.directory}:' + os.environ['PATH'],
                         POWOS_DEVICE='phone', MOCK_RUNNING='false',
-                        POWOS_ADB_STATE_FILE=str(self.directory / 'state'))
+                        POWOS_ADB_STATE_FILE=str(self.directory / 'state'),
+                        MOCK_CREATE_ARGS=str(self.directory / 'create-args'))
 
     def run_script(self, name, *args):
         return subprocess.run(['bash', str(ROOT / 'tools/phone' / name), *args],
@@ -70,7 +73,9 @@ esac
             (self.directory / 'state').write_text(f'{int(time.time())} ok\n')
             result = self.run_script('adb.sh', 'push', str(link), '/data/local/tmp/steam.pkg.tar.xz')
             self.assertEqual(result.returncode, 0, result.stderr)
-            arguments = result.stdout.splitlines()
+            # File transfers run as an owned `docker create` + `start -ai` + `rm -f` (bounded, cancellable):
+            # the transfer container's argv is what `create` received.
+            arguments = (self.directory / 'create-args').read_text().splitlines()
             self.assertIn(str(blob), arguments)
             self.assertIn(f'{blob.parent}:{blob.parent}', arguments)
             self.assertNotIn(str(link), arguments)

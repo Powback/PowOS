@@ -119,6 +119,10 @@ jobs:
           # mksh = Android's /system/bin/sh: test-resize-state runs the device scripts in it (dash has no read -t).
           # Same package list as tools/jobs/tier1.Dockerfile, so tier1 == CI.
           sudo apt-get install -y mksh
+          # The suites that execute shell/ui/*.ts (test-titlebar-harness) load the shell's own locked devDependencies
+          # (typescript, @preact/signals). Agent worktrees symlink shell/node_modules in; a fresh checkout has none.
+          # Same step as tools/jobs/tier1.Dockerfile, so tier1 == CI.
+          npm ci --prefix shell --ignore-scripts --no-audit --no-fund
           bash test/tier1/run-all.sh
 
   # ─── STAGE 2: build image locally, test against it, push on green ────────

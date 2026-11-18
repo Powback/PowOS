@@ -21,6 +21,11 @@ RUN install -m 0755 -d /etc/apt/keyrings \
     && apt-get update && apt-get install -y --no-install-recommends docker-ce-cli \
     && apt-get clean && rm -rf /var/lib/apt/lists/*
 SHELL ["/bin/bash", "-c"]
+# The shell's locked devDependencies (typescript, @preact/signals): the suites that execute shell/ui/*.ts load them from
+# shell/node_modules, which job.sh never ships. Installed before the source so this layer only rebuilds with the lock;
+# shell/.gitignore keeps them out of the job's one-commit repo. Same step as CI's Tier1 job.
+COPY shell/package.json shell/package-lock.json /src/shell/
+RUN npm ci --prefix /src/shell --ignore-scripts --no-audit --no-fund
 COPY . /src
 WORKDIR /src
 RUN rm -rf .jobs && git init -q && git add -A && git commit -qm "job source" --no-verify \
