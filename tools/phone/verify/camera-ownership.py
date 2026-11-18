@@ -117,8 +117,20 @@ def evidence(directory):
     return texts, inventory, roots
 
 
+def past_rotations(text, inventory):
+    """activities minus DisplayRotation's RotationHistory 'source=' lines of tasks that no longer exist.
+
+    That history is a record, not a live reference: this check's own camera (removed at its end) stayed named there,
+    so every later try was 'protected' by its own last run (11-18 20:41-20:48, 6 tries). A history line of a task
+    still in the inventory, and every other mention, still protects."""
+    def live(m):
+        return m.group(0) if m[1] in inventory else ''
+    return re.sub(r'(?m)^\s*source=ActivityRecord\{\S+ u\d+ ' + re.escape(PKG) + r'/\S+ t(\d+)\}.*$', live, text)
+
+
 def guard(directory):
-    text, _, _ = evidence(directory)
+    text, inventory, _ = evidence(directory)
+    text['activities'] = past_rotations(text['activities'], inventory)
     if any(PKG in text[k] for k in ('tasks', 'activities', 'recents', 'windows')):
         raise ValueError('preexisting camera task/window/reference protected')
     proc = text['process'].strip()
