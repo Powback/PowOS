@@ -170,6 +170,15 @@ async def wake_voice_if_needed() -> None:
         release_gpu0_wake_room(lease)
 
 
+def needs_voice_engine(method: str, path: str) -> bool:
+    """Model-list reads are metadata: vLLM's API server answers them while asleep, so they must not wake the
+    weights or count as activity (a 10-minute GET /v1/models probe kept waking voice and, under the GPU0 lease,
+    would queue behind a borrower)."""
+    if method.upper() in ("GET", "HEAD") and (path == "v1/models" or path.startswith("v1/models/")):
+        return False
+    return True
+
+
 async def acquire_voice_request() -> None:
     global active_requests, last_activity
     async with transition_lock:
@@ -268,11 +277,18 @@ async def proxy(request: Request, path: str):
     if not path.startswith("v1/"):
         raise HTTPException(status_code=404, detail="route not exposed")
 
-    try:
-        await acquire_voice_request()
-    except Exception as exc:
-        log.exception("could not wake voice LLM")
-        raise HTTPException(status_code=503, detail=f"voice LLM unavailable: {exc}") from exc
+    wakes = needs_voice_engine(request.method, path)
+
+    async def release_voice_request_if_counted() -> None:
+        if wakes:
+            await release_voice_request()
+
+    if wakes:
+        try:
+            await acquire_voice_request()
+        except Exception as exc:
+            log.exception("could not wake voice LLM")
+            raise HTTPException(status_code=503, detail=f"voice LLM unavailable: {exc}") from exc
     headers = {k: v for k, v in request.headers.items() if k.lower() not in HOP_BY_HOP}
     upstream_request = client.build_request(
         request.method,
@@ -284,14 +300,14 @@ async def proxy(request: Request, path: str):
     try:
         upstream = await client.send(upstream_request, stream=True)
     except Exception:
-        await release_voice_request()
+        await release_voice_request_if_counted()
         raise
 
     response_headers = {k: v for k, v in upstream.headers.items() if k.lower() not in HOP_BY_HOP}
     if upstream.status_code >= 400:
         content = await upstream.aread()
         await upstream.aclose()
-        await release_voice_request()
+        await release_voice_request_if_counted()
         return Response(content, status_code=upstream.status_code, headers=response_headers)
 
     async def body() -> AsyncIterator[bytes]:
@@ -300,7 +316,7 @@ async def proxy(request: Request, path: str):
                 yield chunk
         finally:
             await upstream.aclose()
-            await release_voice_request()
+            await release_voice_request_if_counted()
 
     return StreamingResponse(body(), status_code=upstream.status_code, headers=response_headers)
 

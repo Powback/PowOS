@@ -125,5 +125,36 @@ class GatewayLease(unittest.TestCase):
             self.assertIn('/var/lib/powos/gpu-lease/gpu0-wake-room.lock', files)
 
 
+class GatewayMetadataDoesNotWake(unittest.TestCase):
+    """A periodic GET /v1/models probe woke voice every 10 min; metadata must pass through without waking."""
+
+    def setUp(self):
+        src = (ROOT / 'hosts/gpu-195/voice-llm-gateway/gateway.py').read_text()
+        self.src = src
+        fn = [n for n in ast.parse(src).body if isinstance(n, ast.FunctionDef) and n.name == 'needs_voice_engine']
+        self.assertEqual(len(fn), 1)
+        scope = {}
+        exec(compile(ast.Module(fn, []), 'gateway', 'exec'), scope)
+        self.wakes = scope['needs_voice_engine']
+
+    def test_model_list_reads_do_not_wake(self):
+        for method, path in (('GET', 'v1/models'), ('get', 'v1/models'), ('HEAD', 'v1/models'),
+                             ('GET', 'v1/models/Qwen3-8B-AWQ')):
+            self.assertFalse(self.wakes(method, path), (method, path))
+
+    def test_generation_and_writes_still_wake(self):
+        for method, path in (('POST', 'v1/chat/completions'), ('POST', 'v1/completions'), ('GET', 'v1/modelsx'),
+                             ('POST', 'v1/models'), ('GET', 'v1/embeddings'), ('GET', 'v1/chat/completions')):
+            self.assertTrue(self.wakes(method, path), (method, path))
+
+    def test_proxy_skips_accounting_for_metadata(self):
+        proxy = self.src[self.src.index('async def proxy('):]
+        self.assertIn('wakes = needs_voice_engine(request.method, path)', proxy)
+        # Every release in the proxy goes through the counted-only helper; no unconditional release remains.
+        body = proxy.split('async def release_voice_request_if_counted', 1)[1].split('\n', 3)[3]
+        self.assertNotIn('await release_voice_request()', body)
+        self.assertEqual(body.count('await release_voice_request_if_counted()'), 3)
+
+
 if __name__ == '__main__':
     unittest.main()
