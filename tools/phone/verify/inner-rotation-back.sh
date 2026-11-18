@@ -49,7 +49,8 @@ wwc_extra() { local root
   elif [ "$STARTED" = 1 ]; then say "camera cleanup withheld: launch has no proven owned task (evidence $OUT)"; fi
   CAMTASK="" STARTED=0; }
 # Before wwc_start can go home/fold; repeat immediately before launch to catch
-# camera work appearing during setup. Cached PID alone remains a conservative skip.
+# camera work appearing during setup. cameraserver (clients + per-device open state) decides "in use"; a cached
+# camera pid alone does not (camera-ownership.py).
 camera_snapshot "$OUT/before-setup" || wwc_skip "camera ownership not safe before setup"
 wwc_start
 camera_snapshot "$OUT/prelaunch" || wwc_skip "camera ownership changed during setup"

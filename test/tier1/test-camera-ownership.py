@@ -31,7 +31,8 @@ Allowed user IDs: 0
 == Camera service events log (most recent at top): ==
   11-15 05:52:12 : ADD device 0, reason: (Device added)
 
-== Camera Provider HAL device static information: ==
+''' + ''.join('== Camera device %d dynamic info: ==\n  Device %d is closed, no client instance\n' % (i, i)
+                 for i in range(8)) + '''== Camera Provider HAL device static information: ==
   android.sensor.info.activeArraySize: [0 0 100 100]
 '''
 TIMEOUT = "*** SERVICE 'media.camera' DUMP TIMEOUT (5000ms) EXPIRED ***\n"
@@ -55,7 +56,7 @@ class Ownership(unittest.TestCase):
                            ('activities', 'ACTIVITY MANAGER ACTIVITIES com.oplus.camera'),
                            ('recents', 'ACTIVITY MANAGER RECENT TASKS com.oplus.camera'),
                            ('windows', 'WINDOW MANAGER WINDOWS com.oplus.camera'),
-                           ('clients', CLIENTS.replace('\n[]\n', '\n[other.app]\n')), ('process', '1234')]:
+                           ('clients', CLIENTS.replace('\n[]\n', '\n[other.app]\n'))]:
             with self.subTest(key=key):
                 p = self.d / (key + '.txt')
                 old = p.read_text()
@@ -75,13 +76,40 @@ class Ownership(unittest.TestCase):
                         policy.guard(self.d)
             p.write_text(old)
 
-    def test_completed_clients_accept_late_metadata_timeout_not_cached_pid(self):
+    def test_completed_clients_accept_late_metadata_timeout(self):
         path = self.d / 'clients.txt'
         path.write_text(CLIENTS + TIMEOUT)
         policy.guard(self.d)
         self.assertTrue(path.read_text().endswith(TIMEOUT))
-        (self.d / 'process.txt').write_text('1234')
-        with self.assertRaisesRegex(ValueError, 'may be cached'):
+
+    def test_cached_process_with_idle_cameraserver_is_safe(self):
+        # 11-15: pid 10096 cached for hours, no clients, every device closed -> every try
+        # of inner-rotation-back skipped. cameraserver, not the pid, decides "in use".
+        (self.d / 'process.txt').write_text('10096\n')
+        policy.guard(self.d)
+        for bad in ['pidof: error', '10096 junk']:
+            (self.d / 'process.txt').write_text(bad)
+            with self.assertRaisesRegex(ValueError, 'process probe unrecognized'):
+                policy.guard(self.d)
+
+    def test_open_device_or_incomplete_device_states_protected(self):
+        closed = 'Device 3 is closed, no client instance'
+        for text, why in [
+                (CLIENTS.replace(closed, 'Device 3 is open. Client instance dump:'), 'device 3 is OPEN'),
+                (CLIENTS.replace('== Camera device 7 dynamic info: ==\n  Device 7 is closed, no client instance\n', ''),
+                 'covers 7 of 8'),
+                (CLIENTS.replace(closed, 'Device 3 is something new'), 'device 3 state unrecognized'),
+                (CLIENTS.replace('== Camera device 3', '== Camera device 2'), 'repeated'),
+                (CLIENTS.replace('Number of camera devices: 8\n', ''), 'device count missing')]:
+            with self.subTest(why=why):
+                (self.d / 'clients.txt').write_text(text)
+                with self.assertRaisesRegex(ValueError, why):
+                    policy.guard(self.d)
+
+    def test_probe_error_names_the_line(self):
+        (self.d / 'clients.txt').write_text(
+            CLIENTS.replace('Number of camera devices:', 'ERROR: cameraserver busy\nNumber of camera devices:'))
+        with self.assertRaisesRegex(ValueError, "'ERROR: cameraserver busy'"):
             policy.guard(self.d)
 
     def test_initial_clients_fail_closed_at_section_boundary(self):
