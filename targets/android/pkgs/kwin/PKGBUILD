@@ -144,6 +144,12 @@
 #               fold/rotate's surface swap - that did not take the focus is held off screen until it does or no
 #               full-screen task stands: Steam's main window, re-exported by the unfold's "export-new 1", opened as a
 #               floating task in front of My Friend Pedro (game-resize 557340 11-18 21:55, the game never focused/drew).
+#   0076        ours (3.83): 0074's follow-with-the-root covers the game's own full-screen task too (fullScreen(), how every
+#               Steam game opens), not only a floating task the app made immersive: it never fired for a game, so a
+#               fold whose task surface was re-made (no "size") left the window at the old screen's size in the new
+#               root - My Friend Pedro unfolded again left full screen (a floating 1360x1707 task), Besiege cover
+#               portrait was re-made 391x2484 unmapped (game-resize 11-18 22:42/22:52). The screen change itself also
+#               starts 0072's leave grace, and a leave KWin lets through is logged ("full screen left").
 # HACK: same pkgname as Arch's kwin with pkgrel 3.1 (makepkg allows only integer[.integer]; ".1" = ours), so every Plasma package's
 # "depends=(kwin)" is satisfied by ours and pacman sees it as newer than 6.7.5-3. The real fix is
 # getting the Anland backend upstream into KWin; until then each Plasma update means rebasing
@@ -152,7 +158,7 @@
 pkgname=kwin
 pkgver=6.7.5
 _dirver=$(echo $pkgver | cut -d. -f1-3)
-pkgrel=3.82
+pkgrel=3.83
 pkgdesc='An easy to use, but flexible, Wayland compositor (PowOS: Anland backend for Android)'
 arch=(aarch64)
 url='https://kde.org/plasma-desktop/'
@@ -241,11 +247,12 @@ _patches=(0001-Add-support-for-Anland-display-daemon-kwin-6.7.patch
           0072-X11-a-task-kept-full-screen-window-s-leave-right-after-its-task-resized-it-is-refused.patch
           0073-killprompt-retire-helper-on-owner-close.patch
           0074-backends-anland-a-full-screen-task-s-window-takes-a-new-screen-with-the-root.patch
-          0075-backends-anland-a-window-that-doesn-t-take-a-full-screen-game-s-focus-is-held-off-screen.patch)
+          0075-backends-anland-a-window-that-doesn-t-take-a-full-screen-game-s-focus-is-held-off-screen.patch
+          0076-backends-anland-a-game-s-own-full-screen-task-takes-a-new-screen-with-the-root.patch)
 source=(https://download.kde.org/stable/plasma/$_dirver/$pkgname-$pkgver.tar.xz
         "${_patches[@]}")
 sha256sums=('6baa910b732d93c48c90f9c1cc685cc93d0b8de0cdf138c24192c045bc3a48e2'
-            SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP)
+            SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP SKIP)
 
 prepare() {
   cd $pkgname-$pkgver

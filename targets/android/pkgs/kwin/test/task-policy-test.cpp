@@ -52,11 +52,18 @@ int main()
 
     // 0074: the app's own full-screen task keeps a full-screen window's geometry -> it takes the new screen with the
     // root (game-resize 11-11 03:20: Besiege on the cover, landscape -> portrait, left at 2484x1116 in a 1116x2484 root).
-    CHECK(followsScreenWithRoot(true, true, true));
+    CHECK(followsScreenWithRoot(false, true, true, true));
+    // 0076: the game's own full-screen task (opened full screen: every Steam game) follows too - 0074 left it out and
+    // game-resize 11-18 failed on it (My Friend Pedro unfolded again -> floating 1360x1707, Besiege cover portrait ->
+    // Unity re-made its window 391x2484): no "size" came after the task's surface was re-made.
+    CHECK(followsScreenWithRoot(true, false, true, true));
+    CHECK(followsScreenWithRoot(true, true, true, true));
     // A floating task (its size is not the screen's), a window not full screen, or geometry not the task's: wait.
-    CHECK(!followsScreenWithRoot(false, true, true));
-    CHECK(!followsScreenWithRoot(true, false, true));
-    CHECK(!followsScreenWithRoot(true, true, false));
+    CHECK(!followsScreenWithRoot(false, false, true, true));
+    CHECK(!followsScreenWithRoot(false, true, false, true));
+    CHECK(!followsScreenWithRoot(false, true, true, false));
+    CHECK(!followsScreenWithRoot(true, false, false, true));
+    CHECK(!followsScreenWithRoot(true, false, true, false));
 
     // 0075: a window exported over a standing full-screen task that did not take the focus is held off screen (Steam's
     // main window re-exported by the unfold's "export-new 1" went in front of My Friend Pedro, 11-18 21:55).

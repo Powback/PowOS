@@ -1,0 +1,73 @@
+diff --git a/src/backends/anland/anland_task_policy.h b/src/backends/anland/anland_task_policy.h
+index 9828cb3..f592918 100644
+--- a/src/backends/anland/anland_task_policy.h
++++ b/src/backends/anland/anland_task_policy.h
+@@ -100,14 +100,19 @@ inline bool drawsOwnFrame(bool clientSideDecorated, bool undecoratedByHints, boo
+ }
+ 
+ /**
+- * PowOS (kwin 0074): a task's window takes the app's new screen with the output and Xwayland's root (followScreen)
+- * only when the screen IS its task's size: the app's own full-screen task ([appFullScreen], immersive, the whole
+- * screen) shows a full-screen window ([windowFullScreen]) whose geometry the task keeps ([keptByTask],
+- * powosKeepFullScreenGeometry). A floating task, or a full-screen window in a floating task, waits for its task's size.
++ * PowOS (kwin 0074, 0076): a task's window takes the app's new screen with the output and Xwayland's root
++ * (followScreen) only when the screen IS its task's size: a full-screen task - the game's own, opened full screen
++ * ([ownFullScreenTask], AnlandWindowTask::fullScreen(): how every Steam game starts) or a floating task the app made
++ * immersive ([appFullScreen]) - shows a full-screen window ([windowFullScreen]) whose geometry the task keeps
++ * ([keptByTask], powosKeepFullScreenGeometry). A floating task, or a full-screen window in a floating task, waits for
++ * its task's size. 0074 took only [appFullScreen]: a game's own task never followed (no "takes the new screen with the
++ * root" line in any game-resize step, 11-18), so on a fold whose task surface was re-made (no "size" came) the window
++ * kept the old screen's size in the new root and Wine left full screen (My Friend Pedro unfolded again: a floating
++ * 1360x1707 task; Besiege cover portrait: Unity re-made its window 391x2484, unmapped).
+  */
+-inline bool followsScreenWithRoot(bool appFullScreen, bool windowFullScreen, bool keptByTask)
++inline bool followsScreenWithRoot(bool ownFullScreenTask, bool appFullScreen, bool windowFullScreen, bool keptByTask)
+ {
+-    return appFullScreen && windowFullScreen && keptByTask;
++    return (ownFullScreenTask || appFullScreen) && windowFullScreen && keptByTask;
+ }
+ 
+ } // namespace KWin::AnlandTaskPolicy
+diff --git a/src/backends/anland/anland_window_task.cpp b/src/backends/anland/anland_window_task.cpp
+index 6a72846..57eeded 100644
+--- a/src/backends/anland/anland_window_task.cpp
++++ b/src/backends/anland/anland_window_task.cpp
+@@ -2791,10 +2791,19 @@ void AnlandWindowTasks::followScreen(const QSize &screen)
+     if (!screen.isValid()) {
+         return;
+     }
++    // PowOS (kwin 0076): the screen change itself starts 0072's grace for every task-kept full-screen window, not
++    // only a resize by its task: Wine answers the root's change, whether or not the window's size changes with it.
++    const qlonglong nowMs = qlonglong(std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now().time_since_epoch()).count());
+     for (AnlandWindowTask *task : std::as_const(m_tasks)) {
+         Window *window = task->window();
+-        if (!window || !AnlandTaskPolicy::followsScreenWithRoot(task->appFullScreen(), window->isFullScreen(),
+-                                                                window->property("powosKeepFullScreenGeometry").toBool())) {
++        if (!window || window->isDeleted()) {
++            continue;
++        }
++        const bool kept = window->property("powosKeepFullScreenGeometry").toBool();
++        if (kept && window->isFullScreen()) {
++            window->setProperty("powosFullScreenResizedMs", nowMs);
++        }
++        if (!AnlandTaskPolicy::followsScreenWithRoot(task->fullScreen(), task->appFullScreen(), window->isFullScreen(), kept)) {
+             continue;
+         }
+         qCInfo(KWIN_ANLAND) << "window task" << task->id() << "full screen takes the new screen with the root:" << screen;
+diff --git a/src/netinfo.cpp b/src/netinfo.cpp
+index c7a6bd5..33f20fa 100644
+--- a/src/netinfo.cpp
++++ b/src/netinfo.cpp
+@@ -292,6 +292,12 @@ void WinInfo::changeState(NET::States state, NET::States mask)
+                               << "on a" << screen.size() << "screen (a rotate/fold mid-way," << since << "ms after its task resized it)";
+             mask &= ~NET::FullScreen;
+         } else {
++            // PowOS (kwin 0076): a leave let through says why, as a refused one does: game-resize 11-18 22:42 (My Friend
++            // Pedro unfolded again) left full screen with no line at all, so which path did it was guesswork.
++            if (m_client->property("powosKeepFullScreenGeometry").toBool()) {
++                qCInfo(KWIN_CORE) << "PowOS: full screen left on the client's request:" << m_client->caption() << "at" << frame.size()
++                                  << "on a" << screen.size() << "screen," << since << "ms after its last screen change";
++            }
+             m_client->setFullScreen(false);
+         }
+     }

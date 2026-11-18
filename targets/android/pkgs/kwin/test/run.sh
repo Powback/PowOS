@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # kwin anland unit tests in a throwaway gcc container, against the patched tree src-tree.sh builds (no Qt, no KWin
 # build): reconnect-test.c = 0059's non-blocking try_exit_fallback(); xnativesnap-test.cpp = 0065's 1-px snap;
-# task-policy-test.cpp = 0066's prompt-over-game and restore-watch decisions, 0068's own-frame vs borderless one, 0074's full screen with the root, 0075's windows held behind a full-screen task;
+# task-policy-test.cpp = 0066's prompt-over-game and restore-watch decisions, 0068's own-frame vs borderless one, 0074+0076's full screen with the root (the app's and the game's own full-screen task), 0075's windows held behind a full-screen task;
 # fullscreenleave-test.cpp = 0069 + 0072: the stale-size leave refusal and its grace after a task resize.
 set -euo pipefail
 here=$(cd "$(dirname "$0")/.." && pwd)
