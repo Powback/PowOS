@@ -49,12 +49,15 @@ class DisplayGpu(unittest.TestCase):
         r = self.run_it({'card1-HDMI-A-3'})
         self.assertEqual(r.returncode, 0, r.stderr)
         self.assertIn('DXVK_FILTER_DEVICE_UUID=589a4c177c2d78bc11882aadb37ba2b4\n', r.stdout)
+        self.assertIn('DRI_PRIME=pci-0000_01_00_0\n', r.stdout)  # DX12/Vulkan via Mesa device-select
         self.assertIn('0000:01:00.0', r.stdout)
 
     def test_monitor_on_gpu1_follows_it(self):
         r = self.run_it({'card0-DP-1'})
         self.assertEqual(r.returncode, 0, r.stderr)
         self.assertIn('DXVK_FILTER_DEVICE_UUID=1a118f889cb52316ddda1ea80ff0af37\n', r.stdout)
+        self.assertIn('DRI_PRIME=pci-0000_02_00_0\n', r.stdout)
+        self.assertNotIn('pci-0000_01_00_0', r.stdout)
 
     def test_two_monitors_same_gpu_is_fine(self):
         r = self.run_it({'card1-HDMI-A-3', 'card1-DP-4'})

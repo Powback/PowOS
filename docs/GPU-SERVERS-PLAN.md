@@ -1140,7 +1140,8 @@ and on `systemctl --user daemon-reload`; Steam (Plasma launches it as `app-steam
 pressure-vessel passes it to Proton. Effective for a Steam started after the next login (or daemon-reload + full Steam
 quit/start). A per-game launch option still overrides it.
 
-Limit: vkd3d-proton (DX12) only has `VKD3D_FILTER_DEVICE_NAME` (identical cards share the name) and
-`VKD3D_VULKAN_DEVICE` (a zero-based enumeration index, not an identity; checked in libs/vkd3d/device.c), so DX12
-games are not pinned. If one shows the same symptom, use a per-game `VKD3D_VULKAN_DEVICE=<n>` after checking the order
-with `vulkaninfo --summary` in that game's runtime.
+DX12 and native Vulkan (2026-11-18): vkd3d-proton has no UUID filter, so the same file also sets
+`DRI_PRIME=pci-0000_01_00_0`. Mesa's implicit device-select layer (also loaded in the Steam runtime) orders the named
+device first for every Vulkan app, so vkd3d's device 0 is the display GPU. Measured with `vulkaninfo --summary`:
+`DRI_PRIME=pci-0000_02_00_0` moves 02:00.0 to GPU0; `pci-0000_01_00_0` keeps 01:00.0 first. NVIDIA GL/EGL ignore it.
+A per-game `VKD3D_VULKAN_DEVICE=<n>` or `DRI_PRIME` launch option still overrides it.

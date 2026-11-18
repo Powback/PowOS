@@ -20,8 +20,11 @@
 # (nvidia-smi; for NVIDIA the Vulkan deviceUUID DXVK matches is the same 16 bytes). No connected display, displays
 # on two GPUs, or no UUID for it = a clear error and nothing written. Re-run after moving the monitor to another card.
 #
-# Not covered: vkd3d-proton (DX12) has no UUID filter, only VKD3D_FILTER_DEVICE_NAME (both cards share a name) and
-# VKD3D_VULKAN_DEVICE (an enumeration index, not an identity), so DX12 games keep their default (docs/GPU-SERVERS-PLAN.md).
+# DX12 and native Vulkan: vkd3d-proton has no UUID filter (only VKD3D_FILTER_DEVICE_NAME - both cards share a name -
+# and VKD3D_VULKAN_DEVICE, an index). Mesa's implicit device-select layer (VkLayer_MESA_device_select, also loaded in
+# the Steam runtime) puts the device named by DRI_PRIME=pci-DDDD_BB_DD_F first, so every Vulkan app - vkd3d's device 0
+# included - gets the display GPU. Measured on gpu-195 2026-11-18: vulkaninfo GPU0 flips to 02:00.0 with
+# DRI_PRIME=pci-0000_02_00_0 and stays 01:00.0 with pci-0000_01_00_0. NVIDIA's GL/EGL do not read DRI_PRIME.
 # AI containers are unaffected: rootless podman/CDI containers do not inherit the session env, and only DXVK reads it.
 set -euo pipefail
 HERE="$(cd "$(dirname "$0")" && pwd)"
@@ -70,9 +73,14 @@ done < <("$NVIDIA_SMI" --query-gpu=pci.bus_id,uuid --format=csv,noheader)
 hex="$(tr -d -- '-' <<<"${uuid#GPU-}" | tr 'A-F' 'a-f')"
 [[ "$hex" =~ ^[0-9a-f]{32}$ ]] || die "unexpected UUID '$uuid' for $pci"
 
+prime="pci-$(tr ':.' '__' <<<"$pci")"            # 0000:01:00.0 -> pci-0000_01_00_0 (Mesa device-select format)
+[[ "$prime" =~ ^pci-[0-9a-f]{4}_[0-9a-f]{2}_[0-9a-f]{2}_[0-9a-f]$ ]] || die "unexpected PCI address '$pci'"
+
 content="# Managed by PowOS hosts/gpu-195/display-gpu/install.sh (unit display-gpu-env); remove: install.sh --remove.
-# DXVK renders on the display GPU $pci ($uuid). A per-game launch option overrides this.
-DXVK_FILTER_DEVICE_UUID=$hex"
+# Games render on the display GPU $pci ($uuid). A per-game launch option overrides this.
+# DXVK (DX9-11) by UUID; every Vulkan app incl. vkd3d-proton (DX12) via Mesa device-select ordering.
+DXVK_FILTER_DEVICE_UUID=$hex
+DRI_PRIME=$prime"
 
 if [[ "$mode" == --dry-run ]]; then
     echo "display GPU: $pci $uuid"
