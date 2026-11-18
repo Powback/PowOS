@@ -53,6 +53,18 @@ wwc_extra() { local root
 # camera pid alone does not (camera-ownership.py).
 camera_snapshot "$OUT/before-setup" || wwc_skip "camera ownership not safe before setup"
 wwc_start
+# The INNER screen: only unfolded does WindowFrames adopt a stray full-screen app into a web window. wwc_start unfolds
+# only when home shows no web windows, and the cover's home has them too: 11-18 20:15 the camera ran full screen on
+# the folded cover (display 0 1116x2484) for 76 s and nothing adopted it - a FAIL of the check, not of the fix.
+w0() { sh_ "wm size" | sed -nE 's/.*(Override|Physical) size: ([0-9]+)x[0-9]+.*/\2/p' | tail -1; }
+if [ "$(w0)" -lt 2000 ] 2>/dev/null; then
+  fold 3; UNFOLDED=1
+  for _ in $(seq 1 24); do sleep 0.5; [ "$(w0)" -gt 2000 ] 2>/dev/null && break; done
+  [ "$(w0)" -gt 2000 ] 2>/dev/null || wwc_skip "the inner screen didn't come on (display 0 width $(w0))"
+  wwc_home || wwc_skip "home's page isn't visible on the inner screen"
+  CDP_TIMEOUT_S=20 ww_ready || wwc_skip "home shows no web windows on the inner screen"
+fi
+say "display 0 width $(w0) (inner screen)"
 camera_snapshot "$OUT/prelaunch" || wwc_skip "camera ownership changed during setup"
 r0=$(rot); say "display 0 rotation before: $r0"
 case $r0 in [0-3]) ;; *) wwc_skip "display 0's rotation unreadable ($r0)" ;; esac
