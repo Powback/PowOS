@@ -243,19 +243,23 @@ run)
   apps_changed() { git diff --name-only "$1" "$2" -- apps 2>/dev/null | sed -n 's#^apps/\([^/]*\)/.*#\1#p' | sort -u |
     while read -r a; do [ -f "apps/$a/powos-app.json" ] && echo "$a"; done; }
   # rooted_inputs A B: what changed between A and B that targets/android/rooted/rooted.sh deploy installs (the
-  # rooted-mode part only - its own scripts/session + the small PowOS-side pieces it pushes; the apps-tier pieces
-  # it also pushes, lib/apps/bin/powos, are the "apps" kind above, f105 part 2 - this is part 1; the spacetimedb/
-  # xwayland/kwin packages are BUILT by the "pkgs" step (pkgs_due, 11-10) and installed by this deploy). `deploy`, never `install` (which also re-pushes the rootfs tarball - a human step).
-  # lib/apps/powos-terms + powos-transcribe: powos-deploy.sh installs them (e4bc7be0); a change to them alone must deploy
-  # (11-01: the terminals view-only rewrite ec367873 changed only powos-terms and would never have reached the phone).
-  # targets/android/pkgs (all of it, 11-10): the deploy installs our packages (kwin, xwayland-kgsl, spacetimedb ...)
-  # from out/pkgs, which the "pkgs" step below builds first - a PKGBUILD change alone must deploy too.
-  rooted_inputs() { git diff --name-only "$1" "$2" -- targets/android/rooted targets/android/session \
-    targets/android/pkgs bin/powos-panel-phone desktop/autostart/powos-panel-phone.desktop lib/devices desktop/autostart/powos-places.desktop \
-    lib/powos-tmux-shell lib/self-phone.sh config/etc/profile.d/60-powos-picker-key.sh lib/ai/agents lib/ai/comms/comms-mcp.py \
-    tools/app-api lib/ai/manager lib/ai/sandbox desktop/plasmoid units/phone units/phone-android lib/apps/powos-units lib/apps/powos-terms lib/apps/powos-transcribe \
-    targets/android/steam/unity-screen \
-    2>/dev/null | grep -v -e '^lib/ai/sandbox/node_modules/' -e '^targets/android/pkgs/[^/]*/test/'; }
+  # rooted-mode part, f105 part 1; apps/<app>/ is the "apps" kind above, part 2). The paths are DERIVED from the deploy
+  # at B (tools/phone/rooted-inputs.py: rooted.sh's pushes, narrowed to what powos-deploy.sh installs), never a hand
+  # list: that list fell behind twice (lib/devices, efcf8483; 11-24 most of lib/apps - a27864d4's Steam stall fix in
+  # lib/apps/powos-sleep-gui would never have reached the phone). test/tier1/test-rooted-inputs.py guards it. A
+  # staged-but-not-installed file (lib/apps/powos-noroot-services: the APK's) and shell/APK files start no deploy.
+  # targets/android/pkgs counts whole: the deploy installs our packages (kwin, xwayland-kgsl, spacetimedb ...) from
+  # out/pkgs, which the "pkgs" step below builds first - a PKGBUILD change alone must deploy too. `deploy`, never
+  # `install` (which also re-pushes the rootfs tarball - a human step).
+  # If the derivation fails (a push it can't resolve), the whole of targets/android + lib + units counts (over-
+  # deploying is the safe side) and the error goes to stderr. SHIP_ROOTED_INPUTS (pathspecs) replaces it (tests).
+  rooted_inputs() ( set -f; IFS=$' \t\n'   # a subshell: pathspec globs (tools/app-api/*.py) go to git, unexpanded
+    if [ -n "${SHIP_ROOTED_INPUTS:-}" ]; then specs=$SHIP_ROOTED_INPUTS
+    elif ! specs=$(python3 tools/phone/rooted-inputs.py --rev "$2"); then
+      echo "rooted_inputs: tools/phone/rooted-inputs.py failed at ${2:0:9} - counting all of targets/android lib units" >&2
+      specs="targets/android lib units"; fi
+    # shellcheck disable=SC2086  # one pathspec per word (none has spaces)
+    git diff --name-only "$1" "$2" -- $specs 2>/dev/null | grep -v -e '^lib/ai/sandbox/node_modules/' -e '^targets/android/pkgs/[^/]*/test/' )
   # units_gate: nothing ships to the phone that installs a file no unit claims (DU1: every ship registers what it
   # installs). test-units-registry.py reads every deploy script against units/; a FAIL refuses the rooted deploy.
   # test-powos-dispatch.py: every `powos <subcommand>`'s file is installed by the deploy (powos terms wasn't, 11-01).
