@@ -672,6 +672,10 @@ html:root .ai-panel .tile { background: var(--soft-fill); }
 .drawer :is(.app-label, .heading), .letter-bar span { text-shadow: 0 0 2px var(--color-background), 0 0 4px var(--color-background), 0 0 7px var(--color-background), 0 0 12px color-mix(in srgb, var(--color-background) 70%, transparent); }
 .letter-bar span { transition: transform var(--spring-fast-ms) var(--spring-fast), color var(--spring-fast-ms) var(--spring-fast); }
 .letter-bar span.on { color: var(--accent-text); transform: scale(1.5); }
+/* "All" at the bar's top and foot (drawer.tsx LetterBar ends): a word, the letters' size and a heavier weight
+   to stay legible across the bar's 22px; scaled less when lit so it stays within the frost's edge. */
+.letter-bar span.all { font-weight: 600; }
+.letter-bar span.all.on { transform: scale(1.3); }
 /* Scrubbing the A-Z bar (drawer.tsx highlight): the letter's cells bright with a soft lift, the rest dim; eased in
    and back. opacity/scale/translate only (composited, no layout), changed per letter, not per pointermove. */
 .grid.az .app { transition: background var(--spring-fast-ms) var(--spring-fast), opacity var(--spring-fast-ms) var(--spring-fast), scale var(--spring-fast-ms) var(--spring-fast), translate var(--spring-fast-ms) var(--spring-fast); }
@@ -713,6 +717,7 @@ html:root .ai-panel .tile { background: var(--soft-fill); }
   font: bold 28px var(--font-body);
   pointer-events: none;
 }
+.letter-bubble.all { font-size: 20px; }
 /* Experimental A-Z list (drawer.tsx AzOverlay, Settings > style > experimental): the letter's apps as rows, centred over
    the drawer page (not by the bar), every name whole - wrapped, never cut. Touch stays on the bar (pointer capture): the
    list takes none. It and each letter's rows fade in on the spring; it fades out (usePresence). */

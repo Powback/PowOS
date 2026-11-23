@@ -8,11 +8,16 @@
  *   without usage data: hidden, never filler), and the quick launch places (drawer.tsx QuickLaunch).
  * - A-Z bar touched: every app under that letter (the letter itself, else the next letter with apps), and it stays on
  *   that letter after the finger lifts, until the letter's chip is tapped or the launcher opens again.
+ * - "All" at both ends of the A-Z bar (the user, 11-23: "the launcher sorter should have an option to show all on the top
+ *   and bottom of the sorter"): every app A to Z under its letter's heading, kept after the lift under an "All" chip like a
+ *   letter's; sliding on from it onto a letter shows that letter, live.
  * - Search (anything typed) overrides both: the drawer shows its results (drawer.tsx Drawer).
  * - No recent and no suggested apps (a fresh phone): all apps A to Z, as before, never an empty page.
  */
 
 export const ALPHABET = ["#", ..."ABCDEFGHIJKLMNOPQRSTUVWXYZ"];
+/** The A-Z bar's entry at its top and its foot: every app (launcherView "all", picked). */
+export const ALL = "All";
 /** Recent: two rows folded (4 across), and Suggested one row - compact, so the sections fit above the pill. */
 export const RECENT_MAX = 8;
 export const SUGGESTED_MAX = 4;
@@ -61,7 +66,7 @@ export type LetterEvent = { type: "open" } | { type: "scrub"; letter: string } |
 export function nextLetter(first: Map<string, number>, shown: string | null, e: LetterEvent): string | null {
   switch (e.type) {
     case "scrub":
-      return resolveLetter(first, e.letter) ?? shown;
+      return e.letter === ALL ? ALL : (resolveLetter(first, e.letter) ?? shown);
     case "release":
       return shown;
     default:
@@ -73,7 +78,18 @@ export type LauncherView<T> =
   | { kind: "search" }
   | { kind: "letter"; letter: string; apps: T[] }
   | { kind: "sections"; recent: T[]; suggested: T[] }
-  | { kind: "all"; apps: T[] };
+  | { kind: "all"; apps: T[]; groups: Group<T>[]; picked: boolean };
+
+/** One letter's heading and its apps, A to Z. */
+export interface Group<T> {
+  letter: string;
+  apps: T[];
+}
+
+/** Every app under its letter's heading, the letters in the bar's order. */
+export function groupApps<T>(sorted: Sorted<T>): Group<T>[] {
+  return ALPHABET.filter((l) => sorted.first.has(l)).map((letter) => ({ letter, apps: appsOfLetter(sorted, letter) }));
+}
 
 /** The launcher's pages' content for its state: [recent] and [frequent] are keys, newest / most used first. */
 export function launcherView<T extends Named>(s: {
@@ -85,6 +101,8 @@ export function launcherView<T extends Named>(s: {
   frequent: readonly string[];
 }): LauncherView<T> {
   if (s.searching) return { kind: "search" };
+  const all = (picked: boolean) => ({ kind: "all" as const, apps: s.sorted.list, groups: groupApps(s.sorted), picked });
+  if (s.letter === ALL) return all(true);
   const apps = s.letter == null ? [] : appsOfLetter(s.sorted, s.letter);
   if (s.letter != null && apps.length) return { kind: "letter", letter: s.letter, apps };
   const known = (keys: readonly string[]) => [...new Set(keys)].map((k) => s.byKey.get(k)).filter((a): a is T => a != null);
@@ -93,6 +111,6 @@ export function launcherView<T extends Named>(s: {
   const suggested = known(s.frequent)
     .filter((a) => !shown.has(a.key))
     .slice(0, SUGGESTED_MAX);
-  if (!recent.length && !suggested.length) return { kind: "all", apps: s.sorted.list };
+  if (!recent.length && !suggested.length) return all(false);
   return { kind: "sections", recent, suggested };
 }

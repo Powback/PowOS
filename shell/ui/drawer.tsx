@@ -1,7 +1,8 @@
 /**
  * The drawer: opened, the launcher's sections (ui/launcherview.ts) - Recent, Suggested, Quick launch - with an A-Z bar to
  * tap or slide along (its "#", for names that don't start with a letter, only when there are any): a letter shows every
- * app under it, A to Z, and stays after the finger lifts until its chip is tapped or the launcher opens again. Typing in
+ * app under it, A to Z, and stays after the finger lifts until its chip is tapped or the launcher opens again; "All", at
+ * the bar's top and foot, shows every app under its letter's heading the same way. Typing in
  * the bar narrows it to matches, best first. It's the top of the launcher panel, which grows out of the recent apps bar
  * (home.tsx); always mounted, so it follows the finger without rebuilding.
  */
@@ -20,7 +21,7 @@ import { PendingDetailSheet, PendingIconBadge } from "./pending.tsx";
 import type { App, FilePlace } from "../types.ts";
 import { powos } from "../bridge.ts";
 import { Icon, type IconName } from "./icons.tsx";
-import { ALPHABET, appsOfLetter, launcherView, nextLetter, resolveLetter, sortApps, type LetterEvent } from "./launcherview.ts";
+import { ALL, ALPHABET, appsOfLetter, launcherView, nextLetter, resolveLetter, sortApps, type LetterEvent } from "./launcherview.ts";
 
 import { searchResults, searchSections, searchPending, openSearchResult, type SearchResult } from "../search.ts";
 import { springFast } from "./spring.ts";
@@ -182,9 +183,11 @@ function useRowPick(active: boolean) {
  * on, the letter's apps show centred (AzOverlay); sliding left off the bar lights the row at the finger's height, and
  * lifting there opens that app ([onOpen]); lifting anywhere else leaves the grid at the letter, as before.
  */
-function LetterBar({ onPick, onOpen }: { onPick: (letter: string | null) => void; onOpen: (app: App) => void }) {
+function LetterBar({ onPick, onOpen, ends = false }: { onPick: (letter: string | null) => void; onOpen: (app: App) => void; ends?: boolean }) {
   // "#" only when some name doesn't start with a letter: a "#" with nothing under it would do nothing.
-  const letters = sorted.value.first.has("#") ? ALPHABET : ALPHABET.slice(1);
+  const az = sorted.value.first.has("#") ? ALPHABET : ALPHABET.slice(1);
+  // [ends] (the launcher): "All" above the first letter and below Z, in reach from either end of the bar.
+  const letters = ends ? [ALL, ...az, ALL] : az;
   const [current, setCurrent] = useState<string | null>(null);
   const bar = useRef<HTMLDivElement>(null);
   const listOn = azList.value === "on";
@@ -196,7 +199,7 @@ function LetterBar({ onPick, onOpen }: { onPick: (letter: string | null) => void
     tick();
     onPick(letters[i]);
   };
-  const rows = useRowPick(listOn && current != null);
+  const rows = useRowPick(listOn && current != null && current !== ALL);
   const move = (x: number, y: number) => {
     // Off the bar (left of it) with the list showing: the letter holds, the finger picks a row by its height.
     if (!rows.at(x < bar.current!.getBoundingClientRect().left, y)) pick(y);
@@ -224,9 +227,9 @@ function LetterBar({ onPick, onOpen }: { onPick: (letter: string | null) => void
         onPointerCancel={() => end(false)}
       >
         {letters.map((l) => (
-          <span class={l === current ? "on" : ""}>{l}</span>
+          <span class={`${l === current ? "on" : ""}${l === ALL ? " all" : ""}`}>{l}</span>
         ))}
-        {current && <div class="letter-bubble">{current}</div>}
+        {current && <div class={`letter-bubble${current === ALL ? " all" : ""}`}>{current}</div>}
       </div>
       {listOn && <AzOverlay letter={resolve(current)} row={rows.row} rows={rows.ref} />}
     </>
@@ -264,7 +267,7 @@ export function AppList({ found, onTap, sections = false }: { found: App[] | nul
       <div class={`drawer-list ${found ? "results" : ""}`} ref={list}>
         <ListBody found={found} sections={sections} cell={cell} />
       </div>
-      {!found && <LetterBar onPick={sections ? show : jump} onOpen={onTap ?? openApp} />}
+      {!found && <LetterBar onPick={sections ? show : jump} onOpen={onTap ?? openApp} ends={sections} />}
     </>
   );
 }
@@ -312,25 +315,46 @@ function ListBody({ found, sections, cell }: { found: App[] | null; sections: bo
   );
 }
 
+/** The chip over a letter's (or All's) apps: a tap goes back to the sections. */
+function LetterChip({ label }: { label: string }) {
+  return (
+    <button type="button" class="launcher-chip" aria-label="Back to recent apps" onClick={() => letterEvent({ type: "clear" })}>
+      <span class="launcher-chip-letter">{label}</span>
+      <Icon name="close" size={14} />
+    </button>
+  );
+}
+
 /**
  * The launcher's content (ui/launcherview.ts launcherView): the letter's apps under its chip (tap: back to the
- * sections), or Recent / Suggested / Quick launch - each hidden when empty - or, with neither recent nor suggested
- * apps, every app A to Z. The grid keeps `.grid.az`: the A-Z jump, the align and geometry checks find it.
+ * sections), or Recent / Suggested / Quick launch - each hidden when empty - or every app under its letter's heading
+ * (All picked on the bar, under its chip; or neither recent nor suggested apps). The grids keep `.grid.az`: the A-Z
+ * jump, the align and geometry checks find them.
  */
 function Sections({ cell }: { cell: (app: App) => preact.JSX.Element }) {
   const v = launcherView({ searching: false, letter: launcherLetter.value, sorted: sorted.value, byKey: byKey.value, recent: recent.value, frequent: frequent.value });
   if (v.kind === "letter") {
     return (
       <section class="launcher-section" data-view="letter" data-letter={v.letter}>
-        <button type="button" class="launcher-chip" aria-label="Back to recent apps" onClick={() => letterEvent({ type: "clear" })}>
-          <span class="launcher-chip-letter">{v.letter}</span>
-          <Icon name="close" size={14} />
-        </button>
+        <LetterChip label={v.letter} />
         <div class="grid az" key={v.letter}>{v.apps.map(cell)}</div>
       </section>
     );
   }
-  if (v.kind !== "sections") return <div class="grid az" data-view="all">{sorted.value.list.map(cell)}</div>;
+  if (v.kind === "all") {
+    return (
+      <div class="launcher-sections" data-view="all" data-letter={v.picked ? ALL : undefined}>
+        {v.picked && <LetterChip label={ALL} />}
+        {v.groups.map((g) => (
+          <section class="launcher-section" key={g.letter} data-group={g.letter}>
+            <h3 class="heading">{g.letter}</h3>
+            <div class="grid az">{g.apps.map(cell)}</div>
+          </section>
+        ))}
+      </div>
+    );
+  }
+  if (v.kind !== "sections") return null;
   return (
     <div class="launcher-sections" data-view="sections">
       <section class="launcher-section" data-section="recent">

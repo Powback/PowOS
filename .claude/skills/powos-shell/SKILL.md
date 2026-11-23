@@ -261,8 +261,12 @@ WindowBlur.kt, WallpaperBackdrop.kt, LiquidGlass.kt; page side shell/ui/nativegl
   on sections Recent (8, `recent`) / Suggested (4, `usage.frequent` minus Recent; hidden without data) / Quick launch
   (`files.places`/`files.open`, FilePlaces.kt: DocumentsUI folders + Linux home; only places that resolve). A-Z bar =
   `launcherLetter` signal: the letter's apps under `.launcher-chip` (tap = back), kept on release, reset on every open.
-  No recents + no suggested: plain A-Z. Probe: `[data-view=sections|letter|all]`, `[data-section=recent|suggested|places]`.
-  Shots: drawer, drawer-scrub (held), drawer-letter (released). Device: az-scrub.sh checks open/held/kept/chip.
+  "All" (launcherview ALL) at the bar's top AND foot (LetterBar `ends`, only the launcher's bar; `span.all`): every app
+  under its letter's heading (`[data-group]`), under an "All" chip, kept on release; sliding on to a letter = that
+  letter. No recents + no suggested: the same headed A-Z, no chip. Probe: `[data-view=sections|letter|all]`
+  (`data-letter=All` when picked), `[data-section=recent|suggested|places]`. Shots: drawer, drawer-scrub (held),
+  drawer-letter (released), drawer-all-held (foot All), drawer-all. Device: az-scrub.sh checks open/held/kept/chip + All.
+  Checks that want the list's last letter use `.letter-bar span:not(.all)` (pullup-stage2).
 - One drag for app tiles (11-23, "drag to open as window works for the docked icons but not the recent ones"): launcher
   tiles + search's app rows (drawer.tsx AppResultRow) = apps.tsx dragHome, carry `toWindow` (dockout.tsx aimOut: over an
   app / a window page it opens as window or half, as the dock's); dock recents + DockWindows cells get the pinned cells'

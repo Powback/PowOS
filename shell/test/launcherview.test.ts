@@ -1,7 +1,7 @@
 // The launcher's content per state (shell/ui/launcherview.ts): node --test shell/test/launcherview.test.ts
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { launcherView, nextLetter, RECENT_MAX, SUGGESTED_MAX, sortApps, type LetterEvent } from "../ui/launcherview.ts";
+import { ALL, launcherView, nextLetter, RECENT_MAX, SUGGESTED_MAX, sortApps, type LetterEvent } from "../ui/launcherview.ts";
 
 const app = (label: string) => ({ key: `a:${label.toLowerCase()}`, label });
 const all = ["Brave", "Calendar", "Camera", "Chrome", "Maps", "Messages", "Music", "Signal", "Spotify", "Steam", "Zoom", "Ölwerk", "7-Zip"].map(app);
@@ -70,4 +70,36 @@ test("a letter with no apps shows the next letter's (the last letter's past the 
 test("search overrides the letter and the sections", () => {
   assert.equal(launcherView({ ...base, searching: true }).kind, "search");
   assert.equal(launcherView({ ...base, searching: true, letter: "S" }).kind, "search");
+});
+
+test("All (top or bottom of the bar) shows every app under its letter's heading, kept on release, chip back", () => {
+  // The bar has All at both ends; either sends the same event.
+  const held = run([{ type: "open" }, { type: "scrub", letter: ALL }, { type: "release" }]);
+  assert.equal(held, ALL);
+  const v = launcherView({ ...base, letter: held });
+  assert.equal(v.kind, "all");
+  if (v.kind !== "all") return;
+  assert.equal(v.picked, true);
+  assert.deepEqual(labels(v.apps), labels(sorted.list));
+  assert.deepEqual(v.groups.map((g) => g.letter), ["#", "B", "C", "M", "O", "S", "Z"]);
+  assert.deepEqual(labels(v.groups.find((g) => g.letter === "C")!.apps), ["Calendar", "Camera", "Chrome"]);
+  assert.equal(v.groups.flatMap((g) => g.apps).length, all.length);
+  assert.equal(run([{ type: "clear" }], held), null);
+  // The fallback A-Z (no recent, no suggested) has the headings too, but no chip.
+  const none = launcherView({ ...base, recent: [], frequent: [] });
+  assert.equal(none.kind === "all" && none.picked, false);
+});
+
+test("sliding All -> letter -> All switches live; a reopen resets; search still overrides All", () => {
+  // From the top All down into the letters, then on to the bottom All.
+  let l = run([{ type: "open" }, { type: "scrub", letter: ALL }, { type: "scrub", letter: "B" }]);
+  assert.equal(l, "B");
+  assert.equal(launcherView({ ...base, letter: l }).kind, "letter");
+  l = run([{ type: "scrub", letter: "Z" }, { type: "scrub", letter: ALL }, { type: "release" }], l);
+  assert.equal(l, ALL);
+  assert.equal(run([{ type: "open" }], l), null);
+  assert.equal(launcherView({ ...base, letter: run([{ type: "open" }], l) }).kind, "sections");
+  assert.equal(launcherView({ ...base, searching: true, letter: ALL }).kind, "search");
+  // All with no apps at all: still All, an empty list rather than a stale letter.
+  assert.equal(nextLetter(new Map(), "C", { type: "scrub", letter: ALL }), ALL);
 });
