@@ -1,5 +1,7 @@
 package dev.omalauncher.system
 
+import android.app.ActivityManager
+import android.app.TaskInfo
 import android.content.Context
 import android.content.Intent
 import android.content.pm.LauncherApps
@@ -99,8 +101,70 @@ object CanvasDock {
     }
 
     /**
+     * Whether an app with this task can be a side of Open Canvas, or why not (in words for the user) - pure, CanvasDockTest.
+     * [flags]: the task's TaskInfo split flags as read ([splitFlags]; a missing one is unknown, not a no). OxygenOS
+     * puts its split blocklist (11-23 logcat: "com.android.settings unSupportsSplitScreen by blockList or
+     * ForbidActivityList") into supportsSplitScreenMultiWindow / supportsPocketStudioMultiWindow, so either false = no.
+     */
+    fun sideVerdict(
+        pkg: String?,
+        label: String,
+        own: String,
+        flags: Map<String, Boolean?>,
+    ): String? =
+        when {
+            pkg == null -> "That app isn't open anymore"
+            pkg == own -> "PowOS itself can't be a side of split view"
+            SPLIT_FLAGS.any { flags[it] == false } -> "$label can't be used in split view"
+            else -> null
+        }
+
+    /** The TaskInfo fields [sideVerdict] reads (OxygenOS's own first). */
+    val SPLIT_FLAGS = listOf("supportsPocketStudioMultiWindow", "supportsSplitScreenMultiWindow", "supportsMultiWindow")
+
+    /** [t]'s split flags (hidden fields, HiddenApi exempts TaskInfo); a field this build doesn't have: absent. */
+    private fun splitFlags(t: TaskInfo): Map<String, Boolean?> =
+        SPLIT_FLAGS.associateWith { f -> runCatching { t.javaClass.getField(f).getBoolean(t) }.getOrNull() }
+
+    /** A recent task as the dock reads it: package, label, split flags. */
+    private data class Recent(val id: Int, val pkg: String?, val label: String, val flags: Map<String, Boolean?>)
+
+    private fun recent(context: Context): List<Recent> {
+        val am = context.getSystemService(ActivityManager::class.java) ?: return emptyList()
+        val pm = context.packageManager
+        @Suppress("DEPRECATION")
+        val tasks = runCatching { am.getRecentTasks(40, ActivityManager.RECENT_IGNORE_UNAVAILABLE) }.getOrNull().orEmpty()
+        return tasks.map { t ->
+            val pkg = (t.baseIntent.component ?: t.baseActivity ?: t.topActivity)?.packageName
+            val label = pkg?.let { p -> runCatching { pm.getApplicationLabel(pm.getApplicationInfo(p, 0)).toString() }.getOrNull() } ?: pkg ?: "That app"
+            Recent(t.taskId, pkg, label, splitFlags(t))
+        }
+    }
+
+    /** Why task [s] can't be a side ([sideVerdict]), plus: it needs a launch intent (the shortcut starts it by intent). */
+    private fun whyNotSide(
+        context: Context,
+        s: Recent,
+    ): String? =
+        sideVerdict(s.pkg, s.label, context.packageName, s.flags)
+            ?: if (context.packageManager.getLaunchIntentForPackage(s.pkg!!) == null) "${s.label} can't be opened in split view" else null
+
+    /**
+     * The recent task ids that can be a side of Open Canvas now (the switcher's partner pick and its "can't be used in
+     * split view" note, tasks.canvasSides). Those left out are logged with why, once per answer.
+     */
+    fun sides(context: Context): List<Int> {
+        val all = recent(context)
+        val out = all.associateWith { whyNotSide(context, it) }
+        val left = out.filterValues { it != null }.entries.joinToString(", ") { (s, why) -> "${s.id} ${s.pkg}: $why" }
+        Log.i(TAG, "sides: ${out.filterValues { it == null }.keys.map { it.id }}; not: $left")
+        return out.filterValues { it == null }.keys.map { it.id }
+    }
+
+    /**
      * Task [id]'s app docked on [side], task [other]'s app on the other side, in Open Canvas (path A, class doc). The
      * shortcut stays published (re-pushed each dock; PowosShortcuts.publish may replace it - it's only ever started here).
+     * Every refusal is logged with its reason (`logcat -s PowosCanvasDock`) and goes to the page, which shows it.
      */
     fun dock(
         context: Context,
@@ -108,20 +172,27 @@ object CanvasDock {
         side: Side,
         other: Int,
     ): Result {
+        Log.i(TAG, "dock task $id ($side) beside $other asked")
+        return start(context, id, side, other).also { if (!it.ok) Log.w(TAG, "dock task $id ($side) beside $other refused: ${it.reason}") }
+    }
+
+    private fun start(
+        context: Context,
+        id: Int,
+        side: Side,
+        other: Int,
+    ): Result {
         why(context)?.let { return Result(false, it) }
         if (id == other) return Result(false, "Pick two different apps")
-        val tasks = Tasks.list(context)
-        val pkgs = listOf(id, other).map { t -> tasks.firstOrNull { it.id == t }?.component?.packageName ?: return Result(false, "That app isn't open anymore") }
-        if (pkgs.any { it == context.packageName }) return Result(false, "PowOS itself can't be a side of split view")
+        val tasks = recent(context)
+        val pair = listOf(id, other).map { t -> tasks.firstOrNull { it.id == t } ?: return Result(false, "That app isn't open anymore") }
+        pair.firstNotNullOfOrNull { whyNotSide(context, it) }?.let { return Result(false, it) }
+        val pkgs = pair.map { it.pkg!! }
+        val labels = pair.associate { it.pkg!! to it.label }
         val pm = context.packageManager
-        val labels = pkgs.associateWith { p -> runCatching { pm.getApplicationLabel(pm.getApplicationInfo(p, 0)).toString() }.getOrDefault(p) }
         val plan = plan(pkgs[0], pkgs[1], side, android.os.Process.myUserHandle().hashCode())
-        val intents =
-            plan.packages.map { p ->
-                (pm.getLaunchIntentForPackage(p) ?: return Result(false, "${labels[p]} can't be opened in split view"))
-                    .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-            }
-        val before = plan.packages.associateWith { p -> tasks.firstOrNull { it.component?.packageName == p }?.id }
+        val intents = plan.packages.map { p -> pm.getLaunchIntentForPackage(p)!!.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK) }
+        val before = plan.packages.associateWith { p -> tasks.firstOrNull { it.pkg == p }?.id }
         val info =
             ShortcutInfo.Builder(context, SHORTCUT_ID)
                 .setShortLabel(plan.label(labels))

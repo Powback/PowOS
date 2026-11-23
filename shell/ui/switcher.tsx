@@ -119,13 +119,16 @@ export const TaskCard = memo(function TaskCard({
     gone.current = true;
     const to = side === "left" ? -card.getBoundingClientRect().right : innerWidth - card.getBoundingClientRect().left;
     card.style.transform = "";
-    card.animate(
+    const a = card.animate(
       [
         { transform: `translate(${dx}px, ${dy}px)`, opacity: "1" },
         { transform: `translate(${dx + to * 0.25}px, ${dy}px) scale(0.9)`, opacity: "0" },
       ],
       { duration: spring.ms, easing: spring.easing, fill: "forwards" },
-    ).onfinish = () => (gone.current = false);
+    );
+    // Cancelled too (the host refused the dock: recents.tsx undocked cancels the fly-off): the card takes touches
+    // again - only onfinish left it "gone" for good, every later press on it ignored.
+    a.onfinish = a.oncancel = () => (gone.current = false);
   };
 
   /** Removed: on up and out at the finger's speed (at least a brisk one), then gone from the list. */
@@ -170,6 +173,7 @@ export const TaskCard = memo(function TaskCard({
     const v = (e.clientY - first.y) / Math.max(1, e.timeStamp - first.t);
     const r = cardRelease({ dx: mx, dy: d.dy, x: e.clientX, cardH: el.current!.clientHeight, screenW: innerWidth }, v, !!canDock);
     if (r.kind === "dock") return dockAway(d.dx, d.dy, r.side);
+    if (d.side) console.info(`[canvas] card ${t.id} let go outside the ${d.side} dock zone (x ${Math.round(e.clientX)}): ${r.kind}`);
     if (d.side) onDockHover?.(null);
     if (r.kind === "remove") flingAway(d.dy, v, d.dx);
     else springBack(d.dy, d.dx);
@@ -242,6 +246,7 @@ export const TaskCard = memo(function TaskCard({
         const d = drag.current;
         cancelPress();
         drag.current = null;
+        if (d?.side) console.warn(`[canvas] card ${t.id}'s drag in the ${d.side} dock zone was cancelled (pointercancel): no dock`);
         if (d?.side) onDockHover?.(null);
         if (d?.up) springBack(d.dy, d.dx);
       }}

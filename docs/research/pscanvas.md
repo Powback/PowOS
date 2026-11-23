@@ -302,6 +302,19 @@ measurement). Every dock logs, 2.5 s later, each app's task before vs. in the ca
 `tools/phone/verify/switcher-canvas-dock.sh` (it also prints the protection level of
 `com.oplus.permission.safe.WINDOW`).
 
+**Fixed (11-23 evening), the user: "it does play like a click when i activate the switcher and drag the app to one of
+the sides, but it doesnt activate splitview for it".** Root cause, page side (reproduced in Chromium by the gate's
+`switcher-canvas-drag`, a CDP touch drag): the gesture did reach `tasks.canvasDock`, but (1) the partner pick
+(`dockPartner`) excluded PowOS's own tasks by a `com.powos.app` key prefix that no card key has (keys are `a:pkg/act`,
+`l:app`, or null for the lock face/home), so the newest "other app" could be PowOS's lock face or a Linux window -
+which the host refuses (`PowOS itself can't be a side`), with no log line; (2) after any refusal the card's fly-off
+animation was cancelled, and its `gone` flag only cleared `onfinish`, so that card ignored every later touch - the
+next drags did nothing at all, not even the note. Also OxygenOS refuses blocklisted apps (`OplusSplitScreenManagerService:
+com.android.settings unSupportsSplitScreen by blockList or ForbidActivityList`). Now: `tasks.canvasSides` (host:
+TaskInfo `supportsPocketStudioMultiWindow` / `supportsSplitScreenMultiWindow`, read by reflection, either false = no;
+not PowOS's package; has a launch intent) picks the partner; a blocked dragged app says "<App> can't be used in split
+view"; every host refusal is logged (`PowosCanvasDock ... refused: <reason>`) and shown.
+
 ## 6. com.oplus.pscanvas itself
 
 PENDING: the phone was off the VPN for the whole session (see the hand-back). Next: pull `pm path com.oplus.pscanvas`

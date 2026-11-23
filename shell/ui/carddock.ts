@@ -59,11 +59,39 @@ export function cardRelease(d: CardDrag, vy: number, canDock: boolean): CardRele
   return { kind: "back" };
 }
 
+type Card = { id: number; key?: string | null; split?: unknown };
+
 /**
- * The app beside the docked one: the newest OTHER card that is a single Android app (not a split card, not a PowOS app
- * open in home - negative id - and not PowOS's own task). [list] is the switcher's order, newest first after the lead.
+ * A card that can be a side of Open Canvas. [sides]: the host's answer (tasks.canvasSides - Android apps OxygenOS lets
+ * into split view: not on its blocklist, resizeable, not PowOS's own tasks), the truth when there is one. Without it (an
+ * older APK): a single Android app's card ("a:" key) that isn't PowOS - never a Linux window ("l:", a PowOS task), a
+ * PowOS app open in home (negative id), the lock face or home (PowOS tasks with no key), or a split card.
  */
-export function dockPartner(list: { id: number; key?: string | null; split?: unknown }[], dragged: number): number | null {
-  const t = list.find((c) => c.id !== dragged && c.id >= 0 && !c.split && !(c.key ?? "").startsWith("com.powos.app"));
+export function canSide(c: Card, sides: Set<number> | null): boolean {
+  if (c.id < 0 || c.split) return false;
+  if (sides) return sides.has(c.id);
+  const key = c.key ?? "";
+  return key.startsWith("a:") && !key.startsWith("a:com.powos.app");
+}
+
+/**
+ * The app beside the docked one: the newest OTHER card that can be a side ([canSide]). [list] is the switcher's order,
+ * newest first after the lead.
+ */
+export function dockPartner(list: Card[], dragged: number, sides: Set<number> | null = null): number | null {
+  const t = list.find((c) => c.id !== dragged && canSide(c, sides));
   return t ? t.id : null;
+}
+
+/**
+ * What a card let go in a dock zone does: dock beside [other], or why not - "dragged": the dragged app itself can't be in
+ * split view (OxygenOS's blocklist: Settings), "partner": no other open app can. Both are said to the user.
+ */
+export type DockPick = { other: number } | { why: "dragged" | "partner" };
+
+export function dockPick(list: Card[], dragged: number, sides: Set<number> | null): DockPick {
+  const card = list.find((c) => c.id === dragged);
+  if (!card || !canSide(card, sides)) return { why: "dragged" };
+  const other = dockPartner(list, dragged, sides);
+  return other == null ? { why: "partner" } : { other };
 }

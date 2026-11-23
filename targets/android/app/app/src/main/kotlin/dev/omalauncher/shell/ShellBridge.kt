@@ -755,6 +755,7 @@ class ShellBridge(
             "tasks.canvas" -> dev.omalauncher.system.CanvasDock.available(context)
             "tasks.canvasDock" -> canvasDock(a.getInt(0), a.getString(1), a.getInt(2))
             "tasks.canvasState" -> dev.omalauncher.system.CanvasDock.state() ?: JSONObject.NULL
+            "tasks.canvasSides" -> JSONArray(dev.omalauncher.system.CanvasDock.sides(context))
             // Home's switcher layer (shell/ui/recents.tsx, system/Switcher.kt).
             "recents.slot" -> a.optJSONObject(0)?.let { dev.omalauncher.system.Switcher.slot(this, screenRect(it), it.optDouble("radius", 0.0).toFloat() * density()) }
             "recents.ready" -> dev.omalauncher.system.Switcher.ready(this)

@@ -2309,6 +2309,111 @@ async function switcherThumbsCheck() {
 }
 
 /**
+ * The switcher's drag up and toward a side docks into Open Canvas (ui/carddock.ts; board switcher-drag-dock-open-canvas,
+ * the user 11-23: "it does play like a click when i activate the switcher and drag the app to one of the sides, but it
+ * doesnt activate splitview for it"). Unfolded, the host says Open Canvas is there: a real touch drag (CDP touch events,
+ * through Chromium's touch-action + gesture pipeline, as on the phone) of the front card up and to the left reaches the
+ * host's tasks.canvasDock(card, "left", partner) - the partner a split-capable app, never a PowOS task (a Linux window,
+ * the lock face) - and a refusal leaves a note on screen (never silent).
+ */
+async function switcherCanvasDragCheck(r) {
+  const cdp = await r.page.target().createCDPSession();
+  await cdp.send("Emulation.setTouchEmulationEnabled", { enabled: true, maxTouchPoints: 5 });
+  const t = { r, cdp };
+  const fails = await canvasDragRefused(t);
+  await gateSleep(2600);
+  fails.push(...(await canvasDragDocks(t)));
+  await gateSleep(2600);
+  fails.push(...(await canvasDragBlocked(t)));
+  await r.page.evaluate(() => window.__mockEvents.emit("recents.end", { to: "home" })).catch(() => {});
+  return fails;
+}
+
+const gateSleep = (ms) => new Promise((ok) => setTimeout(ok, ms));
+
+/** switcher-canvas-drag's switcher: five cards, card [from] in front; the host's dock answers [refuse] (null: ok). */
+function canvasDragSetup({ r }, refuse, from = 1201) {
+  return r.page.evaluate(
+    async (refuse, from) => {
+      const { powos } = await window.__gw.mod("./bridge.ts");
+      window.__dock = [];
+      powos.tasks.canvas = async () => true;
+      // Chrome and Files can be in split view; the lock face (1202, no key), a Linux window (1203) and Settings (1205,
+      // OxygenOS's blocklist) can't.
+      powos.tasks.canvasSides = async () => [1201, 1204];
+      powos.tasks.canvasDock = async (id, side, other) => (window.__dock.push([id, side, other]), refuse ? { ok: false, reason: refuse } : { ok: true });
+      const icon = "data:image/svg+xml," + encodeURIComponent('<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 8 8"><rect width="8" height="8" fill="#e63"/></svg>');
+      const tasks = [
+        { id: 1201, label: "Chrome", key: "a:com.android.chrome/.Main", icon, snapshot: "", webwindow: 3, fullScreen: true },
+        { id: 1202, label: "com.powos.app", key: null, icon, snapshot: "" },
+        { id: 1203, label: "Dolphin", key: "l:org.kde.dolphin", icon, snapshot: "" },
+        { id: 1205, label: "Settings", key: "a:com.android.settings/.Settings", icon, snapshot: "" },
+        { id: 1204, label: "Files", key: "a:com.google.android.documentsui/.Files", icon, snapshot: "" },
+      ];
+      window.__mockEvents.emit("recents.show", { open: true, from, tasks });
+      await new Promise((ok) => setTimeout(ok, 1200));
+      const c = document.querySelector(`.recents .task[data-task="${from}"]`)?.getBoundingClientRect();
+      return c ? { x: c.left + c.width / 2, y: c.top + c.height / 2 } : null;
+    },
+    refuse,
+    from,
+  );
+}
+
+/** A thumb's arc from [at]: up first (a card push, not the row's scroll), then on up and toward the left edge. */
+async function canvasDragLeft({ cdp }, at) {
+  const touch = (type, pts) => cdp.send("Input.dispatchTouchEvent", { type, touchPoints: pts });
+  await touch("touchStart", [{ x: at.x, y: at.y, id: 1 }]);
+  const path = [[0, -14], [-2, -30], [-10, -60], [-30, -100], [-70, -150], [-130, -200], [-200, -240], [-260, -270], [-300, -290]];
+  for (const [dx, dy] of path) {
+    await touch("touchMove", [{ x: at.x + dx, y: at.y + dy, id: 1 }]);
+    await gateSleep(16);
+  }
+  await touch("touchEnd", []);
+  await gateSleep(700);
+}
+
+/** The switcher's note text now. */
+const canvasNote = ({ r }) => r.page.evaluate(() => document.querySelector(".recents-note")?.textContent ?? "");
+
+/** Refused by the host: the reason on screen. */
+async function canvasDragRefused(t) {
+  const at = await canvasDragSetup(t, "Chrome can't be used in split view");
+  if (!at) return ["no card for task 1201 in the switcher"];
+  await canvasDragLeft(t, at);
+  const note = await canvasNote(t);
+  return note.includes("split view") ? [] : [`a refused dock left no note on screen (note: "${note}")`];
+}
+
+/** The same card (refused before) docks: tasks.canvasDock(1201, left, 1204 - Files, the newest split-capable app). */
+async function canvasDragDocks(t) {
+  const at = await canvasDragSetup(t, null);
+  if (!at) return ["no card for task 1201 in the switcher"];
+  await canvasDragLeft(t, at);
+  const dock = await t.r.page.evaluate(() => window.__dock);
+  console.log(`     switcher-canvas-drag: docks ${JSON.stringify(dock)}`);
+  const d = dock[0];
+  if (!d) return ["the drag up-left never called tasks.canvasDock (a card refused once still ignoring touches?)"];
+  const fails = [];
+  if (d[0] !== 1201 || d[1] !== "left") fails.push(`tasks.canvasDock(${d.join(", ")}): want task 1201 on the left`);
+  if (d[2] !== 1204) fails.push(`the partner is task ${d[2]}, want 1204 (Files: not PowOS's lock/Linux tasks, not Settings)`);
+  return fails;
+}
+
+/** The dragged app on OxygenOS's blocklist (Settings): never sent to the host, the user told. */
+async function canvasDragBlocked(t) {
+  const at = await canvasDragSetup(t, null, 1205);
+  if (!at) return ["no card for task 1205 in the switcher"];
+  await canvasDragLeft(t, at);
+  const note = await canvasNote(t);
+  const dock = await t.r.page.evaluate(() => window.__dock);
+  const fails = [];
+  if (dock.length) fails.push(`Settings (not allowed in split view) was sent to the host: ${JSON.stringify(dock)}`);
+  if (!note.includes("Settings can't be used in split view")) fails.push(`dragging Settings to a side left no "can't be used in split view" note ("${note}")`);
+  return fails;
+}
+
+/**
  * The switcher with no cards says "No open apps", and the apps running with no card are behind "N running in
  * background" (the user, 2026-11-03: "I actually do have open apps, they're just running in the background ... like
  * Termux"): collapsed at first; an app with a card isn't counted; opened, each row has its icon, name and a Stop that
@@ -14730,6 +14835,9 @@ try {
     runs.push(open(browser, `${ORIGIN}/index.html`, "switcher-thumbs", { width: 404, height: 900 }).then((r) => whenReady(r, () => r.page.evaluate(switcherThumbsCheck))));
     for (const [name, viewport, layout] of [["folded", { width: 404, height: 900 }, "2v"], ["unfolded", { width: 821, height: 883 }, "2h"]])
       runs.push(open(browser, `${ORIGIN}/index.html`, `switcher-split-pair-${name}`, viewport).then((r) => whenReady(r, () => r.page.evaluate(switcherSplitPairCheck, layout))));
+  // Switcher drag-to-side -> Open Canvas (ui/carddock.ts): a real touch drag reaches the host's tasks.canvasDock.
+  if (process.env.SHELL_PAGES !== "0")
+    runs.push(open(browser, `${ORIGIN}/index.html`, "switcher-canvas-drag", { width: 821, height: 883 }).then((r) => whenReady(r, () => switcherCanvasDragCheck(r))));
   for (const [name, viewport] of [["folded", { width: 404, height: 900 }], ["unfolded", { width: 821, height: 883 }]])
     if (process.env.SHELL_PAGES !== "0")
       runs.push(open(browser, `${ORIGIN}/index.html`, `switcher-background-${name}`, viewport).then((r) => whenReady(r, () => switcherBackgroundCheck(r.page))));

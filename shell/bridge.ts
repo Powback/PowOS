@@ -386,6 +386,7 @@ function native(host: NonNullable<Window["PowosHost"]>): Bridge {
       canvas: () => call<boolean>("tasks.canvas"),
       canvasDock: (id, side, other) => call<CanvasDockResult>("tasks.canvasDock", id, side, other),
       canvasState: () => call<CanvasState | null>("tasks.canvasState"),
+      canvasSides: () => call<number[]>("tasks.canvasSides"),
     },
     recents: {
       slot: (rect) => call("recents.slot", rect),

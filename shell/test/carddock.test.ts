@@ -2,7 +2,7 @@
 // Every existing card gesture keeps its result; only a clear up-and-to-a-side drag docks into Open Canvas.
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { cardRelease, dockPartner, dockSide } from "../ui/carddock.ts";
+import { cardRelease, dockPartner, dockPick, dockSide } from "../ui/carddock.ts";
 
 // The unfolded inner screen (CSS px) and a card on it; the card starts in the middle.
 const W = 900;
@@ -66,4 +66,31 @@ test("partner: the newest other single Android app, never a split card, a PowOS 
   assert.equal(dockPartner(list, 7), 3);
   assert.equal(dockPartner(list, 3), 7);
   assert.equal(dockPartner([{ id: 7, key: "a:s" }], 7), null);
+});
+
+// The phone's list as tasks.list gave it on 11-23 (the user's failed dock): PowOS's lock face (no key), Linux windows
+// ("l:", PowOS tasks), Settings (on OxygenOS's split blocklist). The old rule (key starts with "com.powos.app") matched
+// none of these keys, so the lock face was picked as the partner and the host refused it.
+const phone = [
+  { id: 3986, key: "a:com.android.chrome/com.google.android.apps.chrome.Main" },
+  { id: 3987, key: null },
+  { id: 3982, key: "l:systemsettings" },
+  { id: 3974, key: "a:com.android.settings/.Settings" },
+  { id: 3938, key: "a:com.powterm/.MainActivity" },
+];
+
+test("partner without the host's list: never the lock face (no key) or a Linux window (l:)", () => {
+  assert.equal(dockPartner(phone, 3986), 3974);
+});
+
+test("partner with the host's list (tasks.canvasSides): only apps OxygenOS lets into split view", () => {
+  assert.equal(dockPartner(phone, 3986, new Set([3986, 3938])), 3938);
+});
+
+test("dockPick: a blocked dragged app or no partner is a reason, never a silent no-op", () => {
+  const sides = new Set([3986, 3938]);
+  assert.deepEqual(dockPick(phone, 3986, sides), { other: 3938 });
+  assert.deepEqual(dockPick(phone, 3974, sides), { why: "dragged" });
+  assert.deepEqual(dockPick(phone, 3986, new Set([3986])), { why: "partner" });
+  assert.deepEqual(dockPick(phone, 3982, null), { why: "dragged" });
 });

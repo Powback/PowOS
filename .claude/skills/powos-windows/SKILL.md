@@ -47,7 +47,17 @@ description: Use when working on PowOS window tasks - floating Android windows (
 - Host: system/CanvasDock.kt (docs/research/pscanvas.md path A: app-pair dynamic shortcut + LauncherApps.startShortcut,
   no Oplus permission). NOT PowOS's desktop split, NOT WM Shell split. Folded / unsupported: tasks.canvas false, the
   drag is the old one. Started by intent (a marked workaround) - task reuse logged per dock (`logcat -s PowosCanvasDock`).
-- Check: `tools/phone/verify/switcher-canvas-dock.sh` (phone only; Settings + Files, left, regions read back, closed).
+- Partner + blocklist (11-23 fix): the host's `tasks.canvasSides` (CanvasDock.sides: recent tasks whose TaskInfo
+  supportsPocketStudioMultiWindow / supportsSplitScreenMultiWindow aren't false - OxygenOS's split blocklist lands
+  there: Settings - and not PowOS's own package: lock face, home, Linux windows are com.powos.app tasks) is the truth
+  for the partner (carddock.ts dockPick). Never silent: dragged app blocked -> "<App> can't be used in split view";
+  no partner / host refusal -> a note; every host refusal logs `PowosCanvasDock ... refused: <reason>`, the page logs
+  `[canvas] ...`. Card keys are "a:pkg/act" (Android), "l:app" (Linux), null (PowOS lock/home): never match on a raw
+  package prefix. A refused card's fly-off is cancelled -> its `gone` flag must clear on cancel too (it didn't: the
+  card ignored every later touch).
+- Check: `tools/phone/verify/switcher-canvas-dock.sh` (phone only; REAL injected drag of Chrome's card beside
+  Calculator, regions + side read back; then Settings' card -> the note, no canvas). Gate: `switcher-canvas-drag`
+  (CDP touch drag in Chromium: reaches tasks.canvasDock with the right partner; refusal note; Settings blocked).
 
 ## Page after going home (manager decision 2026-10-21, launcher standard)
 - From an app: page kept (home launched with Switcher.EXTRA_RECENTS: no "system.home"). Home while home shows:

@@ -35,7 +35,7 @@ import { frontWindow, tileApps, webWindowsOn } from "./webwindows.tsx";
 import { spring } from "./spring.ts";
 import { dropKeyboard } from "./keyboard.ts";
 import { appView, closeApp, forgetOpened, mergeTasks, openApp, taskApp } from "../apps/pages.ts";
-import { dockPartner, type DockSide } from "./carddock.ts";
+import { dockPick, type DockSide } from "./carddock.ts";
 
 type Phase = "closed" | "drag" | "shown";
 
@@ -93,6 +93,8 @@ const pinned = signal<Set<string>>(new Set());
 const loaded = signal(false);
 /** OxygenOS's Open Canvas can take a docked card now (unfolded, supported: the host's tasks.canvas, asked at each open). */
 const canvas = signal(false);
+/** The cards OxygenOS lets into Open Canvas (the host's tasks.canvasSides, asked at each open); null: not told (older APK). */
+let canvasSides: Set<number> | null = null;
 /** The half a card being dragged would dock to (lit under the cards), or null. */
 const dockHover = signal<DockSide | null>(null);
 /** A short note (a screenshot saved). */
@@ -285,43 +287,62 @@ function begin(e: { from: number | null; tasks: RecentTask[] }) {
   askCanvas();
 }
 
-/** Whether a card can dock into Open Canvas now (the fold may have changed since the last open); an older APK: never. */
+/**
+ * Whether a card can dock into Open Canvas now (the fold may have changed since the last open), and which cards can be a
+ * side of it (OxygenOS's blocklist: Settings can't); an older APK: never.
+ */
 function askCanvas() {
   dockHover.value = null;
+  canvasSides = null;
   const ask = powos.tasks.canvas;
   if (!ask) return void (canvas.value = false);
   ask().then((on) => (canvas.value = !!on), () => (canvas.value = false));
+  powos.tasks.canvasSides?.().then(
+    (ids) => (canvasSides = Array.isArray(ids) ? new Set(ids) : null),
+    () => (canvasSides = null),
+  );
 }
 
-/** A card dragged into a dock zone: the half it targets lit (null: none). One handler for every card (TaskCard is memoised). */
+/** A dragged card entered / left a dock zone: the half it targets lit (null: none). One handler for every card (TaskCard is memoised). */
 function dockHoverCard(side: DockSide | null) {
+  if (side) console.info(`[canvas] card over the ${side} dock zone`);
   dockHover.value = side;
 }
 
+/** A card's name for a note ("Settings"). */
+const cardName = (id: number) => tasks.value.find((t) => t.id === id)?.label || "This app";
+
 /**
- * Card [id] let go in the [side] dock zone: Open Canvas with it on that side and the newest other app on the other
- * (the host's tasks.canvasDock: OxygenOS's app-pair shortcut). No other app: refused here (the card springs back, a
- * note says why - Open Canvas needs two). The host refusing it later: the card comes back with its reason. The
- * switcher itself goes when home stops under the canvas (recents.hide), as for any launch.
+ * Card [id] let go in the [side] dock zone: Open Canvas with it on that side and the newest other app that can be in it
+ * on the other (the host's tasks.canvasDock: OxygenOS's app-pair shortcut). Never silent (the user, 11-23: "it does play
+ * like a click ... but it doesnt activate splitview"): the dragged app not allowed in split view, no other app that is,
+ * or the host refusing it - the card springs back and a note says why. The switcher itself goes when home stops under
+ * the canvas (recents.hide), as for any launch.
  */
 function dockCard(id: number, side: DockSide): boolean {
   const dock = powos.tasks.canvasDock;
-  const other = dockPartner(tasks.value, id);
-  if (!dock || other == null) {
-    showNote(dock ? "Open another app first to split with" : "Not supported by this build yet");
-    return false;
-  }
-  console.info(`[canvas] dock task ${id} ${side}, beside ${other}`);
-  dock(id, side, other).then(
-    (r) => r?.ok || undocked(id, r?.reason),
-    () => undocked(id, "Split view didn't open"),
+  if (!dock) return refuse(id, "Not supported by this build yet");
+  const pick = dockPick(tasks.value, id, canvasSides);
+  if ("why" in pick)
+    return refuse(id, pick.why === "dragged" ? `${cardName(id)} can't be used in split view` : "Open another app that works in split view first");
+  console.info(`[canvas] dock task ${id} ${side}, beside ${pick.other}`);
+  dock(id, side, pick.other).then(
+    (r) => (r?.ok ? console.info(`[canvas] dock of task ${id} started`) : undocked(id, r?.reason)),
+    (e) => undocked(id, `Split view didn't open (${e?.message ?? e})`),
   );
   return true;
 }
 
+/** A dock refused before it started: the reason logged and shown; false = the card springs back. */
+function refuse(id: number, reason: string): false {
+  console.warn(`[canvas] dock of task ${id} refused: ${reason}`);
+  showNote(reason);
+  return false;
+}
+
 /** A dock the host refused: the card back where it was (its fly-off undone), with the reason. */
 function undocked(id: number, reason?: string) {
-  console.warn(`[canvas] dock of task ${id} refused: ${reason ?? "no reason"}`);
+  console.warn(`[canvas] dock of task ${id} refused by the host: ${reason ?? "no reason"}`);
   row?.querySelector<HTMLElement>(`.task[data-task="${id}"]`)?.getAnimations().forEach((a) => a.cancel());
   showNote(reason || "Split view didn't open");
 }

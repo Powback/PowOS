@@ -1171,6 +1171,12 @@ export interface Bridge {
     canvasDock?(id: number, side: "left" | "right", other: number): Promise<CanvasDockResult>;
     /** Host-optional: Open Canvas as it stands (the no-permission reads), or null where there's none. For checks. */
     canvasState?(): Promise<CanvasState | null>;
+    /**
+     * Host-optional: the recent task ids that can be a side of Open Canvas now - Android apps OxygenOS lets into split
+     * view (its blocklist: Settings isn't), never PowOS's own tasks. The switcher picks the dock's partner from these and
+     * tells the user when the dragged app isn't one.
+     */
+    canvasSides?(): Promise<number[]>;
   };
   /**
    * The floating app windows (unfolded home), top-most first, for the dock; "windows.changed" (AppWindow[]) after.
