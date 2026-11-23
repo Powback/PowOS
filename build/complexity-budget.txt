@@ -37,7 +37,7 @@ lib/dev-commands.sh:dev_dockerize 24
 lib/dev-commands.sh:dev_fork 19
 lib/dev-commands.sh:dev_new 16
 lib/dev-commands.sh:dev_override 17
-lib/dev-commands.sh:dev_patch 16
+lib/dev-commands.sh:dev_patch 9
 lib/dlss.sh:cmd_dlss_nr_install 17
 lib/dlss.sh:cmd_dlss_off 16
 lib/dlss.sh:dlss_on_one 16

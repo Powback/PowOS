@@ -1311,6 +1311,48 @@ dev_override_diff() {
 # the bridge from runtime `dev fork` (per-machine) to the committable sources/
 # overlay system. The patch is git-format (a/ b/) so `git apply`/`patch -p1`
 # both accept it — generated via a throwaway git repo (no text munging).
+# dev_patch's pieces (split for the complexity ratchet). Where a fork's patches live: KDE forks share
+# sources/kde/patches/<app>/, others get their own tree.
+_dev_patch_dest() {
+    local proj="$1" sources="$2" name="$3" utype
+    utype="$(_dev_conf_get "$proj/project.conf" UPSTREAM_TYPE)"
+    if [[ "$utype" == "kde" ]]; then echo "$sources/kde/patches/$name"
+    else echo "$sources/$name/patches/$name"; fi
+}
+
+# The fork's src vs a pristine-upstream git base, as a clean a/ b/ patch on stdout (incl. deletions).
+_dev_patch_diff() {
+    local proj="$1"
+    # Diff src vs a pristine-upstream git base → clean a/ b/ patch (incl. deletions).
+    local tmp; tmp="$(mktemp -d)"
+    cp -a "$proj/upstream/." "$tmp/" 2>/dev/null
+    # upstream/ is a clone and carries its own .git — drop it, or `git init` is
+    # a no-op and the base commit fails ("nothing to commit"), aborting under
+    # set -e before any patch is written.
+    rm -rf "$tmp/.git"
+    ( cd "$tmp" && git init -q && git add -A \
+        && git -c user.email=powos@localhost -c user.name=PowOS commit -qm base ) 2>/dev/null
+    if command -v rsync &>/dev/null; then
+        # --checksum: by content (by size+mtime, a same-size edit within the same second was skipped).
+        rsync -a --checksum --delete --exclude=.git "$proj/src/" "$tmp/"
+    else
+        cp -a "$proj/src/." "$tmp/"
+    fi
+    (cd "$tmp" && git add -A && git -c core.autocrlf=false diff --cached)
+    rm -rf "$tmp"
+}
+
+# How to commit the written patch: a git checkout gets the exact command, else where to take it.
+_dev_patch_hint() {
+    local dest="$1" srcroot="$2" out="$3" name="$4" desc="$5"
+    if git -C "$dest" rev-parse --is-inside-work-tree &>/dev/null; then
+        plog "Review it, then:  git -C \"$srcroot\" add \"$out\" && git -C \"$srcroot\" commit -m \"$name: $desc\""
+    else
+        pwarn "$srcroot isn't a git checkout: copy the patch into one" \
+            "(or: powos self pull, then run this again) to commit it."
+    fi
+}
+
 dev_patch() {
     local name="${1:-}" desc="${2:-changes}"
     [[ -z "$name" ]] && { plog "Usage: powos dev patch <name> [description]"; return 1; }
@@ -1330,28 +1372,10 @@ dev_patch() {
     [[ -d "$sources" ]] || sources="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)/sources"
 
     # KDE forks share sources/kde/patches/<app>/; others get their own tree.
-    local utype dest
-    utype="$(_dev_conf_get "$proj/project.conf" UPSTREAM_TYPE)"
-    if [[ "$utype" == "kde" ]]; then dest="$sources/kde/patches/$name"
-    else dest="$sources/$name/patches/$name"; fi
+    local dest; dest="$(_dev_patch_dest "$proj" "$sources" "$name")"
     mkdir -p "$dest"
 
-    # Diff src vs a pristine-upstream git base → clean a/ b/ patch (incl. deletions).
-    local tmp; tmp="$(mktemp -d)"
-    cp -a "$proj/upstream/." "$tmp/" 2>/dev/null
-    # upstream/ is a clone and carries its own .git — drop it, or `git init` is
-    # a no-op and the base commit fails ("nothing to commit"), aborting under
-    # set -e before any patch is written.
-    rm -rf "$tmp/.git"
-    ( cd "$tmp" && git init -q && git add -A \
-        && git -c user.email=powos@localhost -c user.name=PowOS commit -qm base ) 2>/dev/null
-    if command -v rsync &>/dev/null; then
-        rsync -a --delete --exclude=.git "$proj/src/" "$tmp/"
-    else
-        cp -a "$proj/src/." "$tmp/"
-    fi
-    local patch; patch="$(cd "$tmp" && git add -A && git -c core.autocrlf=false diff --cached)"
-    rm -rf "$tmp"
+    local patch; patch="$(_dev_patch_diff "$proj")"
 
     if [[ -z "$patch" ]]; then
         pwarn "No changes between src and upstream — nothing to patch."
@@ -1367,11 +1391,7 @@ dev_patch() {
     printf '%s\n' "$patch" > "$out"
 
     pok "Wrote committable patch → $out"
-    if git -C "$dest" rev-parse --is-inside-work-tree &>/dev/null; then
-        plog "Review it, then:  git -C \"$srcroot\" add \"$out\" && git -C \"$srcroot\" commit -m \"$name: $desc\""
-    else
-        pwarn "$srcroot isn't a git checkout: copy the patch into one (or: powos self pull, then run this again) to commit it."
-    fi
+    _dev_patch_hint "$dest" "$srcroot" "$out" "$name" "$desc"
     plog "Every image build applies it to the app source (git apply / patch -p1)."
 }
 
