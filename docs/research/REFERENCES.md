@@ -4,6 +4,7 @@ One row per external reference used in a research doc or sent by the user. Newes
 
 | date | reference | what it gave | used in |
 |---|---|---|---|
+| 2026-11-23 | https://github.com/skylot/jadx (v1.5.1) on the OnePlus Open's own oplus-framework.jar, oplus-services.jar, services.jar, SystemUI.apk (OxygenOS, pulled 2026-10-23) | decompiled pocket-studio / Open Canvas capture paths (needInterceptStartForSplitScreen, needInterceptActivityForMinimized, CanvasCalculateLayoutRect, OplusSplitScreenAppReader) | pscanvas.md |
 | 2026-11-12 | https://github.com/ValveSoftware/wine/tree/experimental_11.0 (dlls/ntdll/unix/env.c, programs/wineboot/wineboot.c, programs/services/services.c) | first process of a session runs `wineboot --init` and waits; wineboot waits for services.exe, which signals after starting every auto-start service | broforce-engine-init.md lever 1 |
 | 2026-11-12 | https://github.com/ValveSoftware/Proton/blob/experimental_11.0/proton | `waitforexitandrun` runs `wineserver -w` before the game; `run` doesn't | broforce-engine-init.md lever 1 |
 | 2026-11-12 | https://github.com/dnSpy/dnSpy-Unity-mono/tree/master/unity-2017.4.7/mono/mini | Unity 2017.4.7 Mono: AOT loader hook always installed, loads `<assembly>.dll.dll` (GUID + build-info checked), Win32 AOT compiler path | broforce-engine-init.md lever 2 |
