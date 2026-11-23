@@ -267,6 +267,15 @@ WindowBlur.kt, WallpaperBackdrop.kt, LiquidGlass.kt; page side shell/ui/nativegl
   (`data-letter=All` when picked), `[data-section=recent|suggested|places]`. Shots: drawer, drawer-scrub (held),
   drawer-letter (released), drawer-all-held (foot All), drawer-all. Device: az-scrub.sh checks open/held/kept/chip + All.
   Checks that want the list's last letter use `.letter-bar span:not(.all)` (pullup-stage2).
+- Pow folder (11-23, "the pow apps should be in a pow folder"): every .pow web app ("w:<host>") lives in ONE launcher
+  folder "Pow" (launcherview.ts POW/POW_FOLDER "lib:pow", launcherApps/powGroups; never loose in A-Z/letter/All). It is
+  a synthetic entry in state.ts byKey (powFolder; NOT in apps, so search/usage/switcher never see it), drawn by
+  apps.tsx AppIcon -> PowFolderIcon (4 minis on --icon-plate + powos.svg mark). Launcher tap = launcherLetter "Pow"
+  (in-place view by category, infrastructure last, `[data-view=folder]`); dock/home tap = state.ts launch -> folder
+  "lib:pow" (folderview via library.tsx's lib:pow). Home: ShellHome pins only a:/l:, so the folder and single .pow
+  apps are ShellPanels "pow"/"w:<host>" (1x1 cells) mapped to app items in stacks.tsx homeView (ui/powtiles.ts
+  withAppTiles; hidden, never deleted, while the app is gone); every home add goes through powtiles.ts addToHome.
+  Gate pow-folder-{folded,unfolded,unfolded-right,empty} (dev/pow-folder-check.js); shots pow-folder(-open,-dock).
 - One drag for app tiles (11-23, "drag to open as window works for the docked icons but not the recent ones"): launcher
   tiles + search's app rows (drawer.tsx AppResultRow) = apps.tsx dragHome, carry `toWindow` (dockout.tsx aimOut: over an
   app / a window page it opens as window or half, as the dock's); dock recents + DockWindows cells get the pinned cells'

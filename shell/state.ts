@@ -16,12 +16,20 @@ import type { App, AppWindow, Chat, Home, HomeItem, WebWindowRect, WidgetScreen 
 import { sidewaysHome, wideHome } from "./hosts/wide.ts";
 import { dockClasses, validDockAlign } from "./ui/dockalign.ts";
 import { forgetQuickReturn } from "./ui/quickpage.tsx";
+import { isPowApp, POW, POW_FOLDER } from "./ui/launcherview.ts";
 import { adoptWebWindow, onWebWindowPage, openWebWindow, setIconOf, setPageBeside, setShownPage } from "./ui/webwindows.tsx";
 
 /** The host's apps (Android's, Linux's); with the installed PowOS apps that have a page (apps/pages.ts), [apps]. */
 const hostApps = signal<App[]>([]);
 export const apps = computed(() => [...hostApps.value, ...powosApps.value]);
-export const byKey = computed(() => new Map(apps.value.map((a) => [a.key, a])));
+/**
+ * The Pow folder (ui/launcherview.ts POW_FOLDER: every .pow web app in one folder, the user 11-23) as a launcher entry:
+ * there while any .pow app is. Not in [apps] (search, the switcher, usage never see it); in [byKey], so the dock, home
+ * and the launcher draw and carry it as any app's cell (apps.tsx AppIcon draws its face, [launch] opens it).
+ */
+const POW_ENTRY: App = { key: POW_FOLDER, label: POW, icon: "./icons/powos.svg", kind: "powos" };
+export const powFolder = computed<App | null>(() => (apps.value.some(isPowApp) ? POW_ENTRY : null));
+export const byKey = computed(() => new Map([...apps.value, ...(powFolder.value ? [powFolder.value] : [])].map((a) => [a.key, a])));
 /** How many recent apps the strip has (six to a width, scrolling sideways); pinned ones are left out (the dock has them). */
 const RECENT_FETCH = 24;
 const hostRecent = signal<string[]>([]);
@@ -678,6 +686,12 @@ export async function launch(key: string, { fullScreen = false }: { fullScreen?:
   recentsLaunched();
   // Opened alone: its recent pair ends (ui/splitpair.ts) - unless that split still stands (it comes back as the split).
   forgetPairOf(key);
+  // The Pow folder on the dock or home (the launcher opens it in place, drawer.tsx): it opens as a folder does.
+  if (key === POW_FOLDER) {
+    closeDrawer(true);
+    folder.value = key;
+    return;
+  }
   // A PowOS app: its page, full screen in this one (ui/appscreen.tsx).
   if (key.startsWith(PREFIX)) {
     openApp(key.slice(PREFIX.length));

@@ -15576,6 +15576,14 @@ try {
   if (process.env.SHELL_PAGES !== "0")
     for (const [label, fn, name] of ["folded", "unfolded"].flatMap((l) => [[l, "barPersists", "persists"], [l, "editOnly", "edit-only"]]))
       runs.push(open(browser, `${ORIGIN}/index.html`, `searchbar-${name}-${label}`, dockOpensView[label]).then((r) => whenReady(r, () => r.page.evaluate(async (f, l) => (await importShim("./dev/searchbar-check.js"))[f](l), fn, label))));
+  // PF1 (dev/pow-folder-check.js; the user 11-23: "the pow apps should be in a pow folder"): the .pow apps in one Pow
+  // folder in the launcher - no loose w: cell, its view by category, search finds them, the sync updates it live, the
+  // dock and home take it - folded, unfolded and side-docked; no .pow apps: no folder anywhere.
+  if (process.env.SHELL_PAGES !== "0") {
+    for (const [label, side] of [["folded", ""], ["unfolded", ""], ["unfolded", "right"]])
+      runs.push(open(browser, `${ORIGIN}/index.html`, `pow-folder-${label}${side ? `-${side}` : ""}`, dockOpensView[label]).then((r) => whenReady(r, () => r.page.evaluate(async (sd) => (await importShim("./dev/pow-folder-check.js")).powFolder(sd), side))));
+    runs.push(open(browser, `${ORIGIN}/index.html`, "pow-folder-empty", dockOpensView.folded).then((r) => whenReady(r, () => r.page.evaluate(async () => (await importShim("./dev/pow-folder-check.js")).powEmpty()))));
+  }
   // Perf P1 (dev/dock-search-check.js dockSpeechRenders; 02:23 trace): a dictation's words streaming in redraw the dock
   // button only for its on/off, the dock and its cells never - folded and unfolded.
   if (process.env.SHELL_PAGES !== "0")

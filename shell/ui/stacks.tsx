@@ -16,7 +16,8 @@ import { computed, effect, signal } from "@preact/signals";
 import { useLayoutEffect, useRef, useState } from "preact/hooks";
 import type { ComponentChildren } from "preact";
 import { powos } from "../bridge.ts";
-import { editing, home, selected, topBack } from "../state.ts";
+import { byKey as appByKey, editing, home, selected, topBack } from "../state.ts";
+import { withAppTiles } from "./powtiles.ts";
 import { tick } from "./haptics.ts";
 import { optimistic } from "./pending.tsx";
 import { paintDots } from "./pagedots.tsx";
@@ -62,7 +63,8 @@ export const stackHooks: {
  */
 const virtual = new Map<string, { src: HomeItem; anchor: HomeItem; stacks: Stacks; out: HomeItem }>();
 export const homeView = computed<HomeItem[]>(() => {
-  const items = home.value.items;
+  // The Pow folder and the .pow apps pinned on home are app tiles (powtiles.ts), shown while their app is there.
+  const items = withAppTiles(home.value.items, (app) => appByKey.value.has(app));
   const st = stacks.value;
   const out = stackView(items, st);
   if (out === items) return items;

@@ -46,7 +46,9 @@ export function homeLayout(home: Home, changed: () => void, apps: () => App[]): 
     addPanel: async (name, page, cell) => {
       const key = `panel:${name}`;
       home.items = home.items.filter((i) => i.key !== key);
-      home.items.push({ key, kind: "panel", name, page, cell, resizable: true, minSize: [2, 1], size: [4, 2] });
+      // The Pow folder and a .pow app (ui/powtiles.ts) are app cells, as ShellPanels.kt isCell.
+      const one = name === "pow" || /^w:[a-z0-9.-]+\.pow$/.test(name);
+      home.items.push(one ? { key, kind: "panel", name, page, cell: { ...cell, w: 1, h: 1 }, resizable: false, minSize: [1, 1], size: [1, 1] } : { key, kind: "panel", name, page, cell, resizable: true, minSize: [2, 1], size: [4, 2] });
       done();
       return key;
     },

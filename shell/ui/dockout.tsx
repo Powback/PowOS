@@ -22,6 +22,7 @@ import { tick } from "./haptics.ts";
 import { powos } from "../bridge.ts";
 import { byKey, launch, page, pages, pullPage, type Carry } from "../state.ts";
 import { PREFIX } from "../apps/pages.ts";
+import { POW_FOLDER } from "./launcherview.ts";
 import { wideHome } from "../hosts/wide.ts";
 import { aimDock, carriedApp } from "./dockdrop.ts";
 import { openWindowAt, placeAt, webWins, type Place } from "./webwindows.tsx";
@@ -36,8 +37,8 @@ export const outAim = signal<OutAim | null>(null);
 /** How long a launched app may take to show up as a task before the split gives up on it. */
 export const TASK_WAIT = { ms: 6000 };
 
-/** A carry that may open as a window or a half: a dock app's, or a launcher app's (state.ts Carry.toWindow). */
-const windowable = (c: Carry) => !!(c.fromDock || c.toWindow);
+/** A carry that may open as a window or a half: a dock app's, or a launcher app's (state.ts Carry.toWindow) - never the Pow folder. */
+const windowable = (c: Carry) => !!(c.fromDock || c.toWindow) && carriedApp(c) !== POW_FOLDER;
 
 /** Where [c], held at [x], [y], would go off the dock: a half or the middle of the screen, or null. */
 export function aimOut(c: Carry, x: number, y: number): OutAim | null {

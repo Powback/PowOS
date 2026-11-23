@@ -819,6 +819,31 @@ html:root .ai-panel .tile { background: var(--soft-fill); }
 .app-web-mark .icon { width: 66%; height: 66%; }
 .app-icon.offline .app-icon-face { opacity: 0.45; }
 /*
+ * The Pow folder's icon (apps.tsx PowFolderIcon; the user 11-23: every .pow app in one "Pow" folder): its first four
+ * apps small on the icon plate in a 2x2, as a folder face shows them, and PowOS's mark on the lower corner where a web
+ * app's kind mark sits, ringed like it. Static.
+ */
+.pow-face {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  grid-template-rows: 1fr 1fr;
+  gap: 7%;
+  padding: 15%;
+  box-sizing: border-box;
+  background: var(--icon-plate);
+}
+.app-icon .pow-face > img { width: 100%; height: 100%; object-fit: cover; border-radius: var(--icon-radius); }
+.app-icon .pow-mark {
+  position: absolute;
+  right: -4%;
+  bottom: -4%;
+  width: 36%;
+  height: auto;
+  aspect-ratio: 1;
+  border-radius: var(--icon-radius);
+  box-shadow: 0 0 0 1.5px var(--color-background);
+}
+/*
  * A running app (ui/running.ts: a task, a Linux window) or one with a floating window (the dock, unfolded): a short
  * accent bar centred under its icon, bare (no plate) - in the dock, its recent apps and the drawer. Frozen (asleep in
  * RAM: powos-sleep-gui, a game with Steam) or minimised: the same bar, faint. Static: no frames while nothing changes.

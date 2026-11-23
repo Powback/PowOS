@@ -9,6 +9,7 @@ import { tick } from "./haptics.ts";
 import { powos } from "../bridge.ts";
 import { wideHome } from "../hosts/wide.ts";
 import { aimSearch } from "./searchwidget.tsx";
+import { addToHome } from "./powtiles.ts";
 
 /** The most apps the dock holds; a full one swaps instead of growing. */
 export const DOCK_MAX = 6;
@@ -115,7 +116,7 @@ export function dropOnDock(c: Carry, x: number, y: number): boolean {
 /** Pins [app] on home at [cell] of [page]; false when the host can't (see the HACK). */
 export async function addHome(app: string, page: number, cell?: { x: number; y: number; w: number; h: number }) {
   try {
-    await powos.home.add(app, page, cell);
+    await addToHome(app, page, cell);
     return true;
   } catch {
     // HACK: the Android host's home (ShellHome.add) only knows a:/l: keys and refuses a PowOS app's p: key, so a

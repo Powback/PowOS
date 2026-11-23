@@ -13,6 +13,10 @@
  *   letter's; sliding on from it onto a letter shows that letter, live.
  * - Search (anything typed) overrides both: the drawer shows its results (drawer.tsx Drawer).
  * - No recent and no suggested apps (a fresh phone): all apps A to Z, as before, never an empty page.
+ * - The Pow folder (the user, 11-23: "the pow apps should be in a pow folder or something"): every .pow web app
+ *   ("w:<host>", synced from PowStation's catalog, WebApps.kt) sits in ONE folder named "Pow" instead of loose in the
+ *   lists - one cell, under P; tapped, its apps under their catalog categories ("infrastructure" last), A to Z, under a
+ *   "Pow" chip like a letter's. No .pow apps: no folder. Recent, Suggested and search still show the apps themselves.
  */
 
 export const ALPHABET = ["#", ..."ABCDEFGHIJKLMNOPQRSTUVWXYZ"];
@@ -23,6 +27,41 @@ export const RECENT_MAX = 8;
 export const SUGGESTED_MAX = 4;
 
 type Named = { key: string; label: string };
+
+/** The Pow folder's name, and the launcher's view of it (the letter signal's value while it's open). */
+export const POW = "Pow";
+/** Its key: the launcher's cell, a dock pin, the app library's folder, the open folder (state.ts folder). */
+export const POW_FOLDER = "lib:pow";
+/** A .pow web app: in the Pow folder, never loose in the launcher's lists. */
+export const isPowApp = (a: { key: string }) => a.key.startsWith("w:");
+/** The catalog's category that goes last in the folder: the fleet's plumbing, after what the user uses. */
+const INFRA = "infrastructure";
+
+/** The launcher's apps: every app but the .pow ones, and [folder] (the Pow folder's entry) in their place, if any. */
+export function launcherApps<T extends Named>(apps: readonly T[], folder: T | null): T[] {
+  const rest = apps.filter((a) => !isPowApp(a));
+  return folder && rest.length < apps.length ? [...rest, folder] : rest;
+}
+
+/** A category's heading: "games" -> "Games"; none -> "Other". */
+const categoryName = (c: string) => (c ? c[0].toUpperCase() + c.slice(1) : "Other");
+/** A category's place: named ones A to Z, then the ones without (""), then infrastructure. */
+const categoryRank = (c: string) => (c === INFRA ? 2 : c ? 0 : 1);
+
+/**
+ * The Pow folder's apps under their categories: the user-facing ones first (A to Z), then the ones without a category,
+ * then "infrastructure"; A to Z within each. Only the .pow apps of [apps] count.
+ */
+export function powGroups<T extends Named & { webCategory?: string | null }>(apps: readonly T[], compare: (a: string, b: string) => number): Group<T>[] {
+  const by = new Map<string, T[]>();
+  for (const a of apps.filter(isPowApp)) {
+    const c = (a.webCategory ?? "").trim().toLowerCase();
+    by.set(c, [...(by.get(c) ?? []), a]);
+  }
+  return [...by.keys()]
+    .sort((a, b) => categoryRank(a) - categoryRank(b) || compare(a, b))
+    .map((c) => ({ letter: categoryName(c), apps: by.get(c)!.sort((a, b) => compare(a.label, b.label)) }));
+}
 
 /** "Ö" is under O; names that don't start with a letter under "#". */
 export function heading(label: string) {
@@ -78,7 +117,8 @@ export type LauncherView<T> =
   | { kind: "search" }
   | { kind: "letter"; letter: string; apps: T[] }
   | { kind: "sections"; recent: T[]; suggested: T[] }
-  | { kind: "all"; apps: T[]; groups: Group<T>[]; picked: boolean };
+  | { kind: "all"; apps: T[]; groups: Group<T>[]; picked: boolean }
+  | { kind: "folder"; groups: Group<T>[] };
 
 /** One letter's heading and its apps, A to Z. */
 export interface Group<T> {
@@ -91,15 +131,28 @@ export function groupApps<T>(sorted: Sorted<T>): Group<T>[] {
   return ALPHABET.filter((l) => sorted.first.has(l)).map((letter) => ({ letter, apps: appsOfLetter(sorted, letter) }));
 }
 
-/** The launcher's pages' content for its state: [recent] and [frequent] are keys, newest / most used first. */
-export function launcherView<T extends Named>(s: {
+/** What the launcher's view is made of. */
+interface ViewState<T> {
   searching: boolean;
   letter: string | null;
   sorted: Sorted<T>;
   byKey: ReadonlyMap<string, T>;
   recent: readonly string[];
   frequent: readonly string[];
-}): LauncherView<T> {
+  pow?: Group<T>[];
+}
+
+/**
+ * The launcher's pages' content for its state: [recent] and [frequent] are keys, newest / most used first; [pow] the Pow
+ * folder's groups (powGroups), shown while the letter is POW - an emptied folder goes back to the sections.
+ */
+export function launcherView<T extends Named>(s: ViewState<T>): LauncherView<T> {
+  if (s.letter === POW && s.pow?.length && !s.searching) return { kind: "folder", groups: s.pow };
+  return listView(s.letter === POW ? { ...s, letter: null } : s);
+}
+
+/** [launcherView] for a letter, All, or the sections. */
+function listView<T extends Named>(s: ViewState<T>): LauncherView<T> {
   if (s.searching) return { kind: "search" };
   const all = (picked: boolean) => ({ kind: "all" as const, apps: s.sorted.list, groups: groupApps(s.sorted), picked });
   if (s.letter === ALL) return all(true);

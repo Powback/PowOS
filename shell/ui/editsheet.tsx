@@ -3,6 +3,7 @@
  * home; "+ app" the drawer's list, a tap puts that app on the page in view; "theme" a strip of swatches, each in its own
  * colors, the picked one framed - a tap recolors everything at once; done. Up while editing (state.ts editing), at the foot of the screen under the home pages.
  */
+import { addToHome } from "./powtiles.ts";
 import { useEffect, useRef, useState } from "preact/hooks";
 import { signal } from "@preact/signals";
 import { powos } from "../bridge.ts";
@@ -236,7 +237,7 @@ function AppPicker() {
     (queue.current = queue.current.then(async () => {
       if (onHome(app)) return setSaid(`${app.label.toLowerCase()} is on home already`);
       const spot = placeNewCells(1, 1);
-      await powos.home.add(app.key, spot.page, spot.cell);
+      await addToHome(app.key, spot.page, spot.cell);
       home.value = await powos.home.get();
       tick();
       setSaid(`added ${app.label.toLowerCase()}`);

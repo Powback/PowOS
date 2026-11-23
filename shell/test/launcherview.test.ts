@@ -1,7 +1,7 @@
 // The launcher's content per state (shell/ui/launcherview.ts): node --test shell/test/launcherview.test.ts
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { ALL, launcherView, nextLetter, RECENT_MAX, SUGGESTED_MAX, sortApps, type LetterEvent } from "../ui/launcherview.ts";
+import { ALL, appsOfLetter, isPowApp, launcherApps, launcherView, nextLetter, POW, POW_FOLDER, powGroups, RECENT_MAX, SUGGESTED_MAX, sortApps, type LetterEvent } from "../ui/launcherview.ts";
 
 const app = (label: string) => ({ key: `a:${label.toLowerCase()}`, label });
 const all = ["Brave", "Calendar", "Camera", "Chrome", "Maps", "Messages", "Music", "Signal", "Spotify", "Steam", "Zoom", "Ölwerk", "7-Zip"].map(app);
@@ -102,4 +102,41 @@ test("sliding All -> letter -> All switches live; a reopen resets; search still 
   assert.equal(launcherView({ ...base, searching: true, letter: ALL }).kind, "search");
   // All with no apps at all: still All, an empty list rather than a stale letter.
   assert.equal(nextLetter(new Map(), "C", { type: "scrub", letter: ALL }), ALL);
+});
+
+// The Pow folder (the user 11-23): every .pow web app in one folder, never loose in the launcher's lists.
+const web = (host: string, label: string, webCategory?: string | null) => ({ key: `w:${host}`, label, webCategory });
+const powApps = [web("pihole.pow", "Pi-hole", "infrastructure"), web("ararat.pow", "Ararat", "games"), web("cdn.pow", "CDN"), web("traefik.pow", "Traefik", "infrastructure"), web("powscan.pow", "PowScan", "productivity"), web("arcade.pow", "Arcade", "games")];
+const folderEntry = { key: POW_FOLDER, label: POW };
+const cmp = new Intl.Collator(undefined, { sensitivity: "base", numeric: true }).compare;
+
+test("launcher apps: the .pow apps leave the list and one Pow folder takes their place", () => {
+  const list = launcherApps([...all, ...powApps], folderEntry);
+  assert.equal(list.filter(isPowApp).length, 0);
+  assert.equal(list.filter((a) => a.key === POW_FOLDER).length, 1);
+  const s = sortApps(list, cmp);
+  assert.ok(appsOfLetter(s, "P").some((a) => a.key === POW_FOLDER), "the folder sits under P");
+});
+
+test("launcher apps: no .pow apps, no folder (even if one is offered)", () => {
+  assert.deepEqual(launcherApps(all, folderEntry), all);
+  assert.deepEqual(launcherApps(all, null), all);
+});
+
+test("Pow folder: user-facing categories first, then none, infrastructure last; A to Z inside", () => {
+  const g = powGroups([...all, ...powApps], cmp);
+  assert.deepEqual(g.map((x) => x.letter), ["Games", "Productivity", "Other", "Infrastructure"]);
+  assert.deepEqual(labels(g[0].apps), ["Ararat", "Arcade"]);
+  assert.deepEqual(labels(g[3].apps), ["Pi-hole", "Traefik"]);
+  assert.deepEqual(powGroups(all, cmp), []);
+});
+
+test("Pow view: opened shows its groups; emptied goes back to the sections; open/clear leave it", () => {
+  const pow = powGroups(powApps, cmp);
+  const v = launcherView({ ...base, letter: POW, pow });
+  assert.equal(v.kind, "folder");
+  assert.equal(launcherView({ ...base, letter: POW, pow: [] }).kind, "sections");
+  assert.equal(nextLetter(sorted.first, POW, { type: "release" }), POW);
+  assert.equal(nextLetter(sorted.first, POW, { type: "clear" }), null);
+  assert.equal(nextLetter(sorted.first, POW, { type: "open" }), null);
 });

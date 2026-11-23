@@ -28,6 +28,7 @@ import { applyTrack, drawerOpen, eventTime, held } from "./gesture.ts";
 import { LibraryPage } from "./library.tsx";
 import { provideHomeGrid, underWindows, WebWindowsOn } from "./webwindows.tsx";
 import { FolderView } from "./folderview.tsx";
+import { addToHome, isShellTile, panelOfApp } from "./powtiles.ts";
 import { FolderFace, folderable, morphing, folderName, groupIntoFolder, loadFolderNames } from "./folders.tsx";
 import { chosen, isChosen, marquee, MARQUEE_DWELL, partyCells, partyOf, startMarquee, toggleChosen } from "./homeselect.ts";
 import { OwlWidget } from "./owl.tsx";
@@ -202,7 +203,7 @@ function underFinger(c: Carry, items: HomeItem[]) {
 async function dropFromFolder(c: Carry, target: Aim | null) {
   if (underFinger(c, itemsOn(pages.value[page.value]))?.key === c.fromFolder) return;
   tick();
-  await powos.home.add(c.app!, target?.page ?? pages.value[page.value], target?.cell);
+  await addToHome(c.app!, target?.page ?? pages.value[page.value], target?.cell);
 }
 
 /**
@@ -211,8 +212,8 @@ async function dropFromFolder(c: Carry, target: Aim | null) {
  * drag would.
  */
 async function addApp(app: string, target: Aim) {
-  if (!target.group) return void (await powos.home.add(app, target.page, target.cell));
-  await powos.home.group(await powos.home.add(app, target.page), target.group);
+  if (!target.group) return void (await addToHome(app, target.page, target.cell));
+  await powos.home.group(await addToHome(app, target.page), target.group);
 }
 
 /** Where a drop at the finger would go: a free cell at the carried size, or an app or folder to group with. */
@@ -222,9 +223,14 @@ function aim(c: Carry): Aim | null {
   return n == null ? null : aimOn(c, n);
 }
 
+/** A home app or folder - not a shell tile (the Pow folder, a .pow app: powtiles.ts), which the host's folders don't take. */
+const joinable = (i: HomeItem) => (i.kind === "app" || i.kind === "folder") && !isShellTile(i);
+/** [c] carries a shell tile (powtiles.ts): from home, or the Pow folder / a .pow app from the launcher or the dock. */
+const shellCarry = (c: Carry) => (c.item ? isShellTile(c.item) : !!c.app && !!panelOfApp(c.app));
+
 /** Whether [c] let go on [under] makes (or joins) a folder. */
 function groups(c: Carry, under: HomeItem): boolean {
-  if (under.kind !== "app" && under.kind !== "folder") return false;
+  if (!joinable(under) || shellCarry(c)) return false;
   if (c.item) return c.item.kind === "app";
   // An app carried in from the drawer too (the user, 11-14: one let go on a home app was refused, so folders could only
   // be made from apps already on home). Not a dock or folder carry: their drops unpin / take out. Nor one let go on its

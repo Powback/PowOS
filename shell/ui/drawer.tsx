@@ -14,14 +14,14 @@ import { AppCell, AppIcon, dragHome, usePress } from "./apps.tsx";
 import { ChatView } from "./chat.tsx";
 import { drawerOpen, eventTime, pageDecision, sampleVx } from "./gesture.ts";
 import { PageDots, paintDots } from "./pagedots.tsx";
-import { apps, byKey, chatting, closeDrawer, launch, menu, query, recent, stored } from "../state.ts";
+import { apps, byKey, chatting, closeDrawer, launch, menu, powFolder, query, recent, stored } from "../state.ts";
 import { library } from "./library.tsx";
 import { pendingApp } from "./appbuild.tsx";
 import { PendingDetailSheet, PendingIconBadge } from "./pending.tsx";
 import type { App, FilePlace } from "../types.ts";
 import { powos } from "../bridge.ts";
 import { Icon, type IconName } from "./icons.tsx";
-import { ALL, ALPHABET, appsOfLetter, launcherView, nextLetter, resolveLetter, sortApps, type LetterEvent } from "./launcherview.ts";
+import { ALL, ALPHABET, appsOfLetter, launcherApps, launcherView, nextLetter, POW, POW_FOLDER, powGroups, resolveLetter, sortApps, type Group, type LetterEvent, type Sorted } from "./launcherview.ts";
 
 import { searchResults, searchSections, searchPending, openSearchResult, type SearchResult } from "../search.ts";
 import { springFast } from "./spring.ts";
@@ -31,8 +31,15 @@ import { usePresence } from "./reveal.tsx";
 
 const collator = new Intl.Collator(undefined, { sensitivity: "base", numeric: true });
 
-/** Every app A to Z, and where each letter's first app is in that list. */
-const sorted = computed(() => sortApps(apps.value, collator.compare));
+/**
+ * The launcher's apps A to Z, and where each letter's first app is in that list: the .pow web apps as one Pow folder
+ * (launcherview.ts launcherApps). [plain]: every app loose, for the plain A-Z lists (the "+ app" picker, the desktop
+ * panel), which place or open apps one by one.
+ */
+const sorted = computed(() => sortApps(launcherApps(apps.value, powFolder.value), collator.compare));
+const plain = computed(() => sortApps(apps.value, collator.compare));
+/** The Pow folder's apps by category, as the launcher shows it open (launcherview.ts powGroups). */
+const powView = computed(() => powGroups(apps.value, collator.compare));
 
 /** Matches for what's typed: names starting with it first, then words starting with it, then anywhere in them. */
 export const matches = computed(() => findApps(query.value));
@@ -92,22 +99,24 @@ function highlight(grid: Element | null | undefined, letter: string | null) {
   lit = [];
   if (!grid || letter == null) return grid?.removeAttribute("data-scrub");
   grid.setAttribute("data-scrub", "");
-  const { list, first } = sorted.value;
+  const { list, first } = plain.value;
   const start = first.get(letter) ?? list.length;
   const end = Math.min(...[...first.values(), list.length].filter((i) => i > start));
   lit = [...grid.children].slice(start, end);
   for (const el of lit) el.setAttribute("data-lit", "");
 }
 
-/** [letter]'s apps' letter: its own, else the next letter's, else the last letter's (null: no apps at all). */
-const resolve = (letter: string | null) => resolveLetter(sorted.value.first, letter);
+/** [letter]'s apps' letter in list [s]: its own, else the next letter's, else the last letter's (null: no apps at all). */
+const resolve = (letter: string | null, s: Sorted<App> = sorted.value) => resolveLetter(s.first, letter);
 
-/** The apps under [letter] (after [resolve]), A to Z. */
-const appsOf = (letter: string | null) => appsOfLetter(sorted.value, letter);
+/** The apps under [letter] (after [resolve]) in list [s], A to Z. */
+const appsOf = (letter: string | null, s: Sorted<App> = sorted.value) => appsOfLetter(s, letter);
 
 /** The launcher's letter (ui/launcherview.ts): null shows its sections; set by the A-Z bar, kept after the lift. */
 export const launcherLetter = signal<string | null>(null);
-const letterEvent = (e: LetterEvent) => void (launcherLetter.value = nextLetter(sorted.value.first, launcherLetter.peek(), e));
+// Peeked, not read: called from an effect (useOpensAtStart) it would subscribe that effect to the app list, and any
+// change to it (an icon in, the .pow sync) reset the launcher to its sections under the user's finger.
+const letterEvent = (e: LetterEvent) => void (launcherLetter.value = nextLetter(sorted.peek().first, launcherLetter.peek(), e));
 
 /** The apps used most (the host's decayed launch counts): Suggested. Empty (no data, an older APK): hidden. */
 const frequent = signal<string[]>([]);
@@ -131,7 +140,7 @@ export const azList = stored("drawer.azList", "");
  * The letter's apps, centred over the drawer (not by the bar). [row]: the one at the finger's height once it slid off
  * the bar into the list, lit. A new letter fades its rows in (keyed); it fades in and out itself (usePresence, §6).
  */
-function AzOverlay({ letter, row, rows }: { letter: string | null; row: number; rows: { current: HTMLDivElement | null } }) {
+function AzOverlay({ letter, row, rows, list }: { letter: string | null; row: number; rows: { current: HTMLDivElement | null }; list: Sorted<App> }) {
   const { on, leaving } = usePresence(letter != null);
   const last = useRef(letter);
   if (letter != null) last.current = letter;
@@ -141,7 +150,7 @@ function AzOverlay({ letter, row, rows }: { letter: string | null; row: number; 
     <div class={`az-list${leaving ? " leaving" : ""}`} aria-hidden="true">
       <div class="az-list-card tile sheet">
         <div class="az-list-rows" key={l} ref={rows}>
-          {appsOf(l).map((app, i) => (
+          {appsOf(l, list).map((app, i) => (
             <div key={app.key} class={`az-list-row${i === row ? " on" : ""}`} data-key={app.key}>
               <AppIcon src={app.icon} label={app.label} app={app.key} />
               <span class="az-list-name">{app.label}</span>
@@ -184,8 +193,10 @@ function useRowPick(active: boolean) {
  * lifting there opens that app ([onOpen]); lifting anywhere else leaves the grid at the letter, as before.
  */
 function LetterBar({ onPick, onOpen, ends = false }: { onPick: (letter: string | null) => void; onOpen: (app: App) => void; ends?: boolean }) {
+  // The launcher's list ([ends]) or the plain A-Z.
+  const list = ends ? sorted.value : plain.value;
   // "#" only when some name doesn't start with a letter: a "#" with nothing under it would do nothing.
-  const az = sorted.value.first.has("#") ? ALPHABET : ALPHABET.slice(1);
+  const az = list.first.has("#") ? ALPHABET : ALPHABET.slice(1);
   // [ends] (the launcher): "All" above the first letter and below Z, in reach from either end of the bar.
   const letters = ends ? [ALL, ...az, ALL] : az;
   const [current, setCurrent] = useState<string | null>(null);
@@ -205,7 +216,7 @@ function LetterBar({ onPick, onOpen, ends = false }: { onPick: (letter: string |
     if (!rows.at(x < bar.current!.getBoundingClientRect().left, y)) pick(y);
   };
   const end = (open: boolean) => {
-    const app = open && rows.row >= 0 ? appsOf(resolve(current))[rows.row] : null;
+    const app = open && rows.row >= 0 ? appsOf(resolve(current, list), list)[rows.row] : null;
     setCurrent(null);
     rows.clear();
     onPick(null);
@@ -231,7 +242,7 @@ function LetterBar({ onPick, onOpen, ends = false }: { onPick: (letter: string |
         ))}
         {current && <div class={`letter-bubble${current === ALL ? " all" : ""}`}>{current}</div>}
       </div>
-      {listOn && <AzOverlay letter={resolve(current)} row={rows.row} rows={rows.ref} />}
+      {listOn && <AzOverlay letter={resolve(current, list)} row={rows.row} rows={rows.ref} list={list} />}
     </>
   );
 }
@@ -253,14 +264,15 @@ export function AppList({ found, onTap, sections = false }: { found: App[] | nul
   const jump = (letter: string | null) => {
     // Its first app, else the next letter's, else the last letter's. At once: a smooth scroll restarted for every
     // letter a sliding finger crosses lagged behind it.
-    const { first } = sorted.value;
-    const l = resolve(letter);
+    const { first } = plain.value;
+    const l = resolve(letter, plain.value);
     highlight(list.current?.querySelector(".az"), l);
     const el = l != null ? list.current?.querySelector<HTMLElement>(`.az > :nth-child(${first.get(l)! + 1})`) : null;
     if (el) list.current!.scrollTop += el.getBoundingClientRect().top - list.current!.getBoundingClientRect().top;
   };
   useOpensAtStart(list, found, sections);
-  const cell = (app: App) => <AppCell key={app.key} app={app} draggable={!onTap} onTap={onTap} />;
+  // The Pow folder's cell (the launcher's only) opens it in place.
+  const cell = (app: App) => <AppCell key={app.key} app={app} draggable={!onTap} onTap={app.key === POW_FOLDER ? openPow : onTap} />;
   return (
     <>
       {/* Searching: by the bar, bottom-up - the best match nearest to it (shell.css .results). */}
@@ -310,9 +322,17 @@ function ListBody({ found, sections, cell }: { found: App[] | null; sections: bo
           real app is already in [apps] (installedApps -> powosApps -> apps, state.ts), so there's no separate
           "new app" tile to remove, only this one to stop drawing. */}
       {pendingApp.value && pendingApp.value.status !== "done" && <PendingAppCell />}
-      {sections ? <Sections cell={cell} /> : <div class="grid az">{sorted.value.list.map(cell)}</div>}
+      {sections ? <Sections cell={cell} /> : <div class="grid az">{plain.value.list.map(cell)}</div>}
     </>
   );
+}
+
+/** The Pow folder's cell tapped: its apps in the launcher, under a "Pow" chip as a letter's, from the top. */
+function openPow() {
+  launcherLetter.value = POW;
+  tick();
+  const list = document.querySelector(".drawer-page .drawer-list");
+  if (list) list.scrollTop = 0;
 }
 
 /** The chip over a letter's (or All's) apps: a tap goes back to the sections. */
@@ -332,7 +352,8 @@ function LetterChip({ label }: { label: string }) {
  * jump, the align and geometry checks find them.
  */
 function Sections({ cell }: { cell: (app: App) => preact.JSX.Element }) {
-  const v = launcherView({ searching: false, letter: launcherLetter.value, sorted: sorted.value, byKey: byKey.value, recent: recent.value, frequent: frequent.value });
+  const v = launcherView({ searching: false, letter: launcherLetter.value, sorted: sorted.value, byKey: byKey.value, recent: recent.value, frequent: frequent.value, pow: powView.value });
+  if (v.kind === "folder") return <PowSection groups={v.groups} cell={cell} />;
   if (v.kind === "letter") {
     return (
       <section class="launcher-section" data-view="letter" data-letter={v.letter}>
@@ -368,6 +389,25 @@ function Sections({ cell }: { cell: (app: App) => preact.JSX.Element }) {
         </section>
       )}
       <QuickLaunch />
+    </div>
+  );
+}
+
+/**
+ * The Pow folder open in the launcher: its apps under their categories (the user-facing ones first, "infrastructure"
+ * last; one category alone: no heading), each with its kind mark (apps.tsx WebMark), under the "Pow" chip.
+ */
+function PowSection({ groups, cell }: { groups: Group<App>[]; cell: (app: App) => preact.JSX.Element }) {
+  const headed = groups.length > 1;
+  return (
+    <div class="launcher-sections" data-view="folder" data-folder={POW_FOLDER}>
+      <LetterChip label={POW} />
+      {groups.map((g) => (
+        <section class="launcher-section" key={g.letter} data-group={g.letter}>
+          {headed && <h3 class="heading">{g.letter}</h3>}
+          <div class="grid az">{g.apps.map(cell)}</div>
+        </section>
+      ))}
     </div>
   );
 }

@@ -16,6 +16,7 @@ import { useEffect, useLayoutEffect, useRef, useState } from "preact/hooks";
 import { folder, home } from "../state.ts";
 import { AppPress, folderNames, morphing, nameFolder, type DragOut } from "./folders.tsx";
 import { library } from "./library.tsx";
+import { POW_FOLDER } from "./launcherview.ts";
 import { geometry } from "./grid.tsx";
 import { spring, springFast } from "./spring.ts";
 
@@ -34,12 +35,26 @@ function shownOf(key: string | null): Shown | null {
   return l ? { key, name: l.name, apps: l.apps, own: l.own } : null;
 }
 
-/** The tile the folder opens from (its face on home, its card in the library). */
-const tileOf = (key: string) =>
-  document.querySelector<HTMLElement>(`.home-tile[data-key="${CSS.escape(key)}"] .folder-face, .lib-card[data-key="${CSS.escape(key)}"]`);
+/**
+ * The tile the folder opens from (its face on home, its card in the library) - the Pow folder's: its icon on the dock or
+ * a home tile (apps.tsx PowFolderIcon), or its library card. The one on screen: the library's cards are laid out
+ * beside home when it's on another page, and the launcher's cell is under its fade once it's closed.
+ */
+function tileOf(key: string) {
+  const k = CSS.escape(key);
+  const pow = key === POW_FOLDER ? ", .pow-face:not(.drawer .pow-face)" : "";
+  const all = [...document.querySelectorAll<HTMLElement>(`.home-tile[data-key="${k}"] .folder-face, .lib-card[data-key="${k}"]${pow}`)];
+  return all.find(onScreen) ?? all[0] ?? null;
+}
+
+const onScreen = (el: HTMLElement) => {
+  const r = el.getBoundingClientRect();
+  return r.width > 0 && r.right > 0 && r.left < innerWidth && r.bottom > 0 && r.top < innerHeight;
+};
 
 /** Its mini icons, in order. */
-const minisOf = (tile: HTMLElement | null) => (tile ? [...tile.querySelectorAll<HTMLElement>(".folder-face > img, .folder-face > span, .lib-icons > .app-icon")] : []);
+const minisOf = (tile: HTMLElement | null) =>
+  tile ? [...tile.querySelectorAll<HTMLElement>(".folder-face > img, .folder-face > span, .lib-icons > .app-icon, .pow-face > img")] : [];
 
 /** [a] -> [b] as a transform from the top left (b's box drawn at a's). */
 function from(a: DOMRect, b: DOMRect) {

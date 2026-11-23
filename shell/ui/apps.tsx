@@ -18,6 +18,8 @@ import { powos } from "../bridge.ts";
 import { memo } from "./memo.ts";
 import type { App, AppWindow } from "../types.ts";
 import { usePresence } from "./reveal.tsx";
+import { POW_FOLDER, powGroups } from "./launcherview.ts";
+import { addToHome } from "./powtiles.ts";
 import { openNewWindow, webWins } from "./webwindows.tsx";
 
 const LONG_PRESS_MS = 420;
@@ -99,7 +101,8 @@ interface CellProps {
 export function dragHome(key: string, e: PointerEvent) {
   menu.value = null;
   closeDrawer();
-  startCarry({ app: key, toWindow: true }, e, { x: 30, y: 30 });
+  // The Pow folder is no app to open in a window: home or the dock only.
+  startCarry({ app: key, toWindow: key !== POW_FOLDER }, e, { x: 30, y: 30 });
 }
 
 /**
@@ -135,7 +138,33 @@ const ICON_GIVE_UP_MS = 4000;
  * ICON_GIVE_UP_MS) ends as the app's initial, never as a tile loading forever; a new URL tries the picture again.
  * [app] (its launcher key): the app's unread dot over the corner while its count is above 0 (host.badge, apps/badge.ts).
  */
-export function AppIcon({ src, label, app }: { src: string; label?: string; app?: string }) {
+export function AppIcon(props: { src: string; label?: string; app?: string }) {
+  return props.app === POW_FOLDER ? <PowFolderIcon /> : <AppImage {...props} />;
+}
+
+const collator = new Intl.Collator(undefined, { sensitivity: "base", numeric: true });
+/** The Pow folder's first four apps, in the folder's order (launcherview.ts powGroups): its icon's minis. */
+const powMinis = computed(() => powGroups(apps.value, collator.compare).flatMap((g) => g.apps).slice(0, 4));
+
+/**
+ * The Pow folder's icon (launcherview.ts POW_FOLDER), wherever an app icon goes - the launcher, the dock, a home tile,
+ * a carried ghost: its first four apps small on the icon plate, as a folder shows them, and PowOS's mark on the corner
+ * where a web app's kind mark sits. Static.
+ */
+function PowFolderIcon() {
+  return (
+    <span class="app-icon pow-folder">
+      <span class="app-icon-face pow-face">
+        {powMinis.value.map((a) => (
+          <img key={a.key} src={a.icon} alt="" draggable={false} onError={(e) => ((e.currentTarget as HTMLImageElement).style.visibility = "hidden")} />
+        ))}
+      </span>
+      <img class="pow-mark" src="./icons/powos.svg" alt="" draggable={false} />
+    </span>
+  );
+}
+
+function AppImage({ src, label, app }: { src: string; label?: string; app?: string }) {
   const [missing, setMissing] = useState(false);
   // In the theme's colours when that's on and its copy is made (ui/icontint.ts), else as the app draws it.
   const shown = tinted(src) ?? src;
@@ -274,6 +303,9 @@ function newWindowItem(app: App): Item[] {
 /** What the app menu offers for [app]. */
 function menuItems(app: App): Item[] {
   const docked = dock.value.includes(app.key);
+  const home: Item = ["add to home", () => shownHomePage().then((p) => addToHome(app.key, p))];
+  // The Pow folder: where it sits, nothing else (it isn't an app to close, window or remove).
+  if (app.key === POW_FOLDER) return [[docked ? "unpin from dock" : "pin to dock", () => setDocked(app.key, !docked)], home];
   const quick = inLaunchers(app.key);
   const android = app.kind === "android";
   return [
@@ -283,8 +315,8 @@ function menuItems(app: App): Item[] {
     // The control center's quick-launch row, at its end (launchers.tsx: the row's own add/remove).
     [quick ? "remove from quick launch" : "add to quick launch", () => void toggleLauncher(app.key)],
     // On the page home shows (also from the launcher overlay's own page: state.ts shownHomePage), in its first free cell.
-    // Not a web app yet: home's grid pins Android/Linux shortcuts only (ShellHome.add); the dock and quick launch take it.
-    ...(app.kind === "web" ? [] : ([["add to home", () => shownHomePage().then((p) => powos.home.add(app.key, p))]] as Item[])),
+    // A web app as its shell tile (powtiles.ts: ShellHome pins Android/Linux shortcuts only).
+    home,
     ...(android ? ([["app info", () => powos.apps.info(app.key)]] as Item[]) : []),
     ...(android && !app.system ? ([["uninstall", () => powos.apps.uninstall(app.key)]] as Item[]) : []),
     // A .pow web app (issue #8): only its launcher entry goes, and the catalog sync leaves it out from then on (PowApps
