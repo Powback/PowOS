@@ -251,7 +251,7 @@ run)
   # targets/android/pkgs (all of it, 11-10): the deploy installs our packages (kwin, xwayland-kgsl, spacetimedb ...)
   # from out/pkgs, which the "pkgs" step below builds first - a PKGBUILD change alone must deploy too.
   rooted_inputs() { git diff --name-only "$1" "$2" -- targets/android/rooted targets/android/session \
-    targets/android/pkgs bin/powos-panel-phone desktop/autostart/powos-panel-phone.desktop \
+    targets/android/pkgs bin/powos-panel-phone desktop/autostart/powos-panel-phone.desktop lib/devices desktop/autostart/powos-places.desktop \
     lib/powos-tmux-shell lib/self-phone.sh config/etc/profile.d/60-powos-picker-key.sh lib/ai/agents lib/ai/comms/comms-mcp.py \
     tools/app-api lib/ai/manager lib/ai/sandbox desktop/plasmoid units/phone units/phone-android lib/apps/powos-units lib/apps/powos-terms lib/apps/powos-transcribe \
     targets/android/steam/unity-screen \
