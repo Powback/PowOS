@@ -31,6 +31,15 @@ import java.security.SecureRandom
 object PowAccount {
     private val rnd = SecureRandom()
 
+    /** One sign-in's parameters: the client, where PowAuth sends the browser back, and its PKCE/state secrets. */
+    data class Request(
+        val client: String,
+        val redirect: String,
+        val scope: String,
+        val state: String,
+        val verifier: String,
+    )
+
     /** Blocks until the browser comes back (or [timeoutMs]); the access token, or throws with words for the user. */
     fun signIn(
         c: Context,
@@ -48,8 +57,8 @@ object PowAccount {
         val state = b64(bytes(16))
         ServerSocket(0, 4, InetAddress.getByName("127.0.0.1")).use { srv ->
             srv.soTimeout = timeoutMs
-            val redirect = "http://127.0.0.1:${srv.localPort}/callback"
-            val url = authorizeUrl(authorize, client, redirect, scope, state, challengeOf(verifier))
+            val req = Request(client, "http://127.0.0.1:${srv.localPort}/callback", scope, state, verifier)
+            val url = authorizeUrl(authorize, req)
             c.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url)).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
             val deadline = System.currentTimeMillis() + timeoutMs
             while (System.currentTimeMillis() < deadline) {
@@ -64,7 +73,7 @@ object PowAccount {
                 q["error"]?.let { throw IllegalStateException(q["error_description"] ?: it) }
                 check(q["state"] == state) { "the sign-in answer didn't match this request - try again" }
                 val code = checkNotNull(q["code"]) { "PowAuth sent no code - try again" }
-                return exchange(tokenUrl, client, redirect, code, verifier)
+                return exchange(tokenUrl, req, code)
             }
             throw IllegalStateException("the sign-in wasn't finished in time - try again")
         }
@@ -126,18 +135,16 @@ object PowAccount {
 
     private fun exchange(
         tokenUrl: String,
-        client: String,
-        redirect: String,
+        req: Request,
         code: String,
-        verifier: String,
     ): String {
         val form =
             listOf(
                 "grant_type" to "authorization_code",
                 "code" to code,
-                "redirect_uri" to redirect,
-                "client_id" to client,
-                "code_verifier" to verifier,
+                "redirect_uri" to req.redirect,
+                "client_id" to req.client,
+                "code_verifier" to req.verifier,
             ).joinToString("&") { (k, v) -> "$k=${enc(v)}" }
         val conn = URL(tokenUrl).openConnection() as HttpURLConnection
         conn.requestMethod = "POST"
@@ -177,19 +184,15 @@ object PowAccount {
 
     fun authorizeUrl(
         endpoint: String,
-        client: String,
-        redirect: String,
-        scope: String,
-        state: String,
-        challenge: String,
+        r: Request,
     ) = endpoint + "?" +
         listOf(
             "response_type" to "code",
-            "client_id" to client,
-            "redirect_uri" to redirect,
-            "scope" to scope,
-            "state" to state,
-            "code_challenge" to challenge,
+            "client_id" to r.client,
+            "redirect_uri" to r.redirect,
+            "scope" to r.scope,
+            "state" to r.state,
+            "code_challenge" to challengeOf(r.verifier),
             "code_challenge_method" to "S256",
         ).joinToString("&") { (k, v) -> "$k=${enc(v)}" }
 
