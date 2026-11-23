@@ -2635,6 +2635,22 @@ html[data-mode="shade"], html[data-mode="shade"] body { background: transparent;
   margin-left: 10px; padding: 4px 14px; border-radius: 999px; border: none; font: var(--text-small) var(--font-body);
   background: var(--color-foreground); color: var(--color-surface);
 }
+/* A card dragged up and toward a side (ui/carddock.ts): the half of the screen Open Canvas will give it, lit while the
+   finger is in that dock zone (recents.tsx DockTarget). Under the cards, over the scrim; never takes a touch. */
+.recents-dock {
+  position: absolute; top: calc(var(--inset-top, 0px) + 12px); bottom: calc(var(--inset-bottom, 0px) + 12px);
+  width: calc(50% - 18px); border-radius: var(--radius); pointer-events: none;
+  display: flex; align-items: flex-start; justify-content: center; padding-top: 28px;
+  background: color-mix(in srgb, var(--color-foreground) 14%, transparent); border: var(--frame) solid var(--line);
+  font: var(--text-small) var(--font-body); color: var(--color-foreground);
+  animation: recents-dock-in var(--spring-fast-ms) var(--spring-fast) both;
+}
+.recents-dock.left { left: 12px; }
+.recents-dock.right { right: 12px; }
+.recents-dock.leaving { animation: recents-dock-out var(--spring-fast-ms) var(--spring-fast) both; }
+@keyframes recents-dock-in { from { opacity: 0; transform: scale(0.96); } }
+@keyframes recents-dock-out { to { opacity: 0; transform: scale(0.96); } }
+@media (prefers-reduced-motion: reduce) { .recents-dock { animation: none; } }
 .recents-menu-scrim { position: fixed; inset: 0; z-index: 1; }
 .recents-menu {
   position: fixed; z-index: 2; width: 220px; display: flex; flex-direction: column; padding: 6px 0;

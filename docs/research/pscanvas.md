@@ -289,8 +289,18 @@ Run A with Settings + Files (`com.android.settings`, `com.coloros.filemanager`),
    - the side each app got
 3. Leave: the canvas's own close (or HOME), then confirm both apps are back fullscreen.
 
-Never touch the user's apps. PowOS has no code yet that publishes a shortcut or calls `startShortcut` (that is product
-code, being staffed by the coordinator), so the check script lands with it.
+Never touch the user's apps.
+
+**Built (11-23):** path A is PowOS's switcher dock - `system/CanvasDock.kt` (shortcut `powos-canvas-pair`,
+`pushDynamicShortcut` + `LauncherApps.startShortcut`; availability = unfolded + feature/`isSupportPocketStudio` +
+pscanvas installed + `persist.sys.pair_split_feature_enable` + shortcut host), the page's gesture in
+`shell/ui/carddock.ts` (card pushed up and toward a side; the target half lit while in the zone; the newest other
+single Android app is the other side; none: a note, the card springs back - Open Canvas needs two). Bridge:
+`tasks.canvas`, `tasks.canvasDock(id, side, other)`, `tasks.canvasState` (the no-permission reads + the last dock's
+measurement). Every dock logs, 2.5 s later, each app's task before vs. in the canvas (`logcat -s PowosCanvasDock`,
+"reused" / "new task") - that line answers the task-reuse question until the APK is read. The proof above is
+`tools/phone/verify/switcher-canvas-dock.sh` (it also prints the protection level of
+`com.oplus.permission.safe.WINDOW`).
 
 ## 6. com.oplus.pscanvas itself
 

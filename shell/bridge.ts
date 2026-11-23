@@ -37,6 +37,8 @@ import type {
   PhoneNotification,
   RecentTask,
   SplitPair,
+  CanvasDockResult,
+  CanvasState,
   RunState,
   AppLinks,
   AppWindow,
@@ -381,6 +383,9 @@ function native(host: NonNullable<Window["PowosHost"]>): Bridge {
       info: (id) => call<boolean>("tasks.info", id),
       screenshot: (id) => call<string | null>("tasks.screenshot", id),
       toWindow: (id) => call<boolean>("tasks.toWindow", id),
+      canvas: () => call<boolean>("tasks.canvas"),
+      canvasDock: (id, side, other) => call<CanvasDockResult>("tasks.canvasDock", id, side, other),
+      canvasState: () => call<CanvasState | null>("tasks.canvasState"),
     },
     recents: {
       slot: (rect) => call("recents.slot", rect),

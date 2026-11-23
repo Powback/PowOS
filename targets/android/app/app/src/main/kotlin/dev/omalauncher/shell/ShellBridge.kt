@@ -751,6 +751,10 @@ class ShellBridge(
             "tasks.toWindow" -> toWebWindow(a.getInt(0)).also { if (it) dev.omalauncher.system.Switcher.hide() }
             "tasks.info" -> dev.omalauncher.system.Tasks.info(context, a.getInt(0))
             "tasks.screenshot" -> dev.omalauncher.system.Tasks.screenshot(context, a.getInt(0))
+            // The switcher's drag up and toward a side: OxygenOS's Open Canvas (system/CanvasDock.kt, ui/carddock.ts).
+            "tasks.canvas" -> dev.omalauncher.system.CanvasDock.available(context)
+            "tasks.canvasDock" -> canvasDock(a.getInt(0), a.getString(1), a.getInt(2))
+            "tasks.canvasState" -> dev.omalauncher.system.CanvasDock.state() ?: JSONObject.NULL
             // Home's switcher layer (shell/ui/recents.tsx, system/Switcher.kt).
             "recents.slot" -> a.optJSONObject(0)?.let { dev.omalauncher.system.Switcher.slot(this, screenRect(it), it.optDouble("radius", 0.0).toFloat() * density()) }
             "recents.ready" -> dev.omalauncher.system.Switcher.ready(this)
@@ -1214,6 +1218,17 @@ class ShellBridge(
             .put("ids", JSONArray(pair))
             .put("keys", JSONArray(keys))
             .put("layout", dev.omalauncher.system.SplitDrawer.layout(context))
+    }
+
+    /** Task [id] docked into Open Canvas on [side] ("left" / "right") beside task [other]: { ok, reason? } (CanvasDock.dock). */
+    private fun canvasDock(
+        id: Int,
+        side: String,
+        other: Int,
+    ): JSONObject {
+        val s = if (side == "left") dev.omalauncher.system.CanvasDock.Side.LEFT else dev.omalauncher.system.CanvasDock.Side.RIGHT
+        val r = dev.omalauncher.system.CanvasDock.dock(context, id, s, other)
+        return JSONObject().put("ok", r.ok).apply { r.reason?.let { put("reason", it) } }
     }
 
     /**

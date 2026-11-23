@@ -347,6 +347,22 @@ export interface BackgroundApp {
 }
 
 /** Android's split screen as the pair entity (ui/splitpair.ts): its tasks and their apps, left / top first. */
+/** tasks.canvasDock's answer: [ok], or why not (shown to the user as is). */
+export interface CanvasDockResult {
+  ok: boolean;
+  reason?: string;
+}
+
+/**
+ * Open Canvas as FlexibleWindowManager reads it without a permission: in it, the "pick a second app" state, each
+ * task's region (task id -> [left, top, right, bottom], screen px).
+ */
+export interface CanvasState {
+  inCanvas: boolean;
+  minimized: boolean;
+  regions: Record<string, number[]>;
+}
+
 export interface SplitPair {
   ids: number[];
   keys: string[];
@@ -1142,6 +1158,19 @@ export interface Bridge {
     screenshot(id: number): Promise<string | null>;
     /** Host-optional: a web window's full-screen app back into its window. */
     toWindow?(id: number): Promise<boolean>;
+    /**
+     * Host-optional (feature-detect): OxygenOS's Open Canvas (com.oplus.pscanvas, the native split view) can take a
+     * docked card now - unfolded inner screen, feature oplus.software.pocketstudio.support, PowOS the default home.
+     */
+    canvas?(): Promise<boolean>;
+    /**
+     * Host-optional: task [id]'s app docked into Open Canvas on [side], task [other]'s app on the other side (the
+     * switcher's drag up and toward a side, ui/carddock.ts). OxygenOS's app-pair shortcut (docs/research/pscanvas.md
+     * entry A): started by intent, so whether each app comes back in its own state is OxygenOS's (logged by the host).
+     */
+    canvasDock?(id: number, side: "left" | "right", other: number): Promise<CanvasDockResult>;
+    /** Host-optional: Open Canvas as it stands (the no-permission reads), or null where there's none. For checks. */
+    canvasState?(): Promise<CanvasState | null>;
   };
   /**
    * The floating app windows (unfolded home), top-most first, for the dock; "windows.changed" (AppWindow[]) after.

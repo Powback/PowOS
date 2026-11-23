@@ -38,6 +38,17 @@ description: Use when working on PowOS window tasks - floating Android windows (
 - Other events: recents.show/hide/tasks/update, switcher.toggle. Home's stop emits recents.tasks (cards laid out ahead).
 - recents.tsx frame(p, x, y, home): CSS vars on the layer + an inline transform/opacity on `.screens` (home + AI page).
 
+## Dock a card into Open Canvas (11-23, the user: "drag a window up and to the side ... the split view native thing")
+- Unfolded, a switcher card pushed up AND toward a side (shell/ui/carddock.ts dockSide: up >= 18% of the card, sideways
+  >= 14% of the screen, >= ~27 degrees off vertical, finger in the outer 36% on that side) docks it into OxygenOS's Open
+  Canvas (com.oplus.pscanvas) on that side, the newest other single Android app on the other (dockPartner). Mostly
+  vertical = the old removal/spring-back (cardRelease; JS test shell/test/carddock.test.ts via
+  test/tier1/test-switcher-carddock.sh). Live: the card follows the finger sideways, `.recents-dock` lights the half.
+- Host: system/CanvasDock.kt (docs/research/pscanvas.md path A: app-pair dynamic shortcut + LauncherApps.startShortcut,
+  no Oplus permission). NOT PowOS's desktop split, NOT WM Shell split. Folded / unsupported: tasks.canvas false, the
+  drag is the old one. Started by intent (a marked workaround) - task reuse logged per dock (`logcat -s PowosCanvasDock`).
+- Check: `tools/phone/verify/switcher-canvas-dock.sh` (phone only; Settings + Files, left, regions read back, closed).
+
 ## Page after going home (manager decision 2026-10-21, launcher standard)
 - From an app: page kept (home launched with Switcher.EXTRA_RECENTS: no "system.home"). Home while home shows:
   "system.home" -> state.ts goHome() -> page 0 (closes drawer/menus too).
