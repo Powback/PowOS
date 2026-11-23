@@ -6543,6 +6543,13 @@ async function scrollFadeCheck() {
   return fails;
 }
 
+/** One dock-align case (dev/dock-align-check.js) in [r]'s page; DOCK_SHOTS: its render there. */
+async function dockAlignRun(r, name, position, align) {
+  const failures = await r.page.evaluate(async (p, a) => (await importShim("./dev/dock-align-check.js")).dockAlignCheck(p, a), position, align);
+  if (process.env.DOCK_SHOTS) await r.page.screenshot({ path: `${process.env.DOCK_SHOTS}/${name}.png` });
+  return failures;
+}
+
 /** The folded dock's pinned apps never fade (the user, 2026-10-23): at rest on the pinned page its edges are unmasked. */
 async function dockPinnedNoFade() {
   const S = await window.__gw.mod("./state.ts");
@@ -14144,6 +14151,9 @@ try {
     });
   }));
   runs.push(open(browser, `${ORIGIN}/index.html`, "dock-key-migration", { width: 821, height: 883 }).then((r) => whenReady(r, () => dockKeyMigration(r))));
+  // The side dock's alignment (dev/dock-align-check.js): folded and unfolded, left and right, top and bottom.
+  const alignCases = [["cover", { width: 404, height: 900 }], ["inner", { width: 821, height: 883 }]].flatMap(([label, view]) => ["left", "right"].flatMap((position) => ["top", "bottom"].map((align) => [`dock-align-${label}-${position}-${align}`, view, position, align])));
+  for (const [name, view, position, align] of alignCases) runs.push(open(browser, `${ORIGIN}/index.html`, name, view).then((r) => whenReady(r, () => dockAlignRun(r, name, position, align))));
   const dockViews = { cover: { width: 404, height: 900 }, inner: { width: 821, height: 883 }, desktop: { width: 1280, height: 800 } };
   for (const [label, mode, width, height] of [["cover", "home", 404, 900], ["inner", "home", 821, 883], ["desktop", "desktop", 1280, 800]]) {
     for (const position of ["bottom", "left", "right"]) {

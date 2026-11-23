@@ -3928,6 +3928,41 @@ html[data-sideways] .home.dock-right:not(.wide) > .bar { margin-right: var(--sid
 /* A side column centres its pinned apps and the button after them (auto margins: nothing cut once it scrolls). */
 .home.search-dock:is(.dock-left, .dock-right) .dock-pages > .dock-page:first-child { margin-top: auto; }
 .home.search-dock:is(.dock-left, .dock-right) .dock-pages > .dock-page:last-child { margin-bottom: auto; }
+/*
+ * A side dock aligned to the bottom (Settings > style > home > "side dock alignment", ui/dockalign.ts; the user,
+ * 2026-11-23: "I cant really reach my docked icons easily cause they are so far up"): the pinned apps sit at the
+ * column's foot within thumb reach, the recent apps stacked above them - the newest nearest the pinned, growing upward
+ * (column-reverse). Only the recents scroll (their own box shrinks); the pinned group never leaves the screen. The
+ * whole column scrolls only if the pinned apps alone outgrow it. The search button (dockdrop.ts buttonSlot) starts the
+ * pinned group: the separator between the two, with the recents' 12 px gap.
+ */
+.home.dock-end:is(.dock-left, .dock-right) .dock-pages { flex-direction: column-reverse; justify-content: flex-start; }
+.home.dock-end:is(.dock-left, .dock-right) .dock-pages > .dock-page:is(:first-child, :last-child) { margin-top: 0; margin-bottom: 0; }
+.home.dock-end:is(.dock-left, .dock-right) .dock-pages > .dock-page:not(.dock-recent) { flex: none; }
+.home.dock-end:is(.dock-left, .dock-right) .dock-pages > .dock-page.dock-recent {
+  flex: 0 1 auto;
+  min-height: 0;
+  flex-direction: column-reverse;
+  justify-content: flex-start;
+  margin-bottom: 12px;
+  overflow-x: hidden;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  touch-action: pan-y;
+}
+/* Where more recents wait past an end, they fade there (the drawer's scroll-driven --scroll-fade mask), never cut. */
+.home.dock-end:is(.dock-left, .dock-right) .dock-pages > .dock-page.dock-recent {
+  --scroll-fade: 24px;
+  -webkit-mask-image: linear-gradient(transparent, black var(--scroll-fade-t), black calc(100% - var(--scroll-fade-b)), transparent);
+  mask-image: linear-gradient(transparent, black var(--scroll-fade-t), black calc(100% - var(--scroll-fade-b)), transparent);
+}
+@supports (animation-timeline: scroll()) {
+  .home.dock-end:is(.dock-left, .dock-right) .dock-pages > .dock-page.dock-recent {
+    animation: scroll-fade-t linear both, scroll-fade-b linear both;
+    animation-timeline: scroll(self y), scroll(self y);
+    animation-range: 0 var(--scroll-fade), calc(100% - var(--scroll-fade)) 100%;
+  }
+}
 
 /*
  * PowOS AI's glanceable line (powai.tsx Strip, AI7): one slim row under the header - agents working · the task moving

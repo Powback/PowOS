@@ -40,7 +40,7 @@ import { overWindows } from "./panellift.ts";
 import { SearchSpotMenu, openSpotMenu, pillBelow, searchClasses } from "./searchwidget.tsx";
 import { wideHome } from "../hosts/wide.ts";
 import { webWins, windowFrame } from "./webwindows.tsx";
-import { byKey, carry, dock, dockPosition, dockAim, dockDrag, drawer, editing, folder, menu, page, pageCount, pullKind, pullPanels, recent, screen, selected, sessionView, setDock, windows } from "../state.ts";
+import { byKey, carry, dock, dockPosition, homeDockClasses, dockAim, dockDrag, drawer, editing, folder, menu, page, pageCount, pullKind, pullPanels, recent, screen, selected, sessionView, setDock, windows } from "../state.ts";
 import { screens } from "../screens.ts";
 import { appView } from "../apps/pages.ts";
 import { remoteOpen } from "../remote.ts";
@@ -593,7 +593,8 @@ export function Dock() {
   });
   if (gap >= 0) cells.splice(gap, 0, <div key=" gap" class="app dock-gap" />);
   // The centre slot: as many apps left of it as right, an odd one more on the right (the user, 01:26: "3 | 3"); a side
-  // column's end, right before its recent apps: the separator between the two (buttonSlot).
+  // column's end, right before its recent apps - its start when bottom-aligned, the recents above: the separator
+  // between the two (buttonSlot, ui/dockalign.ts).
   if (button) cells.splice(buttonSlot(cells.length), 0, <DockSearchButton key=" search" />);
   const r = aim?.swap && el.current?.getBoundingClientRect();
   return (
@@ -732,7 +733,7 @@ function HomeFrame({ children }: { children: preact.ComponentChildren }) {
     <div
       onPointerDownCapture={grabPill}
       onContextMenu={pillMenu}
-      class={`home adopts dock-${dockPosition.value} ${wideHome.value ? "wide" : ""} ${pillBelow() ? "pill-below" : ""} ${searchClasses()} ${drawerDragging.value ? "dragging" : ""} ${drawerOpen.value ? "open" : ""} ${editing.value ? "editing" : ""} ${overWindows.value ? "over-windows" : ""} ${carriedApp(carry.value) ? "carry-app" : ""} ${searchDockClasses()}`}
+      class={`home adopts ${homeDockClasses.value} ${wideHome.value ? "wide" : ""} ${pillBelow() ? "pill-below" : ""} ${searchClasses()} ${drawerDragging.value ? "dragging" : ""} ${drawerOpen.value ? "open" : ""} ${editing.value ? "editing" : ""} ${overWindows.value ? "over-windows" : ""} ${carriedApp(carry.value) ? "carry-app" : ""} ${searchDockClasses()}`}
     >
       {children}
     </div>

@@ -8,9 +8,10 @@
  * weird"); it no longer turns into a grid tile there. It goes on the grid from the widget picker.
  */
 import { signal } from "@preact/signals";
-import { byKey, carry, dock, dockAim, dockMode, dockPosition, home, searchInDock, searchPlacement, searchSpot, selected, stored, type Carry } from "../state.ts";
+import { byKey, carry, dock, dockAim, dockMode, dockPosition, home, sideDockAlign, searchInDock, searchPlacement, searchSpot, selected, stored, type Carry } from "../state.ts";
 import type { Cell, HomeItem } from "../types.ts";
 import { wideHome } from "../hosts/wide.ts";
+import { searchGapSlot } from "./dockalign.ts";
 import { powos } from "../bridge.ts";
 import { tick } from "./haptics.ts";
 import { Bar } from "./bar.tsx";
@@ -100,7 +101,7 @@ export const carryingSearch = () => carry.value?.item?.key === SEARCH_KEY;
 export function aimSearch(c: Carry, x: number, y: number) {
   if (c.item?.key !== SEARCH_KEY || footAimAt(SEARCH_KEY, x, y) !== "dock") return null;
   const n = dock.value.filter((k) => byKey.value.has(k)).length;
-  return { key: SEARCH_KEY, slot: dockPosition.value !== "bottom" ? n : Math.floor((n + 1) / 2), swap: false };
+  return { key: SEARCH_KEY, slot: searchGapSlot(dockPosition.value, sideDockAlign.value, n), swap: false };
 }
 
 /** [el]'s box grown by [reach] px on every side contains [x], [y]. */

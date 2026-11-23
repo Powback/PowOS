@@ -14,7 +14,7 @@
 import { useEffect } from "preact/hooks";
 import { computed, effect, signal } from "@preact/signals";
 import { powos } from "../bridge.ts";
-import { aiDraft, chatting, closeDrawer, dockPosition, drawer, pullKind, query, type LauncherOpen } from "../state.ts";
+import { aiDraft, chatting, closeDrawer, drawer, homeDockClasses, pullKind, query, type LauncherOpen } from "../state.ts";
 import { AppMenu } from "./apps.tsx";
 import { detailSheet } from "../apps/sheet.ts";
 import { WidgetSheet } from "./widgetsheet.tsx";
@@ -126,7 +126,7 @@ function pullClass(open: boolean): string {
     [open, "open"],
     [pullDragging.value, "dragging"],
   ];
-  return ["home pull-screen", `dock-${dockPosition.value}`, ...flags.filter(([on]) => on).map(([, c]) => c)].join(" ");
+  return ["home pull-screen", homeDockClasses.value, ...flags.filter(([on]) => on).map(([, c]) => c)].join(" ");
 }
 
 export function Pull() {

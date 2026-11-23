@@ -303,6 +303,11 @@ WindowBlur.kt, WallpaperBackdrop.kt, LiquidGlass.kt; page side shell/ui/nativegl
   slot: measure the bar with `.home.wide > .bar .bar-pill`, never the first `.bar-pill` (that's the widget's tile).
 - Pinned dock never fades (the user): `.dock.paged:not(.dock-tray)` runs dock-fade-pinned (right fade 0 at rest,
   grows only scrolling into the recents); the wide DockTray keeps dock-fade. Gate dock-no-fade.
+- Side dock alignment (ui/dockalign.ts, state.ts dockAlign key "dock.align", unset = bottom; Settings > style > home >
+  "side dock alignment"; 11-23 the user: docked icons "so far up"): bottom = `.home.dock-end` - .dock-pages
+  column-reverse, pinned page flex none at the foot, .dock-recent its own column-reverse scroller (newest nearest the
+  pinned, scroll-fade mask) above; the search button starts the pinned group (buttonSlot 0). top = the old column.
+  Checks set dockAlignTry (page-only). Gate dock-align-*; shots dock-align-*; device verify/side-dock-align.sh.
 
 ## Themed icons (board theme-recolor-icons)
 - Slice 1 (8f5c995): ui/icontint.ts. `iconTint = stored("icons.tint")`: "" (apps' own) | "mono". Settings > style >

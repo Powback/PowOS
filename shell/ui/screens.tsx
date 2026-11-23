@@ -38,8 +38,9 @@ import {
 import { Icon, type IconName } from "./icons.tsx";
 import { PACK_INFO, PackBar, packAction, packCancellable, packFrees, packSize, packStatus, usePacks, type Pack, type PackStatus } from "./packs.tsx";
 import { openApp } from "../apps/pages.ts";
-import { mobileDockPlacement, unfoldedDockPlacement, desktopDockPlacement, searchSpot, validDockPosition, apps, ccV3, pullOverApps, pullPanels, separatePanels, speechEngine, chat, openPanel } from "../state.ts";
+import { mobileDockPlacement, unfoldedDockPlacement, desktopDockPlacement, dockAlign, searchSpot, validDockPosition, apps, ccV3, pullOverApps, pullPanels, separatePanels, speechEngine, chat, openPanel } from "../state.ts";
 import { iconTint } from "./icontint.ts";
+import { validDockAlign } from "./dockalign.ts";
 import { UI_FONTS, uiFont } from "./uifont.ts";
 import { ALIGNS, alignChoice, anchorPull, type AlignMode, type AlignSurface } from "./align.ts";
 
@@ -641,6 +642,10 @@ function StyleScreen() {
         <DockOption label="folded dock position" placement={mobileDockPlacement} fallback="bottom" />
         <DockOption label="unfolded dock position" placement={unfoldedDockPlacement} fallback="bottom" />
         <DockOption label="desktop dock position" placement={desktopDockPlacement} fallback="left" />
+        {/* A side dock's pinned apps at its foot (thumb reach) with the recents above, or at its top (ui/dockalign.ts). */}
+        <Option label="side dock alignment">
+          <Segmented options={["top", "bottom"]} picked={validDockAlign(dockAlign.value) === "top" ? 0 : 1} onPick={(i) => (dockAlign.value = i === 0 ? "top" : "bottom")} />
+        </Option>
         <SearchOption label="folded search" mode="mobile" />
         <SearchOption label="unfolded search" mode="unfolded" />
         <Option label="swipe up from the left: PowOS AI">

@@ -14,6 +14,7 @@ import { stableRows } from "./apps/stable.ts";
 import { appView, closeApp, initPowosApps, mergeRecent, noteHostRecent, openApp, powosApps, PREFIX } from "./apps/pages.ts";
 import type { App, AppWindow, Chat, Home, HomeItem, WebWindowRect, WidgetScreen } from "./types.ts";
 import { sidewaysHome, wideHome } from "./hosts/wide.ts";
+import { dockClasses, validDockAlign } from "./ui/dockalign.ts";
 import { forgetQuickReturn } from "./ui/quickpage.tsx";
 import { adoptWebWindow, onWebWindowPage, openWebWindow, setIconOf, setPageBeside, setShownPage } from "./ui/webwindows.tsx";
 
@@ -268,6 +269,23 @@ export function validDockPosition(value: string, fallback: string): string {
  */
 export const dockTry = signal("");
 export const dockPosition = computed(() => validDockPosition(dockTry.value || sidewaysDock(dockPlacement.value), dockMode.value === "desktop" ? "left" : "bottom"));
+/**
+ * A side dock's alignment along its column (ui/dockalign.ts): "bottom" (the default - the pinned apps at the foot within
+ * thumb reach, the recents above them) or "top" (the pinned apps from the top, as before). One choice for home's side
+ * dock folded and unfolded and the launcher's (Settings > style > home > "side dock alignment"); the desktop shell's
+ * column keeps its own layout. [dockAlignTry]: a check's choice for this page only, never stored (as dockTry).
+ */
+// Unset = the coded default (bottom) - never written, so a later default can still change it.
+export const dockAlign = stored("dock.align", "");
+// A pick in Settings (home's page): the launcher over an app (the overlay's page) follows at once, no reload.
+addEventListener("storage", (e) => {
+  if (e.key === "powos.dock.align") dockAlign.value = e.newValue ?? "";
+});
+export const dockAlignTry = signal("");
+/** The alignment in use: the check's, else the user's. */
+export const sideDockAlign = computed(() => validDockAlign(dockAlignTry.value || dockAlign.value));
+/** Home's (and the launcher's) dock classes: dock-<position>, plus dock-end for a bottom-aligned side dock. */
+export const homeDockClasses = computed(() => dockClasses(dockPosition.value, sideDockAlign.value));
 /**
  * Home's search per mode: where its widget is, folded and unfolded each their own (the user, 2026-10-31 15:34: "grab
  * the search as a widget and put it into the sidebar"). "dock": the round button between the dock's pinned apps and its
