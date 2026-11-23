@@ -31,6 +31,7 @@
     ],
     "keep": [
       "/Users/macback/Projects/Powflix/config/jellyfin",
+      "jellyfin-data",
       "powcache-media"
     ]
   },
