@@ -711,6 +711,8 @@ class ShellBridge(
             "shade.behind" -> shade?.behind(a.getDouble(0).toFloat())
             // Home's page: whether a pull down on it is the shade's now. True: PowOS's shade takes it (on the gesture input).
             "shade.homePull" -> homePull(a.getBoolean(0), a, a.optBoolean(2, false))
+            // Home's page took the finger under way sideways (a scroller's, the pages'): the host's pull never starts on it.
+            "shade.homeClaim" -> dev.omalauncher.system.ShadeHost.current?.homeClaim()
             // Home without the gesture input: the shade down, not following the finger.
             "shade.open" -> dev.omalauncher.system.ShadeHost.current?.let { s -> main.post { s.openPanel(control = false) } } ?: notifications(true)
             "overlay.closed", "pull.closed" -> overlay?.closed()

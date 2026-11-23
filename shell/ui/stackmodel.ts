@@ -10,6 +10,7 @@
  * wide vs folded, or an older shell moved it - still shows in the slot: the anchor decides). No store, an empty or
  * malformed one = no stacks: an older layout loads unchanged (the migration is "nothing to migrate").
  */
+import { scrollOwner } from "./scrollown.ts";
 
 export interface WidgetStack {
   /** Member item keys, in swipe order (left to right). */
@@ -221,9 +222,11 @@ const OWNED = "input[type=range], [role=slider], [data-owns-gesture], .resize-ha
  * Asked by gesture.ts at a sideways claim: is this swipe the stack's under the finger? Same rule as the stack's own
  * handler, from the same attributes (data-at / data-n, data-swipe only when it may swipe).
  */
-export function stackSwipeAt(target: Element | null, dx: number): boolean {
+export function stackSwipeAt(target: Element | null, dx: number, x = NaN, y = NaN): boolean {
   const el = target?.closest?.<HTMLElement>(".stack-strip[data-swipe]");
   if (!el || target!.closest(OWNED)) return false;
+  // A scroller inside the widget with room that way scrolls first (scrollown.ts: at its edge the stack swipes).
+  if (scrollOwner(target, { x, y, axis: "x", d: dx, stop: el })) return false;
   return stackTakesSwipe(Number(el.dataset.at), Number(el.dataset.n), dx);
 }
 

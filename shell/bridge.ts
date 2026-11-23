@@ -311,6 +311,7 @@ function native(host: NonNullable<Window["PowosHost"]>): Bridge {
       behind: (q) => call("shade.behind", q),
       homePull: (on, exclude, mainPage, regions) =>
         call<boolean>("shade.homePull", on, exclude ?? null, mainPage ?? false, regions ?? null),
+      homeClaim: () => call<void>("shade.homeClaim"),
       open: () => call("shade.open"),
     },
     overlay: {
@@ -997,6 +998,8 @@ function mock(): Bridge {
       behind: async () => {},
       // The gate reads the last regions home excluded from the host's pulls (W-IN1: they follow the windows).
       homePull: async (...args: unknown[]) => (((globalThis as { __homePullRegions?: unknown }).__homePullRegions = args[3] ?? null), true),
+      // The gate counts home's sideways claims sent to the host (scroll-own: a strip's drag must never be the shade's).
+      homeClaim: async () => void ((globalThis as { __homeClaims?: number }).__homeClaims = ((globalThis as { __homeClaims?: number }).__homeClaims ?? 0) + 1),
       open: async () => console.log("[mock] shade open"),
     },
     overlay: { closed: async () => console.log("[mock] overlay closed") },

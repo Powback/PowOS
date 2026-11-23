@@ -1092,6 +1092,11 @@ export interface Bridge {
      * each list that scrolls), [exclude] being only the dock's - for an older host, which reads that one rect.
      */
     homePull(on: boolean, exclude?: PageRect, mainPage?: boolean, regions?: PageRect[]): Promise<boolean>;
+    /**
+     * Home's page took the finger under way sideways (a scroller's drag, a page swipe, a stack's): the host's pull from
+     * home's body never starts for it (ui/gesture.ts claimFromHost). An older host has none.
+     */
+    homeClaim?(): Promise<void>;
     /** The shade down, not following a finger (home without the host's gesture input). */
     open(): Promise<void>;
   };

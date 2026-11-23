@@ -7754,6 +7754,113 @@ async function stackUnstackCheck() {
   return fails;
 }
 
+/**
+ * SO1, real touches (CDP) on home (ui/scrollown.ts, gesture.ts claimSideways, the host's HomePullAxis): a widget on home
+ * gets a sideways scroller (as an app island's pan-x strip) - (1) a sideways drag on it scrolls its content and home's
+ * page stays; (2) a diagonal one too, and home tells the host the finger is taken sideways (shade.homeClaim: the host's
+ * shade pull never starts on it); (3) scrolled to its end, a fresh drag the same way is home's page swipe; (4) a
+ * diagonal drag along the dock's recent-apps strip is claimed from the host too, home's page staying. The scene's
+ * page has touch input (hasTouch), so home's touch handlers are the real ones.
+ */
+async function scrollOwnCheck(r) {
+  const at = await r.page.evaluate(scrollOwnSetup);
+  if (at.err) return [`SO1: ${at.err}`];
+  if (at.pages < 2) return [`SO1: home has ${at.pages} page(s) - the edge hand-off needs two`];
+  const f = await soFinger(r.page);
+  try {
+    return [...(await soScroller(f, at)), ...(await soEdge(f, at)), ...(await soDock(f, at))];
+  } finally {
+    await f.touch("touchEnd", []).catch(() => {});
+    await r.page.evaluate(async () => {
+      document.querySelector(".gate-hscroll")?.remove();
+      (await window.__gw.mod("./state.ts")).page.value = 0;
+    }).catch(() => {});
+  }
+}
+
+/** In the page: home's first page, a sideways scroller over its first widget tile; where it and the dock are. */
+async function scrollOwnSetup() {
+  const S = await window.__gw.mod("./state.ts");
+  S.page.value = 0;
+  await window.__gw.settled();
+  const fits = (t) => {
+    const b = t.getBoundingClientRect();
+    return b.width >= 150 && b.height >= 60 && b.left >= 0 && b.right <= innerWidth && b.top > 60;
+  };
+  const tile = [...document.querySelectorAll(".page:not(.away) .home-tile")].find(fits);
+  if (!tile) return { err: "no widget tile >= 150x60 on home's first page" };
+  const sc = document.createElement("div");
+  sc.className = "gate-hscroll";
+  Object.assign(sc.style, { position: "absolute", inset: "0", zIndex: "50", overflowX: "auto", overflowY: "hidden", touchAction: "pan-x" });
+  sc.innerHTML = '<div style="width:400%;height:100%"></div>';
+  tile.appendChild(sc);
+  const b = sc.getBoundingClientRect();
+  const d = document.querySelector(".dock-pages, .dock")?.getBoundingClientRect();
+  globalThis.__homeClaims = 0;
+  return { x: b.left + b.width / 2, y: b.top + b.height / 2, w: b.width, pages: S.pageCount.value, dock: d && { x: d.left + d.width / 2, y: d.top + d.height / 2, w: d.width } };
+}
+
+/** A finger (CDP touches): drag a -> b in [steps] moves; the scene's state (page, scroller, host claims). */
+async function soFinger(page) {
+  const cdp = await page.target().createCDPSession();
+  const sleep = (ms) => new Promise((ok) => setTimeout(ok, ms));
+  const touch = (type, pts) => cdp.send("Input.dispatchTouchEvent", { type, touchPoints: pts });
+  const drag = async (a, b, steps = 12) => {
+    await touch("touchStart", [a]);
+    for (let i = 1; i <= steps; i++) (await touch("touchMove", [{ x: a.x + ((b.x - a.x) * i) / steps, y: a.y + ((b.y - a.y) * i) / steps }]), await sleep(16));
+    await touch("touchEnd", []);
+    await sleep(600);
+  };
+  const state = () =>
+    page.evaluate(async () => {
+      const S = await window.__gw.mod("./state.ts");
+      const sc = document.querySelector(".gate-hscroll");
+      return { page: S.page.value, left: sc?.scrollLeft ?? -1, claims: globalThis.__homeClaims ?? 0 };
+    });
+  return { page, sleep, touch, drag, state };
+}
+
+/** (1) sideways and (2) diagonal on the widget's scroller: it scrolls, home's page stays, the host is told. */
+async function soScroller({ drag, state }, at) {
+  const s0 = await state();
+  await drag({ x: at.x + at.w * 0.3, y: at.y }, { x: at.x - at.w * 0.3, y: at.y + 3 });
+  const s1 = await state();
+  // Down-left, ~35 deg off the horizontal: sideways by home's lock.
+  await drag({ x: at.x + at.w * 0.2, y: at.y - 10 }, { x: at.x - at.w * 0.2, y: at.y + 10 + at.w * 0.08 });
+  const s2 = await state();
+  return [
+    s1.left < 20 && `a sideways drag on a widget's scroller didn't scroll it (scrollLeft ${s1.left})`,
+    s1.page !== s0.page && `a sideways drag on a widget's scroller turned home's page (${s0.page} -> ${s1.page})`,
+    s2.page !== s0.page && `a diagonal drag on a widget's scroller turned home's page (${s0.page} -> ${s2.page})`,
+    s2.left <= s1.left && `a diagonal drag on a widget's scroller didn't scroll it (${s1.left} -> ${s2.left})`,
+    s2.claims < 2 && "home didn't tell the host (shade.homeClaim) that drags on a scroller are taken sideways - the shade could pull",
+  ].filter(Boolean).map((m) => `SO1: ${m}`);
+}
+
+/** (3) the scroller at its end: a fresh drag the same way is home's page swipe. */
+async function soEdge({ page, sleep, drag, state }, at) {
+  const p0 = (await state()).page;
+  await page.evaluate(() => { const sc = document.querySelector(".gate-hscroll"); sc.scrollLeft = sc.scrollWidth; });
+  await sleep(100);
+  await drag({ x: at.x + at.w * 0.35, y: at.y }, { x: at.x - at.w * 0.45, y: at.y + 3 });
+  const p1 = (await state()).page;
+  return p1 === p0 + 1 ? [] : [`SO1: at the scroller's end a sideways drag didn't swipe home's page (${p0} -> ${p1})`];
+}
+
+/** (4) a diagonal drag along the dock's recent-apps strip: claimed from the host, home's page stays. */
+async function soDock({ page, drag, state }, at) {
+  if (!at.dock) return ["SO1: no dock on home"];
+  await page.evaluate(async () => {
+    (await window.__gw.mod("./state.ts")).page.value = 0;
+    await window.__gw.settled();
+    globalThis.__homeClaims = 0;
+  });
+  // Down-right, ~35 deg: sideways by the dock's rule (the strip scrolls, or - not scrolling - home's pages turn).
+  await drag({ x: at.dock.x - at.dock.w * 0.15, y: at.dock.y - 4 }, { x: at.dock.x + at.dock.w * 0.05, y: at.dock.y + 22 }, 8);
+  const s = await state();
+  return s.claims ? [] : ["SO1: a diagonal drag along the dock's recent-apps strip wasn't claimed from the host (shade.homeClaim) - the shade could take it"];
+}
+
 async function folderDragCheck() {
   const S = await window.__gw.mod("./state.ts");
   const G = await window.__gw.mod("./ui/grid.tsx");
@@ -15134,6 +15241,11 @@ try {
         }
         return [];
       })));
+  // SO1 (the user, 11-23: "some widgets have a left/right scroller, but using it changes the home PAGE instead of
+  // scrolling the widget's content"; "scrolling the recent-apps bar on home SOMETIMES activates the notification
+  // screen"): real touches (CDP) on a widget's sideways scroller and on the dock's recent-apps strip (scrollOwnCheck).
+  if (process.env.SHELL_PAGES !== "0")
+    runs.push(open(browser, `${ORIGIN}/index.html`, "home-scroll-own", { width: 404, height: 900, hasTouch: true }).then((r) => whenReady(r, () => scrollOwnCheck(r))));
   // Folders by drag: home app onto home app, and a drawer app onto a home app (folderDragCheck).
   if (process.env.SHELL_PAGES !== "0")
     runs.push(open(browser, `${ORIGIN}/index.html`, "home-folder-drag", { width: 404, height: 900 }).then((r) => whenReady(r, () => r.page.evaluate(folderDragCheck))));

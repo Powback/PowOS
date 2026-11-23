@@ -26,6 +26,7 @@ import android.widget.FrameLayout
 import dev.omalauncher.App
 import dev.omalauncher.shell.ShellHost
 import dev.omalauncher.system.gesture.GestureConsumer
+import dev.omalauncher.system.gesture.HomePullAxis
 import dev.omalauncher.system.gesture.PanelPull
 import dev.omalauncher.widgets.runtime.MediaListener
 import org.json.JSONObject
@@ -324,6 +325,15 @@ class ShadeHost(
     var homePull = false
     /** Home's claim-free regions (spec G-R): a drag starting in one is home's own - its dock, column or list scrolls. */
     var homePullExcluded: List<android.graphics.Rect> = emptyList()
+
+    /**
+     * Home's page took the finger under way itself (shade.homeClaim): its drag is sideways - a scroller's (the recent
+     * apps, a widget's row) or the page swipe. A pull from home's body not yet started never starts for it (the user,
+     * 11-23: "scrolling the recent-apps bar on home SOMETIMES activates the notification screen").
+     */
+    fun homeClaim() {
+        if (pulling.following && pulling.fromHome) pulling.claimed = true
+    }
 
     /** Where a pull may start: the status bar (anywhere), or home's body (while [homePull]). */
     private enum class From { STATUS_BAR, HOME }
@@ -895,6 +905,15 @@ class ShadeHost(
         /** Started on home's body: only a swipe is a pull there - not a hold that then moves (a tile being picked up). */
         var fromHome = false
 
+        /** Home's page took this finger itself (shade.homeClaim: sideways - a scroller, the pages): never a pull now. */
+        @Volatile var claimed = false
+
+        /** A finger is being followed (down seen, no up yet): a page's claim only counts for that one. */
+        @Volatile var following = false
+
+        /** Where home's body decides (device px): the page's SLOP, so the host and the page lock the same drag alike. */
+        private val homeDecide = HomePullAxis.DECIDE_DP * shadeContext.resources.displayMetrics.density
+
         /** The page's --drop (shell.css .notif-panel, device px) as it last said; 0: not asked yet (15% of the height). */
         private var dropPx = 0f
         private var dropFor = 0
@@ -914,6 +933,8 @@ class ShadeHost(
             x0 = e.rawX
             y0 = e.rawY
             dragging = false
+            claimed = false
+            following = true
             q = 0.0
             velocity?.recycle()
             velocity = VelocityTracker.obtain().also { it.addMovement(e) }
@@ -926,7 +947,19 @@ class ShadeHost(
             var result = PullMove.NONE
             if (!dragging) {
                 if (fromHome && e.eventTime - e.downTime > HOME_SWIPE_MS && (dy > slop || abs(dx) > slop)) return PullMove.NOT_A_PULL
-                if (dy > slop && dy >= abs(dx)) {
+                if (fromHome) {
+                    // Home's body: the page's own axis lock (HomePullAxis) - a sideways or diagonal drag (a strip
+                    // scrolling, a page swipe) is never the shade's, nor one the page already claimed (homeClaim).
+                    when (HomePullAxis.decide(dx, dy, homeDecide, claimed)) {
+                        HomePullAxis.Verdict.UNDECIDED -> return PullMove.NONE
+                        HomePullAxis.Verdict.NOT_A_PULL -> return PullMove.NOT_A_PULL
+                        HomePullAxis.Verdict.PULL -> {
+                            dragging = true
+                            show()
+                            result = PullMove.STARTED
+                        }
+                    }
+                } else if (dy > slop && dy >= abs(dx)) {
                     dragging = true
                     show()
                     result = PullMove.STARTED
@@ -943,6 +976,7 @@ class ShadeHost(
         }
 
         fun up(e: MotionEvent) {
+            following = false
             val v = velocity
             velocity = null
             if (dragging) {

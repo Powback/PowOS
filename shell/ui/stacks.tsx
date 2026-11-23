@@ -334,7 +334,7 @@ function decide(g: Swipe, e: PointerEvent): boolean {
   const dx = e.clientX - g.x0;
   const dy = e.clientY - g.y0;
   if (Math.hypot(dx, dy) < SLOP) return false;
-  g.mode = sideways(dx, dy) && stackSwipeAt(e.target as Element, dx) ? "mine" : "no";
+  g.mode = sideways(dx, dy) && stackSwipeAt(e.target as Element, dx, g.x0, g.y0) ? "mine" : "no";
   return g.mode === "mine";
 }
 

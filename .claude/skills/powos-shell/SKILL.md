@@ -523,6 +523,19 @@ strip only - not the cause when a drag in a tile fails.
 - Fill checks skip .island-offline.alone and .ag-idle-line (sparse by request); clipping still applies.
 - Monospace sizing: budget 0.62 em/char (phone font ~0.575, preview 0.5), line height 1.4.
 
+## Scroll ownership (ui/scrollown.ts; the user 11-23: widget scrollers paged home, the recents bar opened the shade)
+- One rule: a drag along an axis an element under the finger scrolls, with room left that way, is that element's -
+  home's page swipe (gesture.ts claimSideways), vertical home swipes, a stack's swipe (stackSwipeAt) and the folder
+  sheet's swipe down keep off. At its edge a FRESH drag passes on (decided at the claim, as stacks). Native widgets:
+  AppWidgets.kt sends `scrollers` (rect fractions + room per way, canScrollHorizontally/Vertically) with each frame;
+  appwidget.tsx registers them (registerNative); home.tsx also reports them as host regions.
+- The host's shade pull from home's body uses the page's axis lock (HomePullAxis.kt: decides at 10 dp, pull only when
+  dy > 1.4 x |dx|, locked after) - the old 45 deg / 8 dp rule pulled on diagonal strip drags. Any sideways decision on
+  home (and any non-"home" chrome way) calls shade.homeClaim: the host's pull never starts for that finger.
+- Region reports correct for a settle in flight (settleShift: track/home offset) and re-run 300 ms after home's
+  scroller set changes (homeShape). Gate: home-scroll-own (CDP touches, hasTouch viewport). Unit: HomePullAxisTest.
+  Device: tools/phone/verify/scroll-own.sh (diagonal dock drags never show the shade; a widget scroller scrolls).
+
 ## Widget stacks (ui/stacks.tsx + ui/stackmodel.ts; the user 11-23 "stack widgets and swipe ... like samsung")
 - Model is pure (stackmodel.ts, test/stackmodel.test.ts, tier1 test-home-stacks.sh). Store "home.stacks" =
   {v:1, stacks:{id:{keys, shown, anchor}}}; shell-only, every member stays the host's own item (config/state untouched).

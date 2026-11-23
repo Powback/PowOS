@@ -14,6 +14,7 @@ import type { App, PageRect } from "../types.ts";
 import { AppCell, AppMenu } from "./apps.tsx";
 import { Bar } from "./bar.tsx";
 import { DockSearchButton, buttonMorph, dockButton, grabPill, useButtonMorph } from "./docksearch.tsx";
+import { nativeRects, NATIVE_FACE } from "./scrollown.ts";
 import { chromeWay, drawerDragging, drawerOpen, followOpenness, homeGestures, launcherTakesHome, pageDrag, shadeTakesHome, widthOf, windowGestureActive } from "./gesture.ts";
 import { tick } from "./haptics.ts";
 import { PageDots } from "./pagedots.tsx";
@@ -85,8 +86,25 @@ export function fullScreenAppRegion(): PageRect {
   return { left: 0, top, width: view.w, height: Math.max(0, view.h - top - bottom) };
 }
 
-function pageRect(r: DOMRect): PageRect {
-  return { left: r.left, top: r.top, width: r.width, height: r.height };
+function pageRect(r: DOMRect, shift = 0): PageRect {
+  return { left: r.left - shift, top: r.top, width: r.width, height: r.height };
+}
+
+/**
+ * How far (px) home and its page track still are from where they rest: a page swipe's settle (or the slide back from
+ * PowOS AI's page) still in flight when the regions are read. The report runs right after the finger lets go, while
+ * the track eases ~200 ms to its page - the rects read then were off by the rest of the slide, and stayed so until the
+ * next report: a strip on home (the recent apps) wasn't where the host thought, so a drag on it was the shade's pull
+ * (the user, 11-23: "scrolling the recent-apps bar on home SOMETIMES activates the notification screen"). Rects are
+ * reported where they rest: [home] home's own slide, [track] its track's on top (for what's on the pages).
+ */
+function settleShift(): { home: number; track: number } {
+  const home = document.querySelector(".home")?.getBoundingClientRect().left ?? 0;
+  const track = document.querySelector(".page-track");
+  const pages = document.querySelector(".pages");
+  if (!track || !pages || page.value < 0) return { home, track: home };
+  const p = pages.getBoundingClientRect();
+  return { home, track: track.getBoundingClientRect().left - p.left + page.value * p.width + home };
 }
 
 /** [el]'s scroll axes by its style (overflow auto / scroll): y, x, or none. A style read only, never a layout one. */
@@ -124,8 +142,21 @@ function reshapes(m: MutationRecord): boolean {
 }
 const shapeChanged = (ms: MutationRecord[]) => ms.some(reshapes);
 const homeShape = new MutationObserver((ms) => {
-  if (scrollers && shapeChanged(ms)) scrollers = null;
+  if (!scrollers || !shapeChanged(ms)) return;
+  scrollers = null;
+  reshaped();
 });
+/**
+ * Home's scrollers may have changed (a recent app added, a widget's list grown): the host's regions are reported again
+ * (at most every [RESHAPE_MS]) - before, only a page change or a resize did, and a strip that had just begun to scroll
+ * was the shade's until then.
+ */
+const RESHAPE_MS = 300;
+let reshapeTimer = 0;
+function reshaped() {
+  if (reshapeTimer) return;
+  reshapeTimer = setTimeout(() => ((reshapeTimer = 0), reportRegions?.(true)), RESHAPE_MS) as unknown as number;
+}
 let watched: Element | null = null;
 
 function homeScrollers(home: Element) {
@@ -162,22 +193,39 @@ function claimFree(dockNode: HTMLElement | null): PageRect[] {
   return [...claimStatic(dockNode), ...claimWindows()];
 }
 
+/** The settle's shift for [el]'s rect: the track's for what's on the pages, else home's own. */
+const shiftOf = (el: Element, shift: { home: number; track: number }) => (el.closest(".page-track") ? shift.track : shift.home);
+
+/** Home's scrollers (DOM ones with more to show, outside the dock) and its Android widgets' native ones, with their rects. */
+function homeScrollRects(home: Element, dockNode: HTMLElement | null): [DOMRect, Element][] {
+  const dom = homeScrollers(home)
+    .filter(({ el, axes }) => el.isConnected && !dockNode?.contains(el) && hasMore(el, axes))
+    .map(({ el }) => [el.getBoundingClientRect(), el] as [DOMRect, Element]);
+  return [...dom, ...nativeScrollRects(home)];
+}
+
 /** The dock's and home's scrollers (the costly walk). */
 function claimStatic(dockNode: HTMLElement | null): PageRect[] {
   const out: PageRect[] = [];
   const view = viewport();
   const big = view.w * view.h * 0.5;
-  const add = (el: Element) => {
-    const r = el.getBoundingClientRect();
-    if (r.width > 0 && r.height > 0 && r.width * r.height < big) out.push(pageRect(r));
+  const shift = settleShift();
+  const put = (r: DOMRect, el: Element) => {
+    if (r.width > 0 && r.height > 0 && r.width * r.height < big) out.push(pageRect(r, shiftOf(el, shift)));
   };
+  const add = (el: Element) => put(el.getBoundingClientRect(), el);
   if (dockNode) {
     add(dockNode);
     dockNode.querySelectorAll(".dock-pages, .dock-recent").forEach(add);
   }
   const home = document.querySelector(".home");
-  if (home) for (const { el, axes } of homeScrollers(home)) if (el.isConnected && !dockNode?.contains(el) && hasMore(el, axes)) add(el);
+  if (home) for (const [r, el] of homeScrollRects(home, dockNode)) put(r, el);
   return out;
+}
+
+/** An Android widget's own scrollers (a sideways row, a list: AppWidgets.kt sends them with each frame), as the DOM's. */
+function nativeScrollRects(home: Element): [DOMRect, Element][] {
+  return [...home.querySelectorAll(NATIVE_FACE)].flatMap((face) => [...nativeRects(face, "x"), ...nativeRects(face, "y")].map((r) => [r, face] as [DOMRect, Element]));
 }
 
 /** Every web window shown, with its resize zones (cheap: one rect per window). */
@@ -247,7 +295,7 @@ if (!new URLSearchParams(location.search).get("mode")) effect(() => {
   const dockNode = dockElement.value;
   const report = (full: boolean) => {
     const r = dockNode?.getBoundingClientRect();
-    const exclude = r ? pageRect(r) : undefined;
+    const exclude = r ? pageRect(r, settleShift().home) : undefined;
     if (full) staticRegions = claimStatic(dockNode);
     const regions = [...staticRegions, ...claimWindows()];
     powos.shade.homePull(on, exclude, mainPage, regions).then(

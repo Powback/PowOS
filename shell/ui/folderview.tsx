@@ -11,6 +11,7 @@
  *   blurs what's under the window, never home's tiles in it, so they fade rather than blur.
  * - Transforms and opacity only, inline only while it moves: at rest nothing is left to draw.
  */
+import { scrollOwner } from "./scrollown.ts";
 import { useEffect, useLayoutEffect, useRef, useState } from "preact/hooks";
 import { folder, home } from "../state.ts";
 import { AppPress, folderNames, morphing, nameFolder, type DragOut } from "./folders.tsx";
@@ -175,7 +176,8 @@ function Sheet({ s, closing, onHold, done }: { s: Shown; closing: boolean; onHol
       data-key={s.key}
       style={{ "--fcell-w": `${g.cellW || 76}px`, "--fcell-h": `${Math.max(g.cellH, g.cellW) || 86}px`, "--fcols": cols }}
       onClick={close}
-      onPointerDown={(e) => (swipe.current = e.clientY)}
+      // A list in the folder scrolled down owns a drag down (scrollown.ts): it scrolls back first; at its top the sheet's.
+      onPointerDown={(e) => (swipe.current = scrollOwner(e.target as Element, { x: e.clientX, y: e.clientY, axis: "y", d: 1, stop: root.current }) ? null : e.clientY)}
       onPointerMove={(e) => {
         // The sheet follows a swipe down under the finger; a few px of slop leave a tap a tap.
         if (closing || swipe.current == null) return;
