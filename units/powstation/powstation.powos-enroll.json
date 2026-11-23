@@ -23,7 +23,7 @@
     "access": {
       "authentication": "application",
       "exposure": "lan",
-      "reason": "device API carries no PowAuth session by design (RFC 8628 device flow); LAN/VPN only"
+      "reason": "device API carries no PowAuth session by design (RFC 8628 device flow); LAN/VPN only. A device may present a PowAuth OIDC access token (owner's sign-in on the device), verified server-side at PowAuth's userinfo; /internal/ai/introspect (claude-auth) is not routed by Traefik"
     }
   },
   "remove": {
