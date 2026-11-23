@@ -10,8 +10,8 @@
 #   frozen    as steam, but Steam frozen (powos-sleep-gui sleep steam) FROZEN_S (100) s before the tap: the user's path
 #             after a while in PowOS - its CM server drops a silent client 79 s into a freeze, and the tap then waited
 #             Steam's 11 s reconnect backoff (2026-11-05: handoff 12.7 s) unless unified sleep kept the link (link_watch)
-#   pulse     as frozen, then the tap lands in a link keepalive pulse (powos-sleep-gui link_watch thaws a frozen Steam
-#             1.5 s every ~50 s; the tap waits up to 75 s for one): 557340 11-18 21:52, a tap 1 s after a pulse, Steam
+#   pulse     as steam, frozen, then the tap lands in a link keepalive pulse (powos-sleep-gui link_watch thaws a frozen
+#             Steam 1.5 s every ~50 s from its freeze; the tap waits up to 75 s for one): 557340 11-18 21:52, a tap 1 s after a pulse, Steam
 #             was refrozen at the pulse's end and ran the launch 1.5 s per pulse - CheckShaderDepotManifest 55 s,
 #             SynchronizingCloud 54 s, launch 134 s. "steam steps" says how long each of Steam's launch steps took.
 #   fexcache  as steam, with FEX's code cache on for the game (FEX_ENABLECODECACHINGWIP=1 through PowOS's Proton
@@ -160,7 +160,8 @@ cs_ready_steam() {
        # A -silent Steam has no window, so unified sleep never freezes it (seen 2026-10-23: resident Steam awake 20 min
        # after its start); a Steam the user had on screen is frozen 15 s after it went out of sight. 25 s at most.
        pill "waiting for Steam to sleep (out of sight)"; for _ in $(seq 25); do [ -n "$(cg)" ] && break; touched; sleep 1; done
-       if [ "$1" = frozen ] || [ "$1" = pulse ]; then
+       [ "$1" = pulse ] && { [ -n "$(cg)" ] || powos-sleep-gui sleep steam >/dev/null 2>&1; }  # its pulses count from the freeze
+       if [ "$1" = frozen ]; then
          [ -n "$(cg)" ] || powos-sleep-gui sleep steam >/dev/null 2>&1
          pill "Steam frozen ${FROZEN_S:-100} s before the tap"; for _ in $(seq "${FROZEN_S:-100}"); do touched; sleep 1; done
          echo "   frozen ${FROZEN_S:-100} s: cgroup '$(cg)', CM link $(steam_cm_state)"
