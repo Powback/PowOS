@@ -72,6 +72,10 @@ echo "APKSTART $(git rev-parse HEAD)" >> "$LOG"
 if [ -s "$HOME/apk-link-drop" ]; then d=$(cat "$HOME/apk-link-drop"); echo $((d-1)) > "$HOME/apk-link-drop"; [ "$d" -le 1 ] && rm -f "$HOME/apk-link-drop"
   echo "APKLINKDROP" >> "$LOG"; echo "adb.sh: phone unavailable after reconnect; not caching device state" >&2
   echo "ship-apk: REFUSED - couldn't snapshot the phone's current APK + overrides (above): not installing without a way back (APK built, kept)" >&2; exit 3; fi
+# --publish-only (the phone offline): gated + built = published to PowApps, the copy kept for the install; exit 9.
+case " $* " in *" --publish-only "*) [ -e "$HOME/build-fail" ] && { echo "ship-apk: REFUSED - build-app.sh failed" >&2; exit 5; }
+  mkdir -p "$SHIP_DIR/published"; echo 4242 > "$SHIP_DIR/published/ver"; git rev-parse HEAD > "$SHIP_DIR/published/commit"
+  echo "APKPUBLISH $(git rev-parse HEAD) $*" >> "$LOG"; exit 9 ;; esac
 while [ -e "$HOME/hold-apk" ]; do sleep 0.3; done
 until mkdir "$l/phone" 2>/dev/null; do sleep 0.3; done
 # the installing mark + the pause flag, as the real one; APK_INSTALL_S: how long the install takes
@@ -400,20 +404,37 @@ rm -f "$HOME/apk-link-drop"; land targets/android/app/Main.kt 'class Main15c' "k
 #     (14b above: a real module-first failure with the phone online still holds).
 : > "$LOG"; touch "$HOME/schemas-offline"
 land targets/android/app/Main.kt 'class Main16' "kt16"; req --note "sixteen"; t16=$(tip)
-for _ in $(seq 100); do grep -q "${t16:0:9}: APK waits for the phone" "$Q/runner.log" && break; sleep 0.2; done; sleep 3
-grep -q "${t16:0:9}: APK waits for the phone" "$Q/runner.log" && ! grep -q '^APKSTART' "$LOG" && ! grep -q '^MAIL' "$LOG" &&
+for _ in $(seq 100); do grep -q "${t16:0:9}: APK .*waits for the phone" "$Q/runner.log" && break; sleep 0.2; done; sleep 3
+grep -q "${t16:0:9}: APK .*waits for the phone" "$Q/runner.log" && ! grep -q "^APK $t16" "$LOG" && ! grep -q '^MAIL' "$LOG" &&
   [ "$(cat "$Q/failed-apk" 2>/dev/null)" != "$t16" ] && ! grep -q "${t16:0:9}: APK HELD" "$Q/runner.log" && ls "$Q"/*.req >/dev/null 2>&1 &&
   ok "offline schemas: the APK waits (pending, not held, not mailed)" || { bad "offline schemas"; cat "$LOG"; tail -8 "$Q/runner.log"; }
 rm -f "$HOME/schemas-offline"
 drained 60 && grep -q "^APK $t16 svc=1 --note sixteen" "$LOG" && ok "phone back: the same tip's APK ships, no new commit" || { bad "no retry after offline"; cat "$LOG"; tail -8 "$Q/runner.log"; }
-# 16b. The VPN handshake itself is stale (adb.sh --vpn-state rc 69): the APK isn't even tried; back online = it ships.
+# 16b. The VPN handshake itself is stale (adb.sh --vpn-state rc 69): the OnePlus install isn't even tried, but the APK
+#      is gated, built and PUBLISHED to PowApps (11-23: the S25/razr waited 2 days on the offline OnePlus) - once per
+#      tip; its request is marked published and stays pending; status shows both; back online = the install ships it.
 : > "$LOG"; touch "$HOME/phone-offline"
 land targets/android/app/Main.kt 'class Main16b' "kt16b"; req --note "sixteen b"; t16b=$(tip)
-for _ in $(seq 100); do grep -q "${t16b:0:9}: APK waits for the phone" "$Q/runner.log" && break; sleep 0.2; done; sleep 2
-grep -q "the phone is offline (no WireGuard link)" "$Q/runner.log" && ! grep -q '^APKSTART' "$LOG" && ! grep -q '^MAIL' "$LOG" &&
-  ok "VPN offline: the APK waits" || { bad "VPN offline wait"; cat "$LOG"; tail -8 "$Q/runner.log"; }
+for _ in $(seq 150); do grep -q "${t16b:0:9}: APK published to PowApps; the OnePlus install waits" "$Q/runner.log" && break; sleep 0.2; done; sleep 2
+st=$(bash tools/phone/ship.sh status)
+grep -q "the phone is offline (no WireGuard link)" "$Q/runner.log" && [ "$(grep -c "^APKPUBLISH $t16b .*--publish-only" "$LOG")" = 1 ] &&
+  ! grep -q "^APK $t16b" "$LOG" && ! grep -q '^MAIL' "$LOG" && [ "$(cat "$Q/apk-published" 2>/dev/null)" = "$t16b" ] &&
+  grep -q "^published=$t16b" "$Q"/*.req && grep -q "${t16b:0:9} apk PUBLISHED to PowApps (version code 4242), 1 req" "$Q/shipped.log" &&
+  echo "$st" | grep -q "^APK on PowApps: ${t16b:0:9} (version code 4242.*the OnePlus install waits for the phone (offline)" &&
+  echo "$st" | grep -q "sixteen b  \[APK published to PowApps (${t16b:0:9}); OnePlus install pending\]" &&
+  ok "VPN offline: the APK is published to PowApps once, its request kept pending for the OnePlus install (status shows both)" || { bad "VPN offline publish"; echo "$st"; cat "$LOG"; tail -8 "$Q/runner.log"; }
 rm -f "$HOME/phone-offline"
-drained 60 && grep -q "^APK $t16b" "$LOG" && grep -q "the phone is back online" "$Q/runner.log" && ok "VPN back: the APK ships" || { bad "VPN back"; cat "$LOG"; tail -8 "$Q/runner.log"; }
+drained 60 && grep -q "^APK $t16b" "$LOG" && grep -q "the phone is back online" "$Q/runner.log" && [ "$(grep -c '^APKPUBLISH' "$LOG")" = 1 ] &&
+  grep -q "result=shipped:${t16b:0:9}:apk" "$Q"/done/*.req && ! bash tools/phone/ship.sh status | grep -q '^APK on PowApps' &&
+  ok "VPN back: the APK installs on the OnePlus, the request done" || { bad "VPN back"; cat "$LOG"; tail -8 "$Q/runner.log"; }
+# 16c. Offline, and the build fails: a fault of the tip (failed + mailed once), never "waits for the phone".
+: > "$LOG"; touch "$HOME/phone-offline" "$HOME/build-fail"
+land targets/android/app/Main.kt 'class Main16c' "kt16c"; req --note "sixteen c"; t16c=$(tip)
+for _ in $(seq 150); do [ "$(cat "$Q/failed-apk" 2>/dev/null)" = "$t16c" ] && grep -q '^MAIL.*FAILED' "$LOG" && break; sleep 0.2; done
+[ "$(cat "$Q/failed-apk" 2>/dev/null)" = "$t16c" ] && [ "$(grep -c '^MAIL.*FAILED' "$LOG")" = 1 ] && [ "$(cat "$Q/apk-published")" != "$t16c" ] &&
+  ok "offline publish with a failing build: FAILED + mailed, not published" || { bad "offline build fail"; cat "$LOG"; tail -8 "$Q/runner.log"; }
+rm -f "$HOME/phone-offline" "$HOME/build-fail"; land targets/android/app/Main.kt 'class Main16d' "kt16d"; req --note "sixteen d"
+drained 60 && ok "the next tip ships" || bad "after offline build fail"
 
 # 17. 11-10: no gate verdict (gate.sh exit 75: its machine, .58, didn't answer) is DEFERRED, never a failure: no
 #     FAILED/REFUSED, no mail, no failed mark, the request stays queued, `ship.sh status` says so in one line, nothing
