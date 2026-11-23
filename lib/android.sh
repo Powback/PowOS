@@ -22,7 +22,11 @@ _android_run() { echo "${XDG_RUNTIME_DIR:-/run/powos-app}"; }
 _android_link_field() { awk -v k="$1" '$1 == k { print $2; exit }' "$(_android_run)/adb-link" 2>/dev/null; }
 
 # Does this PowOS app take "adb-link" requests (an older APK doesn't)?
-_android_link_served() { grep -qx adb-link "$(_android_run)/android-request.verbs" 2>/dev/null; }
+# run/adb-link itself is written only by the app's AdbLink, so its "package" line is proof too: APKs up to 11-23 wrote
+# the verbs list before AdbLink existed and never listed it (SessionService order, fixed there).
+_android_link_served() {
+    grep -qx adb-link "$(_android_run)/android-request.verbs" 2>/dev/null || [[ -n "$(_android_link_field package)" ]]
+}
 
 # A request to the app (run/android-request, as the android-request helper writes it: atomically, by rename).
 _android_request() {
@@ -66,7 +70,77 @@ _android_pick() {
     _android_link_refresh || return 1
     dev=$(_android_link_field connect)
     _android_try "$dev" && { echo "$dev"; return 0; }
+    # The app's mDNS found no adbd (its record says Wireless debugging is on, with no port): look for it here.
+    [[ -z "$dev" && "$(_android_link_field wireless)" == on ]] || return 1
+    local port host
+    port=$(_android_probe) || return 1
+    # adbd takes a new connection on the phone's own address but may refuse loopback (S25: "failed to connect to
+    # 127.0.0.1" from a fresh adb server, while the same port on its VPN address connected): own addresses first.
+    for host in $(_android_own_addrs) 127.0.0.1; do
+        _android_try "$host:$port" && { echo "$host:$port"; return 0; }
+    done
     return 1
+}
+
+# adbd's Wireless debugging port, found on this phone's loopback: the port printed, or nothing. For when the
+# app's mDNS lookup (AdbLink) gets no answer - Android publishes the port nowhere else (no property), and NsdManager
+# saw no _adb-tls-connect on the S25 (11-23, Wi-Fi default network + a WireGuard VPN). A port counts only if it
+# answers an adb CNXN with adbd's STLS (Wireless debugging's TLS handshake), so another service is never taken for
+# it. The last port found is tried first (~/.cache/powos/adb-port): it lasts until Wireless debugging restarts.
+_android_probe() {
+    command -v python3 >/dev/null 2>&1 || return 1
+    local cache="${XDG_CACHE_HOME:-$HOME/.cache}/powos/adb-port" port
+    port=$(python3 - "$(cat "$cache" 2>/dev/null)" <<'PY'
+import socket, struct, sys, concurrent.futures as cf
+def cnxn():
+    payload = b"host::\0"
+    head = struct.pack("<6I", 0x4E584E43, 0x01000001, 256 * 1024, len(payload), sum(payload), 0x4E584E43 ^ 0xFFFFFFFF)
+    return head + payload
+def adbd(port):
+    try:
+        with socket.create_connection(("127.0.0.1", port), timeout=0.4) as s:
+            s.settimeout(1.0)
+            s.sendall(cnxn())
+            return port if s.recv(24)[:4] == b"STLS" else None
+    except OSError:
+        return None
+def listening(port):
+    s = socket.socket(); s.settimeout(0.2)
+    try:
+        return port if s.connect_ex(("127.0.0.1", port)) == 0 else None
+    finally:
+        s.close()
+last = sys.argv[1].strip() if len(sys.argv) > 1 else ""
+if last.isdigit() and adbd(int(last)):
+    print(last); sys.exit(0)
+with cf.ThreadPoolExecutor(128) as ex:
+    open_ports = [p for p in ex.map(listening, range(30000, 50000)) if p]
+for p in open_ports:
+    if adbd(p):
+        print(p); sys.exit(0)
+sys.exit(1)
+PY
+) || return 1
+    mkdir -p "${cache%/*}" && printf '%s\n' "$port" > "$cache"
+    echo "$port"
+}
+
+# This phone's own addresses as its routes use them (an app may not list interfaces, but a UDP socket "connected"
+# toward a network reports the source address it would use - no packet is sent): one per line, unique.
+_android_own_addrs() {
+    python3 -I -c '
+import socket
+seen = []
+for t in ("192.168.0.1", "10.0.0.1", "172.16.0.1", "8.8.8.8"):
+    s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    try:
+        s.connect((t, 9)); a = s.getsockname()[0]
+        if a not in seen and not a.startswith("127."): seen.append(a)
+    except OSError:
+        pass
+    finally:
+        s.close()
+print("\n".join(seen))' 2>/dev/null
 }
 
 # Why there is no link, in words, for the user.
@@ -76,6 +150,8 @@ _android_why() {
             echo "rooted mode, or a PowOS app with the adb link (update it), then: powos android link"
     elif [[ "$(_android_link_field wireless)" == off ]]; then
         echo "Wireless debugging is off (Developer options) - turn it on, or run: powos android link"
+    elif [[ -z "$(_android_link_field connect)" ]]; then
+        echo "Wireless debugging is on, but its port wasn't found (the app's mDNS lookup and this side's) - run: powos android link"
     else
         echo "Wireless debugging doesn't take this PowOS's key - run: powos android link"
     fi
