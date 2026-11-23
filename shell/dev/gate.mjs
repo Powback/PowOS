@@ -14360,6 +14360,34 @@ try {
       })));
     }
   }
+  // The stop button (the user, 11-23: the send control becomes STOP while the assistant answers): a long ask turns the
+  // pill's send into stop within 100 ms, typing turns it back, its tap ends the turn (partial answer kept, "stopped"),
+  // send again within 100 ms - in every pill that asks PowOS AI, folded and unfolded (dev/ai-stop-check.js).
+  // Renders: /cache/ai-stop-<case>.png (stop showing) and -after.png (stopped).
+  for (const [name, query, viewport, form, setup] of [
+    ["aipage-folded", "", { width: 404, height: 900 }, '.bar[data-role="ai"]', "page"],
+    ["aipage-unfolded", "", { width: 821, height: 883 }, '.bar[data-role="ai"]', "page"],
+    ["chat-folded", "?mode=pull", { width: 404, height: 900 }, ".bar", "chat"],
+    ["powai-unfolded", "?mode=pull", { width: 821, height: 883 }, ".bar", "ai"],
+    ["assist-folded", "?mode=assist", { width: 404, height: 900 }, ".assist-ask", ""],
+    ["assist-unfolded", "?mode=assist", { width: 821, height: 883 }, ".assist-ask", ""],
+  ]) {
+    runs.push(open(browser, `${ORIGIN}/index.html${query}`, `ai-stop-${name}`, viewport).then((r) => whenReady(r, async () => {
+      await r.page.evaluate(async (how) => {
+        const S = await importShim("./state.ts");
+        if (how === "page") S.page.value = -1;
+        if (how === "chat" || how === "ai") (S.chatting.value = true), (S.drawer.value = 1);
+        if (how === "ai") S.pullKind.value = "ai";
+      }, setup);
+      await r.page.waitForSelector(`form${form} .mic`, { timeout: READY_MS });
+      const started = await r.page.evaluate(async (f) => (await importShim("./dev/ai-stop-check.js")).aiStopStart(f), form);
+      await r.page.screenshot({ path: `/cache/ai-stop-${name}.png` });
+      if (started.length) return started;
+      const ended = await r.page.evaluate(async (f) => (await importShim("./dev/ai-stop-check.js")).aiStopEnd(f), form);
+      await r.page.screenshot({ path: `/cache/ai-stop-${name}-after.png` });
+      return ended;
+    })));
+  }
   // AO1/AO2 (the user, 2026-10-30: "It should hide while I'm drawing so that I can draw like under the drawer"; "when
   // I activate it with like a short click, we should still activate the transcription"): the side-button overlay's
   // short press listens at once, and a stroke into the panel's area hides the panel and goes to the drawing

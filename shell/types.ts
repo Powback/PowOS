@@ -448,6 +448,10 @@ export interface Chat {
    * host that doesn't queue (an older APK): the page queues itself (assistant.ts).
    */
   queued?: { id: number; text: string }[];
+  /** This host can stop a turn (ai.stop: the pill's send turns into stop while one runs). Absent: an older APK. */
+  stoppable?: boolean;
+  /** A stop was asked (ai.stop) and the turn hasn't ended yet. */
+  stopping?: boolean;
   /**
    * How PowOS AI is signed in (`powos manager --auth`): "endpoint" the machine's fleet endpoint (the owner's devices),
    * "login" Claude Code's own login in the image (the user's own Claude account), "signin" neither - the page shows
@@ -760,6 +764,8 @@ export interface Bridge {
     send(text: string, recents?: boolean): Promise<void>;
     /** Takes a queued message back before its turn: it's never sent (?: hosts from before the queue). */
     unqueue?(id: number): Promise<void>;
+    /** Stops the turn under way (the pill's stop button): what it said so far stays, then "stopped" (?: older hosts). */
+    stop?(): Promise<void>;
     /**
      * "Test now": the verify queue (tools/phone/verify/queue.sh, on the Mac) runs [task]'s queued phone checks at once
      * ("all": every queued one), not waiting for the phone to sit idle. ?: hosts from before it.

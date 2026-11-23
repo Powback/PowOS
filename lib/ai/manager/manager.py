@@ -29,6 +29,7 @@ import argparse
 import json
 import os
 import queue
+import signal
 import subprocess
 import sys
 import threading
@@ -94,6 +95,59 @@ class SessionStore:
         os.replace(tmp, self._path(cwd))
 
 
+# The running one-shot turn's pid (the phone's chat runs one at a time per session store): `--stop` reads it.
+TURN_PID = "turn.pid"
+# A turn ended by `--stop` (the chat's stop button) exits with this, after its {"kind": "stopped"} event.
+STOPPED_EXIT = 5
+
+
+def _descendants(pid):
+    """Every process under [pid] (claude's MCP servers and the tool commands it runs), via /proc; [] where there's no
+    /proc (macOS: claude alone is stopped, its own children follow its stdin closing)."""
+    children = {}
+    try:
+        names = os.listdir("/proc")
+    except OSError:
+        return []
+    for name in names:
+        if not name.isdigit():
+            continue
+        try:
+            with open(f"/proc/{name}/stat") as f:
+                ppid = int(f.read().rsplit(")", 1)[1].split()[1])
+        except (OSError, ValueError, IndexError):
+            continue
+        children.setdefault(ppid, []).append(int(name))
+    out, todo = [], [pid]
+    while todo:
+        for c in children.get(todo.pop(), []):
+            out.append(c)
+            todo.append(c)
+    return out
+
+
+def stop_turn(store):
+    """`--stop`: ends the one-shot turn running against [store] (SIGTERM to its broker, which stops claude and says
+    "stopped"). True when one was running. A stale pid file (the broker died) or a reused pid is left alone."""
+    path = os.path.join(store, TURN_PID)
+    try:
+        with open(path) as f:
+            pid = int(f.read().strip())
+    except (OSError, ValueError):
+        return False
+    try:
+        with open(f"/proc/{pid}/cmdline", "rb") as f:
+            if b"manager.py" not in f.read():
+                return False
+    except OSError:
+        pass   # no /proc (macOS): kill(0) below still tells a live pid from a dead one
+    try:
+        os.kill(pid, signal.SIGTERM)
+    except (ProcessLookupError, PermissionError):
+        return False
+    return True
+
+
 class Manager:
     def __init__(self, args, sink=None, enable_inbox=True):
         self.args = args
@@ -103,6 +157,8 @@ class Manager:
         self.pending = queue.Queue()      # (source, text) awaiting send
         self.busy = threading.Event()     # set while a turn is in flight
         self.stop = threading.Event()
+        # Set by `--stop` (SIGTERM, the chat's stop button): the turn under way ends now, what it said so far stays.
+        self.stopped = threading.Event()
         self.proc = None
         self.turns_done = 0
         # A `result` with no assistant/tool event since the last one: Claude Code's own housekeeping turn (a resumed
@@ -400,25 +456,69 @@ class Manager:
             threading.Thread(target=self.inbox_loop, daemon=True).start()
 
     def once(self, text, timeout=300, source="user"):
-        """Run a single turn against the per-dir session, then exit. Widget path."""
+        """Run a single turn against the per-dir session, then exit. Widget path. `--stop` (SIGTERM) ends it early:
+        claude and everything it started are stopped, a {"kind": "stopped"} event goes out, the exit is STOPPED_EXIT."""
         self.enable_inbox = False
-        self.start()
-        self._spawn_workers()
-        self.pending.put((source, text))
-        t0 = time.time()
-        # Done on the first turn that answered; two empty results in a row (a turn that truly said nothing) end it too.
-        while self.turns_done < 1 and self.empty_results < 2 and not self.stop.is_set():
-            if time.time() - t0 > timeout:
-                break
-            time.sleep(0.05)
-        self.shutdown()
+        pid_file = os.path.join(self.args.session_store, TURN_PID)
+        prev = signal.signal(signal.SIGTERM, lambda *_: self.stopped.set())
+        try:
+            with open(pid_file, "w") as f:
+                f.write(str(os.getpid()))
+        except OSError:
+            pid_file = None
+        try:
+            self.start()
+            self._spawn_workers()
+            self.pending.put((source, text))
+            t0 = time.time()
+            # Done on the first turn that answered; two empty results in a row (a turn that truly said nothing) end it too.
+            while (self.turns_done < 1 and self.empty_results < 2 and not self.stop.is_set()
+                   and not self.stopped.is_set()):
+                if time.time() - t0 > timeout:
+                    break
+                time.sleep(0.05)
+            if self.stopped.is_set():
+                self._halt()
+                self._emit({"kind": "stopped"})
+            self.shutdown()
+        finally:
+            signal.signal(signal.SIGTERM, prev)
+            if pid_file:
+                try:
+                    os.remove(pid_file)
+                except OSError:
+                    pass
+        return STOPPED_EXIT if self.stopped.is_set() else 0
+
+    def _halt(self):
+        """Stops claude mid-turn, and whatever it started (tool commands, MCP servers): TERM, then KILL after 3 s. Its
+        session keeps every message it got so far, so the next turn resumes it."""
+        self.stop.set()
+        if not self.proc or self.proc.poll() is not None:
+            return
+        kids = _descendants(self.proc.pid)
+        for pid in [self.proc.pid] + kids:
+            try:
+                os.kill(pid, signal.SIGTERM)
+            except OSError:
+                pass
+        try:
+            self.proc.wait(timeout=3)
+        except subprocess.TimeoutExpired:
+            pass
+        for pid in [self.proc.pid] + kids:
+            try:
+                os.kill(pid, signal.SIGKILL)
+            except OSError:
+                pass
 
     def once_inbox(self, timeout=300):
         """One turn made of what's waiting in the inbox (a frontend that runs one turn at a time - the phone's chat -
         has no watcher between turns; it calls this when mail arrives). Nothing waiting: no turn, no output."""
         texts = self.take_inbox()
         if texts:
-            self.once("\n\n".join(texts), timeout=timeout, source="inbox")
+            return self.once("\n\n".join(texts), timeout=timeout, source="inbox")
+        return 0
 
     def repl(self):
         self.start()
@@ -520,6 +620,8 @@ def main():
                   install when claude itself isn't installed (whatever the sign-in)
   --install       install Claude Code now (the AI page's Install Claude), its progress on stderr
   --signin        Claude Code's own login (claude auth login), in a terminal; --signout its logout
+  --stop          stop the one-shot turn under way (the chat's stop button): it says {"kind": "stopped"},
+                  exits 5, what it answered so far stays; prints stopped / idle
 
 MCP servers the launcher gives it (--mcp-config-file):
   comms     mail, the board's handoffs, present/present_choices (powos comms help)
@@ -544,11 +646,18 @@ MCP servers the launcher gives it (--mcp-config-file):
                     help="Emit one normalized JSON event per line (for the widget).")
     ap.add_argument("--list-json", action="store_true",
                     help="Emit sidebar data (projects + agents) as JSON and exit.")
+    ap.add_argument("--stop", action="store_true",
+                    help="Stop the one-shot turn running against this session store (the chat's stop button): "
+                         "prints stopped / idle, status 0 / 1.")
     args = ap.parse_args()
 
     if args.list_json:
         list_json(args)
         return
+    if args.stop:
+        ok = stop_turn(args.session_store)
+        print("stopped" if ok else "idle")
+        sys.exit(0 if ok else 1)
     # Live output: line-buffer so a pipe/widget consumer sees each event as it
     # renders (a block-buffered pipe would swallow everything until exit).
     # UTF-8 stdio whatever the locale (the phone's chat writes the turn as UTF-8; an emoji in mail must not kill the
@@ -562,11 +671,11 @@ MCP servers the launcher gives it (--mcp-config-file):
     if args.json_events:
         m.sink = m._json_sink
     if args.once_inbox:
-        m.once_inbox()
+        sys.exit(m.once_inbox())
     elif args.once_stdin:
-        m.once(sys.stdin.read().strip())
+        sys.exit(m.once(sys.stdin.read().strip()))
     elif args.once is not None:
-        m.once(args.once)
+        sys.exit(m.once(args.once))
     else:
         m.repl()
 

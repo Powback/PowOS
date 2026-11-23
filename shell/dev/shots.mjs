@@ -559,6 +559,12 @@ const SCENES = [
   ["ai-v2-calm", "home", board(true).replace("P.board.value = B.map", "P.board.value = B.filter((r) => r.status !== 'waiting').map"), "wallpaper"],
   ["queued", "home", `S.chat.value = { busy: true, items: ${CHAT_SAMPLE}.slice(0, 3), queued: [{ id: 1, text: "also check the battery health" }, { id: 2, text: "and remind me at 6 to charge it" }] }; S.chatting.value = true; S.drawer.value = 1;`, "wallpaper"],
   ["queued-ai", "home", `S.chat.value = { busy: true, items: ${CHAT_SAMPLE}.slice(0, 3), queued: [{ id: 1, text: "also check the battery health" }, { id: 2, text: "and remind me at 6 to charge it" }] }; S.page.value = -1;`, "wallpaper"],
+  // The stop button (bar.tsx Stop): PowOS AI answering, the pill's send is stop - the AI page, the drawer's chat, the
+  // side button's overlay; then stopped (the partial answer, a quiet "stopped", send gone).
+  ["ai-stop", "home", `S.chat.value = { busy: true, stoppable: true, items: ${CHAT_SAMPLE}.slice(0, 3) }; S.page.value = -1;`, "wallpaper"],
+  ["chat-stop", "home", `S.chat.value = { busy: true, stoppable: true, items: ${CHAT_SAMPLE}.slice(0, 3) }; S.chatting.value = true; S.drawer.value = 1;`, "wallpaper"],
+  ["assist-stop", "assist", `await sleep(200); E.emit('assist.context', { text: 'Inbox - 3 unread', screenshot: window.__shotsApp }); await sleep(1500); S.chat.value = { busy: true, stoppable: true, items: ${CHAT_SAMPLE}.slice(0, 3) };`, "app"],
+  ["ai-stopped", "home", `S.chat.value = { busy: false, stoppable: true, items: [...${CHAT_SAMPLE}.slice(0, 3), { kind: "note", text: "stopped", error: false }] }; S.page.value = -1;`, "wallpaper"],
   ["kbd-chat", "home", `E.emit('system.insets', { top: 45, bottom: 16, left: 0, right: 0, keyboard: 330 }); S.chat.value = { busy: false, items: ${CHAT_SAMPLE} }; S.chatting.value = true; S.drawer.value = 1;`, "wallpaper"],
   ["kbd-ai", "home", `E.emit('system.insets', { top: 45, bottom: 16, left: 0, right: 0, keyboard: 330 }); S.page.value = -1;`, "wallpaper"],
   ["kbd-assist", "assist", "E.emit('system.insets', { top: 45, bottom: 16, left: 0, right: 0, keyboard: 0 }); await sleep(200); E.emit('assist.context', { text: 'Inbox - 3 unread', screenshot: window.__shotsApp });", "app"],

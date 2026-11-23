@@ -27,6 +27,8 @@ export const icons = {
   // The assist overlay's "Open in PowOS AI" (assist.tsx): MDI "arrow-top-right".
   arrowTopRight: "M5,17.59L15.59,7H9V5H19V15H17V8.41L6.41,19L5,17.59Z",
   arrowUp: "M13,20H11V8L5.5,13.5L4.08,12.08L12,4.16L19.92,12.08L18.5,13.5L13,8V20Z",
+  // The pill's send while PowOS AI answers (bar.tsx Send): stop. MDI "stop" with rounded corners.
+  stop: "M8,6H16A2,2 0 0 1 18,8V16A2,2 0 0 1 16,18H8A2,2 0 0 1 6,16V8A2,2 0 0 1 8,6Z",
   arrowDown: "M11,4H13V16L18.5,10.5L19.92,11.92L12,19.84L4.08,11.92L5.5,10.5L11,16V4Z",
   arrowLeft: "M20,11V13H8L13.5,18.5L12.08,19.92L4.16,12L12.08,4.08L13.5,5.5L8,11H20Z",
   arrowRight: "M4,11V13H16L10.5,18.5L11.92,19.92L19.84,12L11.92,4.08L10.5,5.5L16,11H4Z",

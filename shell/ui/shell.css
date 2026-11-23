@@ -411,6 +411,9 @@
   transition: width var(--spring-fast-ms) var(--spring-fast), margin-left var(--spring-fast-ms) var(--spring-fast), opacity var(--spring-fast-ms) var(--spring-fast);
 }
 .pill .send.shown { width: 40px; margin-left: 0; opacity: 1; pointer-events: auto; }
+/* The same button while PowOS AI answers and the field is empty (bar.tsx Send [stop]): a square in the arrow's place,
+   its tap stops the answer. Its own class, not .shown - "shown" means there is something to send. */
+.pill .send.stop { width: 40px; margin-left: 0; opacity: 1; pointer-events: auto; }
 @media (prefers-reduced-motion: reduce) { .pill .send { transition: none; } }
 /* A send tapped mid-dictation, waiting (<= 3 s) for the recognizer's final words (dictation.ts finish): a small ring
    spins in the arrow's place; it's mounted only while waiting, so a settled pill draws nothing. */

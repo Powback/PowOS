@@ -464,6 +464,7 @@ export function Assist() {
           <Pill
             target={mic}
             send
+            stop
             sending={sending.value}
             value={hearing(mic) ?? draft.value}
             onInput={(v: string) => {

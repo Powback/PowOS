@@ -27,6 +27,7 @@ import type {
   ChromeState,
   Cell,
   Chat,
+  ChatItem,
   ClaudeSignInState,
   DesktopWindow,
   VirtualDesktop,
@@ -514,7 +515,28 @@ function mock(): Bridge {
   const recent = ["a:chrome", "l:konsole", "a:spotify", "a:signal", "l:dolphin", "a:youtube"];
   const data = (name: string) => `powos-shell:${name}`;
   let samples: Promise<Record<string, unknown>> | null = null;
-  let chat: Chat = { busy: false, items: [], queued: [] };
+  let chat: Chat = { busy: false, items: [], queued: [], stoppable: true };
+  /** The mock turn under way's stop (ai.stop): ends it as PowosAiChat.stop does. */
+  let stopTurn: (() => void) | null = null;
+  /**
+   * The mock turn's body: a step, then the answer after 600 ms - or, for a long ask ("long" in it), the start of an
+   * answer and 30 s more, so the stop button can be seen and tapped (the gate's ai-stop scenes). True: stopped (ai.stop).
+   */
+  async function mockTurn(text: string, step: (next: Partial<Chat>) => void): Promise<boolean> {
+    let stopped = false;
+    const wait = (ms: number) =>
+      new Promise<void>((r) => {
+        const t = setTimeout(r, ms);
+        stopTurn = () => ((stopped = true), clearTimeout(t), r());
+      });
+    await wait(400);
+    if (!stopped) step({ items: [...chat.items, { kind: "tool", name: "Bash", hint: "powos status", ok: null }] });
+    const long = /\blong\b/i.test(text);
+    if (!stopped && long) step({ items: [...chat.items, { kind: "assistant", text: "(mock) Here is the start of a long answer…" }] });
+    if (!stopped) await wait(long ? 30000 : 600);
+    stopTurn = null;
+    return stopped;
+  }
   // Dev tools / the gate: the mock host's chat set by hand (its later events build on it, as the host's would).
   (window as unknown as { __mockChat?: (next: Partial<Chat>) => void }).__mockChat = (next) => events.emit("ai.changed", (chat = { ...chat, ...next }));
   let screen: WidgetScreen = { key: null };
@@ -698,20 +720,11 @@ function mock(): Bridge {
         // Mid-turn: queued, as PowosAiChat does; the next turn when this one ends.
         if (chat.busy) return void step({ queued: [...(chat.queued ?? []), { id: Date.now(), text }] });
         step({ busy: true, items: [...chat.items, { kind: "user", text }] });
-        await new Promise((r) => setTimeout(r, 400));
-        step({
-          items: [...chat.items, { kind: "tool", name: "Bash", hint: "powos status", ok: null }],
-        });
-        await new Promise((r) => setTimeout(r, 600));
-        const items = chat.items.slice(0, -1);
-        step({
-          busy: false,
-          items: [
-            ...items,
-            { kind: "tool", name: "Bash", hint: "powos status", ok: true },
-            { kind: "assistant", text: `(mock) You asked: ${text}` },
-          ],
-        });
+        const stopped = await mockTurn(text, step);
+        // Its running step done (or not, stopped), then its answer - or a quiet "stopped", as PowosAiChat.stopped.
+        const items = chat.items.map((i) => (i.kind === "tool" && i.ok == null ? { ...i, ok: !stopped } : i));
+        const end: ChatItem = stopped ? { kind: "note", text: "stopped", error: false } : { kind: "assistant", text: `(mock) You asked: ${text}` };
+        step({ busy: false, stopping: false, items: [...items, end] });
         const next = chat.queued?.[0];
         if (next) {
           step({ queued: chat.queued!.slice(1) });
@@ -719,6 +732,12 @@ function mock(): Bridge {
         }
       },
       unqueue: async (id) => void events.emit("ai.changed", (chat = { ...chat, queued: (chat.queued ?? []).filter((q) => q.id !== id) })),
+      stop: async () => {
+        if (!chat.busy || chat.stopping || !stopTurn) return;
+        events.emit("ai.changed", (chat = { ...chat, stopping: true }));
+        // The host's stop takes a moment (powos manager --stop): the page's button has already turned back to send.
+        setTimeout(() => stopTurn?.(), 300);
+      },
       verdict: async (task, works, line) => console.log(`[mock] verdict: ${task} ${works ? "works" : "still broken"}${line ? ` (${line})` : ""}`),
       verifyGo: async (task) => {
         console.log(`[mock] test now: ${task}`);

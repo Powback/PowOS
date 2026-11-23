@@ -223,6 +223,99 @@ class OnceModeTests(unittest.TestCase):
         self.assertTrue(any("projB" in f for f in files))
 
 
+# A claude that starts answering, then hangs mid-turn (a long reply) - with a child of its own (a tool command), whose
+# pid it writes to STUB_CHILD_PID so the test can check it was stopped too.
+HANG_STUB = textwrap.dedent("""
+    import sys, json, os, subprocess, time
+    def emit(o):
+        sys.stdout.write(json.dumps(o) + '\\n'); sys.stdout.flush()
+    emit({'type': 'system', 'subtype': 'init', 'session_id': 'stub-hang', 'tools': [], 'mcp_servers': []})
+    for line in sys.stdin:
+        if not line.strip():
+            continue
+        child = subprocess.Popen([sys.executable, '-c', 'import time; time.sleep(120)'])
+        open(os.environ['STUB_CHILD_PID'], 'w').write(str(child.pid))
+        emit({'type': 'assistant', 'message': {'content': [{'type': 'text', 'text': 'partial answer'}]}})
+        time.sleep(120)
+""")
+
+
+class StopTests(unittest.TestCase):
+    """The chat's stop button: `manager.py --stop` ends the one-shot turn under way, end to end."""
+
+    def setUp(self):
+        self.tmp = tempfile.mkdtemp()
+        self.store = os.path.join(self.tmp, "store")
+        os.makedirs(self.store)
+        self.stub = os.path.join(self.tmp, "hang.py")
+        with open(self.stub, "w") as f:
+            f.write(HANG_STUB)
+        self.child_pid = os.path.join(self.tmp, "child.pid")
+
+    def tearDown(self):
+        import shutil
+        import signal
+        try:   # without /proc (macOS) the broker can't find claude's child: never leave it behind
+            os.kill(int(open(self.child_pid).read()), signal.SIGKILL)
+        except (OSError, ValueError):
+            pass
+        shutil.rmtree(self.tmp, ignore_errors=True)
+
+    def _stop(self):
+        return subprocess.run([sys.executable, BROKER, "--session-store", self.store, "--stop"],
+                              capture_output=True, text=True, timeout=20)
+
+    def test_stop_ends_the_turn_keeps_the_partial_reply(self):
+        env = dict(os.environ, MANAGER_CLAUDE_CMD=f"{sys.executable} {self.stub}", POWOS_MANAGER_SAFE="1",
+                   POWOS_MANAGER_ASKS="0", NO_COLOR="1", STUB_CHILD_PID=self.child_pid)
+        p = subprocess.Popen([sys.executable, BROKER, "--agent-id", "manager", "--session-store", self.store,
+                              "--json-events", "--once", "write me a long essay"],
+                             stdout=subprocess.PIPE, text=True, env=env, cwd=self.tmp)
+        try:
+            # The reply has begun: the partial answer is out.
+            first = []
+            for line in p.stdout:
+                first.append(json.loads(line))
+                if first[-1]["kind"] == "assistant":
+                    break
+            self.assertTrue(os.path.exists(os.path.join(self.store, "turn.pid")))
+            t0 = time.time()
+            r = self._stop()
+            self.assertEqual(r.stdout.strip(), "stopped")
+            self.assertEqual(r.returncode, 0)
+            rest = [json.loads(l) for l in p.stdout if l.strip()]
+            rc = p.wait(timeout=15)
+            self.assertLess(time.time() - t0, 8, "the stop took too long")
+        finally:
+            if p.poll() is None:
+                p.kill()
+            p.stdout.close()
+        self.assertEqual(rc, 5)
+        self.assertIn("partial answer", [e.get("text") for e in first])
+        self.assertEqual([e["kind"] for e in rest][-1:], ["stopped"])
+        self.assertFalse(os.path.exists(os.path.join(self.store, "turn.pid")))
+        # claude's own child (a tool command) was stopped too, where /proc lets the broker find it.
+        if os.path.isdir("/proc"):
+            pid = int(open(self.child_pid).read())
+            time.sleep(0.5)
+            try:
+                with open(f"/proc/{pid}/stat") as f:
+                    state = f.read().rsplit(")", 1)[1].split()[0]
+            except OSError:
+                state = "gone"
+            self.assertIn(state, ("gone", "Z"))
+        # Nothing running now: a second stop says so.
+        r = self._stop()
+        self.assertEqual((r.stdout.strip(), r.returncode), ("idle", 1))
+
+    def test_stop_with_nothing_running_or_a_stale_pid(self):
+        self.assertEqual(self._stop().stdout.strip(), "idle")
+        with open(os.path.join(self.store, "turn.pid"), "w") as f:
+            f.write("999999")
+        r = self._stop()
+        self.assertEqual((r.stdout.strip(), r.returncode), ("idle", 1))
+
+
 class ListJsonTests(unittest.TestCase):
     """Sidebar data feed for the widget."""
 

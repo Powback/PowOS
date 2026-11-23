@@ -17,7 +17,7 @@ import { followOpenness, pageDragging } from "./gesture.ts";
 import { chatting, drawer, homePage, launcherIsOverlay, openPanel, page, pullKind, pullPage, query, sharesBar } from "../state.ts";
 import { powos } from "../bridge.ts";
 import { tick } from "./haptics.ts";
-import { askQueued, pillTarget, sending, takeOver } from "./assistant.ts";
+import { answering, askQueued, pillTarget, sending, stopAnswer, takeOver } from "./assistant.ts";
 import { dictate, drop, finish, finishing, forget, hearing, listen, listeningFor, makeHold, micOn, release, settle, speech, stopTap, type MicTarget } from "./dictation.ts";
 import { remoteHearing, startBarSync } from "./barsync.ts";
 
@@ -183,6 +183,27 @@ const Send = memo(function Send({ shown, waiting }: { shown: boolean; waiting: b
 }, sameContent);
 
 /**
+ * Send's place while PowOS AI answers and the field is empty (PillSend): Stop (the user, 11-23: "pretty natively like
+ * the way the send button works") - the same 40 px button, a square in the arrow's place; its tap ends the turn
+ * (assistant.ts stopAnswer) and it's send again at once. Typing turns it back into send (a message queues behind).
+ */
+function Stop() {
+  return (
+    <button
+      type="button"
+      class="send stop"
+      aria-label="stop answering"
+      title="Stop"
+      // The field keeps its focus (and the keyboard stays as it was); the form's onClick (open, focus) isn't run.
+      onPointerDown={(e) => e.preventDefault()}
+      onClick={(e) => (e.stopPropagation(), stopAnswer())}
+    >
+      <Icon name="stop" size={20} />
+    </button>
+  );
+}
+
+/**
  * SB3: a submit of [form] (the send button, Enter) while one of [targets] dictates first ends the dictation and waits
  * for its final words (dictation.ts finish, ~3 s at most), then submits again - the form's own onSubmit then sends the
  * whole text, as Enter does, the mic off. A capture listener on the form runs before its (bubble) onSubmit.
@@ -216,13 +237,17 @@ function useSubmitFinishes(box: { current: HTMLDivElement | null }, targets: Mic
  *  (the field is empty until then) - and spinning while a send waits for a dictation's final words. */
 // Memo'd, with [targets] the pill's one array: it renders on its own when a dictation starts or ends - listeningFor
 // reads dictation.ts's pending, which changes with speech.value, read here so this subscribes to it (render scan
-// 11-23: PillSend 115 of 116 needless, "targets~" a new array on every pill render).
-const PillSend = memo(function PillSend({ targets, value }: { targets: MicTarget[]; value: string }) {
+// 11-23: PillSend 115 of 116 needless, "targets~" a new array on every pill render). [stop]: the pill asks PowOS AI -
+// while it answers (assistant.ts answering, a signal read here) and nothing is to be sent, Stop takes Send's place.
+const PillSend = memo(function PillSend({ targets, value, stop }: { targets: MicTarget[]; value: string; stop: boolean }) {
   void speech.value;
   const waiting = !!finishing.value && targets.includes(finishing.value);
   // SI1: the shared bar's text written by another window's dictation (home's, under the launcher): its send shows here.
   const elsewhere = targets.includes(barMic) && remoteHearing.value;
-  return <Send shown={!!value.trim() || waiting || elsewhere || targets.some(listeningFor)} waiting={waiting} />;
+  const shown = !!value.trim() || waiting || elsewhere || targets.some(listeningFor);
+  // Something to send wins: a message typed mid-answer queues behind it (assistant.ts askQueued).
+  if (stop && !shown && answering.value) return <Stop />;
+  return <Send shown={shown} waiting={waiting} />;
 });
 
 /**
@@ -266,6 +291,7 @@ export function Pill({
   hears = NO_HEARS,
   sending = false,
   send = false,
+  stop,
   hint,
   icon,
   class: cls = "",
@@ -279,6 +305,8 @@ export function Pill({
   sending?: boolean;
   /** A send button right of the mic while there's text (the bar's pill): submits the pill's form, as Enter does. */
   send?: boolean;
+  /** This pill asks PowOS AI: while it answers (and the field is empty) its send is a stop button (Send). */
+  stop?: boolean;
   /** OB1: the role's hint - a placeholder that keeps the leading glyph (the role's [icon]) beside it. */
   hint?: string;
   icon?: "apps" | "robotOutline";
@@ -301,7 +329,7 @@ export function Pill({
       <Lead empty={empty} filled={!!field.value} icon={icon} clear={clear} />
       <Field {...(field as { value: string; onInput: (v: string) => void })} placeholder={field.placeholder ?? fitted} />
       <Mic target={target} />
-      {send && <PillSend targets={targets} value={field.value} />}
+      {send && <PillSend targets={targets} value={field.value} stop={stop === true} />}
     </div>
   );
 }
@@ -415,6 +443,9 @@ function useOwnPress(onClick: () => void) {
   };
   return { onPointerDown, onClick: click };
 }
+
+/** The bar's send; it asks PowOS AI (its page's role, or a chat under way): then its send is stop while it answers. */
+const askProps = (role: BarRole, proxy: boolean) => ({ send: true, stop: !proxy && (role === "ai" || chatting.value) });
 
 /** The bar's send (Enter, the send button) in [role]: the manager's chat, a search hit, or asking PowOS AI. */
 function submit(role: BarRole) {
@@ -626,7 +657,7 @@ export function Bar({ proxy = false }: { proxy?: boolean }) {
       <Pill
         target={barMic}
         hears={BAR_HEARS()}
-        send
+        {...askProps(role, proxy)}
         sending={sending.value}
         inputRef={input}
         value={shown}

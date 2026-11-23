@@ -647,6 +647,8 @@ class ShellBridge(
                 if (a.optBoolean(1, true)) PowosAiActivity.keepInRecents(context) else Unit
             }
             "ai.unqueue" -> PowosAiChat.unqueue(a.getLong(0))
+            // The pill's stop button (it is the send button while a turn runs): ends the turn under way.
+            "ai.stop" -> PowosAiChat.stop()
             // How it's signed in, asked again (after the sign-in terminal ends); Settings > AI's Sign out.
             "ai.auth" -> PowosAiChat.checkAuth()
             "ai.signOut" -> PowosAiChat.signOut()
@@ -1680,6 +1682,9 @@ class ShellBridge(
     private fun aiChat() =
         JSONObject()
             .put("busy", PowosAiChat.busy)
+            // The stop button: this host can stop a turn (ai.stop), and is stopping one now.
+            .put("stoppable", true)
+            .put("stopping", PowosAiChat.stopping)
             .put("items", JSONArray(PowosAiChat.items.map { it.json() }))
             .put("thread", PowosAiChat.thread?.json() ?: JSONObject.NULL)
             .put("queued", JSONArray(PowosAiChat.queued.map { it.json() }))
