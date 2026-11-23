@@ -1,0 +1,3 @@
+#!/bin/bash
+# app-stop: stop the app, waypipe and the sampler (keeps /tmp/run for collection).
+pkill -x firefox; pkill -x kate; pkill -x dolphin; sleep 1; pkill -x waypipe; pkill -f waypipe-argbvideo; pkill -f netsample; pkill -x socat; true

@@ -1,0 +1,4 @@
+#!/usr/bin/env bash
+# dc ARGS...: docker compose for this measurement project on the job machine (POW_JOB_CONTEXT, default pow58).
+here=$(cd "$(dirname "$0")" && pwd)
+DOCKER_BUILDKIT=0 exec docker --context "${POW_JOB_CONTEXT:-pow58}" compose -f "$here/compose.yml" -p rmm "$@"

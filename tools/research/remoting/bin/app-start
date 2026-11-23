@@ -1,0 +1,17 @@
+#!/bin/bash
+# app-start MODE APP: (as u) start APP behind a waypipe server that reaches comp:5000 over TCP; 100 ms byte counters
+# of that TCP connection to /tmp/run/net.txt. MODE=local: start APP straight on this container's sway instead.
+. /opt/rm/common.sh
+mode=$1 app=$2
+pkill -x waypipe; pkill -f waypipe-argbvideo; pkill -x socat; pkill -f netsample; pkill -x firefox; pkill -x kate; pkill -x dolphin; sleep 0.5
+cmd=$(app_cmd "$app")
+if [ "$mode" = local ]; then
+  WAYLAND_DISPLAY=wayland-1 setsid dbus-run-session -- $cmd >/tmp/run/app.log 2>&1 &
+else
+  rm -f /tmp/run/wp.sock /tmp/run/net.txt
+  setsid socat UNIX-LISTEN:/tmp/run/wp.sock,fork TCP:comp:5000,nodelay >/tmp/run/socat.log 2>&1 &
+  sleep 0.3
+  setsid python3 /opt/rm/netsample.py >/tmp/run/net.txt 2>/tmp/run/netsample.err &
+  setsid $(wp_bin "$mode") $(wp_opts "$mode") -s /tmp/run/wp.sock server -- dbus-run-session -- $cmd >/tmp/run/app.log 2>&1 &
+fi
+echo "app up mode=$mode app=$app"

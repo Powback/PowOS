@@ -1,6 +1,6 @@
 # Native window remoting: showing remote windows above pixels
 
-Status: **research, 2026-11-23.** Docs only. Companion to `docs/REMOTE-WINDOWS.md` (PowStream pixel streaming into
+Status: **research, 2026-11-23; measured on `.58` the same day (§8).** Companion to `docs/REMOTE-WINDOWS.md` (PowStream pixel streaming into
 web windows) and `docs/WEB_WINDOWS.md` (Linux windows as native child surfaces on the OnePlus Open).
 
 The owner, 11-23: "Lets do some research and see if we can unlock a new native streaming technique, maybe we can even
@@ -212,7 +212,7 @@ Input = added network latency on the interactive path; Wi-Fi RTT assumed 2-10 ms
 | # | approach | layer | input → photon | bandwidth | fidelity | Wi-Fi loss | ARM↔x86 | effort | verdict |
 |---|---|---|---|---|---|---|---|---|---|
 | 1 | **Native browser + state hand-off** | 0 | local, 0 network [E] | ~0 after hand-off (KB of session) | native, 120 Hz | n/a | yes (data) | low-medium | **browsers: do this** |
-| 2 | **waypipe → phone KWin** (lossless, `--video` for motion) | 6 | RTT + app frame + diff ≈ 15-35 ms [E] | KB/s idle, 60-120 MB/s lossless scroll [E], ~4 MB/s video [S, 2019 game] | lossless text, real popups/IME/clipboard/resize | TCP: stalls on loss | yes | low (proto), medium (integrate) | **generic windows: prototype** |
+| 2 | **waypipe → phone KWin** (lossless, `--video` for motion) | 6 | measured §8: +2 ms per ms of one-way delay; Kate 9-20 ms, Firefox 14-25 ms p50 at 3-8 ms each way [M] | KB/s idle, 60-120 MB/s lossless scroll [E], ~4 MB/s video [S, 2019 game] | lossless text, real popups/IME/clipboard/resize | TCP: stalls on loss | yes | low (proto), medium (integrate) | **generic windows: prototype** |
 | 3 | PowStream per-window video (REMOTE-WINDOWS phase 2) | 7 | 20-30 ms p50 + 5-12 input [E, REMOTE-WINDOWS §3] | CBR, a few-tens Mb/s [E] | lossy text, no native popups | FEC, latest-wins | yes | already planned | games + fallback |
 | 4 | Xpra per window | 6/7 | like 3 [E] | adaptive | lossless UI, video motion, scroll vectors [S] | TCP/QUIC [K] | yes | medium (X11 side-system) | reference for encoder policy |
 | 5 | Browser compositor remoting (Blimp / WebRender DL) | 2 | **local scroll**, RTT for JS-driven changes | lowest (vector, cached glyphs/images) [S Menlo, no numbers] | vector, any DPI | needs reliable ordered | yes | browser fork, both ends, per version | dead end for us (Blimp deleted 2017, Castanets stalled) |
@@ -325,12 +325,16 @@ flight) for everything else. C and D are per-engine research; E is a dead end.
 ## 7. Open questions
 
 1. Current waypipe (0.10.x) on Wi-Fi: bytes/s and keystroke→photon for Firefox/Chromium with lossless vs `--video`
-   (§4 measurements 1-3). Nothing published.
+   (§4 measurements 1-3). Nothing published. **Measured 2026-11-23 on emulated Wi-Fi (§8.2)**; the real phone run is
+   §8.6.
 2. Can waypipe pick lossless vs video per *content* (static text vs scroll/video) instead of per buffer format? If
-   not, is a damage-size threshold patch small?
+   not, is a damage-size threshold patch small? **§8.2: no, it is per format, and stock 0.11.3 refuses Firefox's
+   ARGB8888 entirely (4-line patch fixes that); static text then stays lossy, so a lossless refresh after motion is
+   the next patch.**
 3. Does the phone's KWin (anland) accept waypipe's DMA-BUFs from Turnip/Vulkan on Adreno, or must the phone side use
    shm? Effect on the 120 Hz path through `native_consumer.c`?
-4. Waypipe over ssh/TCP under Wi-Fi loss: how bad is head-of-line blocking at p99? Would a QUIC transport (reusing
+4. Waypipe over ssh/TCP under Wi-Fi loss: how bad is head-of-line blocking at p99? **§8.2: 1% loss gave 236-267 ms
+   stalls (Firefox up to 6-8 per 35 s run).** Would a QUIC transport (reusing
    PowStream's B0/wtransport) be accepted upstream or need a fork?
 5. Hand-off: which session fields survive for the owner's top sites (logins via Firefox Sync vs Chromium sync; a
    self-hosted sync server is a new service and needs a yes)?
@@ -342,6 +346,233 @@ flight) for everything else. C and D are per-engine research; E is a dead end.
 9. Games A: which titles in the owner's library have an ARM-capable client and a separable server, beyond Minecraft?
 10. PowOS's own apps: should new apps be written as state + UI (Qt RemoteObjects-style or wasm components) so they can
     migrate across ARM/x86 like the owner's original idea? A design decision for the manager, not a measurement.
+
+---
+
+## 8. Measurements (2026-11-23)
+
+The owner, 11-23: "ok lets run a test for the most promising methods". Three experiments, fresh runs only; every number
+below is `[M]`. Scripts: `tools/research/remoting/` (one command each: `run-waypipe.sh`, `run-dirty.sh`,
+`run-criu.sh`, `run-fidelity.sh`; `report.py` prints these tables from `results/*.jsonl`; `cleanup.sh` removes the
+containers and images). No phone was used.
+
+### 8.1 Environment
+
+- `.58` (Ryzen 9 9950X3D2, Bazzite 44, kernel 7.2.9), rootless podman 5.8.9 over the `pow58` Docker context, Compose
+  project `rmm`, `cgroup_parent: nomad.slice` (the 24-thread job cap). comp = 4 cpus, app = 6, criu-a/b = 2 each.
+  The other tenants of .58 kept running (load average 5-10 during the runs).
+- One Arch Linux image for every container: sway 1.12 / wlroots 0.20.2 (headless backend, GLES2 on the Radeon 610M
+  iGPU render node, one 1920x1080 output at 120 Hz, key repeat 60/s), waypipe 0.11.3, Firefox 160.0.1,
+  Kate/Dolphin 26.08.3 (Qt 6.12), Mesa 26.3.1 (RADV with Vulkan video encode/decode H.264), libwayland 1.26, CRIU 4.3.1.
+- comp = the "phone": headless sway + `waypipe client` behind `socat TCP-LISTEN` (TCP_NODELAY). app = `waypipe server`
+  + the app, reaching comp over the containers' bridge (TCP, the same transport `waypipe ssh` uses, minus ssh crypto).
+- Phone Wi-Fi emulation: `tc netem` on **both** containers' eth0 egress, so the delay applies once per direction
+  (RTT ≈ 2 × delay): `delay 3ms 2ms` and `delay 8ms 4ms` (uniform jitter), each with `loss 0%` and `loss 1%`, all with
+  `rate 400mbit` (~50 MB/s, a realistic Open goodput; with a rate set netem keeps packets in order). "wired" = no qdisc.
+- Pages and inputs: Firefox on a local copy of Wikipedia's "Linux" article (styles/images still from Wikipedia, a
+  sticky textarea on top, Wikipedia's pulsating onboarding dot hidden). Kate on a 2.7k-line Python file (argparse.py,
+  syntax highlighting on). Dolphin on a 3,901-icon folder. Input through `wtype` (sway's virtual keyboard).
+- Phases per run: idle 10 s; typing 60 letters 150-300 ms apart; scroll 10 s (Firefox: JS scroll 12 px/frame, the
+  page's own rendering load; Kate/Dolphin: Down held, 60 repeats/s).
+- Latency = sway sends `wl_keyboard.key` (pressed) → the first `wl_surface.commit` carrying damage from the app's
+  connection, both from sway's `WAYLAND_DEBUG=server` log (libwayland's µs timestamps). That is input→frame-arrives at
+  the compositor; the compositor's own repaint (≤ 1 output frame, 8.3 ms here) and the panel are not included, nor is
+  the phone's input leg to the compositor. fps = damaged commits/s on the busiest surface; a stall = a frame gap or a
+  key→frame time > 100 ms. Bytes = `tcp_info` bytes_acked/bytes_received of the waypipe TCP connection, 100 ms samples.
+- Modes: `local` = the app straight on sway (the app's own baseline); `shm` = `waypipe --no-gpu`; `gpu` = waypipe
+  default (DMA-BUF via Vulkan, lossless LZ4 diffs); `video-stock` = `waypipe --video=h264`; `video` = the same release
+  built with a 4-line patch (`tools/research/remoting/waypipe-argb-video.patch`) that lets ARGB8888/ABGR8888 buffers
+  use video. H.264 encode/decode ran on the iGPU (waypipe reported hwenc/hwdec available; 0.11 has no switch for sw).
+
+### 8.2 Experiment 1: waypipe
+
+| app | mode | net (each way) | key→commit p50 / p95 / max ms | idle KB/s | typing KB/s | scroll fps | gap p95 / max ms | scroll MB/s avg / peak 1 s | stalls >100 ms (local) | retrans | bar |
+|---|---|---|---|---|---|---|---|---|---|---|---|
+| firefox | local | wired (none) | 3.7 / 4.4 / 4.8 | - | - | 122.7 | 8.2 / 139.6 | - | 1 (1) | - | - |
+| firefox | shm | wired (none) | 2.3 / 3.8 / 4.1 | 0.0 | 7.2 | 123.0 | 8.4 / 140.6 | 52.63 / 63.05 | 1 (1) | 0 | FAIL: scroll |
+| firefox | shm | 3±2 ms | 9.1 / 11.1 / 12.8 | 0.0 | 6.7 | 93.1 | 16.3 / 146.5 | 40.32 / 48.40 | 1 (1) | 0 | FAIL: scroll |
+| firefox | shm | 3±2 ms 1% loss | 9.8 / 20.3 / 27.4 | 0.0 | 6.3 | 78.3 | 23.7 / 254.8 | 34.35 / 45.41 | 3 (1) | 203 | FAIL: scroll,stalls |
+| firefox | shm | 8±4 ms | 21.9 / 30.0 / 40.6 | 0.0 | 6.8 | 50.2 | 25.8 / 135.9 | 22.87 / 28.61 | 1 (1) | 0 | FAIL: scroll |
+| firefox | shm | 8±4 ms 1% loss | 23.4 / 57.6 / 58.3 | 0.0 | 6.2 | 48.0 | 33.6 / 131.8 | 21.74 / 27.67 | 1 (1) | 53 | FAIL: scroll |
+| firefox | gpu | wired (none) | 6.4 / 8.2 / 8.7 | 0.0 | 7.8 | 123.2 | 8.3 / 143.4 | 51.54 / 61.80 | 1 (1) | 0 | FAIL: scroll |
+| firefox | gpu | 3±2 ms | 13.9 / 17.4 / 18.4 | 0.0 | 7.6 | 53.2 | 21.6 / 140.6 | 24.50 / 27.76 | 1 (1) | 0 | FAIL: scroll |
+| firefox | gpu | 3±2 ms 1% loss | 11.1 / 22.3 / 45.7 | 0.0 | 6.2 | 75.4 | 25.9 / 384.5 | 32.48 / 40.59 | 1 (1) | 351 | FAIL: scroll |
+| firefox | gpu | 8±4 ms | 25.4 / 36.6 / 39.1 | 0.0 | 7.4 | 32.2 | 34.8 / 107.6 | 14.72 / 17.80 | 1 (1) | 0 | FAIL: scroll |
+| firefox | gpu | 8±4 ms 1% loss | 29.1 / 64.2 / 106.1 | 0.0 | 7.1 | 27.9 | 48.6 / 267.4 | 12.28 / 16.66 | 6 (1) | 82 | FAIL: latency,scroll,stalls |
+| firefox | video-stock | wired (none) | 5.4 / 8.0 / 8.4 | 0.0 | 7.8 | 122.9 | 8.5 / 142.7 | 51.38 / 61.54 | 1 (1) | 0 | FAIL: scroll |
+| firefox | video-stock | 3±2 ms | 12.3 / 14.9 / 15.3 | 0.0 | 7.6 | 54.6 | 21.2 / 138.0 | 24.98 / 28.35 | 1 (1) | 0 | FAIL: scroll |
+| firefox | video-stock | 3±2 ms 1% loss | 12.5 / 22.1 / 28.4 | 0.0 | 7.7 | 43.4 | 27.6 / 250.5 | 19.22 / 25.86 | 7 (1) | 203 | FAIL: scroll,stalls |
+| firefox | video-stock | 8±4 ms | 26.6 / 39.1 / 58.1 | 0.0 | 7.4 | 31.6 | 34.9 / 101.9 | 14.43 / 17.44 | 1 (1) | 0 | FAIL: scroll |
+| firefox | video-stock | 8±4 ms 1% loss | 29.3 / 70.8 / 147.9 | 0.0 | 7.4 | 26.2 | 52.0 / 285.0 | 11.49 / 15.95 | 6 (1) | 84 | FAIL: latency,scroll,stalls |
+| firefox | video | wired (none) | 13.4 / 15.3 / 15.7 | 0.0 | 7.2 | 121.9 | 12.9 / 137.4 | 1.80 / 2.11 | 1 (1) | 0 | PASS |
+| firefox | video | 3±2 ms | 20.7 / 27.4 / 32.1 | 0.0 | 7.2 | 70.7 | 16.6 / 119.3 | 1.07 / 1.29 | 1 (1) | 0 | PASS |
+| firefox | video | 3±2 ms 1% loss | 18.0 / 25.1 / 33.4 | 0.0 | 6.5 | 64.8 | 16.9 / 232.2 | 0.95 / 1.13 | 5 (1) | 21 | FAIL: stalls |
+| firefox | video | 8±4 ms | 29.5 / 45.1 / 56.0 | 0.0 | 6.7 | 40.0 | 29.6 / 108.8 | 0.59 / 0.73 | 1 (1) | 0 | FAIL: scroll |
+| firefox | video | 8±4 ms 1% loss | 28.3 / 61.5 / 72.5 | 0.0 | 6.5 | 32.7 | 31.2 / 258.8 | 0.48 / 0.80 | 8 (1) | 14 | FAIL: latency,scroll,stalls |
+| kate | local | wired (none) | 1.7 / 2.5 / 2.7 | - | - | 98.0 | 16.7 / 285.2 | - | 2 (2) | - | - |
+| kate | shm | wired (none) | 2.6 / 3.5 / 5.2 | 1.0 | 49.8 | 97.3 | 16.8 / 315.7 | 14.04 / 20.23 | 2 (2) | 0 | PASS |
+| kate | shm | 3±2 ms | 9.0 / 11.8 / 13.2 | 1.0 | 49.3 | 97.3 | 17.2 / 309.3 | 13.43 / 19.51 | 2 (2) | 0 | PASS |
+| kate | shm | 3±2 ms 1% loss | 9.1 / 12.1 / 30.9 | 1.0 | 49.0 | 97.8 | 21.2 / 283.9 | 13.65 / 19.23 | 2 (2) | 195 | PASS |
+| kate | shm | 8±4 ms | 20.1 / 24.9 / 25.9 | 1.1 | 70.8 | 97.6 | 17.9 / 286.2 | 13.58 / 19.14 | 2 (2) | 0 | PASS |
+| kate | shm | 8±4 ms 1% loss | 20.0 / 25.6 / 236.3 | 1.0 | 49.4 | 94.2 | 21.8 / 283.4 | 12.79 / 19.21 | 4 (2) | 45 | FAIL: stalls |
+| kate | gpu | wired (none) | 2.5 / 3.2 / 3.6 | 1.0 | 48.6 | 97.3 | 17.0 / 315.8 | 13.34 / 19.04 | 2 (2) | 0 | PASS |
+| kate | gpu | 3±2 ms | 9.0 / 11.9 / 12.5 | 1.0 | 48.8 | 97.3 | 17.3 / 310.5 | 13.44 / 19.45 | 2 (2) | 0 | PASS |
+| kate | gpu | 3±2 ms 1% loss | 9.3 / 11.7 / 18.8 | 1.0 | 49.8 | 97.5 | 19.2 / 297.3 | 13.60 / 19.32 | 2 (2) | 82 | PASS |
+| kate | gpu | 8±4 ms | 19.6 / 24.7 / 26.7 | 1.0 | 50.0 | 97.5 | 17.5 / 301.7 | 13.54 / 19.18 | 2 (2) | 0 | PASS |
+| kate | gpu | 8±4 ms 1% loss | 19.3 / 25.0 / 61.7 | 1.0 | 28.6 | 95.7 | 32.0 / 282.6 | 13.16 / 18.10 | 2 (2) | 117 | PASS |
+| dolphin | local | wired (none) | 2.0 / 3.0 / 3.3 | - | - | 68.3 | 14.9 / 315.2 | - | 3 (3) | - | - |
+| dolphin | gpu | wired (none) | 2.0 / 3.3 / 3.7 | 0.0 | 821.2 | 70.2 | 14.3 / 285.4 | 25.57 / 62.06 | 3 (3) | 0 | PASS |
+| dolphin | gpu | 3±2 ms | 8.7 / 11.6 / 12.2 | 0.0 | 657.6 | 66.5 | 10.2 / 314.6 | 24.44 / 48.61 | 3 (3) | 0 | PASS |
+| dolphin | gpu | 3±2 ms 1% loss | 8.4 / 12.1 / 235.8 | 0.0 | 690.8 | 65.3 | 23.2 / 301.6 | 23.84 / 46.43 | 4 (3) | 186 | FAIL: stalls |
+| dolphin | gpu | 8±4 ms | 17.6 / 23.3 / 23.8 | 0.0 | 730.2 | 65.0 | 12.0 / 288.7 | 23.60 / 47.60 | 3 (3) | 0 | PASS |
+| dolphin | gpu | 8±4 ms 1% loss | 18.2 / 23.4 / 36.8 | 0.0 | 747.9 | 64.0 | 28.7 / 309.3 | 23.16 / 43.64 | 3 (3) | 36 | PASS |
+
+Bar (§4): key→commit ≤ 30 ms p50 / ≤ 60 ms p95; idle and typing ≤ 1 MB/s (both directions); scroll ≥ 60 fps with
+p95 gap ≤ 33 ms at ≤ 30 MB/s; at 1% loss no stall > 100 ms beyond the app's own (the "(local)" count: Firefox's own
+first-scroll hitch ~140 ms; Kate/Dolphin's ~300 ms gap when the Down repeat starts).
+
+Findings:
+
+1. **Stock `--video` never engages for Firefox.** waypipe 0.11.3 video-encodes only opaque DMA-BUF formats
+   (`src/video.rs` `supports_video_format`: XRGB/XBGR8888, 565, 2101010, 16161616); Firefox's toplevel is ARGB8888
+   even with `widget.transparent-windows=false`, so `video-stock` rows equal `gpu` (52 MB/s scroll). With the 4-line
+   patch, video works and looks right (screenshot checked): scroll 1.8 MB/s instead of 52 MB/s at 122 fps wired, for
+   +7 ms key→frame (13.4 vs 6.4 ms p50, the encode/decode). One unpatched observation from the first matrix: one
+   `video 3±2 1%` run sent lossless-sized traffic (38 MB/s); its re-run (in the table) used video. Not explained.
+   Kate and Dolphin draw into **shm** buffers (Qt raster), and waypipe only video-encodes DMA-BUFs, so video never
+   applies to them; they do not need it (≤ 26 MB/s average scroll lossless).
+2. **The frame-callback round trip caps fps at phone RTTs.** Even at 1 MB/s (video), Firefox's scroll fell from 122
+   fps (wired) to 71 fps at 3±2 ms and 40 fps at 8±4 ms per direction; lossless `gpu` fell to 53/32 fps. waypipe
+   forwards `wl_surface.frame` callbacks, so every frame waits a network round trip before the app draws the next one
+   (GSoC 2019 saw the same for games). Kate/Dolphin held ~97/65 fps because their scroll frames are cheap to send and
+   not callback-paced the same way. This, not bandwidth, is the first thing to fix for browsers: answer frame
+   callbacks on the app side (pace locally, waypipe server side) instead of round-tripping them.
+3. **Lossless browser scroll exceeds the bandwidth bar.** 52 MB/s average, 62 MB/s peak per second at 122 fps wired
+   (`gpu` and `shm` alike); under the 50 MB/s emulated link it self-limits to 15-40 MB/s by dropping to 32-93 fps.
+4. **Latency passes for every app without loss, up to 8±4 ms per direction**: Firefox lossless 25.4/36.6 ms (p50/p95),
+   video 29.5/45.1 ms (p50 at the bar); Kate 19.6/24.7 ms; Dolphin 17.6/23.3 ms. Each emulated millisecond of one-way
+   delay adds ~2 ms (one round trip per key).
+5. **1% loss produces stalls > 100 ms (TCP head-of-line blocking), as §2.1 predicted.** Firefox `gpu` 8±4 ms 1%:
+   6 stalls (app's own: 1), worst 267 ms frame gap, key p95 64 ms; `video` 8±4 1%: 8 stalls, worst 259 ms; Kate `shm`
+   8±4 1%: a 236 ms key; Dolphin 3±2 1%: a 236 ms key. Kate `gpu` at 1% loss stayed clean in this run. The loss row of
+   the bar needs a different transport (QUIC/unordered lanes, or FEC), not a different layer.
+6. **Idle is free, typing is small.** Firefox idle 0 B/s once the page's one animation (Wikipedia's pulsating dot,
+   kept for the first test run) is hidden; with it, a 128x64 px region repainted at 124 fps and cost 44 KB/s
+   lossless. Kate idle 1 KB/s (cursor blink). Typing: Firefox ~7 KB/s, Kate ~50 KB/s, Dolphin 0.5-0.8 MB/s (type-ahead
+   search redraws the view).
+7. **Fidelity** (`run-fidelity.sh`, Firefox after a 10 s scroll and a return to the top, 2 s static, vs the same state
+   drawn locally): `gpu` pixel-identical (0 px differ); `shm` ≤ 2 levels off on 69k px (Firefox's software renderer,
+   not the transport); `video` 36.5 dB PSNR, 882k px differ, 33.7k px off by > 16 levels: **waypipe's video mode leaves
+   the static page lossy** (no lossless refresh after motion stops).
+
+Bar verdicts: **Kate and Dolphin pass** every row except the loss row (one 236 ms key stall in 1 of Kate's 4 and 1
+of Dolphin's 2 runs with 1% loss). Firefox
+passes only with the ARGB video patch and only at 3±2 ms without loss (fps 71, 1.1 MB/s, 20.7/27.4 ms); at 8±4 ms it
+misses the fps bar (40), at 1% loss the stall bar, and its static text stays lossy. Lossless Firefox fails the
+scroll-bandwidth row everywhere.
+
+### 8.3 Experiment 2: dirty-memory rate (could a continuous memory mirror work?)
+
+`run-dirty.sh`: each app straight on sway (local), `bin/dirty.py` writes `4` to `/proc/<pid>/clear_refs` for the
+whole process tree, waits 100 ms or 1 s, then counts present-and-soft-dirty pages in `/proc/<pid>/pagemap` over all
+writable mappings; 10 s per state and interval, the 100 ms pass first. firefox-news = theguardian.com/international
+live (idle and scroll only; no text field).
+
+| app | state | 100 ms: mean / p95 / max MB/s | 1 s: mean / p95 / max MB/s | RSS MB | processes |
+|---|---|---|---|---|---|
+| firefox-wiki | idle | 52.43 / 223.62 / 1425.3 | 0.5 / 3.09 / 3.09 | 1515 | 11 |
+| firefox-wiki | typing | 65.58 / 109.86 / 455.32 | 17.55 / 50.38 / 50.38 | 1519 | 11 |
+| firefox-wiki | scroll | 66.43 / 130.45 / 160.18 | 12.24 / 28.1 / 28.1 | 1525 | 11 |
+| firefox-news | idle | 12.63 / 29.93 / 500.59 | 3.43 / 16.95 / 16.95 | 1561 | 11 |
+| firefox-news | scroll | 24.37 / 45.33 / 219.09 | 5.96 / 23.07 / 23.07 | 1547 | 11 |
+| kate | idle | 9.51 / 46.11 / 46.24 | 4.7 / 4.73 / 4.73 | 98 | 1 |
+| kate | typing | 50.15 / 97.73 / 180.84 | 11.02 / 18.49 / 18.49 | 111 | 1 |
+| kate | scroll | 5.32 / 8.99 / 106.27 | 1.81 / 10.79 / 10.79 | 127 | 1 |
+| dolphin | idle | 0.0 / 0.0 / 0.0 | 0.0 / 0.0 / 0.0 | 134 | 1 |
+| dolphin | typing | 95.72 / 197.99 / 489.41 | 17.23 / 28.15 / 28.15 | 147 | 1 |
+| dolphin | scroll | 3.44 / 2.25 / 149.84 | 1.7 / 15.2 / 15.2 | 147 | 1 |
+
+- At the granularity an interactive mirror needs (100 ms), Firefox dirties **52-66 MB/s on average with p95
+  110-224 MB/s and single 100 ms windows of 455 MB/s-1.4 GB/s** (GC, allocation, THP-sized writes); Kate 50 MB/s and
+  Dolphin 96 MB/s while typing. Even the 1 s granularity (useless for interaction: a 1 s mirror lag) needs 12-18 MB/s
+  for Firefox typing/scroll with 50 MB/s peaks.
+- Against ~50-100 MB/s Wi-Fi goodput this is at or over the whole link, before any page-fault round trips, and the
+  same interactions cost 1-2 MB/s as waypipe video or 7-50 KB/s as lossless typing. **A continuous memory mirror is
+  not viable over phone Wi-Fi**, independent of the ISA problem (§5): numbers confirm the dead-end verdict.
+- Caveats: GPU memory (DMA-BUFs/VRAM) is not counted (it would add to the mirror); a THP written once counts 2 MiB;
+  clearing soft-dirty write-protects every page, so the app pays one minor fault per first write per interval.
+
+### 8.4 Experiment 3: CRIU pre-copy hand-off (same ISA, container to container)
+
+`run-criu.sh`: vim in a tmux server (a terminal app; Kate is a Wayland client whose compositor connection CRIU cannot
+move), a separate process typing ~20 chars/s into it. Pre-copy = 3 × `criu pre-dump --track-mem` 1 s apart, each
+image dir streamed (tar over TCP) to criu-b right away, then the final `criu dump` (the app freezes here) streamed the
+same way and `criu restore -d` on criu-b. ITER 0 = plain stop-and-copy. vim-big = vim on a 256 MB text file.
+Freeze = final dump start → restore done on the destination, end to end (includes the transfer and the receiver's
+untar, which is why it exceeds dump + send + restore). Every restore was checked: vim alive on criu-b with the typed
+text in the buffer.
+
+| workload | RSS MB | pre-dumps | net (each way) | total ms | freeze ms (dump + send + restore) | bytes moved MB (pre-dumps + final) | restored + typed text kept |
+|---|---|---|---|---|---|---|---|
+| vim-small | 24 | 0 | wired (none) | 268 | 61 (24 + 17 + 15) | 18.13 (18.13) | yes |
+| vim-small | 24 | 3 | wired (none) | 3325 | 39 (17 + 4 + 15) | 23.92 (18.13+1.94+1.93 + 1.91) | yes |
+| vim-small | 24 | 0 | 3±2 ms | 1753 | 1548 (22 + 1290 + 17) | 18.13 (18.13) | yes |
+| vim-small | 24 | 3 | 3±2 ms | 4760 | 211 (18 + 15 + 17) | 23.93 (18.12+1.94+1.93 + 1.94) | yes |
+| vim-small | 24 | 0 | 8±4 ms 1% loss | 986 | 781 (23 + 687 + 17) | 18.13 (18.13) | yes |
+| vim-small | 24 | 3 | 8±4 ms 1% loss | 6150 | 453 (17 + 33 + 18) | 23.98 (18.13+1.96+1.93 + 1.96) | yes |
+| vim-big | 386 | 0 | wired (none) | 606 | 400 (104 + 169 + 123) | 389.23 (389.23) | yes |
+| vim-big | 386 | 3 | wired (none) | 4174 | 189 (46 + 5 + 135) | 397.26 (390.03+2.42+2.40 + 2.41) | yes |
+| vim-big | 386 | 0 | 3±2 ms | 8354 | 8149 (105 + 7865 + 127) | 389.23 (389.23) | yes |
+| vim-big | 386 | 3 | 3±2 ms | 12712 | 366 (39 + 18 + 136) | 397.37 (390.03+2.47+2.43 + 2.44) | yes |
+| vim-big | 386 | 0 | 8±4 ms 1% loss | 12030 | 11825 (117 + 11527 + 131) | 389.23 (389.23) | yes |
+| vim-big | 386 | 3 | 8±4 ms 1% loss | 16280 | 519 (39 + 34 + 133) | 397.35 (390.03+2.50+2.41 + 2.41) | yes |
+
+- **Rootless works without new host privileges**, with two conditions: capabilities inside podman's user namespace
+  (`SYS_ADMIN SYS_PTRACE CHECKPOINT_RESTORE NET_ADMIN SYS_RESOURCE DAC_READ_SEARCH`, seccomp unconfined, SELinux
+  label disabled; all container-level) and CRIU's **`--unprivileged`** mode. Without it, restore fails at
+  `SO_SNDBUFFORCE/SO_RCVBUFFORCE` ("Operation not permitted"): those need CAP_NET_ADMIN in the initial user
+  namespace, which rootless podman cannot have. `/proc/sys` is read-only in the container (`ns_last_pid`), CRIU used
+  clone3 set_tid instead. The destination needs the same files at the same paths (tmux's socket directory had to be
+  created) and the same PIDs free.
+- Pre-copy cuts the freeze from the full image to the last delta: vim-big 386 MB RSS, 389 MB image → freeze 8.1 s
+  (3±2 ms) / 11.8 s (8±4 ms 1%) stop-and-copy vs **366 / 519 ms** with 3 pre-dumps (wired: 400 → 189 ms). The cost
+  is ~2 % more bytes (397 vs 389 MB) and a longer total (12.7 / 16.3 s), dominated by the first full copy.
+- The emulated link moved the 389 MB first copy at 34-49 MB/s in the tabled runs; an earlier identical 3±2 ms
+  stop-and-copy (whose restore failed on a leftover pty from the previous run, since fixed) took 31.5 s (12 MB/s).
+  netem's rate cap plus queue drops make bulk TCP throughput vary up to 4x, so treat the multi-second rows as rough.
+- Scope: this is server↔server only (`.58` ↔ another x86 box). The phone is arm64 and cannot restore an x86 image;
+  hand-off to the phone stays at the state level (§2.5) or wasm (§5).
+
+### 8.5 What changes in the recommendation
+
+- **waypipe for non-browser Linux windows (Kate, Dolphin, Qt/KDE tools) is confirmed as the generic-window track**:
+  it meets latency, bandwidth, fps and fidelity at phone-like Wi-Fi without loss. The open item is the loss row:
+  ~240 ms stalls at 1% loss over TCP, so the integration should plan a non-TCP transport (QUIC with an unordered
+  diff lane, or the PowStream FEC lane) from the start.
+- **For Firefox/Chromium, the state hand-off (§4 Phase 1a) stays first.** waypipe can only meet the bar for a browser
+  with three changes, two of them waypipe patches: video for ARGB buffers (4 lines, measured working), local
+  frame-callback pacing on the server side (measured cap: 71 fps at 3±2 ms, 40 fps at 8±4 ms), a lossless refresh
+  after motion stops (static text is otherwise lossy), plus the transport fix above. Each is upstreamable; until then
+  a remoted browser is a fallback, not the default.
+- Memory mirroring and execution splitting stay dead ends (now with measured dirty rates). CRIU pre-copy is a viable
+  sub-second **server-to-server** move for terminal/headless apps (e.g. `.58` → gpu-195), not a phone path.
+
+### 8.6 Proposed phone follow-up (not run)
+
+One verify-queue job in a free window, never in the user's session, no Steam/game changes:
+
+1. Make waypipe 0.11.3 a registered unit in the phone's Arch Linux ARM chroot (same release as the server; the
+   patched build if the ARGB video patch is kept), no unmanaged install.
+2. On `.58`, start the measurement image as a Compose job (`tools/research/remoting/dc up -d app`, `tc` off) with
+   `waypipe --video=h264 server -- firefox …` / `-- kate …` reaching the phone over TCP.
+3. Check script `tools/phone/verify/waypipe-window.sh`, queued with `tools/phone/verify/queue.sh add waypipe-window
+   tools/phone/verify/waypipe-window.sh`: in the chroot, `WAYLAND_DISPLAY=<KWin socket> WAYLAND_DEBUG=client waypipe
+   -s /tmp/wp.sock client` + `socat TCP-LISTEN:5000 UNIX-CONNECT:/tmp/wp.sock`; confirm the window appears as a native
+   child surface of a web window (WEB_WINDOWS.md S6), screenshot it; inject the same 60 keys and a 10 s scroll
+   (KWin fake-input, or a key script inside the remote app if KWin's virtual keyboard is refused), and log
+   key→commit from the client-side `WAYLAND_DEBUG`, bytes from `ss -ti`, Wi-Fi RSSI and TCP retransmits.
+4. Pass/fail against the same bar as 8.2; film one run with the S25 at 240 fps for photon latency (REMOTE-WINDOWS §3).
+   Also answers §7 Q3 (does KWin on Adreno accept waypipe's DMA-BUFs, or must the client fall back to shm).
 
 ---
 
