@@ -494,6 +494,24 @@ export type NativePerf = { thresholdMs: number; blocks: NativeBlock[]; frameGaps
 /** The PowOS window in front (a game): its surface's presents since its consumer started; `at` = host epoch ms. */
 export type FrontPresents = { id: number; presented: number; undrawn: number; at: number };
 
+/**
+ * The battery (host: system/Charging.kt). An older host sends only level + charging: every other field is optional.
+ * speed is the charger's class by its power (W): slow < 5, normal, fast >= 7.5, superfast >= 20 (Charging.kt's header).
+ */
+export type Battery = {
+  level: number | null;
+  charging: boolean;
+  plugged?: "ac" | "usb" | "wireless" | "dock" | null;
+  full?: boolean;
+  /** Plugged in but not charging (battery protection holding it). */
+  held?: boolean;
+  speed?: "slow" | "normal" | "fast" | "superfast" | null;
+  watts?: number | null;
+  wattsFrom?: "charger" | "measured" | null;
+  /** ms until full: Android's own estimate, null when it can't tell. */
+  fullInMs?: number | null;
+};
+
 /** Visible system chrome is shared web UI; hosts supply state and perform scoped actions. */
 export interface ChromeState {
   kind: "window" | "grip" | "status";
@@ -1379,8 +1397,8 @@ export interface Bridge {
     insets(): Promise<Insets>;
     /** The display the host shows on now (dp), pushed as "system.display" on every fold/display change and on resume. An older host or the web shell has none: check. */
     display?(): Promise<{ widthDp: number; heightDp: number; displayId: number; rotation: number; folded: boolean }>;
-    /** The battery: level 0-100 (null when unknown) and whether it's charging. */
-    battery(): Promise<{ level: number | null; charging: boolean }>;
+    /** The battery: level 0-100 (null when unknown), whether it's charging and how (Battery; "battery.changed" while the lock face is up). */
+    battery(): Promise<Battery>;
     /** Pulls Android's notification shade down ([open], the default) or puts it away. */
     notifications(open?: boolean): Promise<boolean>;
     /**
@@ -1392,7 +1410,7 @@ export interface Bridge {
     glass(): Promise<GlassSource>;
   };
   /**
-   * Events: "apps.changed", "home.changed", "widget.tree", "system.back" (Android's Back), "system.home" (Home pressed while home shows), "keyboard.inset" (px, every frame of its slide), "system.insets", "system.display" (widthDp, heightDp, displayId, rotation, folded), "ai.changed" (a Chat), "ai.mail" (AgentMail[]), "assist.context" (AssistScreen), "shade.drag" ({ q }), "shade.panel" ({ panel: "notifications" | "control" }), "media.changed" (MediaState), "qs.changed" (QuickState), "qs.collapse" (a tile opened something: the panel goes), "lock.shown" (the face shown again), "shade.settle" ({ open }), "shade.peek" (PhoneNotification | null), "qt.drag" ({ side, y, q }) / "qt.settle" ({ open }) (Quick Tools), "home.panel" ({ kind }: home with its pull-up panel up), "home.panel.begin" / ".drag" ({ p }) / ".end" ({ open }) (the host's corner swipe over home: its launcher in place, gesture.ts), "recents.begin" / "recents.drag" / "recents.end" / "recents.show" / "recents.hide" / "recents.tasks" (Bridge.recents), "switcher.toggle", "ai.sessions" (AgentSession[]), "verify.state" (VerifyState), "widget.screen" (a WidgetScreen), "speech.state" / "speech.done" / "speech.permission", "theme.changed" (ThemeColors), "system.glass" (GlassSource), "notifications.changed" (NotificationList),
+   * Events: "apps.changed", "home.changed", "widget.tree", "system.back" (Android's Back), "system.home" (Home pressed while home shows), "keyboard.inset" (px, every frame of its slide), "system.insets", "system.display" (widthDp, heightDp, displayId, rotation, folded), "ai.changed" (a Chat), "ai.mail" (AgentMail[]), "assist.context" (AssistScreen), "shade.drag" ({ q }), "shade.panel" ({ panel: "notifications" | "control" }), "media.changed" (MediaState), "qs.changed" (QuickState), "qs.collapse" (a tile opened something: the panel goes), "lock.shown" (the face shown again), "battery.changed" (Battery, to the lock face), "shade.settle" ({ open }), "shade.peek" (PhoneNotification | null), "qt.drag" ({ side, y, q }) / "qt.settle" ({ open }) (Quick Tools), "home.panel" ({ kind }: home with its pull-up panel up), "home.panel.begin" / ".drag" ({ p }) / ".end" ({ open }) (the host's corner swipe over home: its launcher in place, gesture.ts), "recents.begin" / "recents.drag" / "recents.end" / "recents.show" / "recents.hide" / "recents.tasks" (Bridge.recents), "switcher.toggle", "ai.sessions" (AgentSession[]), "verify.state" (VerifyState), "widget.screen" (a WidgetScreen), "speech.state" / "speech.done" / "speech.permission", "theme.changed" (ThemeColors), "system.glass" (GlassSource), "notifications.changed" (NotificationList),
    * "appwidgets.frame" ({ id, url, scrolls }), "appwidgets.failed" ({ provider }), "files.changed" ({ path }, for hot reload), "windows.changed" (DesktopWindow[]), "agents.delta" (AgentsDelta), "agents.open" (the agents' notification tapped). Returns an unsubscribe function.
    */
   on(event: string, handler: (data: any) => void): () => void;

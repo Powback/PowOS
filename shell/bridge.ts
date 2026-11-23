@@ -1242,7 +1242,7 @@ function mock(): Bridge {
         keyboard: 0,
       }),
       notifications: async (open = true) => (console.log(`[mock] notification shade ${open ? "down" : "up"}`), true),
-      battery: async () => ({ level: 76, charging: false }),
+      battery: async () => ({ level: 76, charging: false, plugged: null, full: false, held: false, speed: null, watts: null, wattsFrom: null, fullInMs: null }),
       // No wallpaper to frost in a browser: the plain fills (ui/glass.ts's __glass.use() tries one by hand).
       glass: async () => ({ wallpaper: null, blurBehind: false }),
     },

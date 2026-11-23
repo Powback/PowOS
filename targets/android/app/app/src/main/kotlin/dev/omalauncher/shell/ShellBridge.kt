@@ -1507,14 +1507,8 @@ class ShellBridge(
     }
 
     /** The battery: its level (0-100) and whether it's charging, from Android's sticky battery broadcast. */
-    private fun battery(): JSONObject {
-        val b = context.registerReceiver(null, android.content.IntentFilter(android.content.Intent.ACTION_BATTERY_CHANGED))
-        val level = b?.getIntExtra(android.os.BatteryManager.EXTRA_LEVEL, -1) ?: -1
-        val scale = b?.getIntExtra(android.os.BatteryManager.EXTRA_SCALE, 100) ?: 100
-        val status = b?.getIntExtra(android.os.BatteryManager.EXTRA_STATUS, -1) ?: -1
-        val charging = status == android.os.BatteryManager.BATTERY_STATUS_CHARGING || status == android.os.BatteryManager.BATTERY_STATUS_FULL
-        return JSONObject().put("level", if (level < 0) JSONObject.NULL else level * 100 / scale).put("charging", charging)
-    }
+    /** The battery with how it charges (system/Charging.kt): the lock face's charging line reads it. */
+    private fun battery(): JSONObject = dev.omalauncher.system.Charging.read(context).json()
 
     /** The colors in use: the launcher's palette as CSS (what the page's tokens follow), and the theme's own by name. */
     private fun theme(): JSONObject {

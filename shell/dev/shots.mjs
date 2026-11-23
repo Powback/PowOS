@@ -354,6 +354,8 @@ const LOCK_NOTES =
   "const now = Math.floor(Date.now() / 1000); E.emit('notifications.changed', { available: true, items: [" +
   `['Signal', 'Mats', 'are we still on for tonight?', 120, ${ICON("#3a76f0")}], ['Gmail', 'Your order has shipped', 'It arrives Thursday.', 3600, ${ICON("#c5221f")}], ['PowOS', 'Update installed', 'The lock face follows the theme\\nThe shade opens where the finger starts\\nFaster unlock', 7200, ${ICON("#2e7d5b")}]` +
   "].map(([app, title, text, ago, icon], i) => ({ key: 'l' + i, app, icon, title, text, time: now - ago, clearable: true, profile: null, conversation: false })) });";
+/** The battery the lock face reads (lock.tsx: system.battery on lock.shown, then "battery.changed"), as the host sends it. */
+const CHARGE = (v) => ` await sleep(800); const B = (await U('./bridge.ts')).powos; const v = ${v}; B.system.battery = async () => v; E.emit('lock.shown', null); E.emit('battery.changed', v); await sleep(600);`;
 /**
  * The Friction page (PowOS AI's ⋯ › Friction, aifriction.tsx): open problems in three areas - a P0 by count, a P1, one
  * being fixed by a board task - and one fixed this week, set after the screen opens (its feed subscribes as it shows).
@@ -749,6 +751,9 @@ const SCENES = [
   ["lock", "lock", "", "wallpaper"],
   // The lock face with what's new (lock.tsx): the cards on THE backdrop over the dimmed wallpaper, the hint at the foot.
   ["lock-notes", "lock", LOCK_NOTES + " await sleep(600);", "wallpaper"],
+  // Charging on the lock face (charge.ts): a 25 W charger with Android's estimate, then a wireless pad with no estimate.
+  ["lock-charging", "lock", LOCK_NOTES + CHARGE("{ level: 64, charging: true, plugged: 'ac', full: false, held: false, speed: 'superfast', watts: 25, wattsFrom: 'charger', fullInMs: 3540000 }"), "wallpaper"],
+  ["lock-charging-wireless", "lock", CHARGE("{ level: 31, charging: true, plugged: 'wireless', full: false, held: false, speed: 'normal', watts: 5, wattsFrom: 'charger', fullInMs: null }"), "wallpaper"],
   // The screen-off display (aod.tsx): black, the time and date dimmed in the theme's colours, an icon per app.
   ["aod", "aod", LOCK_NOTES + " await sleep(400);", "wallpaper"],
   // The Friction page (aifriction.tsx), and one problem opened (its facts and the logged words).
