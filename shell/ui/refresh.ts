@@ -57,14 +57,33 @@ function ambient(a: Animation | undefined): boolean {
   return !!a.timeline && !(a.timeline instanceof DocumentTimeline);
 }
 
+/**
+ * The ambient CSS animations seen starting, per element: their end (a cancel - an infinite one never ends) is told
+ * from this, not by asking the element again. getAnimations() in an animationend forces a style recalc of the page in
+ * the middle of a frame - "#document.onanimationend refresh.ts:ended 22 ms, forced 21 ms" (perf-1795459755191) - and
+ * by then a finished animation is gone from the list anyway (a cancelled infinite one counted as a finish it never began).
+ */
+const ambientSeen = new WeakMap<Element, Set<string>>();
+
 function infinite(e: Event): boolean {
   if (!(e instanceof AnimationEvent)) return false;
-  return ambient((e.target as Element).getAnimations?.().find((x) => (x as CSSAnimation).animationName === e.animationName));
+  const el = e.target as Element;
+  if (!ambient(el.getAnimations?.().find((x) => (x as CSSAnimation).animationName === e.animationName))) return false;
+  let names = ambientSeen.get(el);
+  if (!names) ambientSeen.set(el, (names = new Set()));
+  names.add(e.animationName);
+  return true;
 }
 
 function started(e: Event) {
   if (infinite(e)) return;
   begin();
+}
+
+/** An ended/cancelled animation that was ambient at its start (no lookup: see ambientSeen). */
+function wasAmbient(e: Event): boolean {
+  if (!(e instanceof AnimationEvent)) return false;
+  return !!ambientSeen.get(e.target as Element)?.delete(e.animationName);
 }
 
 function begin() {
@@ -79,7 +98,7 @@ function begin() {
 }
 
 function ended(e: Event) {
-  if (infinite(e)) return;
+  if (wasAmbient(e)) return;
   finish();
 }
 

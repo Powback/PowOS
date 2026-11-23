@@ -295,6 +295,26 @@ export function Pill({
   );
 }
 
+/** Text widths per font for [useFittedHint] (an element-less context; a few hint forms per font, kept). */
+const hintWidths = new Map<string, Map<string, number>>();
+let hintCtx: OffscreenCanvasRenderingContext2D | CanvasRenderingContext2D | null | undefined;
+function hintWidth(font: string): (text: string) => number {
+  if (hintCtx === undefined)
+    hintCtx = typeof OffscreenCanvas === "function" ? new OffscreenCanvas(1, 1).getContext("2d") : document.createElement("canvas").getContext("2d");
+  let m = hintWidths.get(font);
+  if (!m) hintWidths.set(font, (m = new Map()));
+  const widths = m;
+  return (text) => {
+    let w = widths.get(text);
+    if (w === undefined) {
+      if (!hintCtx) return 0;
+      hintCtx.font = font;
+      widths.set(text, (w = hintCtx.measureText(text).width));
+    }
+    return w;
+  };
+}
+
 /** HF1: the longest of [hint]'s forms (HINT_FORMS) whose text fits the pill's field, re-picked as the field resizes. */
 function useFittedHint(box: { current: HTMLElement | null }, hint: string | undefined) {
   const [fit, setFit] = useState(hint);
@@ -302,16 +322,18 @@ function useFittedHint(box: { current: HTMLElement | null }, hint: string | unde
     const field = box.current?.querySelector("textarea");
     if (!field || !hint) return setFit(hint);
     const forms = HINT_FORMS[hint] ?? [hint];
-    const ctx = document.createElement("canvas").getContext("2d");
-    const pick = () => {
+    // Picked only in the ResizeObserver's callback (it fires once on observe, after layout and before paint): its
+    // content box is the room (no clientWidth/padding read), and the style is fresh there. A pick in the layout effect
+    // itself forced a layout of the page inside the touchend that swiped pages - "DIV.ontouchend 27 ms, forced 21 ms
+    // < pick (ui/bar.tsx)" in 3 of the long frames of perf-1795459755191. The text measured with no element (a
+    // DOM canvas's measureText brings the page's style up to date first), each form's width kept per font.
+    const pick = (room: number) => {
+      if (room <= 0) return setFit(forms[forms.length - 1]);
       const cs = getComputedStyle(field);
-      const room = field.clientWidth - (parseFloat(cs.paddingLeft) || 0) - (parseFloat(cs.paddingRight) || 0);
-      if (!ctx || room <= 0) return setFit(forms[forms.length - 1]);
-      ctx.font = `${cs.fontWeight} ${cs.fontSize} ${cs.fontFamily}`;
-      setFit(forms.find((f) => ctx.measureText(f).width <= room) ?? forms[forms.length - 1]);
+      const width = hintWidth(`${cs.fontWeight} ${cs.fontSize} ${cs.fontFamily}`);
+      setFit(forms.find((f) => width(f) <= room) ?? forms[forms.length - 1]);
     };
-    pick();
-    const ro = new ResizeObserver(pick);
+    const ro = new ResizeObserver((es) => pick(es[es.length - 1].contentRect.width));
     ro.observe(field);
     return () => ro.disconnect();
   }, [hint]);

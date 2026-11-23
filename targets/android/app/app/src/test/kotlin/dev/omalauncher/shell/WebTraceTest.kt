@@ -5,7 +5,7 @@ import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
-/** The fps meter's traces: pages may profile their JS (Document-Policy), the Chrome trace carries JS stacks + timeline. */
+/** The fps meter's traces: pages may profile their JS (Document-Policy), the Chrome trace carries the timeline (JS stacks: jsprofile.ts). */
 class WebTraceTest {
     @Test
     fun pagesMayProfileTheirJs() {
@@ -17,9 +17,11 @@ class WebTraceTest {
     }
 
     @Test
-    fun traceCarriesStacksAndTimeline() {
-        for (c in listOf("devtools.timeline", "disabled-by-default-v8.cpu_profiler", "blink.user_timing", "disabled-by-default-devtools.timeline.frame")) {
+    fun traceCarriesTimelineNotV8Sampler() {
+        for (c in listOf("devtools.timeline", "blink.user_timing", "disabled-by-default-devtools.timeline.frame")) {
             assertTrue(c, c in WebTrace.CATEGORIES)
         }
+        // V8's sampler froze each page ~0.7 s at the record tap (code logging): JS stacks come from jsprofile.ts.
+        assertTrue("v8 cpu_profiler must stay off", "disabled-by-default-v8.cpu_profiler" !in WebTrace.CATEGORIES)
     }
 }
