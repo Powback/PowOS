@@ -77,6 +77,9 @@ function order() {
   if (ids.join("\n") !== agentIds.value.join("\n")) agentIds.value = ids;
 }
 
+/** [a] and [b] differ in content (lists and maps of plain rows; a Map compared by its entries). */
+const changed = (a: unknown, b: unknown) => JSON.stringify(a instanceof Map ? [...a] : a) !== JSON.stringify(b instanceof Map ? [...b] : b);
+
 function apply(d: AgentsDelta) {
   if (d.full) {
     const keep = new Set((d.agents ?? []).map((a) => a.id));
@@ -93,14 +96,17 @@ function apply(d: AgentsDelta) {
     for (const id of d.tasksOf ?? []) next.delete(id);
     for (const t of d.tasks ?? []) next.set(t.agent, [...(next.get(t.agent) ?? []), t]);
     for (const l of next.values()) l.sort((a, b) => a.order - b.order);
-    tasks.value = next;
+    if (changed(tasks.value, next)) tasks.value = next;
   }
-  if (d.full) messages.value = d.messages ?? [];
-  else if (d.messages?.length) {
+  // A full delta (each new subscriber's, every visit to PowOS AI's page) carries the same lists again: kept when equal,
+  // so it re-renders nothing that didn't change (render scan 11-23: the status page re-rendered on every visit).
+  if (d.full) {
+    if (changed(messages.value, d.messages ?? [])) messages.value = d.messages ?? [];
+  } else if (d.messages?.length) {
     const have = new Set(messages.value.map((m) => m.id));
     messages.value = [...messages.value, ...d.messages.filter((m) => !have.has(m.id))].slice(-50);
   }
-  if (d.full || d.asks) asks.value = d.asks ?? [];
+  if ((d.full || d.asks) && changed(asks.value, d.asks ?? [])) asks.value = d.asks ?? [];
   if (d.eventsOf && d.eventsOf === recent.value.agent) recent.value = { agent: d.eventsOf, events: d.events ?? [], convo: d.convo ?? recent.value.convo };
   if (d.full || d.agents || d.gone) order();
 }

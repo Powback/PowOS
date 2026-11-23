@@ -7,7 +7,7 @@
  * to deciding which it is.
  */
 import { memo, sameContent } from "./memo.ts";
-import { useEffect, useLayoutEffect, useRef, useState } from "preact/hooks";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "preact/hooks";
 import { computed } from "@preact/signals";
 import type { Ref } from "preact";
 import { GrowField } from "./grow.tsx";
@@ -214,14 +214,16 @@ function useSubmitFinishes(box: { current: HTMLDivElement | null }, targets: Mic
 
 /** The pill's send: shown while there's text, or while one of [targets] dictates - before its first words land too
  *  (the field is empty until then) - and spinning while a send waits for a dictation's final words. */
-// Not memo'd: it reads the dictation's state (listeningFor) that no prop or signal carries - the pill's render is its
-// cue. Its Send is memo'd, so these renders end here (render scan 11-06: Send 94 of 95 needless).
-function PillSend({ targets, value }: { targets: MicTarget[]; value: string }) {
+// Memo'd, with [targets] the pill's one array: it renders on its own when a dictation starts or ends - listeningFor
+// reads dictation.ts's pending, which changes with speech.value, read here so this subscribes to it (render scan
+// 11-23: PillSend 115 of 116 needless, "targets~" a new array on every pill render).
+const PillSend = memo(function PillSend({ targets, value }: { targets: MicTarget[]; value: string }) {
+  void speech.value;
   const waiting = !!finishing.value && targets.includes(finishing.value);
   // SI1: the shared bar's text written by another window's dictation (home's, under the launcher): its send shows here.
   const elsewhere = targets.includes(barMic) && remoteHearing.value;
   return <Send shown={!!value.trim() || waiting || elsewhere || targets.some(listeningFor)} waiting={waiting} />;
-}
+});
 
 /**
  * SB5 (the user, 2026-10-31 02:46: "we should have an x to clear on the left side of the inputs"): the pill's leading
@@ -229,7 +231,8 @@ function PillSend({ targets, value }: { targets: MicTarget[]; value: string }) {
  * the shared bar (barsync.ts) empties the other window's too - and ends a dictation into it without writing its words
  * back (dictation.ts drop). One 40 px slot either way (shell.css .pill .lead): the text never moves as it turns.
  */
-function Lead({ empty, filled, clear, icon }: { empty: boolean; filled: boolean; clear: () => void; icon?: "apps" | "robotOutline" }) {
+// Memo'd with a [clear] that lives as long as the pill (render scan 11-23: Lead 116 renders, "clear" new each time).
+const Lead = memo(function Lead({ empty, filled, clear, icon }: { empty: boolean; filled: boolean; clear: () => void; icon?: "apps" | "robotOutline" }) {
   return (
     <button
       type="button"
@@ -252,11 +255,15 @@ function Lead({ empty, filled, clear, icon }: { empty: boolean; filled: boolean;
       <Icon name="close" size={20} class="x" />
     </button>
   );
-}
+});
+
+/** GrowField re-rendered only when its props change: the bar's handlers live as long as the bar (stableHandlers). */
+const Field = memo(GrowField);
+const NO_HEARS: MicTarget[] = [];
 
 export function Pill({
   target,
-  hears = [],
+  hears = NO_HEARS,
   sending = false,
   send = false,
   hint,
@@ -282,13 +289,17 @@ export function Pill({
   // Empty and no status to say (listening, an error): the prompt glyph stands in for a placeholder (shell.css .prompt).
   const empty = !field.value && !field.placeholder;
   const box = useRef<HTMLDivElement>(null);
-  const targets = [target, ...hears];
+  // One array while the targets are the same (PillSend is memo'd on it), one clear for the pill's life (Lead is too).
+  const targets = useMemo(() => [target, ...hears], [target, ...hears]);
   useSubmitFinishes(box, targets);
   const fitted = useFittedHint(box, hint);
+  const latest = useRef({ targets, onInput: field.onInput as (v: string) => void });
+  latest.current = { targets, onInput: field.onInput };
+  const clear = useCallback(() => (drop(...latest.current.targets), latest.current.onInput("")), []);
   return (
     <div ref={box} class={`${cls} pill tile ${sending ? "sending" : ""} ${empty ? "empty" : ""}`}>
-      <Lead empty={empty} filled={!!field.value} icon={icon} clear={() => (drop(...targets), field.onInput(""))} />
-      <GrowField {...(field as { value: string; onInput: (v: string) => void })} placeholder={field.placeholder ?? fitted} />
+      <Lead empty={empty} filled={!!field.value} icon={icon} clear={clear} />
+      <Field {...(field as { value: string; onInput: (v: string) => void })} placeholder={field.placeholder ?? fitted} />
       <Mic target={target} />
       {send && <PillSend targets={targets} value={field.value} />}
     </div>
@@ -340,6 +351,9 @@ function useFittedHint(box: { current: HTMLElement | null }, hint: string | unde
   return fit;
 }
 
+/** The bar's other listener (the assistant's dictation writes into it too): one array, so the pill's stay the same. */
+let barHears: MicTarget[] | null = null;
+const BAR_HEARS = () => (barHears ??= [pillTarget]);
 /** The bar's field: a held mic asks PowOS AI, a tap dictates into the search; the drawer comes up to show either. */
 const barMic: MicTarget = {
   typed: () => query.value,
@@ -517,11 +531,20 @@ function useAiSeat(proxy: boolean) {
     if (!proxy) followOpenness(el);
     if (el && !proxy) startCountered(el);
   }).current;
-  const at = homePage && !proxy ? page.value : 0;
-  const dragging = homePage && !proxy && pageDragging.value;
+  return { formRef, form };
+}
+
+/**
+ * The seat's own render (nothing drawn): it reads the page and the finger on it, so a page swipe re-renders this - not
+ * the bar and its whole pill three times (finger down, page set, finger up: 116 pill renders in the user's 27 s of
+ * swipes, perf-1795459755191). Its layout effect runs in the same commit as the pages', as the bar's own did.
+ */
+function BarSeat({ form }: { form: { current: HTMLFormElement | null } }) {
+  const at = page.value;
+  const dragging = pageDragging.value;
   useLayoutEffect(() => {
     const el = form.current;
-    if (!el || !homePage || proxy) return;
+    if (!el) return;
     el.classList.toggle("sliding", dragging);
     seatOnAi(el);
     if (at !== -1) return;
@@ -541,7 +564,7 @@ function useAiSeat(proxy: boolean) {
     const off = powos.on("system.insets", () => requestAnimationFrame(() => seatOnAi(el)));
     return () => (ro.disconnect(), off());
   }, [at, dragging]);
-  return formRef;
+  return null;
 }
 
 /**
@@ -559,7 +582,27 @@ export function Bar({ proxy = false }: { proxy?: boolean }) {
   const shown = hearing(barMic) ?? hearing(pillTarget) ?? query.value;
   const active = focused || !!shown || s.listening;
   const role = proxy ? "search" : barRole.value;
-  const formRef = useAiSeat(proxy);
+  const { formRef, form } = useAiSeat(proxy);
+  // One set of the field's handlers for the bar's life (they read only signals and refs): new ones each render
+  // re-rendered the pill's field on every bar render (render scan 11-23: "onInput onFocus onBlur" changed 93x).
+  const handlers = useRef({
+    onInput: (v: string) => {
+      // Typing over a dictation: it stops, what it heard stays (and nothing sends by itself).
+      takeOver();
+      query.value = v;
+    },
+    // Logged (console -> logcat): desktop mode's launcher search lost its keyboard as the user typed (2026-10-28);
+    // the blur's relatedTarget says who took the focus.
+    onFocus: (e: FocusEvent) => {
+      console.info(`search focus drawer=${drawer.peek()}`);
+      // Home's pill types nowhere: the overlay's pill does (openHere, from the click). The desktop's own launcher
+      // (an APK without the overlay forward: state.ts openPanel) is open by the time its pill is focused.
+      if (launcherIsOverlay && drawer.peek() === 0 && barRole.peek() !== "ai") return void (e.target as HTMLElement | null)?.blur();
+      takeOver();
+      setFocused(true);
+    },
+    onBlur: (e: FocusEvent) => (logBlur(e, input.current), setFocused(false)),
+  }).current;
   return (
     <form
       class={`bar ${active ? "active" : ""} role-${role}`}
@@ -582,27 +625,12 @@ export function Bar({ proxy = false }: { proxy?: boolean }) {
           height (home's layout) never changes. */}
       <Pill
         target={barMic}
-        hears={[pillTarget]}
+        hears={BAR_HEARS()}
         send
         sending={sending.value}
         inputRef={input}
         value={shown}
-        onInput={(v: string) => {
-          // Typing over a dictation: it stops, what it heard stays (and nothing sends by itself).
-          takeOver();
-          query.value = v;
-        }}
-        // Logged (console -> logcat): desktop mode's launcher search lost its keyboard as the user typed (2026-10-28);
-        // the blur's relatedTarget says who took the focus.
-        onFocus={(e: FocusEvent) => {
-          console.info(`search focus drawer=${drawer.value}`);
-          // Home's pill types nowhere: the overlay's pill does (openHere, from the click). The desktop's own launcher
-          // (an APK without the overlay forward: state.ts openPanel) is open by the time its pill is focused.
-          if (launcherIsOverlay && drawer.value === 0 && barRole.peek() !== "ai") return void (e.target as HTMLElement | null)?.blur();
-          takeOver();
-          setFocused(true);
-        }}
-        onBlur={(e: FocusEvent) => (logBlur(e, input.current), setFocused(false))}
+        {...handlers}
         placeholder={s.listening ? "listening…" : (s.error ?? undefined)}
         // The form's role-* class: the hint fades in anew as the page changes the role (shell.css bar-role-*).
         class="bar-pill"
@@ -613,6 +641,7 @@ export function Bar({ proxy = false }: { proxy?: boolean }) {
         readOnly={proxy}
         tabIndex={proxy ? -1 : undefined}
       />
+      {homePage && !proxy && <BarSeat form={form} />}
     </form>
   );
 }

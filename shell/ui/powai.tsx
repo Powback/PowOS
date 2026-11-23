@@ -12,6 +12,7 @@
  * panel) keeps the chat centred at reading width, Progress a glass sheet over its side.
  */
 import { useEffect, useLayoutEffect, useRef, useState } from "preact/hooks";
+import { computed } from "@preact/signals";
 import { powos } from "../bridge.ts";
 import { aiDraft, aiScreen, chat, page } from "../state.ts";
 import { onManagerSend, type MicTarget } from "./bar.tsx";
@@ -597,8 +598,11 @@ function AiColumn({ shown, wide, pill }: { shown: boolean; wide: boolean; pill: 
 }
 
 /** Its page, to the left of home. */
+// Its own computed: the page re-renders when it comes or goes, not on every change between home's pages (render scan
+// 11-23: PowAiPage rendered on each of the user's page swipes).
+const aiShown = computed(() => page.value === -1);
 export function PowAiPage() {
-  const shown = page.value === -1;
+  const shown = aiShown.value;
   // Tells the host the page is up (types.ts pageShown: hosts since 11-02 open the assist overlay over it all the same).
   useEffect(() => void powos.ai.pageShown?.(shown).catch(() => {}), [shown]);
   return <AiView shown={shown} cls={`ai-screen ${shown ? "shown" : ""}`} panes />;

@@ -16,6 +16,7 @@
 import { AppIcon } from "./apps.tsx";
 import { tick } from "./haptics.ts";
 import { tapTaken } from "./taps.ts";
+import { memo } from "./memo.ts";
 import type { ComponentChildren } from "preact";
 import { useEffect, useLayoutEffect, useRef, useState } from "preact/hooks";
 import { computed, signal } from "@preact/signals";
@@ -715,7 +716,7 @@ function faces(items: HomeItem[], joined: Map<string, Record<string, number>>, l
 }
 
 /** The seam pieces as surfaces (a .tile each: the compositor's glass region and the tint, as a face's). */
-function Seams({ items, joined }: { items: HomeItem[]; joined: Map<string, Record<string, number>> }) {
+const Seams = memo(function Seams({ items, joined }: { items: HomeItem[]; joined: Map<string, Record<string, number>> }) {
   if (!joined.size) return null;
   const css = getComputedStyle(document.documentElement);
   const half = (parseFloat(css.getPropertyValue("--gap")) || 8) / 2;
@@ -738,7 +739,7 @@ function Seams({ items, joined }: { items: HomeItem[]; joined: Map<string, Recor
       ))}
     </>
   );
-}
+});
 
 function faceMask(items: HomeItem[], joined: Map<string, Record<string, number>>, lifted: string | undefined) {
   const f = faces(items, joined, lifted);
@@ -1021,6 +1022,8 @@ function Spot({ cell }: { cell: Cell }) {
  * opened at once so it can be named. Only at rest - not while a finger draws or carries.
  */
 function ChosenActions() {
+  // Edit mode first: outside it this reads nothing else, so a page change doesn't re-render it (render scan 11-23).
+  if (!editing.value) return null;
   const n = pages.value[page.value];
   const items = itemsOn(n).filter((i) => isChosen(i.key));
   if (!editing.value || items.length < 2 || carry.value || marquee.value || !folderable(items)) return null;
@@ -1075,6 +1078,28 @@ function PartyGhosts({ c }: { c: Carry }) {
     </>
   );
 }
+
+/**
+ * One page's content, re-rendered by its own items and windows only: a page change re-renders Pages (each page's
+ * "away" class) and stops here - it used to rebuild every page's PageUnder, Seams and tile list on each swipe (render
+ * scan 11-23, perf-1795459755191: Seams 37 of 38 renders needless, PageUnder 76, Fragment 429).
+ */
+const PageContent = memo(function PageContent({ n }: { n: number }) {
+  const { items: on, joined } = pageItems(n);
+  return (
+    <>
+      {/* The page's own content, cut where its web windows' bodies are (the app shows there, under home's
+          pixels: ui/webwindows.tsx "Element model"); the windows are above it, in z by DOM order. */}
+      <PageUnder n={n}>
+        <PageGlass items={on} joined={joined} />
+        <GroupShadow items={on} joined={joined} id={String(n)} />
+        <Seams items={on} joined={joined} />
+        {on.map((item) => renderTile(item, joined.get(item.key)))}
+      </PageUnder>
+      <WebWindowsOn page={n} />
+    </>
+  );
+});
 
 /** A carried tile's face: an app's icon, else its name on a plain face. */
 function Face({ item }: { item: HomeItem }) {
@@ -1290,21 +1315,7 @@ export function Pages() {
         {list.map((n, i) => (
           // Not the page on screen: its animations pause (shell.css .page.away).
           <div class={i === page.value ? "page" : "page away"} key={n}>
-            {(({ items: on, joined }) => {
-              return (
-                <>
-                  {/* The page's own content, cut where its web windows' bodies are (the app shows there, under home's
-                      pixels: ui/webwindows.tsx "Element model"); the windows are above it, in z by DOM order. */}
-                  <PageUnder n={n}>
-                    <PageGlass items={on} joined={joined} />
-                    <GroupShadow items={on} joined={joined} id={String(n)} />
-                    <Seams items={on} joined={joined} />
-                    {on.map((item) => renderTile(item, joined.get(item.key)))}
-                  </PageUnder>
-                  <WebWindowsOn page={n} />
-                </>
-              );
-            })(pageItems(n))}
+            <PageContent n={n} />
           </div>
         ))}
         <LibraryPage here={page.value === list.length} />

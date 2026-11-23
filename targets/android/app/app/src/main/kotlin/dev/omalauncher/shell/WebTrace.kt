@@ -10,23 +10,23 @@ import java.util.concurrent.Executors
 /**
  * The fps meter recording's Chrome trace: every WebView of the app (home, the bar, the shade...) through Android's
  * TracingController, the same trace chrome://tracing / Perfetto / DevTools' Performance panel open - main-thread tasks
- * with JS stacks at timeline events, layout/paint/raster, user timing, compositor frames. Started with the
+ * with JS stacks (V8's sampler), layout/paint/raster, user timing, compositor frames. Started with the
  * recording (perf.native true), stopped with it into [dir]/perf-<ms>.trace.json; the meter's JSON names the file
  * (native.chromeTrace). Ring-buffered (RECORD_CONTINUOUSLY): a long recording keeps its newest part.
  * Off = nothing traced. Never while a check holds it (one tracing session per process: start fails, said in the trace).
  */
 object WebTrace {
     /**
-     * What the trace carries (DevTools' Performance panel's own set and user timing). Not V8's sampler
-     * (disabled-by-default-v8.cpu_profiler): starting it logs every compiled function of each page in a V8 interrupt
-     * on its main thread - home froze 686 ms right after the record tap ("V8.InvokeApiInterruptCallbacks" under the
-     * first EvaluateScript, perf-1795459754955.trace.json), the trace's worst frame (702.7 ms) was the trace itself.
-     * The JS stacks come from the page's own sampler instead (shell/ui/jsprofile.ts, already running in the pre-roll:
-     * the meter JSON's "js" section, 10 ms samples per long frame).
+     * What the trace carries: DevTools' Performance panel's own set, V8's sampler (disabled-by-default-v8.cpu_profiler:
+     * JS stacks in the trace itself) and user timing. Starting the sampler logs every compiled function of each page in
+     * a V8 interrupt on its main thread - home froze 686 ms after the record tap (perf-1795459754955.trace.json,
+     * "V8.InvokeApiInterruptCallbacks" under the first EvaluateScript). That warm-up is the recording's, not the user's:
+     * the meter starts the trace first, lets every page run it off ("perf.meter" {arm}, perfrec.ts), and only then
+     * starts counting (fpsmeter.tsx beginRecord) - the trace keeps it, marked "powos perf: profiler warm-up (not counted)".
      */
     val CATEGORIES = listOf(
         "devtools.timeline", "disabled-by-default-devtools.timeline", "disabled-by-default-devtools.timeline.frame",
-        "disabled-by-default-devtools.timeline.stack", "v8.execute",
+        "disabled-by-default-devtools.timeline.stack", "v8.execute", "disabled-by-default-v8.cpu_profiler",
         "blink.user_timing", "blink", "cc", "viz", "gpu", "toplevel", "latencyInfo",
     )
     private val io = Executors.newSingleThreadExecutor { r -> Thread(r, "web-trace") }

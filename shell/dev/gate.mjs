@@ -15366,6 +15366,13 @@ try {
       console.log(`     needless-renders: ${await r.page.evaluate(() => window.__needless).catch(() => "?")}`);
       return fails;
     })));
+  // Page swipes and an idle home (dev/needless-check.js homeSwipes; the user's trace 11-23: "everything keeps redrawing").
+  if (process.env.SHELL_PAGES !== "0")
+    runs.push(open(browser, `${ORIGIN}/index.html`, "home-swipes", { width: 821, height: 883 }).then((r) => whenReady(r, async () => {
+      const fails = await r.page.evaluate(async () => (await importShim("./dev/needless-check.js")).homeSwipes());
+      console.log(`     home-swipes: ${await r.page.evaluate(() => window.__swipes).catch(() => "?")}`);
+      return fails;
+    })));
   if (process.env.SHELL_PAGES !== "0" && fs.existsSync(path.join(ROOT, "ui/jsprofile.ts")))
     runs.push(open(browser, `${ORIGIN}/index.html`, "perf-trace").then((r) => whenReady(r, () => r.page.evaluate(perfTraceCheck))));
   // f428: a check's fps-meter recording files no ask and no mail; a user's still does (perfSourceCheck).

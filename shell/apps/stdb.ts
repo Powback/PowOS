@@ -520,7 +520,7 @@ export function useRows<T = any>(db: Db, table: string, query: string): T[] {
     if (!t) return;
     let live = true;
     // Equal rows keep their objects (apps/stable.ts): a message re-renders only the rows it changed.
-    const refresh = perFrame(() => live && setRows((was) => stableRows(was, [...t.iter()] as T[])));
+    const refresh = perFrame(() => live && setRows((was) => stableRows(was, [...t.iter()] as T[], true)));
     t.onInsert(refresh);
     t.onDelete(refresh);
     t.onUpdate?.(refresh);
@@ -549,7 +549,7 @@ export function watchRows<T = any>(database: string, make: Builder, table: strin
   let seen: { conn: any; epoch: number; status: Status } | null = null;
   let last: T[] | null = null;
   const deliver = (rows: T[]) => {
-    const next = stableRows(last, rows);
+    const next = stableRows(last, rows, true);
     if (next !== last) onRows((last = next));
   };
   const attach = () => {

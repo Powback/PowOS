@@ -414,6 +414,19 @@ rest. Keep the blur - make it cheap.
 - Gate: pages share one transpile (gate.mjs, cached by hash in ~/.cache/powos-gate/tx; GATE_SHARED_TX=0 = old way).
 - Mac load is mostly not ours (stickman train.py, the kernel builder's Rosetta clang LTO): leave the user's jobs.
 
+## Found (2026-11-23, home "keeps redrawing")
+- The user's 27 s of page swipes (perf-1795459755191): 406 commits, 2383 renders. Per swipe the bar re-rendered 3x
+  (finger down, page set, finger up: it read page/pageDragging) with its pill's parts each time (new handlers/arrays);
+  every page's content rebuilt (Pages' inline children); PowOS AI's page re-rendered on any page change; and each visit
+  to it wiped checks/friction/asks with the feed's first [] and set them anew (two status-page re-renders per visit).
+  Fixed at the source (bar.tsx BarSeat + stable handlers + memo'd parts, grid.tsx PageContent, powai.tsx aiShown,
+  aiboard.tsx useFeed, agents.ts equal full deltas kept, stable.ts anyOrder). Gate `home-swipes` holds it.
+- WebView traces carry NO event args (no frame/layer/stack on Paint etc.): per-page paints come from `cdp.sh idle`, not
+  from the meter's Chrome trace. That trace showed the renderer main thread ~14 s of 27 s in the paint lifecycle.
+- The Chrome trace keeps V8's sampler; its ~690 ms start-up stall is the meter's "ARM" warm-up (fpsmeter.tsx armTrace),
+  before the recording counts, named in the trace by a user-timing measure. Checks wait for `.fps-meter.rec`.
+- `perf-scenarios.sh --only idle`: idle home per-page frames/paints (cdp idle) + a recording's commits/renders.
+
 ## Pitfalls
 - touch IRQs don't see injected input: also check Android's lastUserActivity (`dumpsys power`).
 - A 2 s `top` catches periodic ticks and overstates them; sample 30-60 s.
