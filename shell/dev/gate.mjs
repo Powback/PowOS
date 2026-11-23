@@ -15444,6 +15444,11 @@ try {
   if (process.env.SHELL_PAGES !== "0")
     for (const label of ["folded", "unfolded"])
       runs.push(open(browser, `${ORIGIN}/index.html`, `search-findable-${label}`, dockOpensView[label]).then((r) => whenReady(r, () => r.page.evaluate(async () => (await importShim("./dev/dock-search-check.js")).searchFindable()))));
+  // SP1/SE1 (dev/searchbar-check.js; the user 11-23): home -> search reuses the bar's nodes, nothing animates in; the
+  // search's edit menu (long press, "show as dock button") only in edit mode.
+  if (process.env.SHELL_PAGES !== "0")
+    for (const [label, fn, name] of ["folded", "unfolded"].flatMap((l) => [[l, "barPersists", "persists"], [l, "editOnly", "edit-only"]]))
+      runs.push(open(browser, `${ORIGIN}/index.html`, `searchbar-${name}-${label}`, dockOpensView[label]).then((r) => whenReady(r, () => r.page.evaluate(async (f, l) => (await importShim("./dev/searchbar-check.js"))[f](l), fn, label))));
   // Perf P1 (dev/dock-search-check.js dockSpeechRenders; 02:23 trace): a dictation's words streaming in redraw the dock
   // button only for its on/off, the dock and its cells never - folded and unfolded.
   if (process.env.SHELL_PAGES !== "0")

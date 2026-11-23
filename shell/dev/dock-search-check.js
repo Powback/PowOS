@@ -956,12 +956,13 @@ export async function searchFindable() {
   fails.push(...(await sfOpens("home")));
   await W.pickSearchSpot(mode, "bar");
   await sleep(400);
-  // A long press on home's bar (the WebView's contextmenu).
-  const pill = () => document.querySelector(".home > .bar .bar-pill");
-  fails.push(...(await sfMenuFlips(() => pill()?.dispatchEvent(new MouseEvent("contextmenu", { bubbles: true, cancelable: true })), "dock", "long press on the bar")));
-  // Edit mode's tap on the dock's button (its hold outside edit mode stays dictation).
+  // SE1 (the user 11-23: "don't edit it on long-press; require edit mode"): the menu is edit mode's - a long press on
+  // home's bar there (the WebView's contextmenu); outside it nothing (dev/searchbar-check.js editOnly).
   S.editing.value = true;
   await sleep(400);
+  const pill = () => document.querySelector(".home > .bar .bar-pill");
+  fails.push(...(await sfMenuFlips(() => pill()?.dispatchEvent(new MouseEvent("contextmenu", { bubbles: true, cancelable: true })), "dock", "edit mode long press on the bar")));
+  // Edit mode's tap on the dock's button (its hold outside edit mode stays dictation).
   const btn = document.querySelector(".home .dock .dock-search");
   fails.push(...(await sfMenuFlips(() => btn && (fire(btn, "pointerdown"), fire(btn, "pointerup")), "bar", "edit mode tap on the dock button")));
   S.editing.value = false;

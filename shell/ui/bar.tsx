@@ -31,8 +31,13 @@ export const barRole = computed<BarRole>(() => {
   if (drawer.value > 0 || pullPage) return pullKind.value === "ai" ? "ai" : "apps";
   return homePage && page.value === -1 ? "ai" : "search";
 });
-/** What the role says in the empty field (home's says nothing: the prompt glyph alone, as it always had). */
-const ROLE_HINT: Record<BarRole, string | undefined> = { search: undefined, apps: "Search apps", ai: "Message the manager" };
+/**
+ * What the role says in the empty field (home's says nothing: the prompt glyph alone, as it always had). SP1 (the user,
+ * 11-23: going from home to the search the bar "re-initializes with an animation instead of reusing the existing bar"):
+ * the launcher's bar is home's exactly - same glyph, no hint, no fade; only its results are the launcher's. PowOS AI's
+ * page (another page, a swipe away) keeps its own hint and glyph.
+ */
+const ROLE_HINT: Record<BarRole, string | undefined> = { search: undefined, apps: undefined, ai: "Message the manager" };
 /**
  * HF1 (the coordinator, 11-03: "the hint is clipped mid-word"): each hint's shorter forms, longest first - the pill shows
  * the longest that fits its field's width (useFittedHint), never a word cut off.
@@ -55,7 +60,7 @@ function roleProps(role: BarRole) {
   const sendKey = role === "ai" || (query.value.trim() && !searchResults.value.length && !searchPending.value);
   return {
     hint: ROLE_HINT[role],
-    icon: role === "apps" ? ("apps" as const) : role === "ai" ? ("robotOutline" as const) : undefined,
+    icon: role === "ai" ? ("robotOutline" as const) : undefined,
     "aria-label": ROLE_LABEL[role],
     enterKeyHint: sendKey ? "send" : "go",
   };
@@ -270,13 +275,10 @@ const Lead = memo(function Lead({ empty, filled, clear, icon }: { empty: boolean
       onPointerDown={(e) => e.preventDefault()}
       onClick={(e) => (e.stopPropagation(), filled && clear())}
     >
-      {icon ? (
-        <span class={`prompt role-icon ${empty ? "" : "off"}`} aria-hidden="true">
-          <Icon name={icon} size={18} />
-        </span>
-      ) : (
-        <span class={`prompt ${empty ? "" : "off"}`} aria-hidden="true">&gt;</span>
-      )}
+      {/* SP1: one glyph element for the pill's life - a role's icon swaps its content, never the element. */}
+      <span class={`prompt ${icon ? "role-icon" : ""} ${empty ? "" : "off"}`} aria-hidden="true">
+        {icon ? <Icon name={icon} size={18} /> : ">"}
+      </span>
       <Icon name="close" size={20} class="x" />
     </button>
   );
@@ -663,7 +665,8 @@ export function Bar({ proxy = false }: { proxy?: boolean }) {
         value={shown}
         {...handlers}
         placeholder={s.listening ? "listening…" : (s.error ?? undefined)}
-        // The form's role-* class: the hint fades in anew as the page changes the role (shell.css bar-role-*).
+        // The form's role-* class: PowOS AI's hint fades in as the page becomes it (shell.css bar-role-ai); home's and
+        // the launcher's are one face (SP1), nothing fades between them.
         class="bar-pill"
         {...roleProps(role)}
         autocomplete="off"

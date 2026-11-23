@@ -21,6 +21,7 @@ function barIs(where, role, hint) {
   const ph = b.querySelector("textarea")?.getAttribute("placeholder") ?? "";
   // HF1: a narrow pill says a shorter form of the hint (bar.tsx HINT_FORMS: "Message manager", "Message").
   if (hint && ph !== hint && !hint.startsWith(ph.split(" ")[0])) f.push(`${where}: the bar says "${ph}", not "${hint}"`);
+  if (hint === "" && ph) f.push(`${where}: the bar says "${ph}", not home's empty face`);
   return f;
 }
 
@@ -120,7 +121,8 @@ async function launcherIs(G, S, folded) {
   const f = folded && button ? await morphs("launcher", G, () => (S.drawer.value = 1), button) : ((S.drawer.value = 1), []);
   await G.until(() => document.querySelector(`${BAR}[data-role=apps]`), 3000);
   await sleep(350);
-  f.push(...barIs("launcher", "apps", "Search apps"));
+  // SP1 (the user 11-23): the launcher's bar is home's face exactly - no hint of its own.
+  f.push(...barIs("launcher", "apps", ""));
   if (folded && button) f.push(...(await morphs("launcher back home", G, () => (S.drawer.value = 0), button)), ...buttonBack("launcher back home"));
   else S.drawer.value = 0;
   await sleep(400);

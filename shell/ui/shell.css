@@ -4659,15 +4659,11 @@ html.ww-glued .home.button-morph:not(.pull-screen, .sliding) > .bar:not(.sliding
 .ai-screen.panes[data-bar-room] .ai-bar-slot { height: 0; margin-top: -8px; }
 .ai-screen.panes[data-bar-room] > :is(.ai-left, .ai-right) { margin-bottom: calc(var(--bar-room) + var(--ai-gut)); }
 .ai-screen.panes[data-bar-room] > .ai-left { max-height: calc(100% - var(--bar-room) - var(--ai-gut)); }
-/* The role's glyph (the launcher's apps, the AI page's manager) where home's prompt glyph is. */
+/* The role's glyph (the AI page's manager) where home's prompt glyph is. */
 .pill .prompt.role-icon { display: flex; align-items: center; justify-content: center; height: 40px; }
-/* Switching pages changes the role in place: its hint and glyph fade in anew (one animation name per role, so a
-   change of role restarts it), no jump. */
-@keyframes bar-role-search { from { opacity: 0; } to { opacity: 1; } }
-@keyframes bar-role-apps { from { opacity: 0; } to { opacity: 1; } }
+/* PowOS AI's page changes the role in place: its hint and glyph fade in. Home and the launcher are one face (SP1, the
+   user 11-23: the bar "re-initializes with an animation"): no fade between them. */
 @keyframes bar-role-ai { from { opacity: 0; } to { opacity: 1; } }
-.bar.role-search .bar-pill textarea::placeholder, .bar.role-search .bar-pill .lead > .prompt { animation: bar-role-search var(--spring-ms) var(--spring); }
-.bar.role-apps .bar-pill textarea::placeholder, .bar.role-apps .bar-pill .lead > .prompt { animation: bar-role-apps var(--spring-ms) var(--spring); }
 .bar.role-ai .bar-pill textarea::placeholder, .bar.role-ai .bar-pill .lead > .prompt { animation: bar-role-ai var(--spring-ms) var(--spring); }
 @media (prefers-reduced-motion: reduce) {
   .bar[data-role] .bar-pill textarea::placeholder, .bar[data-role] .bar-pill .lead > .prompt { animation: none; }

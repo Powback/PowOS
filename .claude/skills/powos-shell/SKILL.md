@@ -569,6 +569,11 @@ strip only - not the cause when a drag in a tile fails.
   tile's "put back in bar", "+ widget" > search bar, or a drop on the edit sheet (kept while the search is carried)
   = putBackInBar(); a drop on the dock row folded = back in the foot under the dock (footBelow "1"). gesture.ts
   tableOf keys on search-parked too. Gate: search-launcher-folded/-unfolded.
+- One search bar, no re-init (SP1, the user 11-23: home -> search "re-initializes with an animation"): the launcher's bar
+  is home's node AND face - role "apps" has no hint and no icon (bar.tsx ROLE_HINT), Lead keeps ONE .prompt span, only
+  bar-role-ai fades (shell.css). The search's menu (bar | "show as dock button") is edit mode only (SE1: openSpotMenu
+  refuses outside it, home.tsx pillMenu, closed when edit mode ends). Gate searchbar-persists/-edit-only-*
+  (dev/searchbar-check.js, also run on the device by tools/phone/verify/searchbar.sh); shots search-open, search-spot-edit.
 - "+ app" (editsheet.tsx AppPicker): drawer.tsx AppList (the drawer's A-Z list/results + letter bar, onTap instead of
   launch) + bar.tsx Pill with a local query (findApps = the drawer's ranking). A tap = placeNewCells(1,1) (page in
   view, first free cell; wide page too) + powos.home.add, serialized, home re-read before the next; stays open for

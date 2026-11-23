@@ -716,12 +716,17 @@ function HomeLauncher() {
 /** Home's search as the dock's button (docksearch.tsx). */
 const searchDockClasses = () => `${dockButton.value ? "search-dock" : ""} ${buttonMorph.value ? "button-morph" : ""}`;
 
-/** A long press on home's own bar (not its mic: hold to talk): the search's menu - bar | dock button (searchwidget.tsx). */
+/**
+ * A long press on home's own bar (not its mic: hold to talk), in edit mode only: the search's menu - bar | dock button
+ * (searchwidget.tsx openSpotMenu refuses it outside edit mode: SE1). Outside it the press is the bar's own (no menu).
+ */
 function pillMenu(e: MouseEvent) {
   const t = e.target as HTMLElement;
   const pill = t.closest?.(".home > .bar");
-  if (!pill || t.closest(".mic") || !openSpotMenu(pill)) return;
-  e.preventDefault();
+  if (!pill || t.closest(".mic")) return;
+  // Outside edit mode an unfocused bar's long press does nothing (no menu, no text selection); a focused field keeps
+  // its own (paste, select).
+  if (openSpotMenu(pill) || !pill.contains(document.activeElement)) e.preventDefault();
 }
 
 /**

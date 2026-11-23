@@ -522,6 +522,10 @@ const SCENES = [
   ["search-typing", "home", "const f = document.querySelector('.bar textarea, .bar input'); f?.focus(); if (f) { f.value = 'weather tomorrow in oslo and remind me to bring an umbrella'; f.dispatchEvent(new Event('input', { bubbles: true })); }", "wallpaper"],
   // The bar's send button (ui/bar.tsx Send; the user, 2026-10-30: "add like a send button on the right side"): none
   // while empty, right of the mic once there's text - in home's bar and in the launcher's.
+  // SP1 (the user 11-23): home's bar tapped - the launcher's search in the SAME bar, home's face (glyph, no hint).
+  ["search-open", "home", "S.searchTry.value = 'bar'; await sleep(300); document.querySelector('.home > .bar')?.click(); await sleep(900);", "wallpaper"],
+  // SE1: the search's menu ("show as dock button") - edit mode only: a tap on the bar there.
+  ["search-spot-edit", "home", "S.searchTry.value = 'bar'; S.editing.value = true; await sleep(500); const p = document.querySelector('.home > .bar .bar-pill'); const r = p.getBoundingClientRect(); const o = { bubbles: true, pointerId: 9, pointerType: 'touch', clientX: r.left + r.width / 3, clientY: r.top + r.height / 2 }; p.dispatchEvent(new PointerEvent('pointerdown', o)); p.dispatchEvent(new PointerEvent('pointerup', o)); await sleep(500);", "wallpaper"],
   ["send-empty", "home", "S.query.value = ''; await sleep(300);", "wallpaper"],
   ["send-text", "home", "S.query.value = 'weather'; await sleep(300);", "wallpaper"],
   ["send-launcher", "home", "S.openPanel('apps', { search: true }); await sleep(400); S.query.value = 'weather'; await sleep(300);", "wallpaper"],
