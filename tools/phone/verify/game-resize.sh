@@ -15,7 +15,8 @@
 #   G2 it gets there by itself after the change (every step after the first is a rotation or a fold mid-game): polled every ~1 s for SETTLE_S (12) s, the time logged ("settled
 #      N s"; Unity maps 314x208 first and goes full screen later), and the window still drawing (xframes count);
 #   G3 the game's layer is what SurfaceFlinger composes full screen (bf-onscreen.sh: own task or home's full-screen web
-#      window, logged as how=task|web), and no letterbox / pillarbox in the screencap: black bars on BOTH opposite
+#      window, logged as how=task|web), and no letterbox / pillarbox in the screencap: flat pure-black bars (bars.py:
+#      a dark scene - Besiege's starry menu - is no bar; PowOS's status bar / handle over a bar are allowed) on BOTH opposite
 #      edges, each > 1.5 % of that side and within a third of each other (Proton's fullscreen hack centres a game that
 #      renders a smaller / other-shaped mode than its window: Besiege's saved 2268x1600 in a 2268x2440 window). One
 #      dark edge alone is the game's art, logged only. BARS=note keeps bars a note (a game whose menu is black-framed).
@@ -105,13 +106,7 @@ stop() { if [ "$mine" = 1 ]; then pill "closing the game"
 # Unity under x86 Proton + FEX, sat on a black 1135x1365 window for minutes), at most READY_S (90) s; logged.
 t0=$(date +%s); while [ $(($(date +%s) - t0)) -lt "${READY_S:-90}" ] && room 60; do c=$(ph changes 3); [ "${c#changes=}" -ge 3 ] 2>/dev/null && break; touched && { stop; exit 3; }; done
 log "ready: $c after $(($(date +%s) - t0)) s; game args: $(ph args | tail -1)"
-bars() {  # black rows/columns at each edge of a screencap
-  local r c
-  r=$(ffmpeg -nostdin -loglevel error -i "$1" -vf "format=gray,scale=1:ih:flags=area" -f rawvideo - 2>/dev/null | od -An -v -tu1 | tr -s ' \n' ' ')
-  c=$(ffmpeg -nostdin -loglevel error -i "$1" -vf "format=gray,scale=iw:1:flags=area" -f rawvideo - 2>/dev/null | od -An -v -tu1 | tr -s ' \n' ' ')
-  awk -v r="$r" -v c="$c" 'function edge(s, rev,   a, n, i, k) { n = split(s, a, " "); for (k = 0; k < n; k++) {
-      i = rev ? n - k : k + 1; if (a[i] > 12) return k }; return n }
-    BEGIN { printf "top=%d bottom=%d left=%d right=%d\n", edge(r, 0), edge(r, 1), edge(c, 0), edge(c, 1) }'; }
+bars() { python3 "$here/bars.py" "$1"; }  # flat pure-black rows/columns at each edge of a screencap (bars.py: why)
 # boxed "<bars line>" <WxH>: "letterbox-<top>/<bottom>" or "pillarbox-<left>/<right>" when both opposite edges are black
 # for > 1.5 % of that side and within a third of each other (a centred smaller picture), else nothing.
 boxed() { awk -v s="$1" -v wh="$2" 'BEGIN { split(wh, d, "x"); n = split(s, kv, " "); for (i = 1; i <= n; i++) { split(kv[i], e, "="); b[e[1]] = e[2] + 0 }

@@ -94,13 +94,7 @@ sf() { "$A" shell 'L=$(dumpsys SurfaceFlinger --list | sed -E "s/^RequestedLayer
     echo "$l|$a"; done > /data/local/tmp/powos-sf0; sleep 2; n=0
   while IFS="|" read -r l a; do c=$(dumpsys SurfaceFlinger --latency "$l" | awk -v a="$a" "NR>1 && \$3>a && \$3<9e18 {c++} END{print c+0}"); [ "$c" -gt "$n" ] && n=$c; done < /data/local/tmp/powos-sf0
   rm -f /data/local/tmp/powos-sf0; echo "$n"' | tr -d '\r'; }
-bars() {  # bars <png>: black rows/columns at each edge of a screencap (top bottom left right) and the centre's brightness
-  local r c
-  r=$(ffmpeg -nostdin -loglevel error -i "$1" -vf "format=gray,scale=1:ih:flags=area" -f rawvideo - 2>/dev/null | od -An -v -tu1 | tr -s ' \n' ' ')
-  c=$(ffmpeg -nostdin -loglevel error -i "$1" -vf "format=gray,scale=iw:1:flags=area" -f rawvideo - 2>/dev/null | od -An -v -tu1 | tr -s ' \n' ' ')
-  awk -v r="$r" -v c="$c" 'function edge(s, rev,   a, n, i, k) { n = split(s, a, " "); for (k = 0; k < n; k++) {
-      i = rev ? n - k : k + 1; if (a[i] > 12) return k }; return n }
-    BEGIN { n = split(r, a, " "); printf "top=%d bottom=%d left=%d right=%d mid=%d\n", edge(r, 0), edge(r, 1), edge(c, 0), edge(c, 1), a[int(n / 2)] }'; }
+bars() { python3 "$here/bars.py" --mid "$1"; }  # flat pure-black rows/columns at each edge (bars.py) + the centre row's grey
 fails=0; first=
 probe() {  # probe <label> [cover|inner]
   local st c f s
