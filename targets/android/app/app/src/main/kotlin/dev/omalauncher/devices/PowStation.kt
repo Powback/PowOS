@@ -62,6 +62,18 @@ object PowStation {
     var error by mutableStateOf("")
         private set
 
+    /**
+     * The Pow account sign-in / AI fix (docs/DEVICES.md "Sign in to your Pow account"): "" none, "signing" (PowAuth open
+     * in the browser), "checking" (the realm is asked), "done", "asked" (an approver was asked for Claude), "error".
+     */
+    var signin by mutableStateOf("")
+        private set
+    var signinNote by mutableStateOf("")
+        private set
+
+    /** The waiting join's device code (step 2), for the owner's sign-in to approve; "" when none is waiting. */
+    @Volatile private var deviceCode = ""
+
     /** What PowOS's Linux said when it took the enrollment ("" = not handed over: no image yet, or not joined). */
     var linux by mutableStateOf("")
         private set
@@ -83,6 +95,10 @@ object PowStation {
             .put("tenant", tenant)
             .put("error", error)
             .put("linux", linux)
+            .put("signin", signin)
+            .put("signinNote", signinNote)
+            // PowOS AI's state as ClaudeSignIn last read it ("" not read yet): the joined card offers the fix when not ok.
+            .put("ai", ClaudeSignIn.status.optString("state"))
     }
 
     /** The saved choice, read once: joined (the enrollment file), standalone, or not decided yet. */
@@ -117,7 +133,7 @@ object PowStation {
                 set(if (choiceFile(c).exists()) "standalone" else "choose")
             }
             "leave" -> leave(c)
-            else -> throw IllegalArgumentException("no such action: join.$action")
+            else -> account(c, action)
         }
     }
 
@@ -180,6 +196,7 @@ object PowStation {
         if (st != 200) throw IllegalStateException(refusal(r, "$address didn't take the request ($st)"))
         if (mine != run) return
         code = r.optString("user_code")
+        deviceCode = r.optString("device_code")
         set("code")
         poll(c, realm, r, mine)
     }
@@ -229,12 +246,127 @@ object PowStation {
         t: JSONObject,
     ) = if (err == "access_denied") "not approved - ask again to try once more" else refusal(t, "the code ran out - ask again")
 
+    /** The Pow account actions (sign in, ask an approver for Claude). */
+    private fun account(
+        c: Context,
+        action: String,
+    ) = when (action) {
+        "signin" -> signIn(c)
+        "askai" -> askAi(c)
+        else -> throw IllegalArgumentException("no such action: join.$action")
+    }
+
+    /**
+     * "Sign in with your Pow account": PowAuth in the browser ([PowAccount]), then the realm. Waiting to join: that
+     * sign-in approves this phone (POST /v1/device/signin; the poll picks it up). Joined: its AI token moves to the
+     * owner's subscription (POST /v1/device/ai) - the recovery for a phone whose AI doesn't work. No password in PowOS.
+     */
+    private fun signIn(c: Context) {
+        val app = c.applicationContext
+        val e = enrollment(c)
+        val realm = e?.optString("realm") ?: urlOf(address)
+        val dc = deviceCode
+        if (e == null && (phase != "code" || dc.isEmpty())) return set(phase, "ask to join first, then sign in")
+        signin = "signing"
+        signinNote = ""
+        Thread({
+            runCatching {
+                val info = realmInfo(realm)?.optJSONObject("signin") ?: error("${hostOf(realm)} has no Pow account sign-in")
+                val token = PowAccount.signIn(app, info)
+                signin = "checking"
+                if (e == null) {
+                    val (st, r) = post("$realm/v1/device/signin", JSONObject().put("device_code", dc).put("access_token", token))
+                    check(st == 200) { refusal(r, "the hub answered $st") }
+                    signinNote = "signed in - joining…"
+                } else {
+                    val (st, r) = post("$realm/v1/device/ai", JSONObject().put("access_token", token), e.optString("device_token"))
+                    check(st == 200) { refusal(r, "the hub answered $st") }
+                    tookAi(app, e, r)
+                }
+                signin = "done"
+            }.onFailure {
+                signin = "error"
+                signinNote = it.message ?: "the sign-in didn't finish"
+                Log.i(TAG, "signin failed: ${it.javaClass.simpleName}")
+            }
+        }, "powstation-signin").start()
+    }
+
+    /** "Ask an approver" for Claude: the realm tells the owner (Devices card + notification); waits for the answer. */
+    private fun askAi(c: Context) {
+        val app = c.applicationContext
+        val e = enrollment(c) ?: return set(phase, "join first")
+        val realm = e.optString("realm")
+        val tok = e.optString("device_token")
+        signin = "asked"
+        signinNote = "asked - approve it in Devices on another device"
+        Thread({
+            runCatching {
+                val (st, r) = post("$realm/v1/device/ai/request", JSONObject(), tok)
+                check(st == 200) { refusal(r, "the hub answered $st") }
+                val a = waitForAi(realm, tok)
+                if (a != null) {
+                    tookAi(app, e, a)
+                    signin = "done"
+                } else if (signin == "asked") {
+                    error("nobody answered yet - ask again, or sign in")
+                }
+            }.onFailure {
+                signin = "error"
+                signinNote = it.message ?: "couldn't ask"
+            }
+        }, "powstation-askai").start()
+    }
+
+    /** Polls GET /v1/device/ai until an approver gave a tenant (its answer), or 15 min / the user moved on (null). */
+    private fun waitForAi(
+        realm: String,
+        tok: String,
+    ): JSONObject? {
+        val deadline = System.currentTimeMillis() + 15 * 60_000L
+        while (System.currentTimeMillis() < deadline && signin == "asked") {
+            Thread.sleep(5000)
+            val (st, a) = runCatching { http("GET", "$realm/v1/device/ai", null, tok) }.getOrElse { 0 to JSONObject() }
+            val tenant = a.optString("tenant")
+            if (st == 200 && !a.optBoolean("asked") && tenant.isNotBlank() && tenant != "null") return a
+        }
+        return null
+    }
+
+    /** The realm's AI answer: the tenant (and a new token when it issued one) kept, handed to PowOS's Linux. */
+    private fun tookAi(
+        c: Context,
+        e: JSONObject,
+        r: JSONObject,
+    ) {
+        val ai = r.optJSONObject("ai") ?: (e.optJSONObject("ai") ?: JSONObject()).put("tenant", r.optString("tenant"))
+        e.put("ai", ai)
+        writeEnrollment(c, e)
+        joined(e)
+        signinNote = "Claude: ${ai.optString("tenant")}"
+        adopt(e)
+    }
+
+    private fun writeEnrollment(
+        c: Context,
+        e: JSONObject,
+    ) {
+        val f = enrollmentFile(c)
+        f.parentFile?.mkdirs()
+        f.writeText(e.toString())
+        f.setReadable(false, false)
+        f.setReadable(true, true)
+        f.setWritable(false, false)
+        f.setWritable(true, true)
+    }
+
     /** Approved: keep it (0600), the owner config, PowOS's Linux. */
     private fun took(
         c: Context,
         realm: String,
         t: JSONObject,
     ) {
+        deviceCode = ""
         val e = enrollmentOf(realm, t)
         val f = enrollmentFile(c)
         f.parentFile?.mkdirs()

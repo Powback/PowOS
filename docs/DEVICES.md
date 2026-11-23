@@ -8,8 +8,9 @@ describes what is deployed (owner 2026-11-07: keep the current setup, don't exte
 
 1. **To control a device, pair it in the Devices app**: Add a device, pick it (mDNS or its address), type the 6-digit
    code the target shows. Then lock, unlock (desktop, owner-marked peers only), screen on/off, sleep, wake, ring.
-2. **Enroll only if you want it to approve other devices**: `powos devices enroll` on it (LAN/VPN, `enroll.pow`);
-   the first device is approved on the server, later ones from an approver (below). Enrolling gives no AI access.
+2. **Join** (the phone: Settings > powstation; Linux: `powos devices enroll`), LAN/VPN: **sign in with your Pow
+   account** on the device (owner only), or approve its code from a joined approver. A joined device gets its own AI
+   token on the owner's subscription (below).
 
 ## The pieces
 
@@ -40,7 +41,14 @@ route is LAN/VPN-only plain HTTP. So:
    nothing else (no refresh token is asked for).
 2. **WireGuard (off the LAN only, first).** A device that can't reach `powstation.pow` needs its tunnel before
    anything else. NOT BUILT: it needs a path on `auth.powback.com` that PowAuth itself serves (below); on the LAN this
-   step is skipped.
+   step is skipped. WireGuard stays keypair-based; PowAuth only authorizes provisioning: the device makes its keypair
+   itself (the private key never leaves it) and sends only its public key + device id; only an identity in an
+   explicit VPN group may provision (the owner's `admins`, or a new `vpn` group in `users_database.yml`) - guest
+   accounts (group `users`, e.g. `david`) get 403 and keep only their public routes. The server adds one peer per
+   device (its own tunnel IP, optional preshared key, AllowedIPs per policy) and answers endpoint, server public key,
+   tunnel address, DNS (Pi-hole `172.30.0.100` as today) and AllowedIPs; the device builds the profile. Removing the
+   device, or the user's VPN group, removes its peer. The hand-made peers (phone, laptop, tablet, macback) stay as
+   they are.
 3. **Claude, and the device's own credential (realm, `powstation.pow`).** PowOS hands the access token to the realm
    with its pending join code (`POST /v1/device/signin {device_code, access_token}`) - or, already joined, with its
    device token (`POST /v1/device/ai {access_token}`). The realm asks PowAuth whose token it is (`/api/oidc/userinfo`

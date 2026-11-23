@@ -1608,7 +1608,7 @@ function JoinChoice({ j, go }: { j: JoinState; go: Go }) {
           <Icon name="vpn" size={22} class="scr-row-icon" />
           <div class="scr-row-text">
             <span>Join your PowStation</span>
-            <span class="scr-sub muted">your own hub on this network: its AI, boards and devices. Approve it from a device you already use - no password here.</span>
+            <span class="scr-sub muted">your own hub on this network: its AI, boards and devices. Sign in with your Pow account, or approve it from a device you already use.</span>
           </div>
         </div>
       </button>
@@ -1647,11 +1647,46 @@ function JoinAddress({ j, go, address, setAddress }: { j: JoinState; go: Go; add
 function JoinCode({ j, go }: { j: JoinState; go: Go }) {
   return (
     <>
-      <div class="scr-big">Approve {j.name} on a device you already use</div>
+      <div class="scr-big">Sign in with your Pow account</div>
+      <div class="scr-sub muted">The owner's account at auth.powback.com, in the browser. That sign-in lets {j.name} in - nothing else to approve.</div>
+      <PowSignIn j={j} go={go} label="sign in" />
+      <div class="scr-sub muted">Or approve it on a device you already use: Devices there shows "New device wants to join" with this code.</div>
       <div class="scr-join-code" data-join-code>{j.code}</div>
-      <div class="scr-sub muted">Open Devices there: "New device wants to join" shows this code. Check it matches, then Approve. Waiting…</div>
       <Action icon="close" label="cancel" tone="muted" onClick={() => go("choose", "cancel")} />
     </>
+  );
+}
+
+/** The Pow account sign-in button and its live state (PowStation.kt signIn); optimistic: "opening…" at once. */
+function PowSignIn({ j, go, label }: { j: JoinState; go: Go; label: string }) {
+  const [tapped, setTapped] = useState(false);
+  useEffect(() => setTapped(false), [j.signin, j.signinNote]);
+  const s = tapped ? "signing" : j.signin ?? "";
+  const busy = s === "signing" || s === "checking";
+  const words = s === "signing" ? "finish signing in in the browser…" : s === "checking" ? "checking with your PowStation…" : j.signinNote;
+  return (
+    <>
+      <Action icon="accountCircleOutline" label={busy ? "signing in…" : label} tone="primary" disabled={busy} onClick={() => (setTapped(true), go(j.phase, "signin"))} />
+      {words && <div class={`scr-note ${s === "error" ? "danger" : "muted"}`} data-join-signin={s}>{words}</div>}
+    </>
+  );
+}
+
+/** Joined, but PowOS AI doesn't work here (the S25, 11-23): fix it in place - sign in, or ask an approver. */
+function AiFix({ j, go }: { j: JoinState; go: Go }) {
+  if (!j.ai || j.ai === "ok" || j.signin === "done") return j.signin === "done" && j.signinNote ? <div class="scr-note muted">{j.signinNote}</div> : null;
+  return (
+    <div class="scr-card tile" data-join-aifix>
+      <div class="scr-row">
+        <Icon name="alertCircleOutline" size={22} class="scr-row-icon" />
+        <div class="scr-row-text">
+          <span>PowOS AI doesn't work on this device yet</span>
+          <span class="scr-sub muted">Sign in with your Pow account to give it your Claude, or ask an approver.</span>
+        </div>
+      </div>
+      <PowSignIn j={j} go={go} label="sign in to PowStation" />
+      {j.signin !== "asked" && <Action icon="arrowRight" label="ask an approver" tone="muted" onClick={() => go(j.phase, "askai")} />}
+    </div>
   );
 }
 
@@ -1669,6 +1704,7 @@ function JoinedCard({ j, go }: { j: JoinState; go: Go }) {
         </div>
         {j.linux && <div class="scr-note muted">{j.linux}</div>}
       </div>
+      <AiFix j={j} go={go} />
       <div class="scr-sub muted">Make it feel like your other devices:</div>
       <div class="scr-inline">
         <Action icon="cellphoneScreenshot" label="import home and dock" onClick={() => (closeScreens(), openApp("local.devices"))} />
