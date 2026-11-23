@@ -23,6 +23,14 @@
     "access": {
       "authentication": "existing",
       "exposure": "existing"
+    },
+    "app": {
+      "hosts": [
+        "pihole.pow"
+      ],
+      "name": "Pi-hole",
+      "path": "/admin/",
+      "category": "infrastructure"
     }
   },
   "remove": {

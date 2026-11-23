@@ -20,6 +20,8 @@ class App : Application() {
         if (Application.getProcessName() == packageName) {
             floatingWindows()
             powosUpdates()
+            // Every .pow site as a launcher app, kept in sync with PowStation's catalog (WebApps; the user 11-23).
+            dev.omalauncher.shell.WebApps.start(this)
         }
         // SystemUI's binding to the recents service (and with it the gesture input) back after the process dies.
         dev.omalauncher.system.RecentsWatchdog.start(this)

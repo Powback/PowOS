@@ -379,6 +379,8 @@ object PowStation {
         runCatching { choiceFile(c).apply { parentFile?.mkdirs() }.writeText("joined\n") }
         joined(e)
         adopt(e)
+        // The realm's .pow web apps on the launcher now, not at the next periodic sync.
+        dev.omalauncher.shell.WebApps.syncSoon(c, 0)
     }
 
     private fun joined(e: JSONObject) {
@@ -509,6 +511,16 @@ object PowStation {
             NetworkInterface.getNetworkInterfaces().toList().filter { it.isUp && !it.isLoopback }
                 .flatMap { it.inetAddresses.toList() }.firstOrNull { it is Inet4Address && it.isSiteLocalAddress }?.hostAddress
         }.getOrNull()
+
+    /**
+     * Where the launcher reads the fleet's web app catalog (WebApps, GET <base>/v1/apps): the joined realm, else the
+     * hub's usual name on this LAN/VPN; null on a device set up standalone (the user chose PowOS on its own).
+     */
+    fun catalogBase(c: Context): String? {
+        enrollment(c)?.optString("realm")?.takeIf { it.isNotBlank() }?.let { return it }
+        val choice = runCatching { choiceFile(c).readText().trim() }.getOrNull()
+        return if (choice == "standalone") null else urlOf(DEFAULT_ADDRESS)
+    }
 
     // --- files
 

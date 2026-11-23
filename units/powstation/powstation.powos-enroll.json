@@ -32,7 +32,8 @@
     ],
     "keep": [
       "powos-enroll-data",
-      "/Users/macback/.claude-tenants/enrolled"
+      "/Users/macback/.claude-tenants/enrolled",
+      "/Users/macback/Projects/PowOS/units"
     ]
   },
   "limits": {

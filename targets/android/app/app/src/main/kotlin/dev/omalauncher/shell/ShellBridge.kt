@@ -527,6 +527,7 @@ class ShellBridge(
                 // An installed .pow web app (WebApps, issue #8): WebAppActivity on its site, a window of its own.
                 else if (a.getString(0).startsWith("w:")) WebApps.get(context, a.getString(0).removePrefix("w:"))?.let { app ->
                     runtime.usage.record(a.getString(0))
+                    WebApps.opened(context, app.id)
                     webWindows.also { webWindowsMade = true }.openWeb(app.url, a.getJSONObject(1))
                 } ?: -1
                 else android(a.getString(0))?.let { app ->
@@ -917,7 +918,9 @@ class ShellBridge(
                     .putOpt("category", app.category.takeIf { it >= 0 }),
             )
         }
-        // The .pow web apps the user installed from PowApps (WebApps): opened in a web window on their site.
+        // Every .pow site (WebApps, synced with PowStation's catalog): opened in a web window on its site. "web" is the
+        // kind of app it is (pwa / page / sleeps), "offline" the catalog didn't answer on the last try (off the LAN/VPN).
+        val webOffline = WebApps.reachable == false
         for (app in WebApps.list(context)) {
             list.put(
                 JSONObject()
@@ -925,7 +928,10 @@ class ShellBridge(
                     .put("label", app.name)
                     .put("icon", icon("w:${app.id}"))
                     .put("kind", "web")
-                    .put("url", app.url),
+                    .put("url", app.url)
+                    .put("web", app.web)
+                    .putOpt("webCategory", app.category.ifEmpty { null })
+                    .apply { if (webOffline) put("offline", true) },
             )
         }
         for (app in runtime.linuxApps) {
@@ -1872,6 +1878,7 @@ class ShellBridge(
     /** A .pow web app [key] without web windows (folded, the setting off): its site's own task, full screen. */
     private fun launchWeb(key: String) {
         val app = WebApps.get(context, key.removePrefix("w:")) ?: return
+        WebApps.opened(context, app.id)
         runCatching { context.startActivity(WebAppActivity.intent(context, app.url)) }.onFailure { Log.w(TAG, "launch $key: ${it.message}") }
     }
 

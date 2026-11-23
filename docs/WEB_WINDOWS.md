@@ -1249,20 +1249,38 @@ With the APK installed, unfolded, `powos_web_windows` = 1 and the user idle: ope
 
 ## `.pow` web apps in web windows (issue #8, 2026-11-09)
 
-The fleet's `.pow` services the user installs from PowApps open as PowOS apps in web windows. Nothing is added on
-pairing (owner 11-09): pairing makes them available, the user picks them.
+The fleet's `.pow` services open as PowOS apps in web windows. **Every `.pow` site is an app, automatically (the user,
+2026-11-23):** "I want all .pow stuff as apps automatically even when new ones gets added or removed maybe with some
+indicator of whether its pwa or whatever". This reverses the owner decision of 11-09 ("Nothing is added on pairing:
+only what the user installs").
+
+- **Sync** (`WebApps.kt`, pure rules in `WebAppSync.kt`, `WebAppSyncTest`): at app start, on every default-network
+  change (Wi-Fi, mobile, a VPN coming up or going) and every 15 min, the launcher fetches the catalog from the joined
+  realm (else `powstation.pow`; nothing on a device set up standalone). New hosts are added, hosts the catalog no
+  longer lists are removed - only after a successful, non-empty fetch; a failed fetch changes nothing. Ids stay
+  `w:<host>`, so dock/quick-launch places, the icon PNG and the site's WebView data survive syncs; an icon is read
+  again only when its URL changed or its file is missing, never a sleeping service's favicon before it was opened.
+  An app the user removes ("remove from launcher", PowApps' Remove) stays out (`files/webapps-removed.json`) until
+  PowApps installs it again.
+- **Indicator**: `apps.list` gives each web app `web` (`pwa` = has a manifest, `page`, `sleeps` = behind autosleep:
+  wakes on open, the first open is slower), `webCategory` and `offline` (the catalog didn't answer on the last try:
+  off the LAN/VPN; the apps stay). The shell draws a small chip on the icon's lower right (apps.tsx WebMark: grid,
+  globe, moon, wifi-off; the icon fades when offline) and a line under the name in the app menu. Gate shots
+  `web-app-marks`, `web-app-menu`.
 
 - **Catalog**: PowStation `GET http://powstation.pow/v1/apps` (powos-enroll, read-only, LAN/VPN, no token): every
   whole-site `*.pow` Traefik router, probed through Traefik for its web app manifest (name, `start_url`, icons, theme)
   or `<title>`/icon. API-only routes are left out. A route behind `autosleep@file` is listed but never fetched (no wake).
-- **Store**: PowApps' "Pow web apps" section lists it; Install / Remove call the launcher's `WebAppInstallActivity`
+  A site that doesn't answer once (timeout, 5xx) keeps its last good entry. A compose's `x-pow.services.<svc>.app`
+  (name/icon/category/path; docs/PLATFORM.md "Launcher apps") is preferred over the page; nothing can hide a site.
+- **Store**: PowApps' "Pow web apps" section lists it (now mostly redundant: everything is installed); Install / Remove call the launcher's `WebAppInstallActivity`
   (`dev.omalauncher.action.INSTALL_WEB_APP` / `UNINSTALL_WEB_APP`, startActivityForResult; only `com.powapps` may call
   it, only http(s) `.pow` URLs are taken).
-- **Launcher**: `shell/WebApps.kt` keeps them (`files/webapps.json`, icons `files/webapps/<host>.png` read at install
-  from the manifest icon or `/favicon.ico`); `apps.list` gives each as `w:<host>`, kind `web`. A tap opens
+- **Launcher**: `shell/WebApps.kt` keeps them (`files/webapps.json`, icons `files/webapps/<host>.png` read when an app
+  arrives, from the manifest icon or `/favicon.ico`); `apps.list` gives each as `w:<host>`, kind `web`. A tap opens
   `WebWindows.openWeb`: `WebAppActivity` (one WebView on the site; other hosts go to the browser) on the window's own
   display, one window per site. Without web windows (folded, setting off) it opens as its own document task.
-- **Not yet**: live state (running/asleep) on the icon and tap-to-wake, pinning to the home grid (ShellHome pins
+- **Not yet**: live running/asleep state on the icon (the mark is the catalog's static `sleeps`), pinning to the home grid (ShellHome pins
   Android/Linux shortcuts only; dock and quick launch take it), SVG/data: icons (the letter icon shows), PowApps
   reading the launcher's installed list (it keeps its own).
 

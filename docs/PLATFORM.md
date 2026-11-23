@@ -112,6 +112,29 @@ records the existing SpaceTimeAI backup path, without asserting that a current b
 field is advisory and explicitly reported as unenforced. There is no filesystem quota or shared reservation
 manager yet. Do not interpret a Docker volume label as a quota.
 
+## Launcher apps (`x-pow.services.<svc>.app`)
+
+Every whole-site `*.pow` route becomes a PowOS launcher app on its own (owner 2026-11-23; PowStation's
+`GET http://powstation.pow/v1/apps`, see docs/WEB_WINDOWS.md). The catalog reads each page's manifest, title and icon.
+A service may say how its site should show instead; the catalog prefers this over the scrape:
+
+```yaml
+x-pow:
+  services:
+    pihole:
+      app:
+        name: Pi-hole          # the launcher label (<= 60 chars)
+        host: pihole.pow       # optional: one of its .pow routes (default: all of them)
+        path: /admin/          # optional: where the page lives when / isn't it
+        icon: /admin/img/favicons/apple-touch-icon.png   # a path on its site, or an http(s) .pow URL
+        category: infrastructure   # a short lowercase word, for sorting/grouping
+```
+
+`check` rejects unknown fields, a service without a `Host(`x.pow`)` route, a host that isn't one of its routes and
+an icon off `.pow`. There is no field to hide a site: every `.pow` site is an app. `units` copies the block into the
+unit record (`platform.app`, with the resolved `hosts`); powos-enroll reads those records from this checkout's
+`units/` (mounted read-only), so regenerate and commit the project's units after changing it.
+
 ## Sleep and dependencies
 
 On PowStation, the existing controller uses `powos.autosleep.*`:

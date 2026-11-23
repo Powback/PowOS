@@ -39,7 +39,7 @@ export interface AppWidget {
 export interface App {
   /**
    * Stable id: "a:<package/activity[@profile]>" (Android), "l:<desktop id>" (Linux / PowOS), "p:<app id>" (a PowOS app),
-   * "w:<host>" (a .pow web app installed from PowApps, opened in a web window on its site; issue #8).
+   * "w:<host>" (a .pow site, every one an app - synced with PowStation's catalog, opened in a web window; issue #8).
    */
   key: string;
   label: string;
@@ -48,6 +48,15 @@ export interface App {
   kind: "android" | "linux" | "powos" | "web";
   /** A web app's site (kind "web"). */
   url?: string;
+  /**
+   * A web app's kind (kind "web"; WebApps.kt, PowStation's catalog): an installable PWA (it has a manifest), a plain
+   * page, or a sleeping service (it wakes on open, so the first open takes longer). Drawn as a mark on its icon.
+   */
+  web?: "pwa" | "page" | "sleeps";
+  /** A web app's catalog category ("infrastructure", ...), from its compose's x-pow app declaration. */
+  webCategory?: string | null;
+  /** A web app whose catalog didn't answer on the last try (off the LAN/VPN): kept, shown unreachable. */
+  offline?: boolean;
   /** A work-profile app, a clone, or the system's own (not uninstallable). */
   work?: boolean;
   clone?: boolean;
