@@ -59,9 +59,9 @@ P=$(q "$SC")
 if [ -z "$P" ]; then echo "no widget with a sideways scroller on the page on screen: step skipped" | tee -a "$OUT/log.txt"; else
   set -- $P
   pg0=$(q '(()=>{const t=document.querySelector(".page-track");return t?Math.round(t.getBoundingClientRect().left):0})()')
-  l0=$(q "$ALL[$4]?.scrollLeft|0")
+  l0=$(q "${ALL}[$4]?.scrollLeft|0")
   drag "$1" "$2" -$(($3 / 18)) 1 >/dev/null; chk scroller
-  l1=$(q "$ALL[$4]?.scrollLeft|0")
+  l1=$(q "${ALL}[$4]?.scrollLeft|0")
   pg1=$(q '(()=>{const t=document.querySelector(".page-track");return t?Math.round(t.getBoundingClientRect().left):0})()')
   echo "scrollLeft $l0 -> $l1, track $pg0 -> $pg1" | tee -a "$OUT/log.txt"
   [ "${l1:-0}" -gt "${l0:-0}" ] || fail "a sideways drag on the widget's scroller didn't scroll it"
