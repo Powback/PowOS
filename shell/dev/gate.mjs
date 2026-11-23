@@ -14368,6 +14368,10 @@ try {
   // The side dock's alignment (dev/dock-align-check.js): folded and unfolded, left and right, top and bottom.
   const alignCases = [["cover", { width: 404, height: 900 }], ["inner", { width: 821, height: 883 }]].flatMap(([label, view]) => ["left", "right"].flatMap((position) => ["top", "bottom"].map((align) => [`dock-align-${label}-${position}-${align}`, view, position, align])));
   for (const [name, view, position, align] of alignCases) runs.push(open(browser, `${ORIGIN}/index.html`, name, view).then((r) => whenReady(r, () => dockAlignRun(r, name, position, align))));
+  // The launcher and PowOS AI fill the width with a side dock on either side (dev/side-dock-width-check.js).
+  const widthCases = [["cover", { width: 404, height: 900 }], ["inner", { width: 821, height: 883 }]].flatMap(([label, view]) => ["left", "right"].flatMap((position) => ["apps", "ai"].map((kind) => [`side-dock-width-${label}-${position}-${kind}`, view, position, kind])));
+  for (const [name, view, position, kind] of widthCases)
+    runs.push(open(browser, `${ORIGIN}/index.html`, name, view).then((r) => whenReady(r, () => r.page.evaluate(async (p, k) => (await importShim("./dev/side-dock-width-check.js")).sideDockWidthCheck(p, k), position, kind))));
   const dockViews = { cover: { width: 404, height: 900 }, inner: { width: 821, height: 883 }, desktop: { width: 1280, height: 800 } };
   for (const [label, mode, width, height] of [["cover", "home", 404, 900], ["inner", "home", 821, 883], ["desktop", "desktop", 1280, 800]]) {
     for (const position of ["bottom", "left", "right"]) {

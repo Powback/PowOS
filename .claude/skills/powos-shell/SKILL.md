@@ -312,6 +312,11 @@ WindowBlur.kt, WallpaperBackdrop.kt, LiquidGlass.kt; page side shell/ui/nativegl
   column-reverse, pinned page flex none at the foot, .dock-recent its own column-reverse scroller (newest nearest the
   pinned, scroll-fade mask) above; the search button starts the pinned group (buttonSlot 0). top = the old column.
   Checks set dockAlignTry (page-only). Gate dock-align-*; shots dock-align-*; device verify/side-dock-align.sh.
+- Side dock reserve (11-23, "launcher is not full width if the docking is on the right"): the launcher's .drawer-clip
+  (apps, PowOS AI, the chat) keeps clear of a side dock ONLY while that dock is shown beside it (shell.css
+  `--dock-reserve`: `.adopts.wide` without the AI panel, or `.pull-screen:has(> .dock)`); folded home's launcher slides
+  the dock out, so no reserve on either side. It used to pad by --side-dock always (64 px empty column). Gate
+  side-dock-width-*; shots side-{left,right}-{drawer,ai,chat}; device verify/side-dock-width.sh.
 
 ## Themed icons (board theme-recolor-icons)
 - Slice 1 (8f5c995): ui/icontint.ts. `iconTint = stored("icons.tint")`: "" (apps' own) | "mono". Settings > style >

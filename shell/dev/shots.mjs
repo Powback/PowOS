@@ -449,6 +449,12 @@ const SCENES = [
   ["dsearch-btn-right", "home", "if (S.dock.value.length < 6) S.dock.value = S.recent.value.slice(0, 6); S.dockTry.value = 'right'; S.searchTry.value = 'dock'; await sleep(300);", "wallpaper"],
   ["dsearch-bar-left", "home", "if (S.dock.value.length < 6) S.dock.value = S.recent.value.slice(0, 6); S.dockTry.value = 'left'; S.searchTry.value = 'bar'; await sleep(300);", "wallpaper"],
   ["dsearch-btn-left", "home", "if (S.dock.value.length < 6) S.dock.value = S.recent.value.slice(0, 6); S.dockTry.value = 'left'; S.searchTry.value = 'dock'; await sleep(300);", "wallpaper"],
+  // Side dock right vs left: the launcher and PowOS AI's panel fill the width the same way (board side-dock-on-the-right-launcher-and-ai-chat-aren).
+  ...["left", "right"].flatMap((side) => [
+    [`side-${side}-drawer`, "home", `S.dockTry.value = '${side}'; await sleep(200); S.drawer.value = 1; await sleep(400);`, "wallpaper"],
+    [`side-${side}-ai`, "home", `S.dockTry.value = '${side}'; await sleep(200); S.openPanel('ai'); await sleep(500);`, "wallpaper"],
+    [`side-${side}-chat`, "home", `S.dockTry.value = '${side}'; await sleep(200); S.chat.value = { busy: false, items: ${CHAT_SAMPLE} }; S.chatting.value = true; S.drawer.value = 1; await sleep(400);`, "wallpaper"],
+  ]),
   ["home-dockright", "home", "S.dockTry.value = 'right'; await sleep(200);", "wallpaper"],
   ["edit-dockright", "home", "S.dockTry.value = 'right'; await sleep(200); S.editing.value = true;", "wallpaper"],
   ["edit-land", "home", "S.editing.value = true;", "wallpaper", undefined, LAND_SIZES],
