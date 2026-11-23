@@ -6,6 +6,7 @@ import android.graphics.Paint
 import android.graphics.Path
 import android.graphics.PorterDuff
 import android.graphics.PorterDuffXfermode
+import android.graphics.Rect
 import android.graphics.drawable.AdaptiveIconDrawable
 import android.graphics.drawable.Drawable
 import android.os.Build
@@ -44,7 +45,9 @@ const val ICON_RADIUS = 0.22f
 /**
  * [drawable] drawn [size] px square on [canvas]. An adaptive icon draws its own layers (background, foreground) in
  * PowOS's one shape ([ICON_RADIUS]) rather than the system's mask, so every app's icon has the same silhouette on every
- * surface (the shell's ui/iconshape.ts fits the rest to it); any other drawable as it is.
+ * surface (the shell's ui/iconshape.ts fits the rest to it); any other drawable as it is. A tile inside a tile (a legacy
+ * icon the system wrapped on a plain plate, or a picture with a second rounded square inside its own - [IconFrame])
+ * draws only the inner tile, filling the shape: one edge, never two (the S25's "double border").
  */
 fun drawShapedIcon(
     drawable: Drawable,
@@ -53,25 +56,81 @@ fun drawShapedIcon(
 ) {
     val adaptive = drawable as? AdaptiveIconDrawable
     if (adaptive == null) {
-        drawable.setBounds(0, 0, size, size)
-        drawable.draw(canvas)
+        val framed = runCatching { IconFrame.framedPicture(pixels(drawable, 0), FRAME_N) }.getOrNull()
+        if (framed == null) {
+            drawable.setBounds(0, 0, size, size)
+            drawable.draw(canvas)
+        } else {
+            masked(canvas, size) {
+                drawable.bounds = scaledBounds(framed, 0, size)
+                drawable.draw(canvas)
+            }
+        }
         return
     }
+    val wrapped =
+        adaptive.foreground?.let { fg ->
+            runCatching { IconFrame.wrappedLayer(pixels(fg, FRAME_N / 4), adaptive.background?.let { pixels(it, FRAME_N / 4) }, FRAME_N) }.getOrNull()
+        }
+    masked(canvas, size) {
+        if (wrapped != null) {
+            adaptive.foreground.bounds = scaledBounds(wrapped, FRAME_N / 4, size)
+            adaptive.foreground.draw(canvas)
+        } else {
+            // Layers are 108dp with the 72dp shown: scaled so the shown part fills the square.
+            val inset = size / 4
+            for (layer in listOfNotNull(adaptive.background, adaptive.foreground)) {
+                layer.setBounds(-inset, -inset, size + inset, size + inset)
+                layer.draw(canvas)
+            }
+        }
+    }
+}
+
+/** The analysis size for [IconFrame]: enough to find a frame's edge to ~1%. */
+private const val FRAME_N = 96
+
+/** [draw] on [canvas], then everything outside PowOS's rounded square cleared (anti-aliased; a clipPath is jagged). */
+private inline fun masked(
+    canvas: Canvas,
+    size: Int,
+    draw: () -> Unit,
+) {
     val s = size.toFloat()
     canvas.saveLayer(0f, 0f, s, s, null)
-    // Layers are 108dp with the 72dp shown: scaled so the shown part fills the square.
-    val inset = size / 4
-    for (layer in listOfNotNull(adaptive.background, adaptive.foreground)) {
-        layer.setBounds(-inset, -inset, size + inset, size + inset)
-        layer.draw(canvas)
-    }
-    // Everything outside the rounded square cleared, its edge anti-aliased (a clipPath would leave it jagged).
+    draw()
     val outside = Path().apply {
         addRoundRect(0f, 0f, s, s, s * ICON_RADIUS, s * ICON_RADIUS, Path.Direction.CW)
         fillType = Path.FillType.INVERSE_WINDING
     }
     canvas.drawPath(outside, Paint(Paint.ANTI_ALIAS_FLAG).apply { xfermode = PorterDuffXfermode(PorterDuff.Mode.CLEAR) })
     canvas.restore()
+}
+
+/** [d] drawn [FRAME_N] px square as ARGB, overflowing by [inset] on each side (an adaptive layer's hidden 1/6). */
+private fun pixels(
+    d: Drawable,
+    inset: Int,
+): IntArray {
+    val bmp = Bitmap.createBitmap(FRAME_N, FRAME_N, Bitmap.Config.ARGB_8888)
+    d.setBounds(-inset, -inset, FRAME_N + inset, FRAME_N + inset)
+    d.draw(Canvas(bmp))
+    return IntArray(FRAME_N * FRAME_N).also {
+        bmp.getPixels(it, 0, FRAME_N, 0, 0, FRAME_N, FRAME_N)
+        bmp.recycle()
+    }
+}
+
+/** Bounds that draw [box] (in [pixels]' frame, the drawable overflowing it by [inset]) filling [size] px square. */
+private fun scaledBounds(
+    box: IconFrame.Box,
+    inset: Int,
+    size: Int,
+): Rect {
+    val k = size.toFloat() / box.side
+    val half = size / 2f
+    fun at(v: Int, c: Float) = ((v - c) * k + half).toInt()
+    return Rect(at(-inset, box.cx), at(-inset, box.cy), at(FRAME_N + inset, box.cx), at(FRAME_N + inset, box.cy))
 }
 
 /** Silhouette of a plain bitmap (Linux icons). */

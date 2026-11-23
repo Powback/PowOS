@@ -329,6 +329,11 @@ WindowBlur.kt, WallpaperBackdrop.kt, LiquidGlass.kt; page side shell/ui/nativegl
   `.app-icon::after` (running bar) stays outside the clip. Failed/cross-origin: shown as is.
 - Kotlin: ui/IconMask.kt drawShapedIcon draws adaptive icons' own layers in the same 22% rounded square (not the
   system mask), AndroidApps uses it - so Android icons arrive already in the one shape.
+  A tile inside a tile (ui/IconFrame.kt: an adaptive icon whose foreground is a whole rounded-square legacy icon on a
+  plain background layer - how a system wraps legacy icons, One UI yes, OxygenOS no -, or a plain picture with a second
+  tile inside its plain rim) draws only the inner tile, filling the shape (S25 "double border", 2026-11-23). Generic,
+  no vendor check; JVM tests IconFrameTest (tools/agents/jvm-offload.sh :app:testDebugUnitTest --tests '*IconFrame*').
+  The S25 has no adb from the Mac (VPN peer 10.13.13.2, no wireless-debugging pairing): it gets APKs via PowApps pull.
 - Sizes per context: --icon (grid/drawer), --strip-icon (dock/strip), 58% of a tile/folder cell, library 2x2.
 
 ## Running bar (board running-indicator)
