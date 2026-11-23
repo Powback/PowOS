@@ -28,7 +28,7 @@ class ChargingTest {
         mv: Int = 4000,
         timeMs: Long = -1,
         level: Int = 50,
-    ) = Charging.classify(level, 100, status, plugged, maxUa, maxUv, nowUa, mv, timeMs)
+    ) = Charging.classify(Charging.Reading(level, 100, status, plugged, maxUa, maxUv, nowUa, mv, timeMs))
 
     @Test fun chargerClasses() {
         assertEquals("slow", c(maxUa = 500_000, maxUv = 5_000_000).speed) // 2.5 W: a PC's USB port

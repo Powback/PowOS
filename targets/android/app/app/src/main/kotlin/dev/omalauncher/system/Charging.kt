@@ -100,51 +100,60 @@ object Charging {
             else -> "normal"
         }
 
+    /** The broadcast's numbers and BatteryManager's two reads, raw (-1 / Long.MIN_VALUE: not given). */
+    data class Reading(
+        val level: Int = -1,
+        val scale: Int = 100,
+        val status: Int = -1,
+        val plugged: Int = 0,
+        val maxCurrentUa: Int = -1,
+        val maxVoltageUv: Int = -1,
+        val currentNowUa: Long = Long.MIN_VALUE,
+        val voltageMv: Int = -1,
+        val chargeTimeMs: Long = -1,
+    )
+
+    /** The class, the watts it came from and their source: the charger's offer first, else the intake (raise only). */
+    private fun speed(r: Reading): Triple<String, Double?, String?> {
+        val offered = chargerWatts(r.maxCurrentUa, r.maxVoltageUv)
+        if (offered != null) return Triple(speedOf(offered), offered, "charger")
+        val measured = measuredWatts(r.currentNowUa, r.voltageMv) ?: return Triple("normal", null, null)
+        // Intake only raises the class (see the header): below 7.5 W it says "normal", never "slow".
+        return Triple(if (measured >= FAST_W) speedOf(measured) else "normal", measured, "measured")
+    }
+
+    /** Not charging right now (on battery, full, held): the state without a class or a time. */
+    private fun idle(lvl: Int?, on: String?, r: Reading): Info {
+        val statusFull = r.status == BatteryManager.BATTERY_STATUS_FULL
+        val full = on != null && (statusFull || lvl == 100)
+        return Info(lvl, statusFull, on, full, on != null && !full, null, null, null, null)
+    }
+
     /** Everything from the broadcast's numbers - pure, for the JVM test. */
-    fun classify(
-        level: Int,
-        scale: Int,
-        status: Int,
-        plugged: Int,
-        maxCurrentUa: Int,
-        maxVoltageUv: Int,
-        currentNowUa: Long,
-        voltageMv: Int,
-        chargeTimeMs: Long,
-    ): Info {
-        val lvl = if (level >= 0 && scale > 0) level * 100 / scale else null
-        val on = pluggedName(plugged)
-        val full = on != null && (status == BatteryManager.BATTERY_STATUS_FULL || lvl == 100 && status != BatteryManager.BATTERY_STATUS_CHARGING)
-        val chargingNow = status == BatteryManager.BATTERY_STATUS_CHARGING
-        val held = on != null && !full && !chargingNow
-        val charging = chargingNow || status == BatteryManager.BATTERY_STATUS_FULL
-        if (!chargingNow || on == null || full) return Info(lvl, charging, on, full, held, null, null, null, null)
-        val offered = chargerWatts(maxCurrentUa, maxVoltageUv)
-        val measured = measuredWatts(currentNowUa, voltageMv)
-        val (speed, watts, from) =
-            when {
-                offered != null -> Triple(speedOf(offered), offered, "charger")
-                // Intake only raises the class (see the header): below 7.5 W it says "normal", never "slow".
-                measured != null && measured >= FAST_W -> Triple(speedOf(measured), measured, "measured")
-                measured != null -> Triple("normal", measured, "measured")
-                else -> Triple("normal", null, null)
-            }
-        val time = chargeTimeMs.takeIf { it > 0 }
+    fun classify(r: Reading): Info {
+        val lvl = if (r.level >= 0 && r.scale > 0) r.level * 100 / r.scale else null
+        val on = pluggedName(r.plugged)
+        if (r.status != BatteryManager.BATTERY_STATUS_CHARGING || on == null) return idle(lvl, on, r)
+        val (speed, watts, from) = speed(r)
+        val time = r.chargeTimeMs.takeIf { it > 0 }
         return Info(lvl, true, on, false, false, speed, watts?.let { Math.round(it * 10) / 10.0 }, from, time)
     }
 
     fun from(context: Context, b: Intent?): Info {
         val bm = context.getSystemService(BatteryManager::class.java)
+        fun extra(key: String, def: Int) = b?.getIntExtra(key, def) ?: def
         return classify(
-            level = b?.getIntExtra(BatteryManager.EXTRA_LEVEL, -1) ?: -1,
-            scale = b?.getIntExtra(BatteryManager.EXTRA_SCALE, 100) ?: 100,
-            status = b?.getIntExtra(BatteryManager.EXTRA_STATUS, -1) ?: -1,
-            plugged = b?.getIntExtra(BatteryManager.EXTRA_PLUGGED, 0) ?: 0,
-            maxCurrentUa = b?.getIntExtra(EXTRA_MAX_CURRENT, -1) ?: -1,
-            maxVoltageUv = b?.getIntExtra(EXTRA_MAX_VOLTAGE, -1) ?: -1,
-            currentNowUa = runCatching { bm?.getLongProperty(BatteryManager.BATTERY_PROPERTY_CURRENT_NOW) }.getOrNull() ?: Long.MIN_VALUE,
-            voltageMv = b?.getIntExtra(BatteryManager.EXTRA_VOLTAGE, -1) ?: -1,
-            chargeTimeMs = runCatching { bm?.computeChargeTimeRemaining() }.getOrNull() ?: -1L,
+            Reading(
+                level = extra(BatteryManager.EXTRA_LEVEL, -1),
+                scale = extra(BatteryManager.EXTRA_SCALE, 100),
+                status = extra(BatteryManager.EXTRA_STATUS, -1),
+                plugged = extra(BatteryManager.EXTRA_PLUGGED, 0),
+                maxCurrentUa = extra(EXTRA_MAX_CURRENT, -1),
+                maxVoltageUv = extra(EXTRA_MAX_VOLTAGE, -1),
+                currentNowUa = runCatching { bm?.getLongProperty(BatteryManager.BATTERY_PROPERTY_CURRENT_NOW) }.getOrNull() ?: Long.MIN_VALUE,
+                voltageMv = extra(BatteryManager.EXTRA_VOLTAGE, -1),
+                chargeTimeMs = runCatching { bm?.computeChargeTimeRemaining() }.getOrNull() ?: -1L,
+            ),
         )
     }
 
