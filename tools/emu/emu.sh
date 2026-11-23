@@ -11,8 +11,8 @@
 #   emu.sh stop            the emulator off (the snapshot stays)
 #   emu.sh status          running / booted, the commit its APK is from, the disk it uses
 #   emu.sh reset           back to the "powos-ready" snapshot now (a running emulator), APK again if needed
-#   emu.sh install [REF]   build REF (default origin's tip) with the normal build system (targets/android/tools/
-#                          warm-builder.sh, PUBLISH=0: never into android-app-dev/output, which PowApps serves to the
+#   emu.sh install [REF]   build REF (default origin's tip) with the normal build system (targets/android/prep-app.sh,
+#                          then targets/android/tools/warm-builder.sh, PUBLISH=0: never into android-app-dev/output, which PowApps serves to the
 #                          phone) from a clean checkout of it (.claude/worktrees/emu-build) and `adb install -r` it over
 #                          the system copy, as the phone's installs go; its commit goes to /data/local/tmp on the emulator
 #   emu.sh remove          stop, then delete the AVD, its snapshot and the build checkout (the system image stays)
@@ -159,6 +159,14 @@ wait_dev() { local i; for i in $(seq "${1:-120}"); do running && return 0; sleep
 root_up() { a root >/dev/null 2>&1; sleep 2; wait_dev; wait_boot 120; }
 
 # --- PowOS as the phone has it -------------------------------------------------------------------------------------
+# gradle_cause OUT: why a Gradle build failed - its "What went wrong" section and the e:/error:/CMake Error/Caused by
+# lines, not the stack trace's tail (f524: the tail was 20 lines of org.gradle.internal frames, the cause lost).
+gradle_cause() {
+  { echo "$1" | awk '/^\* What went wrong:/{w=1} /^\* Try:/{w=0} w'
+    echo "$1" | grep -E -A1 '^e: |error:|CMake Error|^warm-builder: '
+  } | grep -Ev "^\s*('|#!|-- |at |See also|C\+\+ build system|from /work|--$|$)" | sed 's/^[[:space:]]*//' | awk '!seen[$0]++' | head -30
+  echo "$1" | grep -q '^\* What went wrong:' || echo "$1" | tail -20
+}
 # build REF: the APK of REF from the normal build system, into $STATE/apk/<commit>.apk; prints its path.
 build() {
   local ref=${1:-} c out apk
@@ -170,8 +178,16 @@ build() {
   if [ ! -e "$BUILD_TREE/.git" ]; then git -C "$REPO" worktree add -q --detach "$BUILD_TREE" "$c" >&2 || die "can't make $BUILD_TREE"
   else git -C "$BUILD_TREE" checkout -q --detach -f "$c" >&2 && git -C "$BUILD_TREE" clean -qfd -- shell targets/android/app >&2; fi
   case "$BUILD_TREE" in "$HOME"/Projects/*) ;; *) die "$BUILD_TREE isn't under ~/Projects (the builder mounts only that)" ;; esac
+  # The inputs Gradle packs that aren't in git (PowStream native client, bundled apps, shell stamp), as every APK build
+  # stages them: without them CMake refused and every emulator build failed (11-23, f524). The tree's own prep-app.sh
+  # (its pins); ours for a commit from before it existed.
+  local prep=$BUILD_TREE/targets/android/prep-app.sh; [ -x "$prep" ] || prep=$ROOT/targets/android/prep-app.sh
+  # powos-units: ~/.cache/powos-emu/build.log
+  say "staging $(git -C "$REPO" rev-parse --short "$c")'s non-git APK inputs (prep-app.sh)" >&2
+  "$prep" "$BUILD_TREE" > "$STATE/build.log" 2>&1 || { tail -20 "$STATE/build.log" >&2; die "prep-app.sh failed (all of it: $STATE/build.log)"; }
   say "building $(git -C "$REPO" rev-parse --short "$c") (warm builder, PUBLISH=0)" >&2
-  out=$(PUBLISH=0 "$ROOT/targets/android/tools/warm-builder.sh" build "/Projects${BUILD_TREE#$HOME/Projects}/targets/android/app" 2>&1) || { echo "$out" | tail -20 >&2; die "the build failed"; }
+  out=$(PUBLISH=0 "$ROOT/targets/android/tools/warm-builder.sh" build "/Projects${BUILD_TREE#$HOME/Projects}/targets/android/app" 2>&1) ||
+    { echo "$out" >> "$STATE/build.log"; gradle_cause "$out" >&2; die "the build failed (all of it: $STATE/build.log)"; }
   apk=$(echo "$out" | sed -n 's/^warm-builder: built \(.*\.apk\) (not published.*/\1/p' | tail -1)
   [ -n "$apk" ] || { echo "$out" | tail -10 >&2; die "the builder named no APK"; }
   mkdir -p "$STATE/apk"; rm -f "$STATE"/apk/*.apk   # one kept: the newest

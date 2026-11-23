@@ -35,7 +35,10 @@ class Contract(unittest.TestCase):
         self.assertIn('ANDROID_CLIENT_REV', build)
         self.assertIn('libpowstream_client_core.so', build)
         self.assertIn('sources/powstream/build-android.sh',
-                      (ROOT / 'targets/android/build-app.sh').read_text())
+                      (ROOT / 'targets/android/prep-app.sh').read_text())
+        # Every APK build path stages it (the emulator lane's skipped it and failed at CMake, 11-23).
+        self.assertIn('prep-app.sh', (ROOT / 'targets/android/build-app.sh').read_text())
+        self.assertIn('prep-app.sh', (ROOT / 'tools/emu/emu.sh').read_text())
         self.assertIn('-- targets/android/app/engine/powstream-native',
                       (ROOT / 'targets/android/tools/apk-job.sh').read_text())
 
