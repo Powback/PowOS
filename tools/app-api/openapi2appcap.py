@@ -37,6 +37,8 @@ SPEND_PAT = re.compile(r"(checkout|payment|pay|order|purchase|book|delete|send|m
 # the safety rule "never enter credentials" (APP-API-CAPTURE.md §0.2). Petstore's GET /user/login?username&password
 # was drafted as an enabled read.
 CRED_PARAM = re.compile(r"(pass(word|wd)?|secret|token|api.?key|otp|pin|credential)$", re.I)
+# Pagination cursors end in "token" too (pageToken, nextPageToken, continuation_token): a list read, not a credential.
+PAGE_TOKEN = re.compile(r"(page|next|prev(ious)?|continuation|cursor|sync).?token$", re.I)
 CRED_PATH = re.compile(r"(login|logout|log.?in|sign.?in|sign.?out|oauth|/token\b|/auth\b)", re.I)
 
 
@@ -56,7 +58,7 @@ def _action(path: str, method: str, op: dict, authed: bool) -> tuple[str, dict]:
     aid = op.get("operationId") or (method + re.sub(r"[^a-zA-Z0-9]+", "_", path)).strip("_")
     aid = re.sub(r"_+", "_", aid).strip("_")[:48] or "root"
     params = {p["name"]: {"type": "string"} for p in op.get("parameters", []) if p.get("in") in ("path", "query")}
-    cred = bool(CRED_PATH.search(path)) or any(CRED_PARAM.search(n) for n in params)
+    cred = bool(CRED_PATH.search(path)) or any(CRED_PARAM.search(n) and not PAGE_TOKEN.search(n) for n in params)
     # A DELETE can't be undone (it was "reversible-write" with an undo placeholder unless its path said "delete"):
     # gated like spend, a per-call yes. Same for anything that takes a credential, read or not.
     spend = (not is_read and (method == "delete" or bool(SPEND_PAT.search(path)))) or cred

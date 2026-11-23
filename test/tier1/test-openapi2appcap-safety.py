@@ -21,6 +21,8 @@ DOC = {
             {"name": "username", "in": "query"}, {"name": "password", "in": "query"}]}},
         "/search": {"get": {"operationId": "search", "parameters": [{"name": "api_key", "in": "query"}]}},
         "/checkout": {"post": {"operationId": "checkout"}},
+        "/items": {"get": {"operationId": "listItems", "parameters": [
+            {"name": "pageToken", "in": "query"}, {"name": "next_page_token", "in": "query"}]}},
     },
 }
 
@@ -45,6 +47,10 @@ class Safety(unittest.TestCase):
             self.assertFalse(x["enabled"], aid)
             self.assertFalse(x["widget"], aid)
             self.assertIn("credential", x["confirm_template"], aid)
+
+    def test_pagination_token_is_a_plain_read(self):
+        x = self.a["listItems"]
+        self.assertEqual((x["safety"], x["enabled"]), ("read", True))
 
     def test_other_writes_unchanged(self):
         self.assertEqual((self.a["updatePet"]["safety"], self.a["updatePet"]["enabled"]), ("reversible-write", False))
