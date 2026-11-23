@@ -5,6 +5,7 @@
  * the phone, so the shell still runs.
  */
 import type {
+  FilePlace,
   Clip,
   BackgroundApp,
   HostWebWindow,
@@ -144,7 +145,8 @@ function native(host: NonNullable<Window["PowosHost"]>): Bridge {
       background: () => call<BackgroundApp[]>("apps.background"),
       stopBackground: (key) => call<boolean>("apps.stopBackground", key),
     },
-    usage: { recent: (limit) => call<string[]>("usage.recent", limit) },
+    usage: { recent: (limit) => call<string[]>("usage.recent", limit), frequent: (limit) => call<string[]>("usage.frequent", limit) },
+    files: { places: () => call<FilePlace[]>("files.places"), open: (id) => call<boolean>("files.open", id) },
     home: {
       get: () => call<Home>("home.get"),
       place: (key, cell, page) => call("home.place", key, cell, page),
@@ -628,7 +630,12 @@ function mock(): Bridge {
       links: async (pkg) => ({ pkg, label: pkg, links: [{ uri: `https://${pkg}.example/item/.*`, activity: ".ItemActivity" }] }),
       ...mockBackground(icon),
     },
-    usage: { recent: async (limit) => recent.slice(0, limit) },
+    // Most used: some recent, some opened less lately (the launcher's Suggested leaves out what Recent shows).
+    usage: { recent: async (limit) => recent.slice(0, limit), frequent: async (limit) => ["a:chrome", "a:maps", "a:spotify", "a:camera", "l:kate", "a:calendar", "a:signal"].slice(0, limit) },
+    files: {
+      places: async () => [{ id: "downloads", label: "Downloads" }, { id: "documents", label: "Documents" }, { id: "camera", label: "Camera" }, { id: "music", label: "Music" }, { id: "linux", label: "Linux home" }],
+      open: async (id) => (console.log("[mock] files.open", id), true),
+    },
     home: homeLayout(home, homeChanged, () => apps),
     store: {
       get: async <T>(name: string) => {

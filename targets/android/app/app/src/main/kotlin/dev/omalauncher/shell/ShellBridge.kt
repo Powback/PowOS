@@ -80,6 +80,7 @@ class ShellBridge(
     private val clips = ClipHistory.of(context)
     private val clipChanged = ClipboardManager.OnPrimaryClipChangedListener { clips.add(ClipHistory.primaryText(context, clipboard())) }
     private val media = ShellMedia(context, runtime, scope, ::emit)
+    private val places by lazy { FilePlaces(context, runtime) }
     /** Android apps as home elements (on unless Settings.Global powos_web_windows = 0; home's activity only). */
     private val webWindows by lazy { WebWindows(context, web, ::emit) }
 
@@ -571,6 +572,11 @@ class ShellBridge(
             // App API's "+ add app": the deep links an app opens, read from its manifest - nothing fired (AppLinks.kt).
             "apps.links" -> AppLinks.read(context, a.getString(0))
             "usage.recent" -> JSONArray(installed(runtime.usage.recent).take(a.optInt(0, 5)))
+            // The launcher's "Suggested" (shell/ui/drawer.tsx): most used first, by the same decayed launch counts.
+            "usage.frequent" -> JSONArray(installed(runtime.usage.frequent()).take(a.optInt(0, 8)))
+            // The launcher's "Quick launch" folders (FilePlaces.kt): only those that open here, and opening one.
+            "files.places" -> places.list()
+            "files.open" -> places.open(a.getString(0))
             "store.get" -> store(a.getString(0)).takeIf { it.isFile }?.readText()?.let { RawJson(it) }
             "store.set" -> {
                 store(a.getString(0)).writeText(a.get(1).let { if (it is String) JSONObject.quote(it) else it.toString() })

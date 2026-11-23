@@ -439,7 +439,10 @@ function DockRecents({ count }: { count: number }) {
         e.pair ? (
           <PairCell key={entryKey(e)} pair={e.pair} />
         ) : (
-          <AppCell key={e.app.key} app={e.app} labels={false} class={markClass(e.app.key)} draggable onTap={tapDock} />
+          // The pinned cells' lift-out too (liftOut: a move away from the dock carries it as a window's drag; along the
+          // dock it stays the row's scroll) - recent ones had only the hold's drag onto home (the user, 11-23: "the drag
+          // to open as window works for the docked icons but not the recent ones").
+          <AppCell key={e.app.key} app={e.app} labels={false} class={markClass(e.app.key)} draggable onMove={liftOut} onTap={tapDock} />
         ),
       )}
     </>
@@ -492,7 +495,7 @@ function DockWindows({ pinned }: { pinned: string[] }) {
       ))}
       {shown.map(([k, state]) => {
         const app = byKey.value.get(k);
-        return app && <AppCell key={`w ${k}`} app={app} labels={false} class={`windowed ${state} ${markClass(k)}`} onTap={tapDock} />;
+        return app && <AppCell key={`w ${k}`} app={app} labels={false} class={`windowed ${state} ${markClass(k)}`} onMove={liftOut} onTap={tapDock} />;
       })}
     </>
   );

@@ -36,6 +36,10 @@ class AppUsage(
 
     private fun order() = scores.entries.sortedByDescending { it.value.second }.map { it.key }
 
+    /** Keys of the apps opened, most used first (the decayed launch count, [score]), for the launcher's suggestions. */
+    fun frequent(now: Long = System.currentTimeMillis()): List<String> =
+        scores.keys.toList().map { it to score(it, now) }.sortedByDescending { it.second }.map { it.first }
+
     /** Counts [settle] calls, so the strip can scroll back to its start each time home comes back. */
     var settled by mutableIntStateOf(0)
         private set

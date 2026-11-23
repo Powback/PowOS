@@ -89,11 +89,15 @@ interface CellProps {
   onTap?: (app: App) => void;
 }
 
-/** Holding [key] and moving: the menu gives way, the launcher closes, and the app follows the finger onto home. */
+/**
+ * Holding [key] and moving: the menu gives way, the launcher closes, and the app follows the finger - onto home, or over
+ * an app into a window or a half, as a dock app does (state.ts Carry.toWindow, dockout.tsx). THE launcher drag: every
+ * launcher tile (AppCell draggable) and search's app rows (drawer.tsx AppResultRow) start it, none has its own.
+ */
 export function dragHome(key: string, e: PointerEvent) {
   menu.value = null;
   closeDrawer();
-  startCarry({ app: key }, e, { x: 30, y: 30 });
+  startCarry({ app: key, toWindow: true }, e, { x: 30, y: 30 });
 }
 
 /**

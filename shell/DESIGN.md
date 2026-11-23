@@ -49,7 +49,8 @@ Native code shrinks to a small, stable API (async calls + events), the same shap
 | area | calls | events |
 |---|---|---|
 | apps | `apps.list()`, `apps.launch(key)`, `apps.icon(key)` (URL), `apps.info(key)`, `apps.uninstall(key)` | `apps.changed` |
-| usage | `usage.recent(n)`, `usage.record(key)` | |
+| usage | `usage.recent(n)`, `usage.frequent(n)` (most used first; the phone's), `usage.record(key)` | |
+| files | `files.places()` (the folders that open here), `files.open(id)` — the launcher's Quick launch (the phone's) | |
 | store | `store.get(name)`, `store.set(name, json)` — the shell's own data files | |
 | keyboard | `keyboard.show()`, `keyboard.hide()` | `keyboard.inset` (px, per frame) |
 | system | `system.insets()`, `system.glass()` (the wallpaper as a picture, for the glass), `system.openSettings(what)` | `system.insets`, `system.glass` |

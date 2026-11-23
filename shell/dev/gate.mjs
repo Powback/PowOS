@@ -14446,6 +14446,14 @@ try {
         console.log(`     ${name}: ${await r.page.evaluate(() => window.__azList).catch(() => "?")}`);
         return fails;
       })));
+    // LD1 (the user, 11-23: "the drag to open as window works for the docked icons but not the recent ones"): every
+    // launcher tile (Recent, Suggested, a letter's apps, search's app rows) and the dock's recent ones start the shared drag.
+    for (const [w, h, name] of [[404, 900, "launcher-drag"], [821, 883, "launcher-drag-unfolded"]])
+      runs.push(open(browser, `${ORIGIN}/index.html`, name, { width: w, height: h }).then((r) => whenReady(r, async () => {
+        const fails = await r.page.evaluate(async () => (await importShim("./dev/launcher-drag-check.js")).launcherDrags());
+        console.log(`     ${name}: ${await r.page.evaluate(() => window.__launcherDrag).catch(() => "?")}`);
+        return fails;
+      })));
     // HZ-VOTE (perf-1793639664326): the drawer's Web Animation settle holds the host's 120 Hz vote, given back after (drawer-settle-refresh).
     runs.push(open(browser, `${ORIGIN}/index.html`, "drawer-settle-refresh", { width: 404, height: 900 }).then((r) => whenReady(r, async () => {
       await r.page.evaluateOnNewDocument(() => {
@@ -14700,7 +14708,7 @@ try {
       runs.push(open(browser, `${ORIGIN}/index.html${query}`, `dock-dragout-${kind}`, { width, height }).then((r) => whenReady(r, () => r.page.evaluate(async (k) => (await importShim("./dev/dock-dragout-check.js")).dockDragOut(k), kind))));
   // The drawer's list fades at an edge with more to scroll (2026-10-24): a short screen, so the mock's apps scroll.
   if (process.env.SHELL_PAGES !== "0")
-    runs.push(open(browser, `${ORIGIN}/index.html?mode=pull`, "scroll-fade", { width: 404, height: 560 }).then((r) => whenReady(r, () => r.page.evaluate(scrollFadeCheck))));
+    runs.push(open(browser, `${ORIGIN}/index.html?mode=pull`, "scroll-fade", { width: 404, height: 440 }).then((r) => whenReady(r, () => r.page.evaluate(scrollFadeCheck))));
   if (process.env.SHELL_PAGES !== "0")
     runs.push(open(browser, `${ORIGIN}/index.html?mode=pull`, "launcher-haptics", { width: 404, height: 900 }).then((r) => whenReady(r, () => launcherHapticsCheck(r.page))));
     runs.push(open(browser, `${ORIGIN}/index.html`, "close-up", { width: 404, height: 560 }).then((r) => whenReady(r, () => r.page.evaluate(closeUpCheck))));

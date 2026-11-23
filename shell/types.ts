@@ -619,6 +619,14 @@ export interface Bridge {
   usage: {
     /** Keys, last opened first. */
     recent(limit: number): Promise<string[]>;
+    /** Keys, most used first (decayed launch counts): the launcher's "Suggested". The phone's only (older APK: rejects). */
+    frequent?(limit: number): Promise<string[]>;
+  };
+  /** The launcher's "Quick launch" folders (FilePlaces.kt): only those that open on this host. The phone's only. */
+  files?: {
+    places(): Promise<FilePlace[]>;
+    /** False: it couldn't be opened. */
+    open(id: string): Promise<boolean>;
   };
   /** The shell's own data files (data/*.json), kept by the host. */
   store: {
@@ -1651,4 +1659,10 @@ export interface BarInput {
   hearing: boolean;
   gen: number;
   seq: number;
+}
+
+/** A folder the launcher can open (types.ts Powos.files). */
+export interface FilePlace {
+  id: string;
+  label: string;
 }

@@ -36,10 +36,13 @@ export const outAim = signal<OutAim | null>(null);
 /** How long a launched app may take to show up as a task before the split gives up on it. */
 export const TASK_WAIT = { ms: 6000 };
 
+/** A carry that may open as a window or a half: a dock app's, or a launcher app's (state.ts Carry.toWindow). */
+const windowable = (c: Carry) => !!(c.fromDock || c.toWindow);
+
 /** Where [c], held at [x], [y], would go off the dock: a half or the middle of the screen, or null. */
 export function aimOut(c: Carry, x: number, y: number): OutAim | null {
   const key = carriedApp(c);
-  if (!c.fromDock || !key || !(c.lifted || overApps()) || aimDock(c, x, y)) return null;
+  if (!windowable(c) || !key || !(c.lifted || overApps()) || aimDock(c, x, y)) return null;
   const place = placeOut(key, x, y);
   if (place) return { key, zone: "window", rect: place.rect, place };
   const w = window.innerWidth, h = window.innerHeight;

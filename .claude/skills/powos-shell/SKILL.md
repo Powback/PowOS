@@ -210,7 +210,7 @@ WindowBlur.kt, WallpaperBackdrop.kt, LiquidGlass.kt; page side shell/ui/nativegl
   wide launcher above the bar (start menu, bar stays tappable); scroll edge fades (drawer, AI panes, shade, chat);
   over-pull unfolds notification stacks; "tests" stop/resume control in v3 Tools (ui/tests.ts, bridge verify.stop -
   needs the new APK, hidden until its dry probe answers).
-- Gate: wideLauncherBar (wide-home), scroll-fade (404x560 so the mock list scrolls), stacks in overpullExpand/Fold,
+- Gate: wideLauncherBar (wide-home), scroll-fade (404x440 so the launcher's sections scroll), stacks in overpullExpand/Fold,
   overpullTests. Stillness helpers must ignore scroll-timeline animations (see Scrollbars note above).
 - Open: no device check yet - queue one per change after the ship (wide drawer + bar, edge fades in drawer and PowOS
   AI, over-pull stacks, tests control after the APK). No board task was claimed (board unreachable at the time).
@@ -256,10 +256,22 @@ WindowBlur.kt, WallpaperBackdrop.kt, LiquidGlass.kt; page side shell/ui/nativegl
   bounds, ui/desktops.ts inWindow) it is the app's by design; left half with pull-up corners on = PowOS AI's panel.
   CDP elementFromPoint can't see Android windows. List end in a check: tap the A-Z bar's last letter, not flings (a
   fling starting at the end IS the over-pull: search + keyboard).
+- Launcher content (11-23, ui/launcherview.ts pure + shell/test/launcherview.test.ts; drawer.tsx Sections/QuickLaunch,
+  only with `AppList sections` - the drawer's Pages; the "+ app" picker and the desktop panel keep the plain A-Z): opens
+  on sections Recent (8, `recent`) / Suggested (4, `usage.frequent` minus Recent; hidden without data) / Quick launch
+  (`files.places`/`files.open`, FilePlaces.kt: DocumentsUI folders + Linux home; only places that resolve). A-Z bar =
+  `launcherLetter` signal: the letter's apps under `.launcher-chip` (tap = back), kept on release, reset on every open.
+  No recents + no suggested: plain A-Z. Probe: `[data-view=sections|letter|all]`, `[data-section=recent|suggested|places]`.
+  Shots: drawer, drawer-scrub (held), drawer-letter (released). Device: az-scrub.sh checks open/held/kept/chip.
+- One drag for app tiles (11-23, "drag to open as window works for the docked icons but not the recent ones"): launcher
+  tiles + search's app rows (drawer.tsx AppResultRow) = apps.tsx dragHome, carry `toWindow` (dockout.tsx aimOut: over an
+  app / a window page it opens as window or half, as the dock's); dock recents + DockWindows cells get the pinned cells'
+  `onMove={liftOut}` (no-hold lift-out; along the row stays scroll). Root cause was DockRecents' AppCell without onMove.
+  Gate LD1 launcher-drag(-unfolded) (dev/launcher-drag-check.js); device: board-look-windows.sh recent-drag.
 - Drawer: A-Z `.grid.az` in `.drawer-list` (padding-right --letter-bar). RecentRow (`.drawer-recents`) is OFF by
   default: `drawerRecents = stored("drawer.recents")`, "on" shows it; Settings > style > home > "recent apps in the
   drawer". The check is inside RecentRow (Drawer itself is at the cyclomatic limit).
-- A-Z scrub highlight (drawer.tsx highlight()): per LETTER change (not pointermove) `.grid.az[data-scrub]` + the
+- A-Z scrub highlight (drawer.tsx highlight(); now only the plain-A-Z lists - the "+ app" picker, the desktop panel): per LETTER change (not pointermove) `.grid.az[data-scrub]` + the
   letter's cells `[data-lit]` (range first.get(l)..next letter's first); shell.css dims others to 0.4, lit get
   scale 1.05 + translate -2px, 180 ms transitions; release clears. Data attributes on purpose: nativeglass/glass
   MutationObservers watch only style/class, and Preact doesn't own them. Shots scene "drawer-scrub" (synthetic

@@ -60,6 +60,12 @@ export interface Carry {
   fromDock?: boolean;
   /** Lifted out of the dock with no hold (home.tsx liftOut): a window's drag - its drop zones (dockout.tsx) on home too. */
   lifted?: boolean;
+  /**
+   * A launcher app held and moved (apps.tsx dragHome: every launcher tile - Recent, Suggested, a letter's apps, search's
+   * app rows): over an app (or a window on unfolded home) it opens there on a half or as a window, the same drop zones
+   * as a dock app's (dockout.tsx aimOut); over home's grid it's placed there, as before.
+   */
+  toWindow?: boolean;
   /** Taken out of this folder (its key): let go off it, it's out of the folder - on home where it's let go. */
   fromFolder?: string;
   x: number;
