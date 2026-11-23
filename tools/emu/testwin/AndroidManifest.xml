@@ -5,11 +5,21 @@
      HACK: a stand-in under another app's package name. Real fix: one test-app setting the checks read (E2E_APP in
      e2e-lib.sh), this client under its own package. -->
 <manifest xmlns:android="http://schemas.android.com/apk/res/android" package="com.oneplus.calculator"
-    android:versionCode="1" android:versionName="emu-testwin-1">
+    android:versionCode="2" android:versionName="emu-testwin-2">
     <uses-sdk android:minSdkVersion="30" android:targetSdkVersion="36" />
     <application android:label="Calculator" android:theme="@android:style/Theme.DeviceDefault.Light.NoActionBar">
         <activity android:name=".Calculator" android:exported="true" android:resizeableActivity="true"
             android:configChanges="screenSize|smallestScreenSize|screenLayout|orientation|density">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity>
+        <activity android:name=".Chat" android:exported="true" android:resizeableActivity="true"
+            android:label="Test chat" android:windowSoftInputMode="adjustResize"
+            android:configChanges="screenSize|smallestScreenSize|screenLayout|orientation|density">
+            <!-- Its own launcher entry: home's apps list gives it a key (a:com.oneplus.calculator/...Chat), ww-keyboard.sh
+                 opens it through home's launch path. -->
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />

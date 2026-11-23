@@ -502,8 +502,16 @@ user's window: the one last pressed or opened, or the newest open window while h
 This was added on 11-03 after e2e round 213. Broforce (Proton) re-asserted full screen in the background when Kate
 opened, covered the screen, and took the dock taps.
 
-Keyboard cover: when the IME's inset covers the focused body, the page lifts that window above the inset, and the
-lift is ordinary geometry in `w.f`. Plasma does not do this, but on a phone it is needed.
+Keyboard cover (KB1, built 11-23, `shell/ui/kbfit.ts`): an Android app on its virtual display never gets IME insets
+(the keyboard is on display 0 through the FALLBACK policy, and Android insets a window only on the IME's display), so
+its adjustResize did nothing and its field stayed under the keyboard - the user, 11-23: "it doesn't resize the
+content so I don't see where I'm typing". Home's own insets (`system.insets` keyboard) do see it, so while the keyboard
+shows, the window it types into (a focused field in a window's DOM names that window; else the top window of the page
+on screen, which a body press raised; never while home's own field types, never a full-screen/PiP window) is shown
+ending at the keyboard's top (`fitted()` in webwindows.tsx: the frame, its shadow, masks; a low floating window moves
+up to keep MIN_H). The body is the app's size in `w.f`, so the host resizes the virtual display / KWin window to the
+room left and the app relayouts there. The stored frame is untouched: keyboard down, the old size is back. Gate
+`ww-keyboard-fit`, device check `tools/phone/verify/ww-keyboard.sh` (emu: tools/emu/testwin's Chat).
 
 ### 3.2 Child surfaces: popups, menus, tooltips, transients (Z3)
 

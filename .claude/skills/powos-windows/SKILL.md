@@ -67,6 +67,12 @@ description: Use when working on PowOS window tasks - floating Android windows (
   Calculator, regions + side read back; then Settings' card -> the note, no canvas). Gate: `switcher-canvas-drag`
   (CDP touch drag in Chromium: reaches tasks.canvasDock with the right partner; refusal note; Settings blocked).
 
+## Keyboard over a web window (KB1, 11-23)
+- An Android app on its VD gets NO IME insets (IME on display 0 via FALLBACK policy; insets are per display): its
+  adjustResize never fires. Fix lives in the page: shell/ui/kbfit.ts + webwindows.tsx `fitted()` - the window typed
+  into ends at home's `system.insets` keyboard top, so `w.f`'s app size shrinks and the host resizes the VD/KWin window.
+  Gate `ww-keyboard-fit`; check `verify/ww-keyboard.sh` (emu: testwin Chat activity logs `PowosTestChat field ...`).
+
 ## Page after going home (manager decision 2026-10-21, launcher standard)
 - From an app: page kept (home launched with Switcher.EXTRA_RECENTS: no "system.home"). Home while home shows:
   "system.home" -> state.ts goHome() -> page 0 (closes drawer/menus too).

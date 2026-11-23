@@ -2898,6 +2898,86 @@ async function switcherWindowCardsCheck() {
   return fails;
 }
 
+/**
+ * KB1 (board keyboard-resizes-the-window-but-not-the-content, the user 11-23: "it doesn't resize the content so I don't
+ * see where I'm typing"): the keyboard up over a right-pinned window and a maximised one - the window being typed into
+ * (the top one) ends at the keyboard's top, and the app size it sends ("w.f" <app h>, what the host resizes the virtual
+ * display / KWin window to) is that shorter body's; the window under it keeps its frame; the keyboard down, the window
+ * is its old size again; home's own field typing leaves the windows alone.
+ */
+async function webWindowKeyboardFitCheck() {
+  const S = await window.__gw.mod("./state.ts");
+  const W = await window.__gw.mod("./ui/webwindows.tsx");
+  // Its helpers come in first (page.evaluate sends one function's source): window.__kbFit, set by the run.
+  const { kbFitKit, kbFitSide, kbFitMax } = window.__kbFit;
+  const k = kbFitKit();
+  S.page.value = 0;
+  await window.__gw.settled();
+  const pg = S.pages.value[0];
+  try {
+    await kbFitSide(W, k, pg);
+    await kbFitMax(W, k, pg);
+  } finally {
+    k.insets(0);
+    W.webWins.value = [];
+  }
+  return k.fails;
+}
+
+/** [webWindowKeyboardFitCheck]'s helpers: insets, a body's rect, the last "w.f" app height, frames, the failures. */
+function kbFitKit() {
+  const fails = [];
+  const KB = 330;
+  const frame = () => new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)));
+  const insets = (keyboard) => window.__mockEvents.emit("system.insets", { top: 24, bottom: 16, left: 0, right: 0, keyboard });
+  const none = { top: NaN, bottom: NaN, height: NaN };
+  const body = (id) => document.querySelector(`.webwindow[data-wwid="${id}"] .webwindow-body`)?.getBoundingClientRect() ?? none;
+  const sentH = (id) => {
+    const parts = (window.__ww.sent.at(-1) ?? "").split(" ");
+    const at = parts.indexOf(String(id), 4);
+    return at < 0 ? NaN : Number(parts[at + 22]);
+  };
+  const want = (ok, msg) => ok || fails.push(`KB1 ${msg}`);
+  const up = async (kb) => (insets(kb), await frame(), await frame());
+  return { fails, KB, insets, body, sentH, want, up, top: () => innerHeight - KB };
+}
+
+/** A right-pinned window over another: the top one (typed into) fits above the keyboard, the other stays. */
+async function kbFitSide(W, k, pg) {
+  const half = Math.round(innerWidth / 2);
+  W.webWins.value = [
+    { id: 981, key: "a:gate.left", label: "Left", page: pg, x: 0, y: 40, w: half, h: innerHeight - 80, live: true },
+    { id: 982, key: "a:gate.chat", label: "Chat", page: pg, x: half, y: 40, w: innerWidth - half, h: innerHeight - 80, live: true },
+  ];
+  await k.up(0);
+  await window.__gw.settled();
+  const [left0, chat0] = [k.body(981), k.body(982)];
+  await k.up(k.KB);
+  const chat = k.body(982);
+  k.want(chat.bottom <= k.top() + 0.5, `side-pinned: the typed-into window's body ends at ${chat.bottom} with the keyboard's top at ${k.top()} (want at or above it)`);
+  k.want(chat.top === chat0.top, `side-pinned: its top moved ${chat0.top} -> ${chat.top} (want kept: there's room)`);
+  const h = k.sentH(982);
+  k.want(Math.abs(h - chat.height) < 1, `side-pinned: the app's size sent is ${h} high, the body ${chat.height} (want the body's: the host resizes the app to it)`);
+  k.want(k.body(981).bottom === left0.bottom, `the window under it changed ${left0.bottom} -> ${k.body(981).bottom} (want kept: the keyboard isn't its)`);
+  await k.up(0);
+  k.want(k.body(982).bottom === chat0.bottom, `keyboard down, the window ends at ${k.body(982).bottom} (want its own ${chat0.bottom} back)`);
+}
+
+/** A maximised window fits too; home's own field typing (the keyboard is home's) leaves it alone. */
+async function kbFitMax(W, k, pg) {
+  W.webWins.value = [{ id: 983, key: "a:gate.max", label: "Max", page: pg, x: 0, y: 24, w: innerWidth, h: innerHeight - 100, restore: { x: 40, y: 120, w: 320, h: 400 }, live: true }];
+  await window.__gw.settled();
+  await k.up(k.KB);
+  k.want(k.body(983).bottom <= k.top() + 0.5, `maximised: the body ends at ${k.body(983).bottom} with the keyboard's top at ${k.top()}`);
+  await k.up(0);
+  const field = document.createElement("input");
+  document.body.append(field);
+  field.focus();
+  await k.up(k.KB);
+  k.want(!document.hasFocus() || k.body(983).bottom > k.top() + 0.5, `home's own field typing shrank the window (its body ends at ${k.body(983).bottom})`);
+  field.remove();
+}
+
 /** [switcherLinuxMaxCheck]'s home: a maximised Linux window (Dolphin), then the switcher up with its card and two apps'. */
 async function switcherLinuxMaxSetup([linux, win, full]) {
   const { powos } = await window.__gw.mod("./bridge.ts");
@@ -14976,6 +15056,8 @@ try {
     runs.push(open(browser, `${ORIGIN}/index.html`, "switcher-linux-max", { width: 404, height: 900 }).then((r) => whenReady(r, () => switcherLinuxMaxCheck(r.page))));
     // Every open window (Linux + Android) has its switcher card, a first frame while it shows keeps them (E2E 248).
     runs.push(open(browser, `${ORIGIN}/index.html`, "switcher-window-cards", { width: 821, height: 883 }).then((r) => whenReady(r, () => r.page.evaluate(switcherWindowCardsCheck))));
+    // KB1: the window being typed into ends at the keyboard's top, its app sized to it (board keyboard-resizes-the-window-...).
+    runs.push(open(browser, `${ORIGIN}/index.html`, "ww-keyboard-fit", { width: 821, height: 883 }).then((r) => whenReady(r, async () => (await r.page.evaluate(`${kbFitKit};${kbFitSide};${kbFitMax};window.__kbFit={kbFitKit,kbFitSide,kbFitMax}`), r.page.evaluate(webWindowKeyboardFitCheck)))));
   // Board switcher-opened-over-a-maximised-linux-window-ce: over home, the maximised web window's card is the centred one.
   if (process.env.SHELL_PAGES !== "0")
     runs.push(open(browser, `${ORIGIN}/index.html`, "switcher-centre", { width: 404, height: 900 }).then((r) => whenReady(r, () => r.page.evaluate(switcherCentreCheck))));

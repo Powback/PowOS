@@ -17,6 +17,7 @@ import type { HostWebWindow, HostWebWindowsSnapshot, WebWindowRect } from "../ty
 import { Mark } from "./chrome.tsx";
 import { forgetQuickReturn, QuickBar, quickGone, quickIconKeys, quickPlace, quickShown, QUICK, type QuickInfo, type QuickRect } from "./quickpage.tsx";
 import { memo } from "./memo.ts";
+import { fitAboveKeyboard, keyboardTop } from "./kbfit.ts";
 import { barReveal, edgeDown, edgeEnd, edgeMove, holdReveal, releaseReveal, revealGone, revealKept } from "./barreveal.ts";
 import { usePresence } from "./reveal.tsx";
 import { confirm as hapticConfirm, tick as hapticTick } from "./haptics.ts";
@@ -500,7 +501,8 @@ function popOut(win: WebWin) {
 /** A quick page's card: a scrim (a tap outside closes), the card on the backdrop glass with its small bar and the page. */
 function QuickEl({ win, z }: { win: WebWin; z: number }) {
   const body = useRef<HTMLDivElement>(null);
-  const frame = { position: "absolute", left: `${win.x}px`, top: `${win.y}px`, width: `${win.w}px`, height: `${win.h}px`, zIndex: 20 + z, display: "flex", flexDirection: "column", transformOrigin: win.quick?.origin } as const;
+  const fit = fitted(win);
+  const frame = { position: "absolute", left: `${fit.x}px`, top: `${fit.y}px`, width: `${fit.w}px`, height: `${fit.h}px`, zIndex: 20 + z, display: "flex", flexDirection: "column", transformOrigin: win.quick?.origin } as const;
   return (
     <>
       <div class="quickpage-scrim" style={{ zIndex: 19 + z }} onPointerDown={(e) => (e.stopPropagation(), close(win.id))} />
@@ -1200,7 +1202,8 @@ function cutAll(box: HTMLElement | null, here: WebWin[]) {
   here.forEach((w, i) => {
     const above = here.slice(i + 1).filter(holed);
     const frame = box.querySelector<HTMLElement>(`.webwindow[data-wwid="${w.id}"]`);
-    if (frame && !w.quick) setMask(frame, holes(above, { x: w.x, y: w.y, s: w.scale ?? 1 }));
+    const f = fitted(w);
+    if (frame && !w.quick) setMask(frame, holes(above, { x: f.x, y: f.y, s: w.scale ?? 1 }));
     const shadow = box.querySelector<HTMLElement>(`.ww-shadow[data-wwid="${w.id}"]`);
     const b = frameBox(w);
     if (shadow) setMask(shadow, holes(above, { x: b.x - SHADOW_PAD, y: b.y - SHADOW_PAD, s: 1 }));
@@ -3693,7 +3696,7 @@ const liveable = (w: WebWin, next: Partial<WebWin>) => resizing.has(w.id) && !w.
 
 /** [w]'s frame [frame], its shadow and its size outline as its render would write them (RS5c: [resizeLive]). */
 function writeFrame(frame: HTMLElement, w: WebWin) {
-  setBox(frame, w);
+  setBox(frame, fitted(w));
   const shadow = frame.parentElement?.querySelector<HTMLElement>(`.ww-shadow[data-wwid="${w.id}"]`);
   const b = frameBox(w);
   if (shadow) sliceShadow(shadow, w.id, shadowBox(w));
@@ -4068,7 +4071,7 @@ function Body({ win, body }: { win: WebWin; body: { current: HTMLDivElement | nu
     if (barAutoHidden(win) && body.current) edgeDown(win.id, e, body.current.getBoundingClientRect().top, rootTokens().inset);
     // A new touch: fingers whose up this body never saw end first (the app's gesture never keeps a stale finger).
     if (e.isPrimary && p.size) (p.clear(), toApp(e, "cancel"));
-    if (!p.size) raise(win.id);
+    if (!p.size) (raise(win.id), blurHomeField());
     try {
       body.current?.setPointerCapture(e.pointerId);
     } catch {}
@@ -4200,12 +4203,14 @@ function AppWindowEl({ win, z, focused }: { win: WebWin; z: number; focused: boo
   const pinch = usePinch(win);
   // SC1: a pinch's scale zooms the whole frame (bar and body); the app keeps its size (sizeOf sends the layout size).
   const s = win.scale ?? 1;
+  // KB1: above the keyboard while it types into this window (the app's size follows the body's).
+  const fit = fitted(win);
   const frame = {
     position: "absolute",
-    left: `${win.x}px`,
-    top: `${win.y}px`,
-    width: `${win.w}px`,
-    height: `${win.h}px`,
+    left: `${fit.x}px`,
+    top: `${fit.y}px`,
+    width: `${fit.w}px`,
+    height: `${fit.h}px`,
     transform: s === 1 ? undefined : `scale(${s})`,
     transformOrigin: "0 0",
     zIndex: 20 + z,
@@ -4254,7 +4259,52 @@ function frameClass(win: WebWin, focused: boolean, sizing: boolean, auto: boolea
 /** A window's whole frame (bar and body) in its page's px (the model; scaled about its top left). */
 export function frameBox(w: WebWin): Box {
   const s = w.scale ?? 1;
-  return { x: w.x, y: w.y, w: w.w * s, h: w.h * s };
+  const f = fitted(w);
+  return { x: f.x, y: f.y, w: f.w * s, h: f.h * s };
+}
+
+// ---- KB1: the window being typed into ends at the keyboard's top (ui/kbfit.ts says why) ----------------------------
+
+/** The keyboard's top (viewport CSS px; Infinity: none), from home's insets - the keyboard shows over home's window. */
+export const kbTop = signal(Infinity);
+powos.on("system.insets", (i: { keyboard?: number } | null) => {
+  const top = keyboardTop(i?.keyboard, innerHeight);
+  if (top !== kbTop.peek()) console.info(`[kb] keyboard ${Number.isFinite(top) ? `top at ${Math.round(top)} of ${innerHeight}` : "down"}`);
+  kbTop.value = top;
+});
+
+/**
+ * The window the keyboard types into, or null: home's own field has it (a focused editable outside every window), or
+ * no keyboard. A field in a window's DOM (a quick page) names that window; otherwise the top window of the page on
+ * screen - a press on a body raises its window, and that press is what gave its app the keyboard (WebWindows.homeIme).
+ * Full-screen and PiP windows are Android's own windows on the phone's screen: the keyboard insets them natively.
+ */
+function typingWindow(): number | null {
+  if (!Number.isFinite(kbTop.value)) return null;
+  const el = document.activeElement as HTMLElement | null;
+  if (el && document.hasFocus() && el.matches?.("input, textarea, [contenteditable]:not([contenteditable=false])")) {
+    const own = el.closest<HTMLElement>(".webwindow[data-wwid]");
+    return own ? Number(own.dataset.wwid) : null;
+  }
+  const page = shownPage();
+  const top = webWins.value.findLast((w) => w.page === page && !w.minimised && !w.pip && !w.pending && !hiddenTab(w.id));
+  return top && !top.full ? top.id : null;
+}
+
+/**
+ * A press on a window's body takes typing away from home's own field (the app gets the keyboard: WebWindows.homeIme),
+ * so [typingWindow] never reads a stale home field as home typing and leaves the app under the keyboard.
+ */
+function blurHomeField() {
+  const el = document.activeElement as HTMLElement | null;
+  if (el?.matches?.("input, textarea, [contenteditable]") && !el.closest(".webwindow")) el.blur();
+}
+
+/** [w]'s frame as shown: its own, or (KB1) fitted above the keyboard while it is the window being typed into. */
+export function fitted(w: WebWin): { x: number; y: number; w: number; h: number } {
+  if (!Number.isFinite(kbTop.value) || w.full || typingWindow() !== w.id) return w;
+  const top = parseFloat(getComputedStyle(document.documentElement).getPropertyValue("--inset-top")) || 0;
+  return fitAboveKeyboard(w, w.scale ?? 1, { kbTop: kbTop.value, originY: renderLayout().origin.y, topLimit: top, minH: MIN_H });
 }
 
 /**
