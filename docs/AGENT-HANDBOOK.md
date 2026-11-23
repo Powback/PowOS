@@ -399,6 +399,18 @@ widened first; out of scope here. `tools/emu/emu.sh` otherwise needed no change 
   `targets/android/rooted/rooted.sh deploy` installs changed since the last rooted ship: `rooted.sh deploy`, f105
   part 1 - the apps-tier pieces `rooted.sh deploy` also pushes are the apps part above, not this one). Test:
   `test/tier1/test-ship-rooted.sh`.
+- **KWin activation** (coordinator decision, 2026-11-23, under the user's "you own it"): a rooted deploy that installs
+  a new kwin package does NOT make it live - the session's kwin_wayland keeps the old one (libkwin mapped "(deleted)")
+  until the Linux session restarts. After every successful rooted deploy the service runs `tools/phone/kwin-pending.sh`:
+  installed package != running KWin -> `ship.sh status` says "kwin X installed, active after next idle window" and
+  `tools/phone/verify/kwin-activate.sh` is queued on board task `kwin-activation`. In the verify queue's idle window
+  (window-lock.sh: screen on, nobody touched it for the queue's idle threshold) it decides (`kwin-activate-lib.sh`
+  `kwact_decide`, tested by `test/tier1/test-kwin-activate.sh`): a game running (Steam's reaper, game-lib.sh) or a
+  Linux app other than Steam with a window -> exit 3, stays queued, never closes either; Steam only -> Steam closed
+  gracefully (thawed, `steam -shutdown`), session restarted (kwin-up.sh `kwin_restart`), Steam started again (its
+  window via home's `apps.launch` if it had one, else out of sight via powos-steam-resident / `steam -silent`);
+  nothing open -> session restarted. Then status says "kwin X active". The queue also skips it while a game is left
+  running (closes_game). `kwin-activate.sh --dry-run` prints the decision without touching anything. No touch injection.
 - Notes are only for what the user can SEE. A change they can't (refactor, lint, tooling, "behaviour unchanged")
   ships with `--silent` instead of `--note` (ship.sh request, and what it runs: shell/push.sh, ship-apk.sh, install-app.sh, deploy-note.sh): no
   notification, only a line in comms' quiet log (`powos comms quiet`).

@@ -138,6 +138,7 @@ status)
   [ -s "$Q/shell-held" ] && { read -r ht hc < "$Q/shell-held"; echo "shell held for its APK ${ht:0:9} (APK inputs + shell in the same commit: $hc) - they land together at the install"; }
   [ -e "$HOME/.config/powos/ship-no-idle-wait" ] && echo "APK installs: at once, no idle wait (~/.config/powos/ship-no-idle-wait)"
   [ -s "$Q/rooted-pending" ] && { read -r rb rt < "$Q/rooted-pending"; echo "rooted deploy pending since ${rb:0:9} (origin ${rt:0:9}; runs after the APK, under the phone-busy rules)"; }
+  [ -s "$Q/kwin-activation" ] && [ -f "$here/verify/kwin-activate-lib.sh" ] && ( . "$here/verify/kwin-activate-lib.sh"; kwact_status_line "$Q/kwin-activation" )
   [ -s "$Q/window-failed" ] && { read -r wt ww wf < "$Q/window-failed"; if [ "$wf" = render-watch ]; then echo "WINDOWS BROKEN: ${wt:0:9} ($ww) failed the passive window check (render-watch) - log $Q/done/render-watch-${wt:0:9}.log"; else echo "WINDOWS BROKEN: ${wt:0:9} ($ww) failed the device window check (verify/window-render.sh; changed: $wf) - log $Q/done/window-render-${wt:0:9}.log"; fi; }
   [ -s "$Q/window-gate.pid" ] && kill -0 "$(cat "$Q/window-gate.pid")" 2>/dev/null && echo "device window check running (pid $(cat "$Q/window-gate.pid"); hidden display, no wait)"
   gd=$(for f in "$Q"/gate-deferred/*; do [ -s "$f" ] || continue; read -r gt ga _ < "$f"; echo "$(basename "$f") ${gt:0:9} since $(date -r "$ga" +%H:%M)"; done | paste -sd, - | sed 's/,/, /g')
@@ -1152,6 +1153,9 @@ run)
           if [ $rrc = 0 ]; then
             echo "$T" > "$Q/rooted-live"; rm -f "$Q/failed-rooted" "$Q/rooted-pending" "$Q/rooted-note"
             pull_publish rooted "$rlog"
+            # A new kwin installed but the session still runs the old one: recorded + its activation queued for the
+            # verify queue's idle window (kwin-pending.sh; coordinator decision 2026-11-23, docs/AGENT-HANDBOOK.md "KWin activation").
+            [ ! -x tools/phone/kwin-pending.sh ] || SHIP_DIR="$Q" tools/phone/kwin-pending.sh >> "$rlog" 2>&1 || true
             echo "$(date '+%F %T') ${T:0:9} rooted ($rchg) for $who_s: $rn" >> "$Q/shipped.log"
             echo "$(date +%T) ${T:0:9}: rooted deploy done ($rchg)"
           elif link_down "$rlog" || phone_offline || { [ $rrc = 69 ] && date +%s > "$Q/phone-offline"; }; then
