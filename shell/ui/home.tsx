@@ -18,6 +18,7 @@ import { chromeWay, drawerDragging, drawerOpen, followOpenness, homeGestures, la
 import { tick } from "./haptics.ts";
 import { PageDots } from "./pagedots.tsx";
 import { Carried, Folders, Pages, startCarry } from "./grid.tsx";
+import { StackSheet } from "./stacks.tsx";
 import { DockOutGhost } from "./dockout.tsx";
 import { buttonSlot, carriedApp, shownLess, slotPast } from "./dockdrop.ts";
 import { ScreenPanel } from "./screen.tsx";
@@ -785,6 +786,8 @@ export function Home() {
       {/* A tile or app carried by a finger, over everything it can be dropped on (the pages, the dock). */}
       {/* An open folder: the tile grows into it, over everything (ui/folderview.tsx). */}
       <Folders />
+      {/* A widget stack's edit sheet (ui/stacks.tsx): reorder, take out, add, unstack. */}
+      <StackSheet />
       <Carried />
       <DockOutGhost />
     </>

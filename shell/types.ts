@@ -103,6 +103,8 @@ export interface HomeItem {
   appWidget?: AppWidgetRef;
   /** A placeholder the shell drew at once while the real tile is on its way (e.g. "Adding..."); gone with home.changed. */
   pending?: string;
+  /** Shell-only (ui/stacks.tsx homeView): this tile is the top of widget stack [stack], drawn in the stack's slot. */
+  stack?: string;
 }
 
 /**

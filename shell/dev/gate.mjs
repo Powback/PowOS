@@ -7656,6 +7656,104 @@ async function folderDissolveCheck() {
  * (b) An app off home, carried from the drawer (apps.tsx dragHome, the drawer's own hold) onto home app C: a folder of
  * the two.
  */
+/**
+ * In the page: widget stacks (ui/stacks.tsx, the user 11-23 "stack widgets and swipe between them like pages like
+ * samsung"). Edit mode: a widget carried onto another makes a stack (one tile, dots, the other member unmounted, kept in
+ * the store); out of edit mode a sideways swipe on it shows the next widget and home's page stays; at the last widget
+ * the stack refuses the swipe (home's pages take it); unstack all = both plain widgets again, side by side, no overlap.
+ */
+async function stackMakeCheck() {
+  const S = await window.__gw.mod("./state.ts");
+  const G = await window.__gw.mod("./ui/grid.tsx");
+  const K = await window.__gw.mod("./ui/stacks.tsx");
+  const M = await window.__gw.mod("./ui/stackmodel.ts");
+  const B = (await window.__gw.mod("./bridge.ts")).powos;
+  const at = (type, x, y) => new PointerEvent(type, { pointerId: 14, pointerType: "touch", clientX: x, clientY: y, bubbles: true, isPrimary: true });
+  const n = S.pages.value[S.page.value];
+  const ws = S.home.value.items.filter((i) => i.page === n && M.stackable(i)).sort((p, q) => p.cell.y - q.cell.y || p.cell.x - q.cell.x);
+  if (ws.length < 2) return [`stacks: the mock's page ${n} has ${ws.length} stackable widget(s), needs 2`];
+  const [a, b] = ws;
+  window.__stk = { a: a.key, b: b.key, before: S.home.value.items.map((i) => [i.key, i.cell, i.page]) };
+  S.editing.value = true;
+  await window.__gw.settled(() => document.querySelector(".edit-sheet"));
+  const r = document.querySelector(`.home-tile[data-key="${b.key}"]`).getBoundingClientRect();
+  const [x, y] = [r.left + r.width / 2, r.top + r.height / 2];
+  G.startCarry({ item: a }, at("pointerdown", x - 30, y - 30), { x: 10, y: 10 });
+  for (let k = 1; k <= 6; k++) window.dispatchEvent(at("pointermove", x - 30 + (30 * k) / 6, y - 30 + (30 * k) / 6));
+  await window.__gw.frames(2);
+  const aimed = !!document.querySelector(".drop-spot.stack-aim");
+  window.dispatchEvent(at("pointerup", x, y));
+  const id = () => M.stackOf(K.stacks.value, a.key);
+  await window.__gw.until(() => id() && M.stackOf(K.stacks.value, b.key) === id());
+  S.editing.value = false;
+  await window.__gw.settled(() => document.querySelector(".stack-strip[data-swipe]"));
+  const strip = document.querySelector(".stack-strip");
+  const stored = M.parseStacks(await B.store.get("home.stacks"));
+  return [
+    [aimed, "a widget held over another shows no stack aim"],
+    [!!id(), `${a.key} let go on ${b.key} made no stack`],
+    [document.querySelectorAll(".home-tile.stacked").length === 1, "not exactly one stack tile"],
+    [strip?.querySelectorAll(".stack-dots i").length === 2, "the stack shows no 2 dots"],
+    [document.querySelectorAll(".stack-page").length === 1, "more than the top widget mounted at rest"],
+    [strip?.querySelector(".stack-page.top")?.dataset.member === a.key, `the dropped widget ${a.key} isn't on top`],
+    [!!M.stackOf(stored, a.key), "the stack wasn't written to the store"],
+  ].filter(([ok]) => !ok).map(([, m]) => `stacks: ${m}`);
+}
+
+/** stackMakeCheck's stack ([b, a], the dropped a on top = the LAST): a swipe right shows b, home's page stays; at the
+ * first widget the stack hands a further swipe right to home's pages. */
+async function stackSwipeCheck() {
+  const S = await window.__gw.mod("./state.ts");
+  const M = await window.__gw.mod("./ui/stackmodel.ts");
+  const { b } = window.__stk;
+  const strip = () => document.querySelector(".stack-strip");
+  const top = () => strip()?.querySelector(".stack-page.top")?.dataset.member;
+  const at = (type, x, y) => new PointerEvent(type, { pointerId: 15, pointerType: "touch", clientX: x, clientY: y, bubbles: true, isPrimary: true });
+  const swipe = async (dx) => {
+    const s = strip().getBoundingClientRect();
+    const [sx, sy] = [s.left + s.width / 2, s.top + s.height / 2];
+    strip().dispatchEvent(at("pointerdown", sx, sy));
+    for (let k = 1; k <= 8; k++) strip().dispatchEvent(at("pointermove", sx + (dx * k) / 8, sy + k));
+    await window.__gw.frames(2);
+    strip().dispatchEvent(at("pointerup", sx + dx, sy + 8));
+    await new Promise((ok) => setTimeout(ok, 450));
+  };
+  const page0 = S.page.value;
+  await swipe(strip().clientWidth * 0.6);
+  const shown1 = top();
+  const mounted = document.querySelectorAll(".stack-page").length;
+  const handsOff = !M.stackSwipeAt(strip(), 50) && M.stackSwipeAt(strip(), -50);
+  await swipe(strip().clientWidth * 0.6);
+  return [
+    [shown1 === b, `a swipe right didn't show the previous widget (top ${shown1}, want ${b})`],
+    [S.page.value === page0, "the swipe on the stack turned home's page too"],
+    [mounted === 1, "the neighbour stayed mounted after the swipe"],
+    [handsOff, "at the first widget the stack still claims a swipe right (or not a swipe left)"],
+    [top() === b, "a swipe past the first widget moved the stack"],
+  ].filter(([ok]) => !ok).map(([, m]) => `stacks: ${m}`);
+}
+
+/** Unstack all: both plain widgets, no overlap; the mock's layout put back as it was. */
+async function stackUnstackCheck() {
+  const S = await window.__gw.mod("./state.ts");
+  const K = await window.__gw.mod("./ui/stacks.tsx");
+  const M = await window.__gw.mod("./ui/stackmodel.ts");
+  const B = (await window.__gw.mod("./bridge.ts")).powos;
+  const { a, b, before } = window.__stk;
+  await K.unstackAll(M.stackOf(K.stacks.value, a));
+  const tile = (k) => document.querySelector(`.home-tile[data-key="${k}"]`);
+  await window.__gw.until(() => !document.querySelector(".stack-strip") && tile(a) && tile(b));
+  const cell = (k) => S.home.value.items.find((i) => i.key === k).cell;
+  const [ca, cb] = [cell(a), cell(b)];
+  const overlap = ca.x < cb.x + cb.w && cb.x < ca.x + ca.w && ca.y < cb.y + cb.h && cb.y < ca.y + ca.h;
+  const fails = [
+    [!document.querySelector(".stack-strip"), "unstack all left a stack"],
+    [!overlap, `unstacked widgets overlap (${JSON.stringify(ca)} / ${JSON.stringify(cb)})`],
+  ].filter(([ok]) => !ok).map(([, m]) => `stacks: ${m}`);
+  for (const [key, c, pg] of before) if (c) await B.home.place(key, c, pg);
+  return fails;
+}
+
 async function folderDragCheck() {
   const S = await window.__gw.mod("./state.ts");
   const G = await window.__gw.mod("./ui/grid.tsx");
@@ -14917,6 +15015,16 @@ try {
     for (const [label, viewport] of [["folded", { width: 404, height: 900 }], ["unfolded", { width: 821, height: 883 }]])
       runs.push(open(browser, `${ORIGIN}/index.html`, `home-folder-${label}`, viewport).then((r) => whenReady(r, async () => {
         for (const check of [folderCreateCheck, folderNameCheck, folderDissolveCheck]) {
+          const fails = await r.page.evaluate(check);
+          if (fails.length) return fails;
+        }
+        return [];
+      })));
+  // Widget stacks (stackCheck): make one by drag, swipe it, the hand-off at its last widget, unstack. Both screens.
+  if (process.env.SHELL_PAGES !== "0")
+    for (const [label, viewport] of [["folded", { width: 404, height: 900 }], ["unfolded", { width: 821, height: 883 }]])
+      runs.push(open(browser, `${ORIGIN}/index.html`, `home-stack-${label}`, viewport).then((r) => whenReady(r, async () => {
+        for (const check of [stackMakeCheck, stackSwipeCheck, stackUnstackCheck]) {
           const fails = await r.page.evaluate(check);
           if (fails.length) return fails;
         }

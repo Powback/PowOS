@@ -24,6 +24,7 @@ import { viewport } from "./viewport.ts";
 import { panelTicks } from "./haptics.ts";
 import { overPull, overRelease } from "./overpull.ts";
 import { inWindow } from "./desktops.ts";
+import { stackSwipeAt } from "./stackmodel.ts";
 import { ccEditing, ccExpanded, EXPAND_AT, expandedByDefault, FOLD_AT, settle as settleCc, stretch as stretchCc } from "./ccexpand.ts";
 import { carry, closeDrawer, dockDrag, dockPosition, drawer, editing, folder, launcherIsOverlay, menu, notif, onLibrary, openPanel, page, pageCount, panel, pullKind, pullPanels, selected, separatePanels } from "../state.ts";
 
@@ -781,7 +782,9 @@ function claimOnHome(gs: Gesture, dx: number, dy: number): Gesture["mode"] {
 
 /** Sideways on home: the pages, unless the drawer is open or a strip scrolls sideways itself (logged, as a miss). */
 function claimSideways(gs: Gesture, dx: number, dy: number): Gesture["mode"] {
-  if (!gs.open && !gs.inStrip && PAGED) return "pages";
+  // A widget stack under the finger with a widget that way pages ITSELF (ui/stacks.tsx asks the same rule); at its
+  // first/last widget the swipe is home's.
+  if (!gs.open && !gs.inStrip && PAGED && !stackSwipeAt(gs.target, dx)) return "pages";
   logSwipe(`drop sideways dx=${r(dx)} dy=${r(dy)} open=${gs.open} strip=${gs.inStrip} page=${page.value}`);
   return null;
 }

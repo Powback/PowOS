@@ -31,7 +31,7 @@ import { FolderView } from "./folderview.tsx";
 import { FolderFace, folderable, morphing, folderName, groupIntoFolder, loadFolderNames } from "./folders.tsx";
 import { chosen, isChosen, marquee, MARQUEE_DWELL, partyCells, partyOf, startMarquee, toggleChosen } from "./homeselect.ts";
 import { OwlWidget } from "./owl.tsx";
-import { AppWidgetFace } from "./appwidget.tsx";
+import { AppWidgetFace, picker } from "./appwidget.tsx";
 import { Island } from "./island.tsx";
 import { AgentsPanel } from "./agents.tsx";
 import { migrateRecents, RecentsPanel } from "./recentwidget.tsx";
@@ -39,6 +39,8 @@ import { dropSearchOnFoot, hoverFoot, placeItem, putBackInBar, SEARCH_KEY, Searc
 import { openAgents } from "../agents.ts";
 import { creationIdOf, creationWidgets, discardWidgetCreation, watchCreations } from "./creationwidgets.tsx";
 import { PendingDetailSheet, SkeletonWidgetTile } from "./pending.tsx";
+import { canStack, dropOnStack, homeView, loadStacks, membersOf, stackHooks, StackFaces, startAddToStack, editStack } from "./stacks.tsx";
+import { stackable } from "./stackmodel.ts";
 import type { Cell, HomeItem } from "../types.ts";
 
 const LONG_PRESS_MS = 420;
@@ -142,9 +144,11 @@ function box(c: Cell) {
 const overlaps = (a: Cell, b: Cell) => a.x < b.x + b.w && b.x < a.x + a.w && a.y < b.y + b.h && b.y < a.y + a.h;
 
 /** Items on the page number [n] (home.pages' numbers, not indices). */
-/** Page [n]'s placed items, plus any widget still being composed (creationwidgets.tsx: client-only until it's done, never through the host). */
+/** Page [n]'s placed items, plus any widget still being composed (creationwidgets.tsx: client-only until it's done, never through the host).
+ * A widget stack is ONE item here, its top widget in the stack's slot (ui/stacks.tsx homeView): every drop, overlap,
+ * join and glass computation sees the stack as the tile it shows. */
 const itemsOn = (n: number) =>
-  [...home.value.items, ...creationWidgets.value.items].filter((i) => i.page === n && i.cell && !searchHere(i));
+  [...homeView.value, ...creationWidgets.value.items].filter((i) => i.page === n && i.cell && !searchHere(i));
 /** The search widget where this screen has the search docked (searchwidget.tsx: one home item, a spot per screen). */
 const searchHere = (i: HomeItem) => i.key === SEARCH_KEY && searchInDock.value;
 
@@ -175,7 +179,11 @@ function matches(a: Cell, b: Cell): boolean {
   return stacked || beside;
 }
 
-type Aim = { group: string; page: number; cell?: undefined } | { cell: Cell; page: number; group?: undefined };
+type Aim =
+  | { group: string; page: number; cell?: undefined; stack?: undefined }
+  | { cell: Cell; page: number; group?: undefined; stack?: undefined }
+  // Let go on another widget (or a stack): stacked with it (ui/stacks.tsx).
+  | { stack: HomeItem; page: number; cell?: undefined; group?: undefined };
 
 /** The tile of [items] under the carrying finger. */
 function underFinger(c: Carry, items: HomeItem[]) {
@@ -231,6 +239,7 @@ function aimOn(c: Carry, n: number): Aim | null {
   const others = itemsOn(n).filter((i) => i.key !== c.item?.key);
   const under = underFinger(c, others);
   if (under && groups(c, under)) return { group: under.key, page: n };
+  if (under && canStack(c.item, under, minCells)) return { stack: under, page: n };
   const x = Math.max(0, Math.min(home.value.columns - size.w, Math.round((c.x - c.grab.x - g.pad) / g.cellW)));
   const y = Math.max(0, Math.min(g.rows - size.h, Math.round((c.y - c.grab.y - g.pad) / g.cellH)));
   const cell = { x, y, ...size };
@@ -288,6 +297,11 @@ export function placeNew(wDp: number, hDp: number) {
 
 /** [placeNew] in cells (a PowOS app's widget states its size in cells, ui/apppicker.tsx). */
 export const placeNewCells = (w: number, h: number) => placeNew(w * (geometry.value.cellW || 60) - 1, h * (geometry.value.cellH || 60) - 1);
+stackHooks.spot = placeNewCells;
+stackHooks.openPicker = () => void (picker.value = true);
+
+/** A widget's smallest size in cells (an Android widget's from its provider's dp minimum). */
+const minCells = (i: HomeItem): [number, number] => (i.appWidget ? appWidgetMin(i) : i.minSize);
 
 /**
  * Starts carrying [what] ({ item } or { app }) with the pointer of [e]: follows it on the window until it lifts, then
@@ -367,6 +381,7 @@ async function letGo(c: Carry | null, ev: PointerEvent) {
   tick();
   if (c.app) await addApp(c.app, target);
   else if (target.group) await powos.home.group(c.item!.key, target.group);
+  else if (target.stack) await dropOnStack(c.item!, target.stack);
   // The search (the dock's button, the foot's pill or its widget) let go on the grid: the bar widget there.
   else if (c.item!.key === SEARCH_KEY) await undockSearch(target.page, target.cell!);
   else await placeItem(c.item!.key, target.cell!, target.page);
@@ -833,10 +848,62 @@ function PageUnder({ n, children }: { n: number; children: ComponentChildren }) 
 /** Dispatches a page's item to its tile (the map call site, never inside Tile itself - keeping Tile's own branching
  * where it already was, under the complexity lint). */
 const renderTile = (item: HomeItem, join?: Record<string, number>) =>
-  item.kind === "panel" && item.name === "creation" ? <CreationTile key={item.key} item={item} /> : <Tile key={item.key} item={item} join={join} />;
+  item.kind === "panel" && item.name === "creation" ? <CreationTile key={item.key} item={item} /> : <Tile key={item.stack ?? item.key} item={item} join={join} />;
 
 /** A merged tile's classes: joined, and free-top when nothing sits above any of its top (shell.css: its light edge). */
 const joinClass = (join?: Record<string, number>) => (!join ? "" : join["--free-top"] ? "joined free-top" : "joined");
+
+/** An OWL widget's face: its error, its wait for Linux, or the widget. */
+function WidgetFace({ item, isSelected }: { item: HomeItem; isSelected: boolean }) {
+  const body = item.error ? (
+    <>
+      <div class="widget-name">{item.name}</div>
+      <div class="widget-error">{item.error}</div>
+    </>
+  ) : item.linux ? (
+    <LinuxWait item={item} />
+  ) : (
+    <OwlWidget widget={item.key} cells={shown(item)} />
+  );
+  return <div class={`tile widget-face ${isSelected ? "focused" : ""}`}>{body}</div>;
+}
+
+/** A shell panel's face, by name. */
+function PanelFace({ item }: { item: HomeItem }) {
+  if (item.name === "agents") return <AgentsPanel item={item} />;
+  if (item.name?.startsWith("app:")) return <Island item={item} />;
+  if (item.name === "recents") return <RecentsPanel item={item} />;
+  return item.name === "search" ? <SearchPanel /> : null;
+}
+
+/** What a tile shows inside its box, by kind (a stack's member draws the same, in the stack's slot). */
+function TileFace({ item, isSelected }: { item: HomeItem; isSelected: boolean }) {
+  switch (item.kind) {
+    case "widget":
+      return <WidgetFace item={item} isSelected={isSelected} />;
+    case "appwidget":
+      return <AppWidgetBody item={item} />;
+    case "panel":
+      return <PanelFace item={item} />;
+    case "app":
+      return <AppFace appKey={item.app!} label={item.label} />;
+    case "folder":
+      return <FolderFace item={item} />;
+  }
+}
+
+/** A tile's classes: its kind, picked/selected/opened/lifted, merged. */
+const tileClass = (item: HomeItem, at: { isSelected: boolean; lifted: boolean; join?: Record<string, number> }) =>
+  `home-tile ${item.kind} ${at.isSelected ? "selected" : ""} ${isChosen(item.key) ? "chosen" : ""} ${morphing.value === item.key ? "opened" : ""} ${at.lifted ? "lifted" : ""} ${item.stack ? "stacked" : ""} ${joinClass(at.join)}`;
+
+/** Is [item]'s tile carried (itself, or picked with the carried one)? */
+const isLifted = (item: HomeItem) => {
+  const c = carry.value;
+  return c?.item?.key === item.key || (!!c?.item && isChosen(item.key) && isChosen(c.item.key));
+};
+
+/** A stack's members as its tiles: each in the stack's slot (the top's cell), its own item otherwise. */
+const stackMembers = (top: HomeItem) => membersOf(top.stack!).map((m) => (m.key === top.key ? top : { ...m, cell: top.cell, page: top.page }));
 
 function Tile({ item, join }: { item: HomeItem; join?: Record<string, number> }) {
   const press = useTilePress(item, () => {
@@ -849,41 +916,21 @@ function Tile({ item, join }: { item: HomeItem; join?: Record<string, number> })
     // A PowOS app's island takes its own taps (ui/island.tsx).
     // An Android widget's taps are its own (appwidget.tsx).
   });
-  const c = carry.value;
-  const lifted = c?.item?.key === item.key || (!!c?.item && isChosen(item.key) && isChosen(c.item.key));
+  const lifted = isLifted(item);
   const isSelected = selected.value === item.key;
   const b = box(shown(item));
+  const chrome = isSelected && !lifted;
   return (
     <div
-      class={`home-tile ${item.kind} ${isSelected ? "selected" : ""} ${isChosen(item.key) ? "chosen" : ""} ${morphing.value === item.key ? "opened" : ""} ${lifted ? "lifted" : ""} ${joinClass(join)}`}
+      class={tileClass(item, { isSelected, lifted, join })}
       /* Its key: what finds it from outside (the pet perches on a tile by it - ui/petperch.ts). */
       data-key={item.key}
       style={{ left: `${b.left}px`, top: `${b.top}px`, width: `${b.width}px`, height: `${b.height}px`, ...join }}
       {...press}
     >
-      {item.kind === "widget" && (
-        <div class={`tile widget-face ${isSelected ? "focused" : ""}`}>
-          {item.error ? (
-            <>
-              <div class="widget-name">{item.name}</div>
-              <div class="widget-error">{item.error}</div>
-            </>
-          ) : item.linux ? (
-            <LinuxWait item={item} />
-          ) : (
-            <OwlWidget widget={item.key} cells={shown(item)} />
-          )}
-        </div>
-      )}
-      {item.kind === "appwidget" && <AppWidgetBody item={item} />}
-      {item.kind === "panel" && item.name === "agents" && <AgentsPanel item={item} />}
-      {item.kind === "panel" && item.name?.startsWith("app:") && <Island item={item} />}
-      {item.kind === "panel" && item.name === "recents" && <RecentsPanel item={item} />}
-      {item.kind === "panel" && item.name === "search" && <SearchPanel />}
-      {item.kind === "app" && <AppFace appKey={item.app!} label={item.label} />}
-      {item.kind === "folder" && <FolderFace item={item} />}
-      {isSelected && !lifted && <Actions item={item} inside={!roomAbove(item)} />}
-      {isSelected && !lifted && item.resizable && <ResizeHandle item={item} />}
+      {item.stack ? <StackFaces id={item.stack} members={stackMembers(item)} face={(m) => <TileFace item={m} isSelected={isSelected} />} /> : <TileFace item={item} isSelected={isSelected} />}
+      {chrome && <Actions item={item} inside={!roomAbove(item)} />}
+      {chrome && item.resizable && <ResizeHandle item={item} />}
     </div>
   );
 }
@@ -912,6 +959,20 @@ function Actions({ item, inside }: { item: HomeItem; inside: boolean }) {
         >
           settings
         </button>
+      )}
+      {item.stack ? (
+        <button
+          onClick={() => {
+            selected.value = null;
+            editStack.value = item.stack!;
+          }}
+        >
+          edit stack
+        </button>
+      ) : (
+        stackable(item) && (
+          <button onClick={() => startAddToStack(item.key)}>add to stack</button>
+        )
       )}
       {item.key === SEARCH_KEY ? (
         // The search widget is never removed (the drawer needs it): it goes back to the bar.
@@ -1005,8 +1066,15 @@ function Preview() {
   if (party) return <>{[...(party.cells ?? new Map<string, Cell>()).entries()].map(([key, cell]) => <Spot key={key} cell={shownCell(party.party, key, cell)} />)}</>;
   // Over the dock it goes there; aimed off it as a window (dockout.tsx's ghost) it opens there: no home spot either way.
   const target = dockAim.value || outAim.value ? null : aim(c);
-  const spot = target?.cell ? box(target.cell) : null;
-  return spot && <div class="drop-spot" style={{ left: `${spot.left}px`, top: `${spot.top}px`, width: `${spot.width}px`, height: `${spot.height}px` }} />;
+  return target && <AimSpot target={target} />;
+}
+
+/** Where a drop lands: a free cell outlined, or - let go on a widget - that widget's box marked as a stack to be. */
+function AimSpot({ target }: { target: Aim }) {
+  const cell = target.stack ? shown(target.stack) : target.cell;
+  if (!cell) return null;
+  const b = box(cell);
+  return <div class={`drop-spot ${target.stack ? "stack-aim" : ""}`} style={{ left: `${b.left}px`, top: `${b.top}px`, width: `${b.width}px`, height: `${b.height}px` }} />;
 }
 
 /** A picked tile's landing cell as it shows (apps and folders 1x1). */
@@ -1298,6 +1366,7 @@ export function Pages() {
     if (rows > 0 && home.value.items.some((i) => !i.cell)) powos.home.arrange(home.value.columns, rows);
   }, [home.value, rows]);
   useEffect(loadFolderNames, []);
+  useEffect(loadStacks, []);
   useEffect(watchCreations, []);
   // The recent apps row, once, as a widget of home's (ui/recentwidget.tsx), at the bottom of the first page.
   useEffect(() => void migrateRecents(rows), [rows]);

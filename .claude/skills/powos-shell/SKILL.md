@@ -523,6 +523,27 @@ strip only - not the cause when a drag in a tile fails.
 - Fill checks skip .island-offline.alone and .ag-idle-line (sparse by request); clipping still applies.
 - Monospace sizing: budget 0.62 em/char (phone font ~0.575, preview 0.5), line height 1.4.
 
+## Widget stacks (ui/stacks.tsx + ui/stackmodel.ts; the user 11-23 "stack widgets and swipe ... like samsung")
+- Model is pure (stackmodel.ts, test/stackmodel.test.ts, tier1 test-home-stacks.sh). Store "home.stacks" =
+  {v:1, stacks:{id:{keys, shown, anchor}}}; shell-only, every member stays the host's own item (config/state untouched).
+  No store / garbage = no stacks (old layouts load unchanged). The ANCHOR's cell+page is the slot; members are placed
+  there too, but the anchor decides (wide vs folded cells may differ). Keys that leave home are pruned (only between two
+  loaded homes - never against the empty default before load()).
+- homeView (computed: one item per stack, the top member in the slot, `stack: id`) feeds grid.tsx itemsOn, so overlap,
+  joins, glass, drops all see the stack as its one tile. placeItem (searchwidget.tsx) moves/resizes every member.
+- Create: edit mode, a widget carried onto a stackable widget whose slot holds its minimum -> Aim {stack} (drop-spot
+  .stack-aim) -> dropOnStack (optimistic). Or the tile's "add to stack": picker opens, the next stackable widget that
+  appears on home joins (addingTo; cleared when edit mode ends). Stacks hold <= 7. Apps/folders/search never stack.
+- Swipe: StackFaces mounts ONLY the top member at rest; on a claimed swipe the neighbours mount, the track follows by
+  style (no render per move), settle 260 ms, then the neighbour unmounts. Gesture rule (one function, stackSwipeAt):
+  sideways (gesture.ts VERTICAL_RATIO) and a widget that way = the stack's; at the first/last widget the swipe is HOME's
+  page swipe (gesture.ts claimSideways asks the same) - hand-off, no rubber band. Vertical on a stack = home's as ever.
+  Not in edit mode (no data-swipe). A claim sends the content a synthetic pointercancel (an Android widget's touch ends).
+- Edit: "edit stack" action -> StackSheet (reorder up/down, take out = free spot, remove, + widget, unstack all).
+- Faces: `.stack-page > .tile` is named beside `.home-tile > .tile` in every glass rule (shell.css). Gate: home-stack-
+  folded/-unfolded (stackMake/Swipe/UnstackCheck). Shots: home-stack, home-stack-swipe, edit-stack. Device:
+  tools/phone/verify/home-stack.sh.
+
 ## Home grid: merges, relayout
 - grid.tsx joins: a side covered WHOLE by neighbours extends half a gutter (--jX 1); a partially touched side stays at
   its normal inset; seams() adds .tile.seam pieces - a bridge filling the gutter along the shared span and a fillet

@@ -237,7 +237,7 @@
   },
   "ui/grid.tsx": {
     "complexity": {
-      "count": 3
+      "count": 2
     },
     "max-depth": {
       "count": 2

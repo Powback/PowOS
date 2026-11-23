@@ -9,6 +9,7 @@
  */
 import { signal } from "@preact/signals";
 import { byKey, carry, dock, dockAim, dockMode, dockPosition, home, sideDockAlign, searchInDock, searchPlacement, searchSpot, selected, stored, type Carry } from "../state.ts";
+import { stackKeysFor } from "./stacks.tsx";
 import type { Cell, HomeItem } from "../types.ts";
 import { wideHome } from "../hosts/wide.ts";
 import { searchGapSlot } from "./dockalign.ts";
@@ -27,8 +28,9 @@ const onHome = () => home.value.items.some((i) => i.key === SEARCH_KEY);
 export const SEARCH_KEY = "panel:search";
 
 /** A tile moved or resized: placed as it is. */
-export function placeItem(key: string, cell: Cell, page: number): Promise<unknown> {
-  return powos.home.place(key, cell, page);
+export async function placeItem(key: string, cell: Cell, page: number): Promise<void> {
+  // A widget stack's tile moves/resizes the whole stack: every member into the slot (ui/stacks.tsx).
+  for (const k of stackKeysFor(key)) await powos.home.place(k, cell, page);
 }
 
 /**

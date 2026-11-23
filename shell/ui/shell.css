@@ -535,7 +535,7 @@ html:root .home:has(.drawer .chat) .launcher-frame.tile {
 :root[data-light="false"][data-wallpaper="light"], :root[data-light="true"][data-wallpaper="dark"] { --chat-fill: 94%; }
 /* Home's widgets are PowOS AI's frost (the material block near the end: same tint, same compositor blur, 2026-10-28 "the
    color of the widgets sucks"); this --glass-dim is only the plain/CSS-glass fallback. Their text is often small and plain - a touch more of the tint than the reference (4.0 -> 4.5:1). */
-.page .home-tile > .tile, .lib-card.tile, .page .seam {
+:is(.page .home-tile, .page .stack-page) > .tile, .lib-card.tile, .page .seam {
   /* Measured over the crystal on the inner screen (the widgets' preview): 32% left plain text at 4.2:1, 42% reaches
      4.5; secondary text in a widget is the foreground itself - its size says it's secondary, a see-through colour
      there was 3.7:1. */
@@ -544,7 +544,7 @@ html:root .home:has(.drawer .chat) .launcher-frame.tile {
   --glass-fill: var(--text-fill);
   --color-muted: var(--color-foreground);
 }
-:is(:root[data-light="false"][data-wallpaper="light"], :root[data-light="true"][data-wallpaper="dark"]) :is(.page .home-tile > .tile, .lib-card.tile) { --glass-dim: 68%; }
+:is(:root[data-light="false"][data-wallpaper="light"], :root[data-light="true"][data-wallpaper="dark"]) :is(:is(.page .home-tile, .page .stack-page) > .tile, .lib-card.tile) { --glass-dim: 68%; }
 .dock { background: none; }
 /* The dock: no slab and no plates - the icons bare on the wallpaper, as the search pill floats above them. */
 .launcher-frame { border-radius: var(--radius) var(--radius) 0 0; box-shadow: var(--lift-edge), var(--lift-shadow-up); }
@@ -967,7 +967,7 @@ html:has(.sheet:not(.pop)) :is(.stage, .bar, .dock, .ai-screen .ai-scroll) {
 /* N1: on the track's clock (above) - the glass holds still on screen only when both run on the same thread. */
 html.ww-glued .page-glass-img { transition: --glass-x var(--spring-ms) var(--spring); }
 .page-track.dragging .page-glass-img, .page-glass-img.sliding, html.ww-glued :is(.page-track.dragging .page-glass-img, .page-glass-img.sliding) { transition: none; }
-.glass :is(.page .home-tile > .tile, .lib-card.tile) { background: var(--glass-fill); }
+.glass :is(:is(.page .home-tile, .page .stack-page) > .tile, .lib-card.tile) { background: var(--glass-fill); }
 .home-tile { position: absolute; padding: calc(var(--gap) / 2); touch-action: none; }
 .home-tile.lifted { opacity: 0.25; }
 /* Editing home, a widget's content is a picture: the tile takes every press (pick, lift, drag; its actions and resize
@@ -983,7 +983,7 @@ html.ww-glued .page-glass-img { transition: --glass-x var(--spring-ms) var(--spr
     calc(var(--gap) / 2 * (1 - var(--jt))) calc(var(--gap) / 2 * (1 - var(--jr)))
     calc(var(--gap) / 2 * (1 - var(--jb))) calc(var(--gap) / 2 * (1 - var(--jl)));
 }
-.home-tile.joined > .tile {
+.home-tile.joined > .tile, .home-tile.joined .stack-strip, .home-tile.joined .stack-page > .tile {
   border-radius:
     calc(var(--radius) * var(--ctl)) calc(var(--radius) * var(--ctr))
     calc(var(--radius) * var(--cbr)) calc(var(--radius) * var(--cbl));
@@ -3162,18 +3162,18 @@ html[data-mode="quicktools"], html[data-mode="quicktools"] body { background: tr
 }
 /* A dark theme over a dark wallpaper: the tint a touch lighter, so the glass shows over pure black - the theme's glass
    colour towards white in oklab, its hue kept (it was lifted towards a cool blue-grey in every theme). */
-:root[data-light="false"]:not([data-wallpaper="light"]) :is(.chrome-surface, .app-screen.tile, .lib-card.tile, .ai-screen .tile, .folder-sheet .folder-bg.tile, .home:has(.ai-panel) .launcher-frame.tile, .notif-panel :is(.cc.v3, .notif-own), .page .home-tile > .tile, :is(.home > .bar .bar-pill, .home .dsb-glass)) {
+:root[data-light="false"]:not([data-wallpaper="light"]) :is(.chrome-surface, .app-screen.tile, .lib-card.tile, .ai-screen .tile, .folder-sheet .folder-bg.tile, .home:has(.ai-panel) .launcher-frame.tile, .notif-panel :is(.cc.v3, .notif-own), :is(.page .home-tile, .page .stack-page) > .tile, :is(.home > .bar .bar-pill, .home .dsb-glass)) {
   --frost-base: color-mix(in oklab, var(--glass-tone) 88%, white);
 }
-html:root .chrome-surface, html.glass-native .app-screen.tile.sheet, html:root .lib-card.tile, html:root .ai-screen .tile, html:root .folder-sheet .folder-bg.tile, html:root .home:has(.ai-panel) .launcher-frame.tile, html:root .notif-panel .cc.v3, html:root .page .home-tile > .tile, html:root :is(.home > .bar .bar-pill, .home .dsb-glass) {
+html:root .chrome-surface, html.glass-native .app-screen.tile.sheet, html:root .lib-card.tile, html:root .ai-screen .tile, html:root .folder-sheet .folder-bg.tile, html:root .home:has(.ai-panel) .launcher-frame.tile, html:root .notif-panel .cc.v3, html:root :is(.page .home-tile, .page .stack-page) > .tile, html:root :is(.home > .bar .bar-pill, .home .dsb-glass) {
   --glass-blur-native: var(--frost-blur-native);
   /* Glass, not a slab, over a black backdrop too (blur of black is black): a faint light from above and a lit edge. */
   background: linear-gradient(180deg, var(--frost-sheen), transparent 45%), linear-gradient(var(--frost-fill), var(--frost-fill)), linear-gradient(var(--glass-veil), var(--glass-veil));
   box-shadow: var(--lift-edge), var(--lift-shadow);
 }
 /* Home's widgets: the frost above, with their own (lighter) compositor blur - --widget-blur-native (theme.css). */
-html:root .page .home-tile > .tile, html:root .lib-card.tile { --glass-blur-native: var(--widget-blur-native); }
-/* The library's folder cards are home's tiles too: every widget rule names .lib-card.tile beside .page .home-tile > .tile,
+html:root :is(.page .home-tile, .page .stack-page) > .tile, html:root .lib-card.tile { --glass-blur-native: var(--widget-blur-native); }
+/* The library's folder cards are home's tiles too: every widget rule names .lib-card.tile beside :is(.page .home-tile, .page .stack-page) > .tile,
    so tint, edge and blur are the widgets' own in every theme (the user, 18:41 and 19:09 "doesnt seem the same still?"). */
 /* Home's search bar (the foot's pill, bar.tsx) is the widgets' glass too: their frost, edge and compositor blur (2026-10-28
    "make the search bar have the same tint and blur as the widgets"). */
@@ -3208,7 +3208,7 @@ html:root:not(.glass-native) .ai-screen .tile { background: var(--frost-fill); }
  * showed every widget, pill and card as a white slab (the user, 11-14: "the blur bg stuff is white"); THE backdrop is
  * the theme's one tint everywhere (theme.css, 10-31). Only labels straight on the wallpaper turn (theme.css --on-wallpaper).
  */
-:root :is(.page .home-tile > .tile, .lib-card.tile, .page .seam, :is(.home > .bar .bar-pill, .home .dsb-glass), .page .search-face .bar-pill, .folder-sheet .folder-bg.tile) {
+:root :is(:is(.page .home-tile, .page .stack-page) > .tile, .lib-card.tile, .page .seam, :is(.home > .bar .bar-pill, .home .dsb-glass), .page .search-face .bar-pill, .folder-sheet .folder-bg.tile) {
   --frost-fill: var(--shade-tint);
   --frost-sheen: transparent;
   --glass-veil: transparent;
@@ -4642,3 +4642,29 @@ html.ww-glued .home.button-morph:not(.pull-screen, .sliding) > .bar:not(.sliding
 @media (prefers-reduced-motion: reduce) {
   .bar[data-role] .bar-pill textarea::placeholder, .bar[data-role] .bar-pill .lead > .prompt { animation: none; }
 }
+
+/*
+ * Widget stacks (ui/stacks.tsx): one slot, the widget on top filling it as a lone widget's face does (every
+ * `.home-tile > .tile` rule names `.stack-page > .tile` too), its neighbour beside it only while a finger swipes.
+ * Dots inside the stack's foot, the home page dots' look at a smaller size.
+ */
+.stack-strip { position: relative; width: 100%; height: 100%; overflow: hidden; border-radius: var(--radius); touch-action: none; }
+.stack-track { position: absolute; inset: 0; }
+.stack-page { position: absolute; top: 0; width: 100%; height: 100%; }
+.stack-page > .tile { height: 100%; box-sizing: border-box; }
+.page-dots.stack-dots { position: absolute; left: 0; right: 0; bottom: 3px; z-index: 2; height: 8px; gap: 4px; }
+.page-dots.stack-dots i { width: 4px; height: 4px; }
+/* A widget let go here stacks with this one: its whole box marked, filled softly (no hard line: design language). */
+.drop-spot.stack-aim { border-style: solid; background: color-mix(in srgb, var(--color-accent) 14%, transparent); }
+.stack-scrim { position: fixed; inset: 0; z-index: 40; display: flex; align-items: center; justify-content: center; padding: var(--edge); }
+.stack-sheet { width: min(100%, 380px); max-height: 80vh; display: flex; flex-direction: column; gap: 10px; padding: 12px var(--edge) var(--edge); overflow: hidden; }
+html:root .stack-sheet.tile { --glass-blur-native: var(--backdrop-blur-native); background: var(--menu-tint); }
+.stack-sheet-head { font: var(--text-item) var(--font-body); font-weight: bold; color: var(--color-foreground); text-align: center; }
+.stack-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px; overflow-y: auto; touch-action: pan-y; }
+.stack-list li { display: flex; align-items: center; gap: 4px; padding: 6px 8px; border-radius: 8px; background: var(--soft-fill); }
+.stack-list li.on { background: color-mix(in srgb, var(--color-accent) 18%, transparent); }
+.stack-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--color-foreground); }
+.stack-list button, .stack-sheet-acts button { padding: 6px 10px; border-radius: 8px; }
+.stack-list button:disabled { opacity: 0.35; }
+.stack-sheet-acts { display: flex; gap: 6px; justify-content: flex-end; flex-wrap: wrap; }
+.stack-sheet .danger { color: var(--color-red); }
