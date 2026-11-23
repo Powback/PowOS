@@ -440,6 +440,14 @@ rest. Keep the blur - make it cheap.
 - The AI page away re-rendered on every agents delta (StatusColumn read otherProjectsCount, StatusPage/Stacked read
   needsYou/fleet/board, WorkingNow's projectOf read parent agent signals): aistatus.tsx `whileShown(shown, f)` reads
   untracked while away; shown again it renders fresh. home-swipes' idle 3 s: 2 commits -> 0 (it now wants 0).
+- Swipes to PowOS AI's page and back re-rastered the pill, page-track, widgets and library on every finger move (258
+  layer paints / 4 swipes, 28 ms paint): applyTrack's --track-counter was an unregistered (inherited) property set on
+  .home each move - all of home restyled with a changed style - and .home/.ai-screen had no compositing reason under a
+  finger (only their settle transition composited them); home's dots moved by paint. Now --track-counter is registered
+  inherits:false (the bar translates by its own --bar-counter), .home/.ai-screen and .home-dots i/::after have
+  will-change: 67-70 layer paints (~2 per layer per swipe: arrival changes), ~10 ms. The ~10 Paint/s left are empty
+  per-move Paints (~0.3 ms, no layer): the bar's counter is a `translate`, not directly updated as `transform` is
+  (will-change on the bar made it worse). Gate home-paints: AI swipes <= 12 Paint/s and <= 110 layer paints.
 - Pull a device trace without touching the UI: `adb.sh shell 'su -c "gzip -c -1 <run>/perf-N.trace.json >
   /data/local/tmp/x.gz; chmod 644 ..."'` then `adb.sh pull` (337 MB -> 49 MB, ~45 s); WebView events carry no args, so
   read the per-frame structure (nesting by ts/dur) and line it up with the recording's home.inputs/state.

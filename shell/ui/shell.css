@@ -177,7 +177,7 @@
    home-folder-folded once the pill sat under the dock by default). */
 .home.pill-below > .dock:not(.dock-ghost) { top: var(--bar-drop); }
 /* Edit mode: the foot's row rises over the edit bar (--edit-rise, measured from the inset, so undropped first) - the
-   screen-fixed bar's translate carries the rise (--bar-edit-rise: its translate is --track-counter's, FX1). */
+   screen-fixed bar's translate carries the rise (--bar-edit-rise: its translate is the --bar-counter's, FX1). */
 .home.editing { --bar-drop: 0px; --bar-edit-rise: var(--edit-rise); }
 /* The search bar goes down to the screen's foot as the dock gives way (under the dock already: it stays). */
 .home > .bar { transform: translateY(calc(var(--p) * (var(--strip-height) + var(--bar-drop)))); }
@@ -310,6 +310,9 @@
 .page-dots i { --on: 0; position: relative; width: 6px; height: 6px; border-radius: 50%; background: color-mix(in srgb, var(--color-foreground) 28%, transparent); transform: scale(calc(1 + var(--on) * 0.25)); transition: transform var(--spring-ms) var(--spring); }
 .page-dots i::after { content: ""; position: absolute; inset: 0; border-radius: inherit; background: color-mix(in srgb, var(--color-foreground) 85%, transparent); opacity: var(--on); transition: opacity var(--spring-ms) var(--spring); }
 .page-dots.live i, .page-dots.live i::after { transition: none; }
+/* Home's dots follow every finger move (pagedots.tsx): composited, they move without repainting (gate home-paints). */
+.home-dots i { will-change: transform; }
+.home-dots i::after { will-change: opacity; }
 /* Home's: at the stage's foot, in the gap above the pill / dock, over the pages' width only (the stage is already
    clear of a side dock); it fades with the pages as the launcher opens. */
 .home-dots { position: absolute; left: 0; right: 0; bottom: calc(var(--gap) / 2 - 7px); opacity: calc(1 - var(--p)); pointer-events: none; }
@@ -1765,7 +1768,11 @@ input.folder-title:focus { background: var(--soft-fill); }
    the properties themselves transition, on the main thread: a window riding home moves on the frame its page does. */
 @property --slide-x { syntax: "<length-percentage>"; inherits: false; initial-value: 0px; }
 @property --bar-counter { syntax: "<length>"; inherits: false; initial-value: 0px; }
-.home, .ai-screen { transform: translateX(var(--slide-x)); transition: transform var(--spring-ms) var(--spring); }
+/* Not inherited (gate home-paints, 11-23): set on home every finger move, an inherited --track-counter restyled all of
+   home and re-rastered the pill, the widgets and the library each move. The bar reads its own --bar-counter. */
+@property --track-counter { syntax: "<length>"; inherits: false; initial-value: 0px; }
+/* will-change: composited for the whole swipe, not only its settle - under a finger the slide moved them by paint. */
+.home, .ai-screen { transform: translateX(var(--slide-x)); transition: transform var(--spring-ms) var(--spring); will-change: transform; }
 html.ww-glued :is(.home, .ai-screen) { transition: --slide-x var(--spring-ms) var(--spring); }
 .home.sliding, .ai-screen.sliding, html.ww-glued :is(.home.sliding, .ai-screen.sliding) { transition: none; }
 .ai-screen {
@@ -4613,9 +4620,9 @@ html:has(.home > .bar[data-role="ai"] textarea:focus) .ai-screen.stacked > .ai-s
  */
 .home > .bar.seated { z-index: 5; }
 /* FX1 (the user, 11-03 22:53: "there's still some page block for the search bar on the last page"): the bar never rides
-   a page - --track-counter (gesture.ts applyTrack) undoes home's slide in the same frame, on its curve; under a finger
-   (.sliding) it follows at once. --bar-lift: the keyboard's lift on PowOS AI's page (bar.tsx seatOnAi). */
-.home:not(.pull-screen) > .bar { translate: var(--track-counter, 0px) calc(var(--bar-lift, 0px) - var(--bar-edit-rise, 0px)); transition: opacity var(--spring-fast-ms) var(--spring-fast), visibility 0s, translate var(--spring-ms) var(--spring); }
+   a page - its --bar-counter (gesture.ts applyTrack, beside home's --track-counter) undoes home's slide in the same
+   frame, on its curve; under a finger (.sliding) it follows at once. --bar-lift: the keyboard's lift on PowOS AI's page (bar.tsx seatOnAi). */
+.home:not(.pull-screen) > .bar { translate: var(--bar-counter) calc(var(--bar-lift, 0px) - var(--bar-edit-rise, 0px)); transition: opacity var(--spring-fast-ms) var(--spring-fast), visibility 0s, translate var(--spring-ms) var(--spring); }
 .home:not(.pull-screen).sliding > .bar, .home:not(.pull-screen) > .bar.sliding { transition: opacity var(--spring-fast-ms) var(--spring-fast), visibility 0s; }
 /* N1b: with a web window the counter is the bar's own registered --bar-counter (gesture.ts applyTrack sets it beside
    home's --track-counter), on home's clock: the bar holds still while home slides on the main thread. */

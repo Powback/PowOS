@@ -14253,8 +14253,13 @@ const MUST = {
  * while it's left alone, then through real touch swipes between home's pages and to PowOS AI's page and back - per
  * second, against HOME_PAINTS. The old overlay here: 11 a second idle, ~50 swiping; now ~0.25 (the trace's own start)
  * and 4-9. The only scene that traces in a plain run (GATE_PROFILE's ww-resize-cost traces too: one trace at a time).
+ * To PowOS AI's page and back (11-23): 258 layer paints (pill, page-track, widgets, library each ~30x: every finger move
+ * re-rastered them - home's --track-counter inherited into its whole subtree, home and the AI screen not composited, the
+ * dots moved by paint), 28 ms; now ~70 (each layer ~2 per swipe: the pages' and the bar's own changes on arrival), ~10
+ * ms. Its ~10 Paint/s left are one empty Paint per move (no layer painted, ~0.3 ms): the bar's counter is a `translate`,
+ * which Chrome doesn't update directly the way it does home's `transform`.
  */
-const HOME_PAINTS = { idle: 1, swipes: 15 };
+const HOME_PAINTS = { idle: 1, swipes: 15, ai: 12, aiLayers: 110 };
 
 /**
  * This page's paints while [act] runs and [ms] pass: the main thread's Paint events of its frame (a devtools trace, as
@@ -14337,8 +14342,9 @@ async function homePaints(page) {
   console.log(`     home-paints: idle 4 s ${line(idle)} | 4 swipes between home's pages ${line(home)} | 4 to PowOS AI's page and back ${line(ai)}`);
   const fails = [];
   if (idle.perSec > HOME_PAINTS.idle) fails.push(`idle home painted ${line(idle)} - want <= ${HOME_PAINTS.idle}/s: nothing on it changes`);
-  for (const [what, r] of [["between home's pages", home], ["to PowOS AI's page and back", ai]])
-    if (r.perSec > HOME_PAINTS.swipes) fails.push(`page swipes ${what} painted ${line(r)} - want <= ${HOME_PAINTS.swipes}/s: a slide moves layers, it doesn't repaint them`);
+  for (const [what, r, max] of [["between home's pages", home, HOME_PAINTS.swipes], ["to PowOS AI's page and back", ai, HOME_PAINTS.ai]])
+    if (r.perSec > max) fails.push(`page swipes ${what} painted ${line(r)} - want <= ${max}/s: a slide moves layers, it doesn't repaint them`);
+  if (ai.layers > HOME_PAINTS.aiLayers) fails.push(`page swipes to PowOS AI's page and back repainted ${ai.layers} layers (${line(ai)}) - want <= ${HOME_PAINTS.aiLayers}: the pill, widgets and library ride composited, never re-rastered per move`);
   return fails;
 }
 
