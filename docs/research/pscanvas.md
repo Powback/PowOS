@@ -315,6 +315,17 @@ TaskInfo `supportsPocketStudioMultiWindow` / `supportsSplitScreenMultiWindow`, r
 not PowOS's package; has a launch intent) picks the partner; a blocked dragged app says "<App> can't be used in split
 view"; every host refusal is logged (`PowosCanvasDock ... refused: <reason>`) and shown.
 
+**Fixed (11-23 night), the user: "When I activate it, it's like hiding the app".** Cause: PowOS's own window adopt
+(`WindowFrames.adopt`, web windows on) took Open Canvas's container task as a stray full-screen app and moved it into a
+web window (window-log 11-23 17:58:36 "task 3940 (com.oplus.pscanvas) was full screen: now a web window"); the 20:20
+docks reused that same container 3940, so the apps went into a canvas off the screen. pscanvas's later death (20:20:26
+"Killing 3919:com.oplus.pscanvas (adj 960): remove task", UserAwareMgr "process killed flags=bg") was the system
+ending the canvas after both its apps' tasks were removed from PowOS's switcher, not a killer of its own. The partner
+"Discord can't be used in split view" was a cached task's flags (numActivities=0 reads supportsMultiWindow and
+supportsSplitScreenMultiWindow false); Discord's blocklist entry is `type="1:0:0"` (bar phone / cover only). Now:
+`CanvasDock.owns` exempts the canvas from adopt and the floating hand-over, split flags count only for live tasks, and
+`CanvasDock.checkBack` brings the dragged app back with a note when it isn't in a canvas region 2.5-4 s after the start.
+
 ## 6. com.oplus.pscanvas itself
 
 PENDING: the phone was off the VPN for the whole session (see the hand-back). Next: pull `pm path com.oplus.pscanvas`

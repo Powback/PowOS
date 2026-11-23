@@ -12,6 +12,7 @@
 #   3. The switcher (KEYCODE_APP_SWITCH), Chrome's card dragged up and toward the side away from its centre: Open Canvas
 #      comes up - isInPocketStudio(0) true, two regions (tasks.canvasState), Chrome's on the dragged-to side; the page's
 #      and host's lines ([canvas] / PowosCanvasDock) logged
+#      and PowOS never adopts the canvas into a web window (window-log "com.oplus.pscanvas) was full screen")
 #   4. MEASURED, not judged: each app's task before vs. in the canvas ("reused" / "new task", CanvasDock.measure)
 #   5. The canvas closed (Home, then its task removed); Settings' card dragged the same way: no canvas, and the note
 #      "Settings can't be used in split view" on screen (never silent)
@@ -81,6 +82,9 @@ cs=$(hcall tasks.canvasState "[]" "v=>JSON.stringify(v)")
 say "state: $cs"
 say "top: $(sh_ "dumpsys activity activities" | grep -m1 topResumedActivity | cut -c1-160)"
 while IFS= read -r l; do say "log: $l"; done < <(pagelog 12)
+# 11-23 "it's like hiding the app": PowOS's window adopt took Open Canvas's container into a web window (off the screen).
+adopted=$(sh_ "tail -n 60 /data/data/com.powos.app/files/window-log.txt" | grep -E "com\.oplus\.pscanvas\) was full screen" | tail -1)
+[ -n "$adopted" ] && bad "adopt: PowOS took Open Canvas into a window: $adopted"
 v=$(python3 - "$cs" "$CID" "$SIDE" <<'PY'
 import json, sys
 try: s = json.loads(sys.argv[1])

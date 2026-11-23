@@ -124,7 +124,21 @@ object CanvasDock {
 
     /** [t]'s split flags (hidden fields, HiddenApi exempts TaskInfo); a field this build doesn't have: absent. */
     private fun splitFlags(t: TaskInfo): Map<String, Boolean?> =
-        SPLIT_FLAGS.associateWith { f -> runCatching { t.javaClass.getField(f).getBoolean(t) }.getOrNull() }
+        liveFlags(SPLIT_FLAGS.associateWith { f -> runCatching { t.javaClass.getField(f).getBoolean(t) }.getOrNull() }, t.numActivities)
+
+    /**
+     * The split flags worth reading for a task with [activities] running activities: all of them for a live task, none
+     * (unknown, never a no) for a task with none - a recent task whose process is gone reports false for
+     * supportsMultiWindow and supportsSplitScreenMultiWindow whatever the app (11-23 20:20 logcat: Discord's cached task
+     * 3936, numActivities=0, both false; the live tasks of the same apps true). That false read was the wrong "Discord
+     * can't be used in split view" - Discord is on no inner-screen blocklist (sys_wms_split_app_ps.xml lists it 1:0:0:
+     * bar phones and the cover screen only). OxygenOS still refuses a really blocked app at the start, and [dock]'s
+     * check-back brings the dragged app back with a note then. Pure: CanvasDockTest.
+     */
+    fun liveFlags(
+        flags: Map<String, Boolean?>,
+        activities: Int,
+    ): Map<String, Boolean?> = if (activities > 0) flags else emptyMap()
 
     /** A recent task as the dock reads it: package, label, split flags. */
     private data class Recent(val id: Int, val pkg: String?, val label: String, val flags: Map<String, Boolean?>)
@@ -211,8 +225,79 @@ object CanvasDock {
         if (!ok) return Result(false, "Split view didn't open")
         Switcher.launched("canvas dock ${plan.packages.joinToString(" | ")}")
         Log.i(TAG, "dock task $id ($side) beside $other: shortcut started, canvas ${plan.packages.joinToString(" | ")}, tasks before $before")
-        measure(context.applicationContext, before)
+        measure(context.applicationContext, before, Dragged(pair[0].pkg!!, id, pair[0].label))
         return Result(true)
+    }
+
+    /** OxygenOS's FlexibleWindowManager is there (read once: the window code asks on every task event). */
+    private val hasFwm by lazy { runCatching { Class.forName(FWM) }.isSuccess }
+
+    /** Open Canvas's own container task (com.oplus.pscanvas): the split view itself, never a stray app to float. */
+    fun isCanvas(pkg: String?): Boolean = pkg == CANVAS_PACKAGE
+
+    /** The task ids Open Canvas holds now (its regions; empty when none or not readable). */
+    fun canvasTasks(): Set<Int> = if (!hasFwm) emptySet() else runCatching { regions(fwm("getPocketStudioTaskRegion", Int::class.javaPrimitiveType!! to 0)).keys().asSequence().mapNotNull { it.toIntOrNull() }.toSet() }.getOrDefault(emptySet())
+
+    /**
+     * Task [id] (package [pkg]) belongs to Open Canvas - its container or a side of it: PowOS's window adopt and floating
+     * hand-over leave it alone. Before this, adopt took the canvas container (a full-screen standard task on display 0)
+     * as a stray app and moved it into a web window (window-log 11-23 17:58:36: "task 3940 (com.oplus.pscanvas) was full
+     * screen: now a web window"); every later dock reused that container (20:20:21, task 3940 again), so the dragged app
+     * went into a canvas off the screen - "when I activate it, it's like hiding the app".
+     */
+    fun owns(
+        id: Int,
+        pkg: String?,
+    ): Boolean = isCanvas(pkg) || id in canvasTasks()
+
+    /** The app a dock was dragged for: its package, its task before the dock, its name. */
+    private data class Dragged(val pkg: String, val task: Int, val label: String)
+
+    /** What the check-back after a dock does - pure, CanvasDockTest. */
+    enum class Outcome { DOCKED, UNKNOWN, LOST }
+
+    /**
+     * The dock as read back: [inCanvas] (isInPocketStudio(0)), [canvasTasks] (its regions' task ids) and the dragged
+     * app's task ids ([dragged]: before and now). DOCKED: a region holds it; LOST: no canvas, or a canvas without it;
+     * UNKNOWN: a canvas whose regions can't be read (never pulled out of a canvas on a guess).
+     */
+    fun outcome(
+        inCanvas: Boolean,
+        canvasTasks: Set<Int>,
+        dragged: Set<Int>,
+    ): Outcome =
+        when {
+            dragged.any { it in canvasTasks } -> Outcome.DOCKED
+            inCanvas && canvasTasks.isEmpty() -> Outcome.UNKNOWN
+            else -> Outcome.LOST
+        }
+
+    /**
+     * The dragged app is never lost (the user, 11-23: "When I activate it, it's like hiding the app"): read back 2.5 s
+     * after the start (once more 1.5 s later while the canvas may still be settling); not in a canvas region then, it is
+     * brought back as it was (its task from recents, else started again) and a note says split view didn't open.
+     */
+    private fun checkBack(
+        context: Context,
+        dragged: Dragged,
+    ) {
+        val (pkg, task, label) = dragged
+        var o = Outcome.UNKNOWN
+        for (wait in listOf(0L, 1500L)) {
+            if (wait > 0) Thread.sleep(wait)
+            val now = Tasks.list(context).filter { it.component?.packageName == pkg }.map { it.id }.toSet()
+            val inCanvas = fwm("isInPocketStudio", Int::class.javaPrimitiveType!! to 0) as? Boolean ?: false
+            o = outcome(inCanvas, canvasTasks(), now + task)
+            if (o == Outcome.DOCKED) break
+        }
+        Log.i(TAG, "dock of $pkg (task $task): $o")
+        if (o != Outcome.LOST) return
+        val back = Tasks.list(context).firstOrNull { it.id == task } != null && Tasks.open(context, task)
+        if (!back) runCatching { context.startActivity(context.packageManager.getLaunchIntentForPackage(pkg)!!.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)) }
+        Log.w(TAG, "dock of $pkg (task $task): not in the canvas - brought back (${if (back) "its task" else "started again"})")
+        android.os.Handler(android.os.Looper.getMainLooper()).post {
+            android.widget.Toast.makeText(context, "Split view didn't open - $label is back", android.widget.Toast.LENGTH_LONG).show()
+        }
     }
 
     /** The last dock's task ids per package, before and in the canvas (null: none yet) - for the verify check. */
@@ -227,9 +312,11 @@ object CanvasDock {
     private fun measure(
         context: Context,
         before: Map<String, Int?>,
+        dragged: Dragged,
     ) {
         Thread {
             Thread.sleep(2500)
+            checkBack(context, dragged)
             val s = state()
             val inCanvas = s?.optJSONObject("regions")?.keys()?.asSequence()?.mapNotNull { it.toIntOrNull() }?.toSet().orEmpty()
             val now = Tasks.list(context)

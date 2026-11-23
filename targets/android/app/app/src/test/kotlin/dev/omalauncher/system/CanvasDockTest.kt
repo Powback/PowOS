@@ -61,4 +61,34 @@ class CanvasDockTest {
         assertEquals("PowOS itself can't be a side of split view", CanvasDock.sideVerdict(own, "PowOS", own, yes))
         assertEquals("That app isn't open anymore", CanvasDock.sideVerdict(null, "That app", own, yes))
     }
+
+    @Test
+    fun aCachedTaskFlagsAreUnknownNotANo() {
+        // 11-23 20:20: Discord's cached task (numActivities=0) read supportsSplitScreenMultiWindow=false and
+        // supportsMultiWindow=false - the wrong "Discord can't be used in split view". Live, the same flags are true.
+        val cached = mapOf("supportsPocketStudioMultiWindow" to true, "supportsSplitScreenMultiWindow" to false, "supportsMultiWindow" to false)
+        assertNull(CanvasDock.sideVerdict("com.discord", "Discord", own, CanvasDock.liveFlags(cached, 0)))
+        // A live task's no is still a no (Settings, OxygenOS's blocklist).
+        assertEquals("Settings can't be used in split view", CanvasDock.sideVerdict(settings, "Settings", own, CanvasDock.liveFlags(cached, 1)))
+        assertEquals(yes, CanvasDock.liveFlags(yes, 2))
+    }
+
+    @Test
+    fun theDraggedAppIsNeverLeftOutsideACanvas() {
+        assertEquals(CanvasDock.Outcome.DOCKED, CanvasDock.outcome(true, setOf(4005, 4006), setOf(4006)))
+        // Open Canvas took a new task for it: its new id counts.
+        assertEquals(CanvasDock.Outcome.DOCKED, CanvasDock.outcome(true, setOf(4005, 4010), setOf(4006, 4010)))
+        // No canvas at all, or one without the dragged app: brought back.
+        assertEquals(CanvasDock.Outcome.LOST, CanvasDock.outcome(false, emptySet(), setOf(4006)))
+        assertEquals(CanvasDock.Outcome.LOST, CanvasDock.outcome(true, setOf(4005, 4007), setOf(4006)))
+        // A canvas whose regions can't be read: never pulled out on a guess.
+        assertEquals(CanvasDock.Outcome.UNKNOWN, CanvasDock.outcome(true, emptySet(), setOf(4006)))
+    }
+
+    @Test
+    fun openCanvasContainerIsTheCanvas() {
+        assertEquals(true, CanvasDock.isCanvas("com.oplus.pscanvas"))
+        assertEquals(false, CanvasDock.isCanvas("com.android.chrome"))
+        assertEquals(false, CanvasDock.isCanvas(null))
+    }
 }

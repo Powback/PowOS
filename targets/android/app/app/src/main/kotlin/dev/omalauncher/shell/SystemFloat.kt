@@ -98,7 +98,7 @@ object SystemFloat {
      * system's own float of a full-screen app only, as before.
      */
     private fun handOver(ctx: Context) {
-        val floating = FreeformTasks.floatingModes(ctx).filter { (_, pkg, _) -> pkg != null && pkg != ctx.packageName }
+        val floating = FreeformTasks.floatingModes(ctx).filter { (id, pkg, _) -> foreign(ctx, id, pkg) }
         val ids = floating.map { it.first }.toSet()
         handed.retainAll(ids)
         FreeformTasks.retainNativeFloats(ids)
@@ -116,6 +116,16 @@ object SystemFloat {
             onFloat?.invoke(id)
         }
     }
+
+    /**
+     * Task [id] of [pkg] is another app's floating task the hand-over may take: not PowOS's own, and not Open Canvas's
+     * (its container, its sides, its minimised "pick a second app" app - OxygenOS's split view, CanvasDock.owns).
+     */
+    private fun foreign(
+        ctx: Context,
+        id: Int,
+        pkg: String?,
+    ): Boolean = pkg != null && pkg != ctx.packageName && !dev.omalauncher.system.CanvasDock.owns(id, pkg)
 
     /** Floating tasks handed to [onFloat] already (while they still float on the main display). */
     private val handed = java.util.concurrent.ConcurrentHashMap.newKeySet<Int>()

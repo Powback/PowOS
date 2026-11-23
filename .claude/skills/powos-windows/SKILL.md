@@ -55,6 +55,14 @@ description: Use when working on PowOS window tasks - floating Android windows (
   `[canvas] ...`. Card keys are "a:pkg/act" (Android), "l:app" (Linux), null (PowOS lock/home): never match on a raw
   package prefix. A refused card's fly-off is cancelled -> its `gone` flag must clear on cancel too (it didn't: the
   card ignored every later touch).
+- Never lost (11-23 night, the user: "When I activate it, it's like hiding the app"): WindowFrames' adopt had taken
+  Open Canvas's container (com.oplus.pscanvas, a full-screen standard task on display 0) into a web window at 17:58;
+  every later dock reused that off-screen container. Now CanvasDock.owns (pscanvas package or a task in the canvas
+  regions) keeps adopt (AdoptGate.CANVAS) and SystemFloat's hand-over off it, and CanvasDock.checkBack reads the dock
+  back at 2.5/4 s: dragged app not in a region -> its task brought back + a toast "Split view didn't open - X is back".
+  Side verdicts use a task's split flags only when it has live activities (TaskInfo.numActivities > 0): a cached
+  task reads false for all of them (Discord 3936) - Discord is on no inner-screen blocklist (sys_wms_split_app_ps.xml
+  `com.discord type="1:0:0"` = bar phone/cover only).
 - Check: `tools/phone/verify/switcher-canvas-dock.sh` (phone only; REAL injected drag of Chrome's card beside
   Calculator, regions + side read back; then Settings' card -> the note, no canvas). Gate: `switcher-canvas-drag`
   (CDP touch drag in Chromium: reaches tasks.canvasDock with the right partner; refusal note; Settings blocked).

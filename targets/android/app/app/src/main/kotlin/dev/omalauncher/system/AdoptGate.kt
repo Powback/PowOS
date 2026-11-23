@@ -23,7 +23,7 @@ object AdoptGate {
     /**
      * Full-screen app task skipped by adopt: the reason, or null (adopted). [own]: PowOS's own task (or no package);
      * [adopted]/[windowed]: tried once already / a window that went full screen itself; [buttonFull]: a web window's app
-     * made full screen by its bar's button.
+     * made full screen by its bar's button. OxygenOS's Open Canvas (CanvasDock.owns) is [CANVAS] before any of these.
      */
     fun skip(
         own: Boolean,
@@ -38,4 +38,11 @@ object AdoptGate {
             buttonFull -> "full screen by its web window's button"
             else -> null
         }
+
+    /**
+     * Why Open Canvas's tasks (its container, its sides: CanvasDock.owns) are never adopted: the split view itself. Adopt
+     * once moved the container into a web window, off the screen (11-23 17:58:36, task 3940), and every later dock went
+     * into it ("it's like hiding the app").
+     */
+    const val CANVAS = "OxygenOS's Open Canvas (split view)"
 }
