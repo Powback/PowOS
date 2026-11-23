@@ -776,7 +776,9 @@ dev_fork() {
         name="$app"
         type="kde"
 
-        # Load KDE config
+        # Load KDE config. Declared first: without the conf (a phone, a fresh install) the array is undeclared and
+        # under set -u bash reads ${KDE_APP_CATEGORIES[dolphin]} as an indexed array, "dolphin: unbound variable".
+        declare -A KDE_APP_CATEGORIES=()
         local kde_conf="${POWOS_ROOT:-/var/lib/powos}/sources/kde/dev.conf"
         if [[ -f "$kde_conf" ]]; then
             source "$kde_conf"
