@@ -275,8 +275,26 @@ curl -H 'Host: enroll.pow' http://192.168.50.100/healthz                       #
   deployed authority; `--apply-ai` / `ai-apply` are not available), PowAuth device principals / forwardAuth (those
   branches are superseded, unmerged) and OpenBao.
 
+## Devices in Dolphin's sidebar (`powos-places`)
+
+Dolphin (and every KDE file dialog) shows this device's storage and the owner's other devices in its Places panel
+(the user, 11-23). `lib/devices/powos-places watch` runs from the session's autostart (`powos-places.desktop`,
+phone unit `dolphin-places`; the x86 image ships both) and rewrites only its own bookmarks in
+`~/.local/share/user-places.xbel` (tagged `<PowOSPlace>`); the user's places and their order stay.
+
+- Phone: "Phone" (the whole shared storage) and the launcher's Quick launch folders (`FilePlaces.kt`; the test keeps
+  both lists equal), plus removable storage (`/storage/<uuid>`) while it is mounted. KDE lists them under Places.
+- Fleet, under KDE's Remote group, as KIO URLs (never kernel mounts): the realm's enrolled devices whose agent address
+  answers SSH (a rooted PowOS phone's sshd on 2222 -> `sftp://powos@<addr>:2222/mnt/sdcard`, a desktop's on 22),
+  and the owner's hosts from the owner config's `POWOS_FILE_PLACES` (JSON `[{"name","url","kind"}]`, e.g. the hub,
+  gpu-195, the NAS share; it comes with the realm's owner bundle like every other `POWOS_*`). This device is left out.
+- A device that doesn't answer is written hidden and "(offline)" (Dolphin: Show Hidden Places), never a live entry
+  that hangs; it comes back when it answers. Polling (HACK row in REMOTE-POWOS.md): local state 5 s, reachability
+  60 s, registry 10 min. A missing places file is left for KDE to create (KDE writes its defaults only into a new one).
+- `powos-places list` shows what it would write; `apply` writes once. Test: `test/tier1/test-places.py`.
+
 Tests: `test/tier1/test-deviced.py` (agent + enroll client), `test/tier1/test-deviced-unlock.py` (unlock: desktop
 only, owner/approver only, fake loginctl), `test/tier1/test-deviced-approve.py` (pending/approve/
 revoke CLI and `/v1/enroll/*`, approver-only, same-device-only), the gate's `app local.devices` (`dvUnlock`, `dvJoin`,
 `dvJoinDeny`, `dvMember`), `DeviceAgentCoreTest` + `LockActionsTest` (the no-root agent),
-PowStation `enroll/test_powos_enroll.py` (the realm side).
+PowStation `enroll/test_powos_enroll.py` (the realm side), `test/tier1/test-places.py` (Dolphin's places).

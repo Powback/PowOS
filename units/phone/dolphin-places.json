@@ -1,0 +1,23 @@
+{
+  "id": "dolphin-places",
+  "name": "PowOS places in Dolphin's sidebar",
+  "kind": "system",
+  "owner": "system:devices",
+  "purpose": "The phone's storage (the launcher's Quick launch folders, removable storage) and the owner's other devices (realm registry + owner config POWOS_FILE_PLACES, as sftp:// / smb:// / nfs:// KIO URLs, never kernel mounts) in Dolphin's Places panel: lib/devices/powos-places rewrites only its own tagged bookmarks in ~/.local/share/user-places.xbel, offline devices hidden. Started by the session's autostart; polls local state every 5 s and reachability every 60 s (HACK row in docs/REMOTE-POWOS.md section 4). Python stdlib only; installs no package.",
+  "installedBy": "targets/android/rooted/powos-deploy.sh (lib/devices, staged by rooted.sh deploy); the PowOS image (Containerfile: lib/ and desktop/autostart/)",
+  "packages": [],
+  "files": [
+    "/usr/lib/powos/devices/powos-places",
+    "/etc/xdg/autostart/powos-places.desktop",
+    "/home/powos/.local/share/user-places.xbel (its own tagged bookmarks only)",
+    "/home/powos/.cache/powos/places"
+  ],
+  "processes": [
+    {"match": "python3 /usr/lib/powos/devices/powos-places watch", "user": "powos",
+     "started_by": "the Plasma session's autostart (/etc/xdg/autostart/powos-places.desktop)"}
+  ],
+  "limits": {"memMB": 48, "cpuPct": 2, "pids": 16},
+  "unbounded": "one small session process, asleep between ticks; probe threads (one per device address) live under 1 s",
+  "autosleep": "never",
+  "remove": "pkill -f 'powos-places watch'; rm /usr/lib/powos/devices/powos-places /etc/xdg/autostart/powos-places.desktop; rm -r /home/powos/.cache/powos/places. Its bookmarks stay until removed in Dolphin (Places panel, right-click, Remove)"
+}

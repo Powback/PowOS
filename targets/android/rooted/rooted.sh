@@ -175,6 +175,8 @@ deploy)
   adb push -q "$HERE/../../../lib/config.sh" /data/local/tmp/powos-apps/config.sh
   # The device agent (lib/devices/powos-deviced: the Devices app's control channel, docs/DEVICES.md).
   adb push -q "$HERE/../../../lib/devices" /data/local/tmp/powos-apps/devices
+  # Dolphin's places (lib/devices/powos-places, unit dolphin-places) and its session autostart.
+  adb push -q "$HERE/../../../desktop/autostart/powos-places.desktop" /data/local/tmp/powos-apps/devices/powos-places.desktop
   # The patched source build (pkgs/spacetimedb) when there is one, else the official binaries (pkgs/spacetimedb-bin).
   stdb=$("$HERE/../tools/newest-pkgs.sh" "$HERE/../out/pkgs" spacetimedb)
   [ -n "$stdb" ] || stdb=$("$HERE/../tools/newest-pkgs.sh" "$HERE/../out/pkgs" spacetimedb-bin)

@@ -1,0 +1,10 @@
+[Desktop Entry]
+Type=Application
+Name=PowOS Places
+Comment=This device's storage and the owner's other devices in Dolphin's sidebar, kept current
+Exec=/usr/lib/powos/devices/powos-places watch
+Icon=folder-network
+Terminal=false
+X-KDE-autostart-phase=2
+OnlyShowIn=KDE;
+NoDisplay=true

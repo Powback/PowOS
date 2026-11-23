@@ -1,0 +1,388 @@
+#!/usr/bin/env python3
+"""powos-places - this device's storage and the owner's other devices in Dolphin's sidebar (the Places panel; the
+user, 11-23: "dolphin should have tighter device integration in the sidebar").
+
+KDE keeps the Places panel in ~/.local/share/user-places.xbel (KFilePlacesModel, shared by Dolphin and every KDE file
+dialog; it watches the file and reloads). This owns only the bookmarks it tagged there (<PowOSPlace> in the KDE
+metadata); the user's own places, their order and anything KDE adds stay as they are. What it writes:
+
+  - on a phone, the phone's own storage as real folders: the whole shared storage ("Phone") and the same folders as
+    the launcher's Quick launch (targets/android/.../shell/FilePlaces.kt; test-places.py keeps the two lists equal),
+    plus removable storage (SD card / USB, Android's /storage/<uuid>) while it is there. KDE shows these under Places.
+  - the owner's other devices as KIO URLs (sftp://, smb://, nfs://, never a kernel mount: a dead CIFS/sshfs mount
+    under HOME stalls Dolphin, config/ai/agents/modder/agent.conf), under KDE's Remote group:
+      * every device enrolled in the owner's realm (`powos devices registry`, docs/DEVICES.md) whose agent address
+        answers SSH (a rooted PowOS phone's sshd on 2222, a PowOS desktop's on 22); this device itself is left out;
+      * the owner's hosts from the owner config (~/.config/powos/owner.conf, written from the realm's owner bundle,
+        lib/devices/powos-deviced owner_apply): POWOS_FILE_PLACES = a JSON list of {"name", "url", "kind"} - the hub,
+        GPU servers, the NAS share. No address of the owner's is a default here.
+    A device that doesn't answer right now is written hidden and named "(offline)" (Dolphin's "Show Hidden Places"
+    shows it), so a click never hangs on a dead host; it comes back by itself when it answers again.
+
+  powos-places apply     write the PowOS places once (no change = no write)
+  powos-places watch     apply at login, then keep them current (the session's autostart, powos-places.desktop)
+  powos-places list      the places it would write, as JSON
+
+Env: POWOS_PLACES_XBEL (the file), POWOS_PHONE_STORAGE (the phone's storage root), POWOS_STORAGE_DIRS (where
+removable storage appears, ':'-separated), POWOS_OWNER_CONF, POWOS_DEVICED_DIR (the enrollment), POWOS_PLACES_CACHE.
+"""
+import importlib.machinery
+import importlib.util
+import json
+import os
+import re
+import socket
+import sys
+import threading
+import time
+import urllib.parse
+from xml.dom import minidom
+
+HERE = os.path.dirname(os.path.realpath(__file__))
+XBEL = os.environ.get("POWOS_PLACES_XBEL") or os.path.expanduser("~/.local/share/user-places.xbel")
+CACHE = os.environ.get("POWOS_PLACES_CACHE") or os.path.expanduser("~/.cache/powos/places")
+TAG = "PowOSPlace"
+KDE = "http://www.kde.org"
+FDO = "http://freedesktop.org"
+
+# The launcher's Quick launch folders (FilePlaces.kt `places`, primary:<path>), in its order. test-places.py fails when
+# the two differ: one list, written twice only because one side is Kotlin in the APK and this runs in Linux.
+PHONE_FOLDERS = [
+    ("downloads", "Downloads", "Download", "folder-download"),
+    ("documents", "Documents", "Documents", "folder-documents"),
+    ("camera", "Camera", "DCIM/Camera", "camera-photo"),
+    ("pictures", "Pictures", "Pictures", "folder-pictures"),
+    ("music", "Music", "Music", "folder-music"),
+]
+ICON_OF_KIND = {"phone": "smartphone", "tablet": "tablet", "laptop": "computer-laptop", "desktop": "computer",
+                "server": "network-server", "gpu": "network-server", "nas": "network-server-database",
+                "share": "folder-network"}
+PORT_OF = {"sftp": 22, "fish": 22, "smb": 445, "nfs": 2049, "webdav": 80, "webdavs": 443, "ftp": 21}
+# Where a device's SSH answers: a rooted PowOS phone's sshd (port 2222, targets/android/rooted/powos-start.sh, its
+# storage at /mnt/sdcard as the session user powos), then a PowOS desktop's.
+SSH_PORTS = ((2222, "powos", "/mnt/sdcard"), (22, "", "/"))
+PROBE_S = 0.6
+REGISTRY_EVERY_S = 600
+REFRESH_EVERY_S = 60
+TICK_S = 5
+
+
+# ── where things are ─────────────────────────────────────────────────────────
+
+
+def deviced():
+    """lib/devices/powos-deviced as a module (its enrollment, realm_call): one implementation of the realm client."""
+    loader = importlib.machinery.SourceFileLoader("powos_deviced", os.path.join(HERE, "powos-deviced"))
+    spec = importlib.util.spec_from_loader("powos_deviced", loader)
+    mod = importlib.util.module_from_spec(spec)
+    loader.exec_module(mod)
+    return mod
+
+
+def phone_storage():
+    """The phone's shared storage as this Linux sees it: the app's session gets /storage passed through, the rooted
+    one has it bound at /mnt/sdcard (powos-start.sh). None on a computer."""
+    env = os.environ.get("POWOS_PHONE_STORAGE")
+    for p in ([env] if env else ["/storage/emulated/0", "/mnt/sdcard"]):
+        if p and os.path.isdir(os.path.join(p, "Android")):
+            return p
+    return None
+
+
+UUID = re.compile(r"^[0-9A-F]{4}-[0-9A-F]{4}$|^[0-9a-f]{16}$")
+
+
+def removable():
+    """Android's removable volumes (SD card, USB drive): /storage/<uuid>, while mounted and readable here."""
+    dirs = (os.environ.get("POWOS_STORAGE_DIRS") or "/storage:/mnt/media_rw").split(":")
+    seen, out = set(), []
+    for d in dirs:
+        try:
+            names = sorted(os.listdir(d))
+        except OSError:
+            continue
+        for n in names:
+            p = os.path.join(d, n)
+            if UUID.match(n) and n not in seen and os.path.isdir(p) and os.access(p, os.R_OK | os.X_OK):
+                seen.add(n)
+                out.append((n, p))
+    return out
+
+
+def owner_conf(key):
+    path = os.environ.get("POWOS_OWNER_CONF") or os.path.expanduser("~/.config/powos/owner.conf")
+    try:
+        for line in open(path):
+            if line.startswith(key + "="):
+                return line[len(key) + 1:].strip()
+    except OSError:
+        pass
+    return ""
+
+
+def owner_hosts():
+    """POWOS_FILE_PLACES from the owner config: [{name, url, kind}]; anything malformed is skipped."""
+    raw = owner_conf("POWOS_FILE_PLACES")
+    try:
+        items = json.loads(raw) if raw else []
+    except ValueError:
+        sys.stderr.write("powos-places: POWOS_FILE_PLACES is not JSON; ignored\n")
+        return []
+    out = []
+    for it in items if isinstance(items, list) else []:
+        if isinstance(it, dict) and it.get("name") and urllib.parse.urlsplit(str(it.get("url", ""))).scheme in PORT_OF:
+            out.append({"name": str(it["name"]), "url": str(it["url"]), "kind": str(it.get("kind") or "server")})
+    return out
+
+
+def registry(dv, refresh):
+    """The realm's enrolled devices minus this one ([{id, name, kind, host}]); the last answer is cached, so a realm
+    that is down (or a phone off the LAN) still knows which devices exist."""
+    path = os.path.join(CACHE, "registry.json")
+    e = dv.load_json(dv.enrollment_path(), None) if dv else None
+    if not e or not e.get("device_token"):
+        return []
+    cached = dv.load_json(path, None)
+    if refresh or cached is None:
+        try:
+            st, r = dv.realm_call(e["realm"], "/v1/devices", token=e["device_token"])
+            if st == 200:
+                cached = r.get("devices") or []
+                os.makedirs(CACHE, exist_ok=True)
+                dv.save_json(path, cached)
+        except Exception as x:  # the realm unreachable: keep what we knew
+            sys.stderr.write(f"powos-places: registry: {x}\n")
+    me = (e.get("device") or {}).get("id")
+    out = []
+    for d in cached or []:
+        host = urllib.parse.urlsplit(d.get("agent") or "").hostname
+        if d.get("revoked") or d.get("id") == me or not host:
+            continue
+        out.append({"id": d["id"], "name": d.get("name") or d["id"], "kind": d.get("kind") or "desktop", "host": host})
+    return out
+
+
+def answers(host, port):
+    try:
+        with socket.create_connection((host, port), timeout=PROBE_S):
+            return True
+    except OSError:
+        return False
+
+
+def probe_all(pairs):
+    """{(host, port): bool}, all at once (a dead host costs PROBE_S, not PROBE_S each)."""
+    res = {}
+
+    def one(hp):
+        res[hp] = answers(*hp)
+
+    ts = [threading.Thread(target=one, args=(hp,), daemon=True) for hp in set(pairs)]
+    for t in ts:
+        t.start()
+    for t in ts:
+        t.join(PROBE_S + 1)
+    return res
+
+
+def slug(s):
+    return re.sub(r"[^a-z0-9]+", "-", s.lower()).strip("-") or "x"
+
+
+def file_url(path):
+    return "file://" + urllib.parse.quote(path)
+
+
+def endpoint(url):
+    u = urllib.parse.urlsplit(url)
+    return u.hostname, u.port or PORT_OF.get(u.scheme, 22)
+
+
+# ── what to show ─────────────────────────────────────────────────────────────
+
+
+def gather(dv=None, refresh_registry=False, probe=probe_all):
+    """The PowOS places, in order: [{id, title, url, icon, online}]."""
+    out = []
+    root = phone_storage()
+    if root:
+        out.append({"id": "phone", "title": "Phone", "url": file_url(root), "icon": "smartphone", "online": True})
+        for pid, label, rel, icon in PHONE_FOLDERS:
+            p = os.path.join(root, rel)
+            if os.path.isdir(p):
+                out.append({"id": f"phone-{pid}", "title": label, "url": file_url(p), "icon": icon, "online": True})
+        for n, p in removable():
+            out.append({"id": f"storage-{n.lower()}", "title": f"Removable storage ({n})", "url": file_url(p),
+                        "icon": "drive-removable-media", "online": True})
+    remote = [{"id": "host-" + slug(h["name"]), "title": h["name"], "url": h["url"],
+               "icon": ICON_OF_KIND.get(h["kind"], "folder-network"), "ep": [endpoint(h["url"])]}
+              for h in owner_hosts()]
+    for d in registry(dv, refresh_registry):
+        remote.append({"id": "device-" + slug(d["id"]), "title": d["name"], "icon": ICON_OF_KIND.get(d["kind"], "computer"),
+                       "ep": [(d["host"], port) for port, _, _ in SSH_PORTS], "host": d["host"]})
+    up = probe([ep for r in remote for ep in r["ep"]])
+    for r in remote:
+        hit = next((ep for ep in r["ep"] if up.get(ep)), None)
+        if "url" not in r:   # a registry device: the first SSH port that answers decides user and path
+            port, user, path = next((s for s in SSH_PORTS if hit and s[0] == hit[1]), SSH_PORTS[-1])
+            r["url"] = f"sftp://{user + '@' if user else ''}{r['host']}:{port}{path}"
+        out.append({"id": r["id"], "title": r["title"], "url": r["url"], "icon": r["icon"], "online": hit is not None})
+    return out
+
+
+# ── the xbel file ────────────────────────────────────────────────────────────
+
+
+def ours(bm):
+    for md in bm.getElementsByTagName("metadata"):
+        if md.getAttribute("owner") == KDE and md.getElementsByTagName(TAG):
+            return True
+    return False
+
+
+def element(doc, tag, text=None, **attrs):
+    el = doc.createElement(tag)
+    for k, v in attrs.items():
+        el.setAttribute(k, v)
+    if text is not None:
+        el.appendChild(doc.createTextNode(text))
+    return el
+
+
+def bookmark(doc, p):
+    bm = element(doc, "bookmark", href=p["url"])
+    bm.appendChild(element(doc, "title", p["title"] if p["online"] else f"{p['title']} (offline)"))
+    info = bm.appendChild(element(doc, "info"))
+    fdo = info.appendChild(element(doc, "metadata", owner=FDO))
+    fdo.appendChild(element(doc, "bookmark:icon", name=p["icon"]))
+    kde = info.appendChild(element(doc, "metadata", owner=KDE))
+    kde.appendChild(element(doc, "ID", f"powos/{p['id']}"))
+    kde.appendChild(element(doc, TAG, p["id"]))
+    kde.appendChild(element(doc, "IsHidden", "false" if p["online"] else "true"))
+    return bm
+
+
+def render(text, places):
+    """The file's text with our bookmarks replaced by [places] (at the first one's spot, else at the end); the
+    user's bookmarks and everything else byte-for-byte as they were."""
+    doc = minidom.parseString(text)
+    root = doc.documentElement
+    marks = [n for n in root.childNodes if n.nodeType == n.ELEMENT_NODE and n.tagName == "bookmark"]
+    mine = [n for n in marks if ours(n)]
+    # A folder the user (or KDE's defaults: xdg-user-dirs point at the phone's Download, Music, ... on a phone) already
+    # has a place for isn't added twice.
+    theirs = {n.getAttribute("href").rstrip("/") for n in marks if not ours(n)}
+    places = [p for p in places if p["url"].rstrip("/") not in theirs]
+
+    def blank_before(n):
+        prev = n.previousSibling
+        return prev if prev is not None and prev.nodeType == n.TEXT_NODE and not prev.data.strip() else None
+
+    if mine:   # our first bookmark's spot (before its indentation), marked while the old ones go
+        anchor = root.insertBefore(doc.createComment("powos-places"), blank_before(mine[0]) or mine[0])
+    else:      # the end, before the closing tag's indentation
+        last = root.lastChild
+        anchor = last if last is not None and last.nodeType == last.TEXT_NODE and not last.data.strip() else None
+    for n in mine:
+        if blank_before(n):
+            root.removeChild(blank_before(n))
+        root.removeChild(n)
+    for p in places:
+        root.insertBefore(doc.createTextNode("\n "), anchor)
+        root.insertBefore(bookmark(doc, p), anchor)
+    if mine:
+        root.removeChild(anchor)
+    if not root.getAttribute("xmlns:bookmark"):
+        root.setAttribute("xmlns:bookmark", "http://www.freedesktop.org/standards/desktop-bookmarks")
+    head = text[:text.index("<xbel")]
+    body = root.toxml()
+    return head + body + ("\n" if text.endswith("\n") else "")
+
+
+def apply(places, path=XBEL):
+    """Writes [places] into the file; True when it changed. A missing file is left missing: KDE writes its default
+    places (Home, Trash, Network, ...) only into a file that doesn't exist yet, so this waits for the first KDE file
+    view to make it (watch picks it up within a tick)."""
+    try:
+        text = open(path, encoding="utf-8").read()
+    except FileNotFoundError:
+        return False
+    new = render(text, places)
+    if new == text:
+        return False
+    tmp = f"{path}.powos-places.tmp"
+    with open(tmp, "w", encoding="utf-8") as f:
+        f.write(new)
+    os.replace(tmp, path)
+    return True
+
+
+# ── commands ─────────────────────────────────────────────────────────────────
+
+
+def load_deviced():
+    try:
+        return deviced()
+    except Exception as x:  # no device agent here: local places only
+        sys.stderr.write(f"powos-places: no device agent ({x}); fleet devices left out\n")
+        return None
+
+
+def stamp(dv):
+    """What decides the places without the network: the storage that is there, the owner config, the enrollment
+    and the file itself (KDE rewrites it when the user edits a place: ours go back in)."""
+    paths = [XBEL, os.environ.get("POWOS_OWNER_CONF") or os.path.expanduser("~/.config/powos/owner.conf")]
+    if dv:
+        paths.append(dv.enrollment_path())
+    st = []
+    for p in paths:
+        try:
+            st.append(os.stat(p).st_mtime_ns)
+        except OSError:
+            st.append(None)
+    return (st, phone_storage(), removable())
+
+
+def watch():
+    dv = load_deviced()
+    places, last_full, last_registry, seen = [], 0.0, 0.0, None
+    while True:
+        now = time.monotonic()
+        s = stamp(dv)
+        if s != seen or now - last_full >= REFRESH_EVERY_S:
+            fresh = now - last_registry >= REGISTRY_EVERY_S or (seen is not None and s[0][2:] != seen[0][2:])
+            places = gather(dv, refresh_registry=fresh)
+            last_full = now
+            if fresh:
+                last_registry = now
+        try:
+            if apply(places):
+                print(f"powos-places: wrote {len(places)} places ({sum(not p['online'] for p in places)} offline)",
+                      flush=True)
+        except Exception as x:  # a half-written file from KDE: next tick
+            sys.stderr.write(f"powos-places: {XBEL}: {x}\n")
+        seen = stamp(dv)
+        # HACK: device changes are found by polling (local state every TICK_S, devices' reachability every
+        # REFRESH_EVERY_S, the realm's registry every REGISTRY_EVERY_S): nothing tells the session when a device
+        # enrolls, comes online or a USB drive is plugged in. Real fix: powos-deviced publishes device events
+        # (realm push + mDNS browse) and the app forwards Android's storage broadcasts; this then waits on those.
+        time.sleep(TICK_S)
+
+
+def main(argv):
+    cmd = argv[0] if argv else "help"
+    if cmd == "apply":
+        places = gather(load_deviced(), refresh_registry=True)
+        print(f"powos-places: {'wrote' if apply(places) else 'unchanged,'} {len(places)} places in {XBEL}")
+    elif cmd == "list":
+        print(json.dumps(gather(load_deviced(), refresh_registry=True), indent=1))
+    elif cmd == "watch":
+        watch()
+    else:
+        print(__doc__.strip())
+        return 0 if cmd in ("help", "-h", "--help") else 2
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main(sys.argv[1:]) or 0)
