@@ -15178,6 +15178,21 @@ try {
       console.log(`ai-segs-renders: tab row renders ${JSON.stringify(o.counts)}`);
       return o.fails;
     })));
+  // The tab screens' header (back, name, glance) and the tab strip whole, under the status bar, at every layout: folded,
+  // unfolded, each with a side dock, and the cover turned sideways (dev/ai-tab-head-check.js; the user, 11-23: "surely
+  // we can do the page dock cutoff thing more nicely" - Agents/Progress/Devices started behind the clock).
+  if (process.env.SHELL_PAGES !== "0")
+    for (const [label, view, dock, top] of [
+      ["folded", { width: 404, height: 899 }, "bottom", 45],
+      ["folded-right", { width: 404, height: 899 }, "right", 45],
+      ["unfolded", { width: 821, height: 883 }, "bottom", 45],
+      ["unfolded-left", { width: 821, height: 883 }, "left", 45],
+      ["folded-land", { width: 899, height: 404 }, "right", 0],
+    ])
+      runs.push(open(browser, `${ORIGIN}/index.html`, `ai-tab-head-${label}`, view).then((r) => whenReady(r, async () => {
+        const fails = await r.page.evaluate(async (d, t) => (await importShim("./dev/ai-tab-head-check.js")).aiTabHeadCheck(d, t), dock, top);
+        return fails.map((f) => `ai-tab-head-${label}: ${f}`);
+      })));
   // Try cards show before | after, the after an emulator shot of the fix (the user, 2026-11-01).
   if (process.env.SHELL_PAGES !== "0")
     runs.push(open(browser, `${ORIGIN}/index.html`, "try-pair", { width: 404, height: 900 }).then((r) => whenReady(r, () => aiTryPairCheck(r.page))));

@@ -4560,6 +4560,14 @@ html:root :is(.ai-screen.status, .ai-left) .ais-stack > .ais-card-peek { align-s
 .ai-screen.stacked > .ai-scroll { position: relative; inset: auto; flex: 1; min-height: 0; padding-top: 0; padding-bottom: 0; scroll-padding-block: 0; --ai-fade-at: 0px;
   -webkit-mask-image: linear-gradient(to bottom, transparent, black 14px, black calc(100% - var(--ai-fade, 0px)), transparent); mask-image: linear-gradient(to bottom, transparent, black 14px, black calc(100% - var(--ai-fade, 0px)), transparent); }
 .ai-screen.stacked > .ai-segs { margin-top: auto; }
+/*
+ * A tab's header (Agents, Progress, Devices: back, name, a glance; aipanes.tsx TabHead, agents.tsx AgentsView) sits
+ * where the chat's header does - on its own line under the status bar (--ai-head-top), never behind the clock (the
+ * user, 11-23: "surely we can do the page dock cutoff thing more nicely"; the page has no top padding, its scroller
+ * starts under this row and fades in under it). Unfolded it heads the right column's glass (.ai-right's padding).
+ */
+.ai-screen.stacked > .ag-top { flex: none; position: relative; z-index: 2; min-height: 36px; margin-top: var(--ai-head-top); }
+.ai-right > .ag-top { flex: none; min-height: 36px; }
 /* Home's shared bar sits under the tabs (its AI-page role is its own task): its room kept, on every tab. */
 .ai-screen.stacked > .ai-bar-slot { flex: none; height: calc(var(--pill-height) + var(--ai-foot)); }
 /*

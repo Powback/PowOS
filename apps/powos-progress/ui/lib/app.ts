@@ -82,6 +82,8 @@ export interface Props {
   cells?: [number, number];
   /** A page: closes it (Back does too). */
   close?: () => void;
+  /** A page whose holder draws its header (PowOS AI's Progress tab: back, name, the figure): no back/title row of its own. */
+  headed?: boolean;
 }
 
 /** The SDK names reducers and tables in camelCase (set_qty -> setQty); the module's own names work here too. */

@@ -161,7 +161,7 @@ function ProgressScreen({ shown, back, beside = false }: { shown: boolean; back:
   return (
     <div class="ai-app-page">
       <Fallback>
-        <C host={appHost} app={PROGRESS_APP} base={`./_app/${PROGRESS_APP}/`} close={back} />
+        <C host={appHost} app={PROGRESS_APP} base={`./_app/${PROGRESS_APP}/`} close={back} headed />
       </Fallback>
     </div>
   );

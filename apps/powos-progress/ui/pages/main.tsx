@@ -111,15 +111,17 @@ function useOpen(p: P, focus: string | null, byId: Map<string, WorkRow>) {
 
 const plural = (n: number, one: string, many: string) => (n === 1 ? one : many);
 
-function SummaryHeader({ p, close }: { p: P; close?: () => void }) {
+function SummaryHeader({ p, close, headed }: { p: P; close?: () => void; headed?: boolean }) {
   const works = p.items.filter((i) => i.state === "works").length;
   return (
     <>
-      <header style={S.head}>
-        <button style={S.back} onClick={close} aria-label="back">‹</button>
-        <h1 style={S.title}>Road to daily driver</h1>
-        <span style={S.big}>{p.pct === null ? "–" : `${p.pct}%`}</span>
-      </header>
+      {!headed && (
+        <header style={S.head}>
+          <button style={S.back} onClick={close} aria-label="back">‹</button>
+          <h1 style={S.title}>Road to daily driver</h1>
+          <span style={S.big}>{p.pct === null ? "–" : `${p.pct}%`}</span>
+        </header>
+      )}
       <div style={S.summary}>
         {p.items.length ? `${works} of ${p.items.length} things work` : "The checklist isn't filled in yet"}
         {" · "}
@@ -208,7 +210,7 @@ function DoneToday({ work }: { work: WorkRow[] }) {
   );
 }
 
-export default function Main({ host, close }: Props) {
+export default function Main({ host, close, headed }: Props) {
   const p = useProgress(host);
   const [focus] = useState(() => takeFocus());
   const byId = new Map(p.work.map((w) => [w.id, w]));
@@ -216,7 +218,7 @@ export default function Main({ host, close }: Props) {
   const lanes = lanesOf(p.work);
   return (
     <div style={S.page}>
-      <SummaryHeader p={p} close={close} />
+      <SummaryHeader p={p} close={close} headed={headed} />
       <NeedsYou ws={lanes.get("you") ?? []} open={open} toggle={toggle} focus={focus} />
       <Checklist areas={p.areas} byId={byId} open={open} toggle={toggle} focus={focus} />
       <Board lanes={lanes} open={open} toggle={toggle} focus={focus} />

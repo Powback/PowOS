@@ -5,7 +5,7 @@
  * powai.tsx lays them out.
  */
 import { useEffect, useState } from "preact/hooks";
-import { computed } from "@preact/signals";
+import { computed, untracked } from "@preact/signals";
 import { aiScreen, chat } from "../state.ts";
 import { agentsView, aiAgent, closeAgents, messages, since, useAgents } from "../agents.ts";
 import { fleet, ownWords, shorten, taskOf, workingNow, type Fleet, type Worker } from "../fleet.ts";
@@ -199,6 +199,37 @@ function FleetRows({ f, foot }: { f: Fleet; foot?: preact.ComponentChildren }) {
       {foot}
       <CommsFold />
     </div>
+  );
+}
+
+/** A tab screen's glance beside its name: Progress its daily-driver figure (or open tasks), Devices how many hosts. */
+function glanceOf(s: AiScreen) {
+  if (s === "progress") {
+    const dd = dailyDriver();
+    const open = areas().reduce((n, [, a, b]) => n + a + b, 0);
+    return dd != null ? `Daily driver ${dd}%` : open ? `${open} open` : "";
+  }
+  const hosts = new Set(units.value.map((u) => u.host)).size;
+  return s === "devices" && hosts ? `${hosts} host${hosts === 1 ? "" : "s"}` : "";
+}
+
+/**
+ * A bottom tab's screen header (Progress, Devices; Agents draws the same one, agents.tsx AgentsView): back, its name, a
+ * glance - one row under the status bar, as the chat's own header (shell.css .ai-tab-head; the user, 11-23: "surely we
+ * can do the page dock cutoff thing more nicely" - the tabs' pages started behind the clock). [shown]: off screen its
+ * reads aren't tracked (as aistatus.tsx whileShown;
+ * not imported: aistatus.tsx imports this file).
+ */
+export function TabHead({ s, title, shown }: { s: AiScreen; title: string; shown: boolean }) {
+  const glance = shown ? glanceOf(s) : untracked(() => glanceOf(s));
+  return (
+    <header class="ag-top ai-tab-head">
+      <button type="button" class="session-back" aria-label="back" onClick={() => (aiScreen.value = "chat")}>
+        ‹
+      </button>
+      <span class="ai-title">{title}</span>
+      {glance && <span class="muted fl-head">{glance}</span>}
+    </header>
   );
 }
 

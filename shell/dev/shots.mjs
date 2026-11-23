@@ -58,6 +58,8 @@ const DESKTOP_SIZES = {
   laptop: { width: 1280, height: 800, insets: { top: 0, bottom: 0 } },
 };
 /** The phone's screens plus a wide desktop window: for pages whose layout follows their width (the AI page). */
+/** The AI page's tabs at every layout: folded, unfolded, and both sideways (the side-docked one). */
+const AI_TAB_SIZES = { ...SIZES, ...LAND_SIZES };
 const WIDE_SIZES = { ...SIZES, window: { width: 1600, height: 1000, insets: { top: 0, bottom: 0 } } };
 
 /**
@@ -531,10 +533,12 @@ const SCENES = [
   ["send-launcher", "home", "S.openPanel('apps', { search: true }); await sleep(400); S.query.value = 'weather'; await sleep(300);", "wallpaper"],
   ["send-ai", "home", "S.page.value = -1; await sleep(400); const f = document.querySelector('.ai-compose textarea'); if (f) { f.value = 'what is on tonight'; f.dispatchEvent(new Event('input', { bubbles: true })); } await sleep(300);", "wallpaper"],
   ["ai", "home", "S.page.value = -1;", "wallpaper"],
+  // Folded, unfolded and both turned sideways (folded-land: the dock a column on the side): the tab header under the
+  // status bar at each (gate ai-tab-header).
   // OE1 (the user, 11-03 21:14: "Why is the search [bar] just under the chat here?"): every tab, the bar where home's is.
-  ["ai-tab-agents", "home", "S.page.value = -1; await sleep(400); S.aiScreen.value = 'fleet';", "wallpaper"],
-  ["ai-tab-progress", "home", "S.page.value = -1; await sleep(400); S.aiScreen.value = 'progress';", "wallpaper"],
-  ["ai-tab-devices", "home", "S.page.value = -1; await sleep(400); S.aiScreen.value = 'devices';", "wallpaper"],
+  ["ai-tab-agents", "home", "S.page.value = -1; await sleep(400); S.aiScreen.value = 'fleet';", "wallpaper", undefined, AI_TAB_SIZES],
+  ["ai-tab-progress", "home", "S.page.value = -1; await sleep(400); S.aiScreen.value = 'progress';", "wallpaper", undefined, AI_TAB_SIZES],
+  ["ai-tab-devices", "home", "S.page.value = -1; await sleep(400); S.aiScreen.value = 'devices';", "wallpaper", undefined, AI_TAB_SIZES],
   ["chat", "home", `S.chat.value = { busy: false, items: ${CHAT_SAMPLE} }; S.chatting.value = true; S.drawer.value = 1;`, "wallpaper"],
   ["chat-open", "home", `S.chat.value = { busy: false, items: ${CHAT_SAMPLE} }; S.chatting.value = true; S.drawer.value = 1; await sleep(300); document.querySelector('.chat .tl-row')?.click(); await sleep(100); document.querySelectorAll('.chat .tl-row.has-out')[0]?.click(); document.querySelectorAll('.chat .tl-row.has-out')[2]?.click();`, "wallpaper"],
   ["present", "home", `S.chat.value = { busy: false, items: ${PRESENT_SAMPLE} }; S.chatting.value = true; S.drawer.value = 1;`, "wallpaper"],
