@@ -290,6 +290,15 @@ frame of drag latency; measure it before turning it on for drags (animations fir
   Renders a move 16 -> 0 (a snap change still renders the window: its outline class); gate trace
   at 4x CPU: AsyncTask Run (Preact's render task) 50.8 -> 10.9 ms, restyled elements 20 -> 6 a move. Maximised frames
   and zone heights near the system strips take the old path (a render).
+  SH1 (11-23, the user: "The shadow is not positioned correctly when I'm resizing a window"): RS6's 9-slice pieces are
+  placed from the shadow element's box at the drag's start, but any render mid-drag (a snap, the grips' fade, and every
+  move whose zone heights change near a system strip, which takes the render path) wrote the LIVE box onto that element
+  (pieces shifted by the drag so far on an n/w drag, for the rest of the drag) and a rendering move never moved the
+  pieces at all (the shadow stayed where it was, e.g. the bottom row a strip-reach below the frame). Now WindowShadow
+  renders the slice's box and "sliced" class while sliced, a rendering move moves the pieces too, a remounted element
+  or a box too small for the corners gets the whole shadow, and a drag's start drops any stale slice. Gate
+  `ww-shadow-track`: real touches on all 8 zones, out / into a strip's reach / in to the smallest window / out, with
+  forced renders mid-drag; every move each piece's box and its caster's edges against the frame (1 px).
 - [ ] **N5 - games**: windowed games are Linux windows (N1-N4 apply); full screen stays the direct-scanout task. Check:
   a windowed Proton game's menu (untyped override-redirect) shows (0062), fps x/120 unchanged by N1.
 

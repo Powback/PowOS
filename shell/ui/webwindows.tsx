@@ -2604,6 +2604,7 @@ const resizing = new Map<number, Resizing>();
 
 /** A resize grab on window [id] began: its app's size paced from now ([pace]) until [resizeEnd]. */
 function resizeStart(id: number) {
+  unslice(id, webWins.peek().find((v) => v.id === id)); // SH1: never a slice left from an earlier drag
   resizing.set(id, { cw: -1, ch: -1, frame: 0, last: -Infinity, lastAt: -Infinity, steps: 0, reqs: 0 });
   liftStart(id);
   glassDrags.add(id);
@@ -3657,7 +3658,12 @@ function resizeBy(id: number, s: Grab & { side: string; k: number }, e: PointerE
   if (pacing) pacing.steps++;
   showSnap(id, r, k, a);
   const next = { x: Math.round(r.x), y: Math.round(r.y), w: Math.round(r.w), h: Math.round(r.h) };
-  if (!resizeLive(id, next)) update(id, { ...next, restore: undefined });
+  if (resizeLive(id, next)) return;
+  update(id, { ...next, restore: undefined });
+  // SH1: a move that renders still moves a sliced shadow's pieces (its render keeps the slice's box: [WindowShadow]).
+  const w = webWins.peek().find((v) => v.id === id);
+  const shadow = document.querySelector<HTMLElement>(`.ww-shadow[data-wwid="${id}"]`);
+  if (w && shadow && sliced.has(id)) sliceShadow(shadow, id, shadowBox(w));
 }
 
 /**
@@ -3690,7 +3696,7 @@ function writeFrame(frame: HTMLElement, w: WebWin) {
   setBox(frame, w);
   const shadow = frame.parentElement?.querySelector<HTMLElement>(`.ww-shadow[data-wwid="${w.id}"]`);
   const b = frameBox(w);
-  if (shadow) sliceShadow(shadow, w.id, { x: b.x - SHADOW_PAD, y: b.y - SHADOW_PAD, w: b.w + 2 * SHADOW_PAD, h: b.h + 2 * SHADOW_PAD });
+  if (shadow) sliceShadow(shadow, w.id, shadowBox(w));
   const size = frame.querySelector(".ww-outline-size");
   // Its text nodes' data (the size, " × ", the size): Preact keeps these nodes and diffs their text on its next render.
   if (size?.firstChild instanceof Text && size.lastChild instanceof Text) {
@@ -3715,17 +3721,21 @@ const S9_PIECES = [
 const S9 = () => SHADOW_PAD + S9_IN;
 type Slice = { el: HTMLElement; x: number; y: number; w: number; h: number; pieces: HTMLElement[] };
 const sliced = new Map<number, Slice>();
+/** A shadow box [b] the 9-slice's corners fit in. */
+const s9Fits = (b: Box) => b.w > 2 * S9() && b.h > 2 * S9();
 function sliceShadow(shadow: HTMLElement, id: number, box: Box) {
   let s = sliced.get(id);
+  // SH1: a slice of an element that is gone (the window maximised and back: [WindowShadow] remounted), or a box too
+  // small for the corners: the whole shadow at [box] (re-sliced from there on a later move).
+  if (s && (s.el !== shadow || !s9Fits(box))) (unslice(id, undefined), (s = undefined));
   if (!s) {
     const st = shadow.style;
     const r = { x: parseFloat(st.left), y: parseFloat(st.top), w: parseFloat(st.width), h: parseFloat(st.height) };
-    if (st.maskImage || !(r.w > 2 * S9() && r.h > 2 * S9() && box.w > 2 * S9() && box.h > 2 * S9())) return setBox(shadow, box);
+    if (st.maskImage || !s9Fits(r) || !s9Fits(box)) return (shadow.classList.remove("sliced"), setBox(shadow, box));
     s = { el: shadow, ...r, pieces: S9_PIECES.map(([, i, j]) => slicePiece(shadow, r, i, j)) };
     shadow.classList.add("sliced");
     sliced.set(id, s);
   }
-  if (box.w <= 2 * S9() || box.h <= 2 * S9()) return; // MIN_W/MIN_H keep a frame past this; the last good place stays
   const dx = box.x - s.x, dy = box.y - s.y, ew = box.w - s.w, eh = box.h - s.h;
   const sx = (box.w - 2 * S9()) / (s.w - 2 * S9()), sy = (box.h - 2 * S9()) / (s.h - 2 * S9());
   S9_PIECES.forEach(([, i, j], k) => {
@@ -3755,9 +3765,12 @@ function unslice(id: number, w: WebWin | undefined) {
   sliced.delete(id);
   s.pieces.forEach((p) => p.remove());
   s.el.classList.remove("sliced");
-  if (!w) return;
+  if (w) setBox(s.el, shadowBox(w));
+}
+/** Window [w]'s shadow element's box: its frame's and [SHADOW_PAD] round it. */
+function shadowBox(w: WebWin): Box {
   const b = frameBox(w);
-  setBox(s.el, { x: b.x - SHADOW_PAD, y: b.y - SHADOW_PAD, w: b.w + 2 * SHADOW_PAD, h: b.h + 2 * SHADOW_PAD });
+  return { x: b.x - SHADOW_PAD, y: b.y - SHADOW_PAD, w: b.w + 2 * SHADOW_PAD, h: b.h + 2 * SHADOW_PAD };
 }
 
 /** Windows resized live ([resizeLive]) since their drag began: [resizeEnd] commits them. */
@@ -4008,17 +4021,22 @@ function ResizeOutline({ win, leaving }: { win: WebWin; leaving: boolean }) {
  */
 function WindowShadow({ win, z, focused }: { win: WebWin; z: number; focused: boolean }) {
   if (win.restore) return null;
-  const b = frameBox(win);
+  // SH1 (the user, 11-23: "The shadow is not positioned correctly when I'm resizing a window"): while it is a 9-slice
+  // (RS6), a render mid-drag (a snap, the grips' fade, a move near a system strip) keeps the slice's box and class -
+  // its pieces are placed from that box, so writing the live box here moved them all by the drag so far (and a class
+  // write dropped "sliced": the whole shadow showed at the render's box beside the pieces).
+  const s = sliced.get(win.id);
+  const b = s ?? shadowBox(win);
   const style = {
-    left: `${b.x - SHADOW_PAD}px`,
-    top: `${b.y - SHADOW_PAD}px`,
-    width: `${b.w + 2 * SHADOW_PAD}px`,
-    height: `${b.h + 2 * SHADOW_PAD}px`,
+    left: `${b.x}px`,
+    top: `${b.y}px`,
+    width: `${b.w}px`,
+    height: `${b.h}px`,
     zIndex: 20 + z,
     // Its mask (the windows above it): WebWindowsOn's cutAll, after the render.
   };
   return (
-    <div class={`ww-shadow ${focused ? "focused" : ""} ${reflowing.value === win.page ? "ww-reflow" : ""}`} data-wwid={win.id} style={style}>
+    <div class={`ww-shadow ${focused ? "focused" : ""} ${reflowing.value === win.page ? "ww-reflow" : ""} ${s ? "sliced" : ""}`} data-wwid={win.id} style={style}>
       <div style={{ inset: `${SHADOW_PAD}px` }} />
     </div>
   );

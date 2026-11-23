@@ -12284,6 +12284,115 @@ async function gripDragScene(r) {
   }
 }
 
+/**
+ * SH1 (the user, 11-23: "The shadow is not positioned correctly when I'm resizing a window"): a window's drop shadow
+ * sits on its frame on EVERY frame of a resize drag - each edge and corner, out and in, down to the smallest window
+ * (under RS6's 9-slice size: the whole shadow again) and back, with the window re-rendered mid-drag (a host event,
+ * a snap: Preact writes the shadow's box while it is a 9-slice). Real
+ * touches (CDP). In the page, [shadowAt] reads where the shadow IS: the whole one's caster, or each 9-slice piece's
+ * box and its caster's box along the axis it isn't stretched on, against the frame's box (1 px).
+ */
+function shadowAt(id) {
+  const frame = document.querySelector(`.webwindow[data-wwid="${id}"]`);
+  const sh = frame?.parentElement?.querySelector(`.ww-shadow[data-wwid="${id}"]`);
+  if (!frame || !sh) return ["no frame or shadow"];
+  const F = frame.getBoundingClientRect();
+  const k = F.width / parseFloat(frame.style.width) || 1;
+  const pieces = [...sh.querySelectorAll(":scope > .ww-s9")];
+  const whole = getComputedStyle(sh.firstElementChild).visibility !== "hidden";
+  if (!sh.classList.contains("sliced")) return window.__shadowWhole(sh, F, pieces.length, whole);
+  if (pieces.length !== 8) return [`sliced with ${pieces.length} pieces (want 8)`];
+  const pad = (sh.firstElementChild.getBoundingClientRect().left - sh.getBoundingClientRect().left) / k;
+  return [...(whole ? ["sliced, but the whole shadow shows too"] : []), ...pieces.flatMap((p, n) => window.__shadowPiece(p, n, F, { P: pad * k, S: pieces[0].getBoundingClientRect().width }))];
+}
+/** SH1, in the page: a whole (not sliced) shadow [sh] cast from frame box [F], shown, no pieces left in it. */
+function shadowWhole(sh, F, pieces, shown) {
+  const c = sh.firstElementChild.getBoundingClientRect();
+  const near = (a, b) => Math.abs(a - b) <= 1;
+  const at = near(c.left, F.left) && near(c.top, F.top) && near(c.width, F.width) && near(c.height, F.height);
+  return [
+    pieces && `${pieces} 9-slice pieces left in a whole shadow`,
+    !at && `whole shadow cast from ${Math.round(c.left)},${Math.round(c.top)} ${Math.round(c.width)}x${Math.round(c.height)}, frame ${Math.round(F.left)},${Math.round(F.top)} ${Math.round(F.width)}x${Math.round(F.height)}`,
+    !shown && "whole shadow hidden",
+  ].filter(Boolean);
+}
+/** SH1, in the page: 9-slice piece [n] (nw n ne w e sw s se) of a shadow [g].P px past frame box [F], corners [g].S px. */
+function shadowPiece(p, n, F, { P, S }) {
+  const near = (a, b) => Math.abs(a - b) <= 1;
+  const [i, j] = [[0, 0], [1, 0], [2, 0], [0, 1], [2, 1], [0, 2], [1, 2], [2, 2]][n];
+  const name = "nw n ne w e sw s se".split(" ")[n];
+  const col = [[F.left - P, S], [F.left - P + S, F.width + 2 * P - 2 * S], [F.right + P - S, S]][i];
+  const row = [[F.top - P, S], [F.top - P + S, F.height + 2 * P - 2 * S], [F.bottom + P - S, S]][j];
+  const b = p.getBoundingClientRect();
+  const out = [];
+  if (!(near(b.left, col[0]) && near(b.width, col[1]) && near(b.top, row[0]) && near(b.height, row[1])))
+    out.push(`piece ${name} at ${Math.round(b.left)},${Math.round(b.top)} ${Math.round(b.width)}x${Math.round(b.height)}, want ${Math.round(col[0])},${Math.round(row[0])} ${Math.round(col[1])}x${Math.round(row[1])}`);
+  return [...out, ...window.__shadowCast(p.firstElementChild.getBoundingClientRect(), [i, j], F).map((e) => `piece ${name} ${e}`)];
+}
+/** SH1, in the page: the caster box [c]'s edges a piece at column/row [ij] shows (a corner its two, an edge its one) on frame [F]'s. */
+function shadowCast(c, [i, j], F) {
+  const edges = [i === 0 && ["left", c.left, F.left], i === 2 && ["right", c.right, F.right], j === 0 && ["top", c.top, F.top], j === 2 && ["bottom", c.bottom, F.bottom]];
+  return edges.filter((e) => e && Math.abs(e[1] - e[2]) > 1).map(([e, got, want]) => `casts its ${e} edge at ${Math.round(got)}, frame's ${Math.round(want)}`);
+}
+
+/** SH1, in the page: window 971 alone on page 0 at its start frame; [side]'s resize zone centre. */
+async function shadowPlace(side) {
+  const S = await window.__gw.mod("./state.ts");
+  const W = await window.__gw.mod("./ui/webwindows.tsx");
+  S.page.value = 0;
+  W.webWins.value = [{ id: 971, key: "a:gate.shadow", label: "Shadow", page: S.pages.value[0], x: 190, y: 250, w: 420, h: 380, live: true }];
+  await window.__gw.settled();
+  const z = document.querySelector(`.webwindow[data-wwid="971"] .ww-edge-${side}`)?.getBoundingClientRect();
+  return z && { x: Math.round(z.left + z.width / 2), y: Math.round(z.top + z.height / 2) };
+}
+/** SH1, in the page: the dragged window re-rendered mid-drag, as a snap (RZ4) or the grips' fade (RZ6) does it. */
+async function shadowRender() {
+  const W = await window.__gw.mod("./ui/webwindows.tsx");
+  const v = W.resizeView.peek();
+  if (v) W.resizeView.value = { ...v, snapped: v.snapped ? "" : "w" };
+  await window.__gw.frames(2);
+}
+
+/**
+ * SH1: out 60, out 120, a render, out to the screen's edge (n/s: into a system strip's reach - a zone height changes,
+ * that move renders the window), back, in to the smallest window, out again, a render, in.
+ */
+const SH1_STEPS = [[60], [120], [120, true], [300], [120], [-260], [-200], [40], [40, true], [10]];
+/** SH1: one real-touch resize drag of window 971 by [side]'s zone ([touch]: CDP), the shadow read after each move. */
+async function shadowDrag(r, touch, side) {
+  const at = await r.page.evaluate(shadowPlace, side);
+  if (!at) return [`SH1: no ${side} resize zone`];
+  const sign = (plus, minus) => (side.includes(plus) ? 1 : side.includes(minus) ? -1 : 0);
+  const [vx, vy] = [sign("e", "w"), sign("s", "n")];
+  const look = async (what) => {
+    const bad = await r.page.evaluate(async () => (await window.__gw.frames(1), window.__shadowAt(971)));
+    return bad.length ? [`SH1: ${side} drag, ${what}: ${bad.slice(0, 3).join("; ")}`] : [];
+  };
+  const fails = [];
+  await touch("touchStart", [{ x: at.x, y: at.y, id: 1 }]);
+  for (const [d, render] of SH1_STEPS) {
+    if (render) await r.page.evaluate(shadowRender);
+    await touch("touchMove", [{ x: at.x + vx * d, y: at.y + vy * d, id: 1 }]);
+    fails.push(...(await look(`move ${d}${render ? " after a render" : ""}`)));
+  }
+  await touch("touchEnd", []);
+  return [...fails, ...(await look("let go"))];
+}
+
+async function shadowTrackScene(r) {
+  const cdp = await r.page.target().createCDPSession();
+  await cdp.send("Emulation.setTouchEmulationEnabled", { enabled: true, maxTouchPoints: 5 });
+  const touch = (type, pts) => cdp.send("Input.dispatchTouchEvent", { type, touchPoints: pts });
+  await r.page.evaluate(`window.__shadowAt = ${shadowAt}; window.__shadowWhole = ${shadowWhole}; window.__shadowPiece = ${shadowPiece}; window.__shadowCast = ${shadowCast}`);
+  const fails = [];
+  try {
+    for (const side of ["n", "s", "e", "w", "ne", "nw", "se", "sw"]) fails.push(...(await shadowDrag(r, touch, side)));
+    return fails;
+  } finally {
+    await r.page.evaluate(async () => ((await window.__gw.mod("./ui/webwindows.tsx")).webWins.value = [])).catch(() => {});
+  }
+}
+
 async function swapScene(r) {
   try {
     for (const step of [SWAP_HELPERS, swapDividerTap, swapHintTap, swapVertical, swapAloneHalf]) {
@@ -14494,6 +14603,9 @@ try {
   // GR1: a real finger on the journey's grip point resizes live, every step (ww-grip-drag; e2e round 193 steps 29-32).
   if (process.env.SHELL_PAGES !== "0")
     runs.push(open(browser, `${ORIGIN}/index.html`, "ww-grip-drag", { width: 821, height: 883 }).then((r) => whenReady(r, () => gripDragScene(r))));
+  // SH1: a window's shadow on its frame every frame of a resize drag - all sides, smallest size, a render and a remount mid-drag (ww-shadow-track; the user, 11-23).
+  if (process.env.SHELL_PAGES !== "0")
+    runs.push(open(browser, `${ORIGIN}/index.html`, "ww-shadow-track", { width: 821, height: 883 }).then((r) => whenReady(r, () => shadowTrackScene(r))));
   // NR1: on a phone without root, widgets needing Linux say what they need (nonroot-widgets; the user, 11-03).
   if (process.env.SHELL_PAGES !== "0")
     runs.push(open(browser, `${ORIGIN}/index.html`, "nonroot-widgets", { width: 412, height: 915 }).then((r) => whenReady(r, () => r.page.evaluate(nonrootWidgetsCheck))));
