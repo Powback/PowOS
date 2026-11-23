@@ -32,7 +32,7 @@ class CanvasDockTest {
     @Test
     fun labelReadsInCanvasOrder() {
         val labels = mapOf(settings to "Settings", files to "Files")
-        assertEquals("Files | Settings", CanvasDock.plan(settings, files, CanvasDock.Side.RIGHT, 0, labels).label)
-        assertEquals("Settings | filemanager", CanvasDock.plan(settings, files, CanvasDock.Side.LEFT, 0, mapOf(settings to "Settings")).label)
+        assertEquals("Files | Settings", CanvasDock.plan(settings, files, CanvasDock.Side.RIGHT, 0).label(labels))
+        assertEquals("Settings | filemanager", CanvasDock.plan(settings, files, CanvasDock.Side.LEFT, 0).label(mapOf(settings to "Settings")))
     }
 }

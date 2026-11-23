@@ -50,19 +50,17 @@ object CanvasDock {
     data class Plan(
         val packages: List<String>,
         val extras: Map<String, Any>,
-        val label: String,
-    )
+    ) {
+        /** The shortcut's label: the apps' names ([labels]: package -> name) in canvas order. */
+        fun label(labels: Map<String, String>) = packages.joinToString(" | ") { labels[it] ?: it.substringAfterLast('.') }
+    }
 
-    /**
-     * The pair for [dragged] docked on [side] with [other] on the other side ([labels]: package -> app name), for user
-     * [userId]. Pure: JVM-tested (CanvasDockTest).
-     */
+    /** The pair for [dragged] docked on [side] with [other] on the other side, for user [userId]. Pure: CanvasDockTest. */
     fun plan(
         dragged: String,
         other: String,
         side: Side,
         userId: Int,
-        labels: Map<String, String> = emptyMap(),
     ): Plan {
         val order = if (side == Side.LEFT) listOf(dragged, other) else listOf(other, dragged)
         return Plan(
@@ -72,7 +70,6 @@ object CanvasDock {
                 KEY_USER_IDS to IntArray(order.size) { userId },
                 KEY_ORIENTATION to SIDE_BY_SIDE,
             ),
-            order.joinToString(" | ") { labels[it] ?: it.substringAfterLast('.') },
         )
     }
 
@@ -118,7 +115,7 @@ object CanvasDock {
         if (pkgs.any { it == context.packageName }) return Result(false, "PowOS itself can't be a side of split view")
         val pm = context.packageManager
         val labels = pkgs.associateWith { p -> runCatching { pm.getApplicationLabel(pm.getApplicationInfo(p, 0)).toString() }.getOrDefault(p) }
-        val plan = plan(pkgs[0], pkgs[1], side, android.os.Process.myUserHandle().hashCode(), labels)
+        val plan = plan(pkgs[0], pkgs[1], side, android.os.Process.myUserHandle().hashCode())
         val intents =
             plan.packages.map { p ->
                 (pm.getLaunchIntentForPackage(p) ?: return Result(false, "${labels[p]} can't be opened in split view"))
@@ -127,7 +124,7 @@ object CanvasDock {
         val before = plan.packages.associateWith { p -> tasks.firstOrNull { it.component?.packageName == p }?.id }
         val info =
             ShortcutInfo.Builder(context, SHORTCUT_ID)
-                .setShortLabel(plan.label)
+                .setShortLabel(plan.label(labels))
                 .setIntents(intents.toTypedArray())
                 .setExtras(persistable(plan.extras))
                 .build()
