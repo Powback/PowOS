@@ -3,7 +3,8 @@
 // (screens-mock.ts, booted with ?join=choose = a first run that hasn't picked yet):
 //  - the setup step opens by itself: Join your PowStation / Use PowOS on its own, both on screen;
 //  - Join: "looking…" at once (optimistic), then the address field prefilled with powstation.pow (found on the LAN);
-//  - an unreachable address comes back in words; the real one shows "asking…" at once, then the code, big;
+//  - an unreachable address comes back in words; the real one shows "asking…" at once, then the code step: sign in
+//    with the Pow account (PowAuth) or approve the code, big, from a device already in use - both on screen;
 //  - approved (the approver's Devices card, here window.__joinApprove): "Part of Mats's PowOS", the hub's Claude, the
 //    home/dock import and theme offers;
 //  - Leave asks once, then standalone again; Settings' PowStation tile says which.
@@ -62,12 +63,27 @@ async function askCode(f) {
   await type("powstation.pow");
   button(/ask to join/)?.click();
   f(await G().until(() => phase() === "code", 2000), `no code after asking (phase "${phase()}")`);
+  codeStep(f);
+}
+
+/** 3b. the code step (18e5e184): sign in with the Pow account (PowAuth) OR approve the code, big, from a device already
+ *  in use - this device's name, where to approve, both on screen. */
+function codeStep(f) {
   const code = root()?.querySelector("[data-join-code]");
   f(code?.textContent === "BCDF-GHJK", `the code shows "${code?.textContent}"`);
   const big = code ? parseFloat(getComputedStyle(code).fontSize) : 0;
   const body = parseFloat(getComputedStyle(document.body).fontSize);
   f(big >= body * 1.8, `the code is ${big}px on a ${body}px page - not big enough to match at a glance`);
-  f(/PowOS phone/.test(text()) && /Approve/.test(text()), `the code step doesn't say this device's name and where to approve: "${text().slice(0, 200)}"`);
+  f(/PowOS phone/.test(text()) && /approve it on a device you already use/i.test(text()) && /Devices/.test(text()), `the code step doesn't say this device's name and where to approve: "${text().slice(0, 240)}"`);
+  signIn(f, code);
+}
+
+/** The code step's Pow account sign-in: a live button, named, on screen next to the code. */
+function signIn(f, code) {
+  const signin = button(/^sign in$/);
+  f(signin && !signin.disabled, "the code step offers no Pow account sign-in button");
+  f(/Pow account/.test(text()), "the code step doesn't name the Pow account sign-in");
+  f(signin && onScreen(signin) && code && onScreen(code), "the sign-in button or the code is off screen");
 }
 
 /** 4. approved on another device: whose PowOS, the hub's Claude, the import and theme offers. */
