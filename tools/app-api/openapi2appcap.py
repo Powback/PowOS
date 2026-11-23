@@ -8,7 +8,9 @@ The draft is deliberately conservative, per the safety model:
   - every mutating method -> its inferred safety but ENABLED:false (NOT in the
     allowlist) and promoted:false, so it cannot be called until the user reviews
     and promotes it. 'spend' is guessed from the path (checkout/pay/order/
-    purchase/book/delete/send/message) and gets confirm:true + a template;
+    purchase/book/delete/send/message), from a DELETE, and from taking a credential
+    (login/token paths, password/key/otp params - read or not, never enabled) and
+    gets confirm:true + a template;
     everything else mutating is 'reversible-write' with an undo placeholder.
   - the auth scheme becomes one token HANDLE (store:<app>:session) — the VALUE is
     never read from the capture or written here; the store holds the app's own
@@ -31,6 +33,11 @@ import sys
 
 READ = {"get", "head", "options"}
 SPEND_PAT = re.compile(r"(checkout|payment|pay|order|purchase|book|delete|send|message|tip|charge)", re.I)
+# Takes a credential (a password, a key, a one-time code) or signs in/out: never a plain read, never on by default -
+# the safety rule "never enter credentials" (APP-API-CAPTURE.md §0.2). Petstore's GET /user/login?username&password
+# was drafted as an enabled read.
+CRED_PARAM = re.compile(r"(pass(word|wd)?|secret|token|api.?key|otp|pin|credential)$", re.I)
+CRED_PATH = re.compile(r"(login|logout|log.?in|sign.?in|sign.?out|oauth|/token\b|/auth\b)", re.I)
 
 
 def _tokens(oa: dict, app: str) -> dict:
@@ -48,19 +55,23 @@ def _action(path: str, method: str, op: dict, authed: bool) -> tuple[str, dict]:
     is_read = method in READ
     aid = op.get("operationId") or (method + re.sub(r"[^a-zA-Z0-9]+", "_", path)).strip("_")
     aid = re.sub(r"_+", "_", aid).strip("_")[:48] or "root"
-    spend = (not is_read) and bool(SPEND_PAT.search(path))
-    safety = "read" if is_read else ("spend" if spend else "reversible-write")
+    params = {p["name"]: {"type": "string"} for p in op.get("parameters", []) if p.get("in") in ("path", "query")}
+    cred = bool(CRED_PATH.search(path)) or any(CRED_PARAM.search(n) for n in params)
+    # A DELETE can't be undone (it was "reversible-write" with an undo placeholder unless its path said "delete"):
+    # gated like spend, a per-call yes. Same for anything that takes a credential, read or not.
+    spend = (not is_read and (method == "delete" or bool(SPEND_PAT.search(path)))) or cred
+    safety = "spend" if spend else ("read" if is_read else "reversible-write")
     ep = {"method": method.upper(), "path": path}
     if op.get("security") or authed:
         ep["auth"] = "session"
-    params = {p["name"]: {"type": "string"} for p in op.get("parameters", []) if p.get("in") in ("path", "query")}
+    usable = safety == "read"
     action = {
         "summary": op.get("summary") or f"{method.upper()} {path}",
         "safety": safety,
         "origin": "captured",
         "promoted": False,
-        "enabled": is_read,                 # reads on; writes disabled until promoted
-        "widget": is_read,
+        "enabled": usable,                  # reads on; writes and credential actions off until promoted
+        "widget": usable,
         "inputs": {"type": "object", "properties": params},
         "endpoint": ep,
     }
@@ -68,7 +79,8 @@ def _action(path: str, method: str, op: dict, authed: bool) -> tuple[str, dict]:
         action["undo"] = "TODO-set-undo-action"
     if safety == "spend":
         action["confirm"] = True
-        action["confirm_template"] = "Confirm: " + (op.get("summary") or aid) + " ? (review what & how much)"
+        action["confirm_template"] = ("Takes a credential - PowOS never enters one: " if cred else "Confirm: ") + \
+            (op.get("summary") or aid) + (" (sign in in the app itself)" if cred else " ? (review what & how much)")
     return aid, action
 
 

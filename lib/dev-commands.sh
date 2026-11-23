@@ -1323,7 +1323,10 @@ dev_patch() {
 
     # Repo sources dir: the bundled source on a running system, else the dev
     # checkout that holds this lib.
-    local sources="${POWOS_SRC:-/var/lib/powos/src}/sources"
+    # The checkout `powos self`/`reload` use first (powos_src_find: a git clone such as ~/Projects/PowOS): a patch
+    # written into the baked /var/lib/powos/src of a phone landed outside any git tree.
+    local srcroot; srcroot="${POWOS_SRC:-$(powos_src_find 2>/dev/null || echo /var/lib/powos/src)}"
+    local sources="$srcroot/sources"
     [[ -d "$sources" ]] || sources="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)/sources"
 
     # KDE forks share sources/kde/patches/<app>/; others get their own tree.
@@ -1358,11 +1361,17 @@ dev_patch() {
     local count n out
     count="$(find "$dest" -maxdepth 1 -name '*.patch' 2>/dev/null | wc -l)"
     n="$(printf '%03d' "$((count + 1))")"
-    out="$dest/${n}-${desc}.patch"
+    # The file name as a slug ("manager test" made "001-manager test.patch"); the description stays as typed.
+    local slug; slug="$(printf '%s' "$desc" | tr '[:upper:]' '[:lower:]' | tr -cs 'a-z0-9' '-' | sed 's/^-*//; s/-*$//')"
+    out="$dest/${n}-${slug:-changes}.patch"
     printf '%s\n' "$patch" > "$out"
 
     pok "Wrote committable patch → $out"
-    plog "Review it, then:  git add \"$out\" && git commit -m \"$name: $desc\""
+    if git -C "$dest" rev-parse --is-inside-work-tree &>/dev/null; then
+        plog "Review it, then:  git -C \"$srcroot\" add \"$out\" && git -C \"$srcroot\" commit -m \"$name: $desc\""
+    else
+        pwarn "$srcroot isn't a git checkout: copy the patch into one (or: powos self pull, then run this again) to commit it."
+    fi
     plog "Every image build applies it to the app source (git apply / patch -p1)."
 }
 
