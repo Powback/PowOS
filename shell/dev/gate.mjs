@@ -14244,6 +14244,104 @@ const MUST = {
   assist: [[".assist-draw", "the circle-to-crop layer over the screen (assist.tsx Draw)"]],
 };
 
+/**
+ * Home's paints (the user's trace perf-1795459755191, 11-23 "everything keeps redrawing": ~140 Paint events a second
+ * through 27 s of page swipes, ~10 ms each, painting again for ~1 s after each - the render overlay's DOM canvas redrawn
+ * every frame of its 700 ms flashes, its measureText forcing the page's style first; renderoverlay.ts now draws
+ * offscreen). Home as the user has it: the live glass (a port and "b.state 1"), the render overlay on, the mock's agent
+ * news flowing, the phone's DPR. Its main thread's Paint events (a devtools trace, the phone trace's measure) counted
+ * while it's left alone, then through real touch swipes between home's pages and to PowOS AI's page and back - per
+ * second, against HOME_PAINTS. The old overlay here: 11 a second idle, ~50 swiping; now ~0.25 (the trace's own start)
+ * and 4-9. The only scene that traces in a plain run (GATE_PROFILE's ww-resize-cost traces too: one trace at a time).
+ */
+const HOME_PAINTS = { idle: 1, swipes: 15 };
+
+/**
+ * This page's paints while [act] runs and [ms] pass: the main thread's Paint events of its frame (a devtools trace, as
+ * the phone's), per second, and the layers painted most (LayerTree.layerPainted: where to look).
+ */
+async function paintsWhile(page, ms, act) {
+  const cdp = await page.target().createCDPSession();
+  const painted = [];
+  cdp.on("LayerTree.layerPainted", (e) => painted.push(e.layerId));
+  const layers = new Map();
+  cdp.on("LayerTree.layerTreeDidChange", (e) => e.layers?.forEach((l) => layers.set(l.layerId, l)));
+  await cdp.send("LayerTree.enable").catch(() => {});
+  await page.tracing.start({ categories: ["devtools.timeline"] });
+  const t0 = Date.now();
+  await Promise.all([act?.(), new Promise((r) => setTimeout(r, ms))]);
+  const secs = (Date.now() - t0) / 1000;
+  const frame = page.mainFrame()._id;
+  const paints = JSON.parse((await page.tracing.stop()).toString()).traceEvents.filter((e) => e.name === "Paint" && e.ph === "X" && e.args?.data?.frame === frame);
+  const by = new Map();
+  for (const id of painted) by.set(id, (by.get(id) ?? 0) + 1);
+  const top = [];
+  for (const [id, n] of [...by].sort((x, y) => y[1] - x[1]).slice(0, 4)) top.push(`${await layerName(cdp, layers.get(id), id)} ${n}x`);
+  await cdp.detach().catch(() => {});
+  const paintMs = Math.round(paints.reduce((t, e) => t + (e.dur || 0), 0) / 100) / 10;
+  return { n: paints.length, perSec: Math.round((paints.length / secs) * 10) / 10, paintMs, layers: painted.length, top };
+}
+
+/** A layer's element ("div.home-tile.widget"), else what it is. */
+async function layerName(cdp, l, id) {
+  if (!l?.backendNodeId) return l && !l.parentLayerId ? "the root layer" : `layer ${id}`;
+  const n = (await cdp.send("DOM.describeNode", { backendNodeId: l.backendNodeId }).catch(() => null))?.node;
+  const at = n?.attributes ?? [];
+  const cls = at.includes("class") ? "." + at[at.indexOf("class") + 1].trim().split(/\s+/).slice(0, 3).join(".") : "";
+  return n ? n.localName + cls : `layer ${id}`;
+}
+
+/** Page swipes by touch (CDP input, as a finger: the gesture's own handlers), [dirs] 1 = to the next page, -1 = back. */
+async function touchSwipes(page, dirs) {
+  const cdp = await page.target().createCDPSession();
+  const touch = (type, x) => cdp.send("Input.dispatchTouchEvent", { type, touchPoints: x == null ? [] : [{ x, y: 630 }] });
+  for (const dir of dirs) {
+    const x0 = dir > 0 ? 700 : 520;
+    await touch("touchStart", x0);
+    for (let i = 1; i <= 6; i++) (await new Promise((r) => setTimeout(r, 16)), await touch("touchMove", x0 - dir * i * 25));
+    await touch("touchEnd");
+    await new Promise((r) => setTimeout(r, 600));
+  }
+  await cdp.detach().catch(() => {});
+}
+
+/**
+ * In the page: the live glass's stand-in, the fps meter on with its render overlay ("perf.meter", as the host
+ * broadcasts the meter's "rs"), the mock's news on, home's first page. What didn't take, or "".
+ */
+async function asTheUsersHome() {
+  const G = window.__gw;
+  const N = await G.mod("./apps/native.ts");
+  const O = await G.mod("./ui/renderoverlay.ts");
+  const ch = new MessageChannel();
+  ch.port2.onmessage = () => {};
+  N.native.value = ch.port1;
+  for (const f of N.fromNative) f("b.state 1");
+  window.__powosMockQuiet = false;
+  (await G.mod("./state.ts")).page.value = 0;
+  await G.settled();
+  await G.until(() => (window.__mockEvents.emit("perf.meter", { on: true, renders: true }), O.overlayOn()), 3000).catch(() => {});
+  if (!document.documentElement.classList.contains("glass-native")) return "the live glass's stand-in didn't take (no html.glass-native)";
+  return O.overlayOn() ? "" : "the meter's rs didn't put the render overlay up";
+}
+
+async function homePaints(page) {
+  const setup = await page.evaluate(asTheUsersHome);
+  if (setup) return [`home-paints: ${setup}`];
+  // Settled (the overlay's mount, the first page's layout); a trace's start itself costs one paint (~0.25/s here).
+  await new Promise((r) => setTimeout(r, 3000));
+  const idle = await paintsWhile(page, 4000);
+  const home = await paintsWhile(page, 4 * 620 + 600, () => touchSwipes(page, [1, -1, 1, -1]));
+  const ai = await paintsWhile(page, 4 * 620 + 600, () => touchSwipes(page, [-1, 1, -1, 1]));
+  const line = (r) => `${r.n} Paint (${r.perSec}/s, ${r.paintMs} ms; ${r.layers} layer paints${r.top.length ? ": " + r.top.join(", ") : ""})`;
+  console.log(`     home-paints: idle 4 s ${line(idle)} | 4 swipes between home's pages ${line(home)} | 4 to PowOS AI's page and back ${line(ai)}`);
+  const fails = [];
+  if (idle.perSec > HOME_PAINTS.idle) fails.push(`idle home painted ${line(idle)} - want <= ${HOME_PAINTS.idle}/s: nothing on it changes`);
+  for (const [what, r] of [["between home's pages", home], ["to PowOS AI's page and back", ai]])
+    if (r.perSec > HOME_PAINTS.swipes) fails.push(`page swipes ${what} painted ${line(r)} - want <= ${HOME_PAINTS.swipes}/s: a slide moves layers, it doesn't repaint them`);
+  return fails;
+}
+
 /** The idle check (see the top): after the page settled, IDLE_MS of nothing - no rAF, no paint, no endless animation. */
 async function idle(run) {
   await run.page.evaluate(() => (window.__powosMockQuiet = true)).catch(() => {});
@@ -15509,6 +15607,9 @@ try {
       console.log(`     home-swipes: ${await r.page.evaluate(() => window.__swipes).catch(() => "?")}`);
       return fails;
     })));
+  // Home's paints left alone and through page swipes, as the user's home (homePaints; the trace 11-23).
+  if (process.env.SHELL_PAGES !== "0")
+    runs.push(open(browser, `${ORIGIN}/index.html`, "home-paints", { width: 821, height: 883, deviceScaleFactor: 2.7625, isMobile: true, hasTouch: true }).then((r) => whenReady(r, () => homePaints(r.page))));
   if (process.env.SHELL_PAGES !== "0" && fs.existsSync(path.join(ROOT, "ui/jsprofile.ts")))
     runs.push(open(browser, `${ORIGIN}/index.html`, "perf-trace").then((r) => whenReady(r, () => r.page.evaluate(perfTraceCheck))));
   // f428: a check's fps-meter recording files no ask and no mail; a user's still does (perfSourceCheck).

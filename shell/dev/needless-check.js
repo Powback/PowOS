@@ -98,6 +98,8 @@ function swipeFails(home, ai, idle) {
   if (count(ai, ["Pill"]) > 12) fails.push(`6 swipes to PowOS AI's page and back rendered the pill ${count(ai, ["Pill"])}x (want <= 12): ${line(ai)}`);
   if (home.needlessRenders > 6) fails.push(`swipes between home's pages: ${home.needlessRenders} needless renders (want <= 6): ${line(home)}`);
   if (ai.needlessRenders > 12) fails.push(`swipes to PowOS AI's page: ${ai.needlessRenders} needless renders (want <= 12): ${line(ai)}`);
-  if (idle.commits > 2) fails.push(`idle home committed ${idle.commits}x in 3 s (want <= 2): ${line(idle)}`);
+  // The PowOS AI page away renders nothing on agent/board news (aistatus.tsx whileShown; 11-23: 2 commits per 3 s from
+  // StatusColumn/StatusPage/Hero/WorkingNow re-rendering off screen on each agents delta).
+  if (idle.commits > 0) fails.push(`idle home committed ${idle.commits}x in 3 s (want 0: nothing on screen changed): ${line(idle)}`);
   return fails;
 }

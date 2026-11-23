@@ -426,6 +426,23 @@ rest. Keep the blur - make it cheap.
 - The Chrome trace keeps V8's sampler; its ~690 ms start-up stall is the meter's "ARM" warm-up (fpsmeter.tsx armTrace),
   before the recording counts, named in the trace by a user-timing measure. Checks wait for `.fps-meter.rec`.
 - `perf-scenarios.sh --only idle`: idle home per-page frames/paints (cdp idle) + a recording's commits/renders.
+- The trace's ~140 Paint/s (3884 Paint, ~10 ms each) was the render overlay (the meter's "rs", on in that recording):
+  its DOM canvas redrawn every frame of each 700 ms flash, measureText forcing style first. Per frame in the trace: a
+  rAF FunctionCall with a style recalc, then a ~11 ms Paint; ~20 Paint/s before the first touch (the meter's 10 Hz
+  graph), painting every frame from the first swipe until ~1 s after the last (flashes). f426c138 draws it offscreen.
+  Gate `home-paints` (home as the user's: glass stand-in, meter + rs on via "perf.meter", live mock news, DPR 2.76,
+  real CDP touch swipes) counts the trace's Paint events of the page's frame: old overlay 45/s swiping, now ~5 (home
+  pages) / ~11 (to PowOS AI's page), idle ~0.5 (the trace start's own paint). Budget idle <= 1/s, swipes <= 15/s.
+- Headless pitfalls for paints: LayerTree.layerPainted never reports a canvas's paints (old and new overlay looked the
+  same); count Paint trace events filtered by `args.data.frame` (other scenes' pages share the renderer). DPR 1 and
+  mock-quiet hide device paints; enabling the overlay with setOverlay() races home's own perf.meter read - emit
+  "perf.meter" through `__mockEvents`.
+- The AI page away re-rendered on every agents delta (StatusColumn read otherProjectsCount, StatusPage/Stacked read
+  needsYou/fleet/board, WorkingNow's projectOf read parent agent signals): aistatus.tsx `whileShown(shown, f)` reads
+  untracked while away; shown again it renders fresh. home-swipes' idle 3 s: 2 commits -> 0 (it now wants 0).
+- Pull a device trace without touching the UI: `adb.sh shell 'su -c "gzip -c -1 <run>/perf-N.trace.json >
+  /data/local/tmp/x.gz; chmod 644 ..."'` then `adb.sh pull` (337 MB -> 49 MB, ~45 s); WebView events carry no args, so
+  read the per-frame structure (nesting by ts/dur) and line it up with the recording's home.inputs/state.
 
 ## Pitfalls
 - touch IRQs don't see injected input: also check Android's lastUserActivity (`dumpsys power`).

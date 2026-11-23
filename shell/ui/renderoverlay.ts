@@ -100,7 +100,10 @@ function showList() {
   if (!list) return;
   const t = topRenders(6);
   const line = (r: (typeof t.byCount)[number]) => `${String(r.renders).padStart(5)} ${String(r.needless).padStart(4)} ${r.selfMs.toFixed(1).padStart(6)} ${r.name}`;
-  list.textContent = ["renders needless ms(self) component", ...t.byCount.map(line), "needless:", ...t.needless.slice(0, 4).map(line)].join("\n");
+  const text = ["renders needless ms(self) component", ...t.byCount.map(line), "needless:", ...t.needless.slice(0, 4).map(line)].join("\n");
+  // Written only when it changed: the same text set again still replaced its text node - a relayout and repaint of the
+  // list twice a second on an idle home (gate home-paints).
+  if (text !== list.textContent) list.textContent = text;
 }
 
 function mount() {

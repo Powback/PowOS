@@ -27,7 +27,7 @@ import { aiAgent } from "../agents.ts";
 import { fleet, workingNow } from "../fleet.ts";
 import { untried } from "./trycard.tsx";
 import { AiSegs, FleetPane, useAgentsInPane } from "./aipanes.tsx";
-import { AiStatus, noteAsked, openChat, OtherProjectsItem, otherProjectsCount } from "./aistatus.tsx";
+import { AiStatus, noteAsked, openChat, OtherProjectsItem, otherProjectsCount, whileShown } from "./aistatus.tsx";
 import { Icon } from "./icons.tsx";
 import { SignInSheet } from "./claudesignin.tsx";
 import { InstallClaude } from "./claudeinstall.tsx";
@@ -547,7 +547,8 @@ function StatusColumn({ shown, beside = false }: { shown: boolean; beside?: bool
   const [menu, setMenu] = useState(false);
   const pop = usePresence(menu);
   // Friction, and folded "Open chat" / unfolded "Other projects (N)" while other projects' agents work.
-  const n = menuScreens(true).length + (beside ? Number(otherProjectsCount() > 0) : 1);
+  // Off screen its reads aren't tracked (aistatus.tsx whileShown): an agents delta doesn't re-render the page away.
+  const n = menuScreens(true).length + (beside ? Number(whileShown(shown, otherProjectsCount) > 0) : 1);
   const more = <More n={n} menu={menu} setMenu={setMenu} />;
   return (
     <>
