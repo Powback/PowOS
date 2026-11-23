@@ -101,11 +101,15 @@ esac
 # Instant resume: unified sleep freezes a Steam that's out of sight (units/phone/steam.json, docs/UNIFIED-SLEEP.md).
 # Thaw it first, so what this launch hands to it (a game, the window) reaches a running Steam instead of waiting on a
 # frozen one. dbus-send, not powos-sleep-gui wake: a C program, no Python start-up on the way to the window.
-case $(cat "/proc/${steam_pid:-0}/cgroup" 2>/dev/null) in
-  *powos/sleep/*)
-    dbus-send --session --print-reply=literal --reply-timeout=3000 --dest=dev.powos.Sleep /Gui \
-      dev.powos.Sleep.Gui.Wake string:steam >/dev/null 2>&1 || powos sleep wake "$steam_pid" >/dev/null 2>&1 ;;
-esac
+# Asked of any running client, frozen or not: Wake on an awake one holds it awake for the launch. A client that looks
+# awake may be in a 1.5 s link keepalive pulse (powos-sleep-gui link_watch) and refrozen at its end - a tap 1 s after a
+# pulse (557340 11-18 21:52) asked nothing and Steam ran the launch 1.5 s per ~53 s pulse: CheckShaderDepotManifest
+# 55 s, SynchronizingCloud 54 s, launch 134 s against 4 s for the same steps awake.
+if [ -d "/proc/${steam_pid:-0}" ]; then
+  dbus-send --session --print-reply=literal --reply-timeout=3000 --dest=dev.powos.Sleep /Gui \
+    dev.powos.Sleep.Gui.Wake string:steam >/dev/null 2>&1 \
+    || case $(cat "/proc/$steam_pid/cgroup" 2>/dev/null) in *powos/sleep/*) powos sleep wake "$steam_pid" >/dev/null 2>&1 ;; esac
+fi
 # A client left stopped by a signal (state T: a debugger's attach that never finished left a SIGSTOP pending, 2026-10-23)
 # reads nothing either: SIGCONT to its tree (harmless to running processes; a cgroup-frozen one keeps sleeping).
 if [ -d "/proc/${steam_pid:-0}" ]; then

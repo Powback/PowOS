@@ -375,9 +375,13 @@ Access, idle windows and on-device rules: the powos-phone skill (adb/root/idle/c
   held off screen"; it opens on its activation or when no full-screen task stands ("held window ... it opens").
   Open: 346010 11-18 22:08 - an EXISTING Steam task (KWin task 3, no "open") went live over Besiege at folded portrait:
   Android raised it (logcat was gone; capture `logcat -s WindowTasks PowosWebWindows ActivityTaskManager` on a repeat).
-  Launch 134 s (557340 21:52): not windows - Steam's own CheckShaderDepotManifest 55 s + SynchronizingCloud 54 s
-  (cloud_log: "AutoCloud checking local state" -> 54 s -> "already synced"): a ~54 s network timeout per request in a
-  Steam resumed from its freeze; Besiege 2 min later: 4 s for the same steps.
+  Launch 134 s (557340 21:52): not windows, not network, not shaders - Steam was FROZEN between link keepalive pulses
+  (sleep-gui link_watch: thawed 1.5 s every ~50 s). The tap came 1 s after a pulse thawed it: /usr/bin/steam saw no
+  sleep cgroup, asked no Wake, the pulse's end refroze it, and each launch step waited for the next pulse
+  (CheckShaderDepotManifest 55 s, SynchronizingCloud 54 s). Tell-tale: console_log "IPC function call ... took too
+  long: ~53300 msec" and remote_connections.txt peers (.195/.58 Remote Play) reconnecting every ~55 s (ping timeout =
+  the frozen client). Fix (steam pkgrel 50 + sleep-gui): Wake for any running client; a pulse ends awake and no freeze
+  happens while SteamLaunches.preparing(). Check: `bf-coldstart.sh app:<id> pulse` ("steam steps" line).
 - Wine's screen follows the container (steam pkgrel 49, 11-19; user_settings.py follow_screen): Proton defaults
   EmulateModeset ON (win32u add_modes: host modes cut to one, the app's current mode kept from the registry), so after
   any fold/rotate Wine kept the LAUNCH size as the app's monitor and mapped X geometry through scale + centre offset.
