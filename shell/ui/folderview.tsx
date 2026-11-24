@@ -177,6 +177,14 @@ function useMorph(root: { current: HTMLElement | null }, closing: boolean, done:
   }, [closing]);
 }
 
+/**
+ * The grid scrolls under the finger (pan-y, shell.css): a drag down that the sheet's swipe owns (started where nothing
+ * scrolls back: the grid at its top) is kept from the browser's pan, which would cancel the swipe's pointer.
+ */
+function keepSwipe(e: TouchEvent, from: number | null) {
+  if (from != null && e.touches[0].clientY > from && e.cancelable) e.preventDefault();
+}
+
 function Sheet({ s, closing, onHold, done }: { s: Shown; closing: boolean; onHold: DragOut; done: () => void }) {
   const root = useRef<HTMLDivElement>(null);
   const swipe = useRef<number | null>(null);
@@ -199,6 +207,7 @@ function Sheet({ s, closing, onHold, done }: { s: Shown; closing: boolean; onHol
         const dy = e.clientY - swipe.current;
         dragSheet(root.current, dy > 8 ? dy : 0);
       }}
+      onTouchMove={(e) => keepSwipe(e, swipe.current)}
       onPointerUp={(e) => {
         // Swiped down: it closes (as a tap outside does) from where the finger left it; short of it, springs back.
         const dy = swipe.current == null ? 0 : e.clientY - swipe.current;
@@ -207,10 +216,7 @@ function Sheet({ s, closing, onHold, done }: { s: Shown; closing: boolean; onHol
         if (dy > SWIPE_CLOSE) close();
         else if (root.current?.dataset.dy) dragSheet(root.current, 0, true);
       }}
-      onPointerCancel={() => {
-        swipe.current = null;
-        if (!closing && root.current?.dataset.dy) dragSheet(root.current, 0, true);
-      }}
+      onPointerCancel={() => ((swipe.current = null), !closing && root.current?.dataset.dy && dragSheet(root.current, 0, true))}
     >
       <div class="folder-focus tile" />
       <div class="folder-sheet" onClick={(e) => e.stopPropagation()}>

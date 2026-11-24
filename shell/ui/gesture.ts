@@ -781,11 +781,17 @@ function panelSwipe(gs: Gesture, dx: number, dy: number) {
 function claimOnHome(gs: Gesture, dx: number, dy: number): Gesture["mode"] {
   const vertical = Math.abs(dy) > Math.abs(dx) * VERTICAL_RATIO;
   if (vertical && Math.abs(dx) >= 6) logSwipe(`lock=vertical dx=${r(dx)} dy=${r(dy)} ratio=${(Math.abs(dy) / Math.abs(dx)).toFixed(2)} page=${page.value}`);
+  if (!vertical) return claimSideways(gs, dx, dy);
+  // A list under the finger that can still scroll that way (a widget's, the library's, scrollown.ts) scrolls - up AND
+  // down alike, and the host's shade pull keeps off it too (the user, 11-24: in the library "scrolling DOWN works, but
+  // scrolling UP opens the notification center"). At its end, home's.
+  if (roomTakes(gs.room, "y", dy)) {
+    claimFromHost();
+    return null;
+  }
   // PowOS AI's page and the app library: up and down are their own (they scroll).
-  if (vertical && (page.value === -1 || onLibrary() || gs.ownV)) return null;
-  // A list under the finger that can still scroll that way (a widget's, scrollown.ts) scrolls: at its end, home's.
-  if (vertical && roomTakes(gs.room, "y", dy)) return null;
-  return vertical ? claimVertical(gs, dy) : claimSideways(gs, dx, dy);
+  if (page.value === -1 || onLibrary() || gs.ownV) return null;
+  return claimVertical(gs, dy);
 }
 
 /**

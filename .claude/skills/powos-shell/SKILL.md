@@ -543,7 +543,16 @@ strip only - not the cause when a drag in a tile fails.
   home (and any non-"home" chrome way) calls shade.homeClaim: the host's pull never starts for that finger.
 - Region reports correct for a settle in flight (settleShift: track/home offset) and re-run 300 ms after home's
   scroller set changes (homeShape). Gate: home-scroll-own (CDP touches, hasTouch viewport). Unit: HomePullAxisTest.
-  Device: tools/phone/verify/scroll-own.sh (diagonal dock drags never show the shade; a widget scroller scrolls).
+  Device: tools/phone/verify/scroll-own.sh (diagonal dock drags never show the shade; a widget scroller scrolls; the
+  library scrolled down is dragged back down without the shade).
+- Symmetric vertically (the user 11-24: "scrolling DOWN works, but scrolling UP opens the notification center"): a
+  vertical drag a scroller has room for calls shade.homeClaim both ways (claimOnHome), and the host's regions keep a
+  scroller of ANY size while it has room toward its top (home.tsx scrollsBack: the library's page-sized list was left
+  out as "empty home", so the host pulled on every drag down on it). At its top it leaves the regions (a pull from there
+  is the shade's). A scroll that crosses the top re-reports next frame (scrolledOnHome; axes cached by the walk, no
+  style read - HP5). The folder sheet's grid scrolls by touch (.folder-grid .app pan-y; an app's press stops
+  propagation, so the sheet's swipe starts off the apps; keepSwipe stops the pan for it). Gates folder-scroll-own (SO2),
+  library-scroll-own (SO3).
 
 ## Widget stacks (ui/stacks.tsx + ui/stackmodel.ts; the user 11-23 "stack widgets and swipe ... like samsung")
 - Model is pure (stackmodel.ts, test/stackmodel.test.ts, tier1 test-home-stacks.sh). Store "home.stacks" =

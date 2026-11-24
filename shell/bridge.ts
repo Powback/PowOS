@@ -997,10 +997,14 @@ function mock(): Bridge {
       blur: async (dp) => console.log("[mock] shade blur", dp),
       behind: async () => {},
       // The gate reads the last regions home excluded from the host's pulls (W-IN1: they follow the windows).
-      homePull: async (...args: unknown[]) => (((globalThis as { __homePullRegions?: unknown }).__homePullRegions = args[3] ?? null), true),
+      // ...and whether home last said a pull down on it is the host's (__homePullOn: never while a folder is open).
+      homePull: async (...args: unknown[]) => (
+        Object.assign(globalThis, { __homePullRegions: args[3] ?? null, __homePullOn: !!args[0] }), true
+      ),
       // The gate counts home's sideways claims sent to the host (scroll-own: a strip's drag must never be the shade's).
       homeClaim: async () => void ((globalThis as { __homeClaims?: number }).__homeClaims = ((globalThis as { __homeClaims?: number }).__homeClaims ?? 0) + 1),
-      open: async () => console.log("[mock] shade open"),
+      // The gate counts the shade asked down without a pull (gesture.ts askShade): a scroll must never ask it.
+      open: async () => void ((globalThis as { __shadeOpens?: number }).__shadeOpens = ((globalThis as { __shadeOpens?: number }).__shadeOpens ?? 0) + 1),
     },
     overlay: { closed: async () => console.log("[mock] overlay closed") },
     pull: {

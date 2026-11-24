@@ -7937,6 +7937,151 @@ async function soDock({ page, drag, state }, at) {
   return s.claims ? [] : ["SO1: a diagonal drag along the dock's recent-apps strip wasn't claimed from the host (shade.homeClaim) - the shade could take it"];
 }
 
+/**
+ * SO2, real touches (CDP) in an open folder whose grid overflows (the user, 11-24: "scrolling DOWN in the folder view
+ * works, but scrolling UP opens the notification center"): a drag up scrolls the grid on, a drag down scrolls it back -
+ * the folder stays open and its sheet in place, the shade is never asked (shade.open) and the host's pull on home's body
+ * is off while it shows (shade.homePull false). Then, scrolled back to its top, a fresh drag down is the sheet's swipe.
+ */
+async function folderScrollOwnCheck(r) {
+  const at = await r.page.evaluate(folderScrollSetup);
+  if (at.err) return [`SO2: ${at.err}`];
+  const f = await soFinger(r.page);
+  const st = () => r.page.evaluate(folderScrollState);
+  try {
+    const s0 = await st();
+    await f.drag({ x: at.x, y: at.y + at.h * 0.4 }, { x: at.x + 4, y: at.y - at.h * 0.4 });
+    const s1 = await st();
+    await f.drag({ x: at.x, y: at.y - at.h * 0.4 }, { x: at.x - 4, y: at.y + at.h * 0.3 });
+    const s2 = await st();
+    // The sheet's swipe down still closes it (from its title: an app's press is its own).
+    await f.drag({ x: at.x, y: at.title }, { x: at.x, y: at.title + 140 });
+    const s3 = await st();
+    return [
+      s3.open && "a drag down from the folder's title didn't close it (the sheet's swipe)",
+      s1.top <= s0.top + 3 && `a drag up in the folder's grid didn't scroll it on (scrollTop ${s0.top} -> ${s1.top})`,
+      s2.top >= s1.top - 3 && `a drag down in the folder's grid didn't scroll it back (scrollTop ${s1.top} -> ${s2.top})`,
+      s0.pullOn && "the host's pull on home's body is on under the open folder (a drag down there is the shade's)",
+      ...[["up", s1], ["down", s2]].flatMap(([way, s]) => [
+        !s.open && `a drag ${way} in the folder's grid closed the folder`,
+        s.dy && `a drag ${way} in the folder's grid moved its sheet (${s.dy} px)`,
+        s.opens && `a drag ${way} in the folder's grid asked the shade down (shade.open x${s.opens})`,
+      ]),
+    ].filter(Boolean).map((m) => `SO2: ${m}`);
+  } finally {
+    await f.touch("touchEnd", []).catch(() => {});
+    await r.page.evaluate(async () => ((await window.__gw.mod("./state.ts")).folder.value = null)).catch(() => {});
+  }
+}
+
+/** In the page: the library folder with the most apps open, its grid made to overflow (shorter) if it doesn't. */
+async function folderScrollSetup() {
+  const S = await window.__gw.mod("./state.ts");
+  const L = await window.__gw.mod("./ui/library.tsx");
+  S.page.value = 0;
+  await window.__gw.settled();
+  const big = [...L.library.value].sort((a, b) => b.apps.length - a.apps.length)[0];
+  if (!big) return { err: "no library folder" };
+  S.folder.value = big.key;
+  await window.__gw.until(() => document.querySelector(".folder-view.open .folder-grid"));
+  await window.__gw.settled();
+  const grid = document.querySelector(".folder-view.open .folder-grid");
+  // More apps than fit (copies of its first cell: the grid's own touch rules on each).
+  for (let i = 0; i < 24; i++) grid.appendChild(grid.firstElementChild.cloneNode(true));
+  // Tall enough for a drag inside it, short enough to scroll a good way.
+  if (grid.scrollHeight <= grid.clientHeight + 120) grid.style.maxHeight = `${Math.max(170, Math.round(grid.scrollHeight / 2))}px`;
+  await window.__gw.settled();
+  if (grid.scrollHeight <= grid.clientHeight + 60) return { err: `the folder's grid doesn't overflow (${grid.scrollHeight} / ${grid.clientHeight})` };
+  Object.assign(globalThis, { __shadeOpens: 0, __homeClaims: 0 });
+  const b = grid.getBoundingClientRect();
+  const t = document.querySelector(".folder-view.open .folder-title").getBoundingClientRect();
+  return { x: b.left + b.width / 2, y: b.top + b.height / 2, h: b.height, title: t.top + t.height / 2 };
+}
+
+/** In the page: the folder's grid scroll, whether it's open, its sheet's swipe offset, the host's calls. */
+function folderScrollState() {
+  const v = document.querySelector(".folder-view");
+  return {
+    top: Math.round(v?.querySelector(".folder-grid")?.scrollTop ?? -1),
+    open: !!v?.classList.contains("open"),
+    dy: Number(v?.dataset.dy) || 0,
+    opens: globalThis.__shadeOpens ?? 0,
+    pullOn: !!globalThis.__homePullOn,
+  };
+}
+
+/**
+ * SO3, real touches (CDP) on the app library's page (a near screen-sized list; the user, 11-24: "scrolling DOWN in the
+ * folder view works, but scrolling UP opens the notification center"): scrolled away from its top, the host is told the
+ * list is a claim region (a drag down there scrolls it back - never the host's shade pull); a drag up and a drag down
+ * both scroll it and both are claimed from the host (shade.homeClaim), the shade never asked; back at its top the
+ * region goes (a pull down from there is the shade's again).
+ */
+async function libraryScrollOwnCheck(r) {
+  const at = await r.page.evaluate(libraryScrollSetup);
+  if (at.err) return [`SO3: ${at.err}`];
+  const f = await soFinger(r.page);
+  const st = () => r.page.evaluate(libraryScrollState, at);
+  try {
+    const s0 = await st();
+    await f.drag({ x: at.x, y: at.y + 120 }, { x: at.x + 4, y: at.y - 120 });
+    const s1 = await st();
+    await f.drag({ x: at.x, y: at.y - 100 }, { x: at.x - 4, y: at.y + 100 });
+    const s2 = await st();
+    await r.page.evaluate(async () => {
+      document.querySelector(".library-scroll").scrollTop = 0;
+      await window.__gw.frames(3);
+    });
+    await f.sleep(200);
+    const s3 = await st();
+    return [
+      !s0.covered && "scrolled down, the library's list isn't a claim region for the host - a drag down on it is the shade's pull",
+      s1.top <= s0.top + 10 && `a drag up on the library didn't scroll it (scrollTop ${s0.top} -> ${s1.top})`,
+      s1.claims < 1 && "a drag up on the library wasn't claimed from the host (shade.homeClaim)",
+      s2.top >= s1.top - 10 && `a drag down on the scrolled library didn't scroll it back (scrollTop ${s1.top} -> ${s2.top})`,
+      s2.claims <= s1.claims && "a drag down on the scrolled library wasn't claimed from the host (shade.homeClaim) - the shade could pull",
+      s2.opens && `a drag on the library asked the shade down (shade.open x${s2.opens})`,
+      s3.covered && "at its top the library is still a claim region - a pull down from there never reaches the shade",
+    ].filter(Boolean).map((m) => `SO3: ${m}`);
+  } finally {
+    await f.touch("touchEnd", []).catch(() => {});
+    await r.page.evaluate(async () => ((await window.__gw.mod("./state.ts")).page.value = 0)).catch(() => {});
+  }
+}
+
+/** In the page: the library's page shown, its list made to overflow (a spacer) if it doesn't, scrolled to its middle. */
+async function libraryScrollSetup() {
+  const S = await window.__gw.mod("./state.ts");
+  S.page.value = S.pages.value.length;
+  await window.__gw.settled();
+  const list = document.querySelector(".library-scroll");
+  if (!list) return { err: "no .library-scroll on the library's page" };
+  if (list.scrollHeight < list.clientHeight * 2) {
+    const pad = document.createElement("div");
+    pad.className = "gate-pad";
+    pad.style.height = `${list.clientHeight * 2}px`;
+    list.appendChild(pad);
+  }
+  await window.__gw.settled();
+  list.scrollTop = Math.round((list.scrollHeight - list.clientHeight) / 2);
+  await window.__gw.frames(3);
+  await new Promise((ok) => setTimeout(ok, 200));
+  Object.assign(globalThis, { __shadeOpens: 0, __homeClaims: 0 });
+  const b = list.getBoundingClientRect();
+  return { x: b.left + b.width / 2, y: b.top + b.height / 2 };
+}
+
+/** In the page: the library's scroll, whether the host's regions cover its middle, the host's calls. */
+function libraryScrollState(at) {
+  const covered = (globalThis.__homePullRegions ?? []).some((q) => at.x >= q.left && at.x <= q.left + q.width && at.y >= q.top && at.y <= q.top + q.height);
+  return {
+    top: Math.round(document.querySelector(".library-scroll")?.scrollTop ?? -1),
+    covered,
+    claims: globalThis.__homeClaims ?? 0,
+    opens: globalThis.__shadeOpens ?? 0,
+  };
+}
+
 async function folderDragCheck() {
   const S = await window.__gw.mod("./state.ts");
   const G = await window.__gw.mod("./ui/grid.tsx");
@@ -15322,6 +15467,13 @@ try {
   // screen"): real touches (CDP) on a widget's sideways scroller and on the dock's recent-apps strip (scrollOwnCheck).
   if (process.env.SHELL_PAGES !== "0")
     runs.push(open(browser, `${ORIGIN}/index.html`, "home-scroll-own", { width: 404, height: 900, hasTouch: true }).then((r) => whenReady(r, () => scrollOwnCheck(r))));
+  // SO2 (the user, 11-24: "scrolling UP [in the folder view] opens the notification center"): real touches up and down
+  // in an open folder whose grid overflows (folderScrollOwnCheck).
+  if (process.env.SHELL_PAGES !== "0")
+    runs.push(open(browser, `${ORIGIN}/index.html`, "folder-scroll-own", { width: 404, height: 900, hasTouch: true }).then((r) => whenReady(r, () => folderScrollOwnCheck(r))));
+  // SO3 (same report, the library: a page-sized list the host's regions left out): libraryScrollOwnCheck.
+  if (process.env.SHELL_PAGES !== "0")
+    runs.push(open(browser, `${ORIGIN}/index.html`, "library-scroll-own", { width: 404, height: 900, hasTouch: true }).then((r) => whenReady(r, () => libraryScrollOwnCheck(r))));
   // Folders by drag: home app onto home app, and a drawer app onto a home app (folderDragCheck).
   if (process.env.SHELL_PAGES !== "0")
     runs.push(open(browser, `${ORIGIN}/index.html`, "home-folder-drag", { width: 404, height: 900 }).then((r) => whenReady(r, () => r.page.evaluate(folderDragCheck))));

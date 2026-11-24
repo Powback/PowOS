@@ -1263,7 +1263,9 @@ input.folder-title:focus { background: var(--soft-fill); }
   overflow-y: auto;
   overscroll-behavior: contain;
 }
-.folder-grid .app { touch-action: none; min-width: 0; }
+/* Up and down are the grid's own (a folder with more apps than fit scrolls - both ways, the user 11-24); a hold that
+   then moves is a drag out (folders.tsx AppPress stops the pan), a swipe down at its top the sheet's (folderview.tsx). */
+.folder-grid .app { touch-action: pan-y; min-width: 0; }
 .folder-grid .app .app-icon { width: min(var(--icon), 58%); transform-origin: 0 0; }
 .folder-grid .app-label { text-shadow: none; max-width: 100%; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; padding: 0 2px; }
 .chosen-actions { z-index: 9; }

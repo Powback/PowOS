@@ -107,16 +107,33 @@ function settleShift(): { home: number; track: number } {
   return { home, track: track.getBoundingClientRect().left - p.left + page.value * p.width + home };
 }
 
-/** [el]'s scroll axes by its style (overflow auto / scroll): y, x, or none. A style read only, never a layout one. */
-function scrollAxes(el: Element): { y: boolean; x: boolean } | null {
+/**
+ * [el]'s scroll axes by its style (overflow auto / scroll): y, x, or none; [rev]: a column-reverse list (its top is
+ * scrollTop -span). A style read only, never a layout one.
+ */
+function scrollAxes(el: Element): Axes | null {
   const s = getComputedStyle(el);
   const y = /auto|scroll/.test(s.overflowY);
   const x = /auto|scroll/.test(s.overflowX);
-  return y || x ? { y, x } : null;
+  return y || x ? { y, x, rev: s.flexDirection === "column-reverse" } : null;
+}
+type Axes = { y: boolean; x: boolean; rev: boolean };
+
+/**
+ * [el] (an up-and-down scroller, [axes] as the walk read them) has room toward its top: a finger dragged DOWN on it
+ * scrolls it back, so it is the scroller's, never the host's shade pull - however big it is (the library's page, a
+ * page-sized list). The user, 11-24: "scrolling DOWN works, but scrolling UP opens the notification center": a near
+ * screen-sized scroller was left out of the regions (the empty home the pulls start from), so the host pulled on every
+ * drag down on it while the page (scrollown.ts) gave it to the list. At its top it is left out again: a drag down from
+ * there is the shade's, as a fresh drag at a scroller's edge passes on (scrollown.ts). Sizes only, no style read.
+ */
+function scrollsBack(el: Element, axes: Axes): boolean {
+  if (!axes.y) return false;
+  return axes.rev ? el.scrollTop > el.clientHeight - el.scrollHeight + 1 : el.scrollTop > 1;
 }
 
 /** Whether [el] (a scroller by its style) has more to show along an axis it scrolls. */
-function hasMore(el: Element, axes: { y: boolean; x: boolean }): boolean {
+function hasMore(el: Element, axes: Axes): boolean {
   return (axes.y && el.scrollHeight > el.clientHeight + 1) || (axes.x && el.scrollWidth > el.clientWidth + 1);
 }
 
@@ -127,7 +144,9 @@ function hasMore(el: Element, axes: { y: boolean; x: boolean }): boolean {
  * its style - "scrolls (ui/home.tsx:89)" 1200 ms of self time, 70-170 ms per run, right as each swipe settled. Now a
  * page change reads the few kept scrollers' sizes and rects; the walk reads style only (no layout).
  */
-let scrollers: { el: Element; axes: { y: boolean; x: boolean } }[] | null = null;
+let scrollers: { el: Element; axes: Axes }[] | null = null;
+/** The kept scrollers' axes by element (a scroll event's target looked up, never its style read). */
+let axesOf = new WeakMap<Element, Axes>();
 /** Class tokens a swipe or settle toggles (gesture.ts applyTrack, pagedots.tsx, grid.tsx): none sets an overflow. */
 const SWIPE_STATE = new Set(["sliding", "dragging", "live", "away", "seated"]);
 const tokens = (v: string | null) => new Set((v ?? "").split(/\s+/).filter(Boolean));
@@ -159,6 +178,29 @@ function reshaped() {
 }
 let watched: Element | null = null;
 
+/**
+ * A scroller on home crossed its top (scrolled away from it, or back to it): whether a drag down on it is the list's or
+ * the host's pull changed (scrollsBack), so the host's regions are reported again at once - the next frame, never the
+ * [RESHAPE_MS] wait (a drag back down right after a scroll down must already be the list's). Two size reads per scroll
+ * event of a kept scroller (its axes from the walk, no style read); a report only on a crossing.
+ */
+const atTop = new WeakMap<Element, boolean>();
+let flipFrame = 0;
+function scrolledOnHome(e: Event) {
+  const el = e.target instanceof Element ? e.target : null;
+  const axes = el && reportRegions ? axesOf.get(el) : undefined;
+  if (el && axes?.y && crossedTop(el, axes)) flipFrame ||= requestAnimationFrame(() => ((flipFrame = 0), reportRegions?.(true)));
+}
+
+/** Whether [el] is now at its top when it wasn't, or the other way (first seen: only away from it counts). */
+function crossedTop(el: Element, axes: Axes): boolean {
+  const top = !scrollsBack(el, axes);
+  const was = atTop.get(el);
+  atTop.set(el, top);
+  return was === undefined ? !top : was !== top;
+}
+if (!new URLSearchParams(location.search).get("mode")) addEventListener("scroll", scrolledOnHome, { capture: true, passive: true });
+
 function homeScrollers(home: Element) {
   if (watched !== home) {
     homeShape.disconnect();
@@ -169,11 +211,12 @@ function homeScrollers(home: Element) {
   // Changes not delivered yet (the observer's callback is a microtask away): seen here first.
   if (scrollers && shapeChanged(homeShape.takeRecords())) scrollers = null;
   if (scrollers) return scrollers;
-  const found: { el: Element; axes: { y: boolean; x: boolean } }[] = [];
+  const found: { el: Element; axes: Axes }[] = [];
+  axesOf = new WeakMap();
   // Hidden subtrees are walked too: an inline style that shows one again isn't a change this observer sees.
   for (const el of home.querySelectorAll("*")) {
     const axes = scrollAxes(el);
-    if (axes) found.push({ el, axes });
+    if (axes) found.push({ el, axes }), axesOf.set(el, axes);
   }
   homeShape.takeRecords();
   return (scrollers = found);
@@ -196,12 +239,15 @@ function claimFree(dockNode: HTMLElement | null): PageRect[] {
 /** The settle's shift for [el]'s rect: the track's for what's on the pages, else home's own. */
 const shiftOf = (el: Element, shift: { home: number; track: number }) => (el.closest(".page-track") ? shift.track : shift.home);
 
-/** Home's scrollers (DOM ones with more to show, outside the dock) and its Android widgets' native ones, with their rects. */
-function homeScrollRects(home: Element, dockNode: HTMLElement | null): [DOMRect, Element][] {
+/**
+ * Home's scrollers (DOM ones with more to show, outside the dock) and its Android widgets' native ones, with their rects
+ * and whether a drag down scrolls them back (scrollsBack: kept as a region however big).
+ */
+function homeScrollRects(home: Element, dockNode: HTMLElement | null): [DOMRect, Element, boolean][] {
   const dom = homeScrollers(home)
     .filter(({ el, axes }) => el.isConnected && !dockNode?.contains(el) && hasMore(el, axes))
-    .map(({ el }) => [el.getBoundingClientRect(), el] as [DOMRect, Element]);
-  return [...dom, ...nativeScrollRects(home)];
+    .map(({ el, axes }) => [el.getBoundingClientRect(), el, scrollsBack(el, axes)] as [DOMRect, Element, boolean]);
+  return [...dom, ...nativeScrollRects(home).map(([r, el]) => [r, el, false] as [DOMRect, Element, boolean])];
 }
 
 /** The dock's and home's scrollers (the costly walk). */
@@ -210,8 +256,8 @@ function claimStatic(dockNode: HTMLElement | null): PageRect[] {
   const view = viewport();
   const big = view.w * view.h * 0.5;
   const shift = settleShift();
-  const put = (r: DOMRect, el: Element) => {
-    if (r.width > 0 && r.height > 0 && r.width * r.height < big) out.push(pageRect(r, shiftOf(el, shift)));
+  const put = (r: DOMRect, el: Element, back = false) => {
+    if (r.width > 0 && r.height > 0 && (r.width * r.height < big || back)) out.push(pageRect(r, shiftOf(el, shift)));
   };
   const add = (el: Element) => put(el.getBoundingClientRect(), el);
   if (dockNode) {
@@ -219,7 +265,7 @@ function claimStatic(dockNode: HTMLElement | null): PageRect[] {
     dockNode.querySelectorAll(".dock-pages, .dock-recent").forEach(add);
   }
   const home = document.querySelector(".home");
-  if (home) for (const [r, el] of homeScrollRects(home, dockNode)) put(r, el);
+  if (home) for (const [r, el, back] of homeScrollRects(home, dockNode)) put(r, el, back);
   return out;
 }
 

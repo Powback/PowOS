@@ -8,7 +8,9 @@
 #   2. a widget scroller on the page on screen (a DOM element in a tile with more to show sideways, or an Android widget
 #      whose frame lists a sideways native scroller), if there is one: a sideways drag scrolls it (DOM: scrollLeft) and
 #      home's page stays; then dragged back;
-#   3. a straight pull down on home's body still opens the shade (regression), swiped shut.
+#   3. a straight pull down on home's body still opens the shade (regression), swiped shut;
+#   4. the app library's page (the user 11-24: "scrolling UP opens the notification center"): scrolled down by a drag up,
+#      a drag down scrolls it back and the shade's window never shows.
 # Injected input + read-only CDP in a free window; Home after. Exit 1 + "FAIL:" on a failed step, 3 on a real touch.
 # Headless twin: shell/dev/gate.mjs home-scroll-own.
 set -uo pipefail
@@ -75,5 +77,28 @@ m=$(drag $((W / 2)) $((H * 30 / 100)) 1 $((H * 4 / 100))); chk pull
 [ "$m" != 0 ] || fail "a straight pull down on home didn't show the shade's window"
 sh_ "input swipe $((W / 2)) $((H * 80 / 100)) $((W / 2)) $((H * 15 / 100)) 250"; sleep 1.2
 [ "$(shade_shown)" = 0 ] || sh_ "input keyevent 4"
+
+step "4. the library scrolled down: a drag down scrolls it back, never the shade (both ways the list's)"
+# The user, 11-24: "scrolling DOWN works, but scrolling UP opens the notification center" - a page-sized list was left
+# out of the host's regions. Home's pages are swiped (input) to the library; its list is read only.
+LIB='document.querySelector(".library-scroll")'
+onlib() { q "(()=>{const e=$LIB;if(!e)return 0;const r=e.getBoundingClientRect();return r.left>-4&&r.left<innerWidth/4?1:0})()"; }
+for k in 1 2 3 4 5 6 7 8; do [ "$(onlib)" = 1 ] && break; sh_ "input swipe $((W * 85 / 100)) $((H * 50 / 100)) $((W * 15 / 100)) $((H * 50 / 100)) 180"; sleep 0.9; done
+if [ "$(onlib)" != 1 ]; then echo "no library page reached: step skipped" | tee -a "$OUT/log.txt"; else
+  sh_ "logcat -c"
+  t0=$(q "${LIB}.scrollTop|0")
+  m1=$(drag $((W / 2)) $((H * 70 / 100)) 2 -$((H * 4 / 100))); chk "library up"
+  t1=$(q "${LIB}.scrollTop|0"); sleep 0.5
+  m2=$(drag $((W / 2)) $((H * 35 / 100)) 2 $((H * 3 / 100))); chk "library down"
+  t2=$(q "${LIB}.scrollTop|0")
+  echo "library scrollTop $t0 -> $t1 (up) -> $t2 (down); shade mid-drag up=$m1 down=$m2" | tee -a "$OUT/log.txt"
+  sh_ "logcat -d -v time | grep -E \"PowosShade|PowosGestures\" | tail -20" > "$OUT/library.log"
+  if [ "${t1:-0}" -le "${t0:-0}" ]; then echo "the library didn't scroll (too short?): down step not judged" | tee -a "$OUT/log.txt"; else
+    [ "$m2" = 0 ] || fail "a drag down on the scrolled library showed the shade's window"
+    [ "${t2:-0}" -lt "${t1:-0}" ] || fail "a drag down on the scrolled library didn't scroll it back"
+  fi
+  [ "$m1" = 0 ] || fail "a drag up on the library showed the shade's window"
+  [ "$(shade_shown)" = 0 ] || { fail "the library drags left the shade open"; sh_ "input keyevent 4"; sleep 1; }
+fi
 
 [ "$FAILS" = 0 ] && echo "PASS: scroll ownership on home ($OUT)" || { echo "FAIL: $FAILS step(s) ($OUT)"; exit 1; }
