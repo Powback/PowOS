@@ -108,6 +108,34 @@ class KeyboardAiTest {
         assertEquals(5, r.getInt("n"))
         assertEquals(1, r.getJSONArray("avoid").length())
         assertFalse(r.has("shot"))
+        assertEquals("the press's screenshot id is the learning session", "s1", r.getString("session"))
+    }
+
+    @Test fun outcomeIsBehindTheSameCallerCheck() {
+        val other = KeyboardAi.Caller(kb, listOf("com.evil"), signer, ime)
+        val notIme = KeyboardAi.Caller(kb, pkg, signer, "com.other/.Ime")
+        assertEquals("denied", KeyboardAi.gate("outcome", other, me)!!.getString("error"))
+        assertEquals("denied", KeyboardAi.gate("outcome", notIme, me)!!.getString("error"))
+        assertNull(KeyboardAi.gate("outcome", KeyboardAi.Caller(kb, pkg, signer, ime), me))
+        for (m in KeyboardAi.METHODS) assertEquals(m, "denied", KeyboardAi.gate(m, other, me)!!.getString("error"))
+        assertEquals("bad-request", KeyboardAi.gate("dump", KeyboardAi.Caller(kb, pkg, signer, ime), me)!!.getString("error"))
+    }
+
+    @Test fun outcomeRequestTextOnlyAndNeverForPrivateFields() {
+        val ask =
+            JSONObject().put("rid", "h-1-ab").put("action", "picked").put("picked", 1).put("final", "y".repeat(3000))
+                .put("sent", true).put("inputType", 0x41).put("image", "aGk=")
+        val r = KeyboardAi.outcomeRequest(ask)!!
+        assertEquals(1, r.getInt("v"))
+        assertEquals(2000, r.getString("final").length)
+        assertTrue(r.getBoolean("sent"))
+        assertFalse(r.has("image"))
+        assertEquals("", KeyboardAi.outcomeRequest(JSONObject(ask.toString()).put("action", "more"))!!.getString("final"))
+        assertNull(KeyboardAi.outcomeRequest(JSONObject(ask.toString()).put("inputType", 0x81)))
+        assertNull(KeyboardAi.outcomeRequest(JSONObject(ask.toString()).put("inputType", 0x12)))
+        assertNull(KeyboardAi.outcomeRequest(JSONObject(ask.toString()).put("imeOptions", 0x1000000)))
+        assertNull(KeyboardAi.outcomeRequest(JSONObject(ask.toString()).put("action", "deleted")))
+        assertNull(KeyboardAi.outcomeRequest(JSONObject(ask.toString()).put("rid", "")))
     }
 
     @Test fun guestAnswerParsing() {

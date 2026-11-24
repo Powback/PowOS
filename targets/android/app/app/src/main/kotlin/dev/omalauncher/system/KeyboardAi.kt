@@ -18,9 +18,15 @@ import org.json.JSONObject
  *  - capture {"imeTop": px, "screenH": px}         -> {"shot": id, "w", "h", "via"}; errors secure / needs-access /
  *                                                      failed. Taken only on this explicit call; the image is kept in
  *                                                      memory only ([Shots], never written to disk) for [SHOT_TTL_MS]
- *  - drafts  {"shot", "transcript", "text", "app", "hint", "inputType", "n", "avoid": [..]}
- *                                                   -> {"variations": [...], "model"}; errors expired / ai / model /
- *                                                      no-reply / timeout / cancelled / signin / relogin / install
+ *  - drafts  {"shot", "transcript", "text", "app", "hint", "inputType", "imeOptions", "n", "avoid": [..]}
+ *                                                   -> {"variations": [...], "model", "learn": bool, "rid"?}; errors
+ *                                                      expired / ai / model / no-reply / timeout / cancelled / signin /
+ *                                                      relogin / install. "rid" only while learning (below)
+ *  - outcome {"rid", "action": picked|more|dismissed, "picked", "final", "sent", "inputType", "imeOptions"}
+ *                                                   -> {} at once; PowOS records it in the background (`powos manager
+ *                                                      --kb-outcome`, lib/ai/manager/reply_learn.py: text only, the
+ *                                                      Keyboard AI app's database) - how the drafts learn the user's
+ *                                                      style. Never for password / incognito fields ([outcomeRequest])
  *  - cancel  {"shot"}                              -> {} the shot's running draft killed, the shot dropped
  *  - release {"shot"}                              -> {} the shot dropped (chips dismissed)
  *
@@ -119,6 +125,51 @@ object KeyboardAi {
         return (bitmapH.toLong() * imeTop / screenH).toInt().coerceIn(1, bitmapH)
     }
 
+    /** Every method the provider answers; each one goes through [gate] first. */
+    val METHODS = setOf("probe", "capture", "drafts", "outcome", "cancel", "release")
+
+    /** The refusal for [method] from [caller] (null: go ahead): the same [admit] for every method, new ones included. */
+    fun gate(
+        method: String,
+        caller: Caller,
+        myUid: Int,
+    ): JSONObject? {
+        val why = admit(caller, myUid) ?: return if (method in METHODS) null else error("bad-request", "no method $method")
+        return error("denied", why)
+    }
+
+    /**
+     * A password field (text, web, visible, numeric PIN) or an incognito one (IME_FLAG_NO_PERSONALIZED_LEARNING): the
+     * keyboard's ReplyDrafts.isPrivateField - nothing is learned from those.
+     */
+    fun privateField(
+        inputType: Int,
+        imeOptions: Int,
+    ): Boolean {
+        val cls = inputType and 0xF
+        val variation = inputType and 0xFF0
+        return (cls == 1 && variation in setOf(0x80, 0x90, 0xE0)) || (cls == 2 && variation == 0x10) || (imeOptions and 0x1000000) != 0
+    }
+
+    private val ACTIONS = setOf("picked", "more", "dismissed")
+
+    /** The keyboard's outcome report as `powos manager --kb-outcome` reads it; null: not one, or a private field. */
+    fun outcomeRequest(ask: JSONObject): JSONObject? {
+        val rid = ask.optString("rid")
+        val action = ask.optString("action")
+        if (rid.isEmpty() || rid.length > 100 || action !in ACTIONS) return null
+        if (privateField(ask.optInt("inputType"), ask.optInt("imeOptions"))) return null
+        return JSONObject()
+            .put("v", CONTRACT)
+            .put("rid", rid)
+            .put("action", action)
+            .put("picked", ask.optInt("picked", -1))
+            .put("final", if (action == "picked") ask.optString("final").take(2000) else "")
+            .put("sent", ask.optBoolean("sent"))
+            .put("inputType", ask.optInt("inputType"))
+            .put("imeOptions", ask.optInt("imeOptions"))
+    }
+
     /** The JSON request `powos manager --drafts` reads (reply_drafts.py's contract v1) from the keyboard's [ask]. */
     fun guestRequest(
         ask: JSONObject,
@@ -135,8 +186,10 @@ object KeyboardAi {
             .put("app", ask.optString("app").take(200))
             .put("hint", ask.optString("hint").take(200))
             .put("inputType", ask.optInt("inputType"))
+            .put("imeOptions", ask.optInt("imeOptions"))
             .put("n", ask.optInt("n", 3).coerceIn(1, 5))
             .put("avoid", avoid)
+            .put("session", ask.optString("shot").take(100))
     }
 
     /** The guest's answer (its last JSON line) as the keyboard's answer; anything else is a "model" error. */

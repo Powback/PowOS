@@ -87,7 +87,7 @@ def fake(body):
 
 
 def drafts(claude, req=REQ):
-    env = dict(os.environ, MANAGER_CLAUDE_CMD=claude, POWOS_DRAFTS_TIMEOUT="20")
+    env = dict(os.environ, MANAGER_CLAUDE_CMD=claude, POWOS_DRAFTS_TIMEOUT="20", POWOS_STDB="http://127.0.0.1:9")
     p = subprocess.run([sys.executable, "-I", HELPER], input=json.dumps(req) if not isinstance(req, str) else req,
                        capture_output=True, text=True, env=env, cwd=tmp)
     return p.returncode, json.loads(p.stdout.strip().splitlines()[-1])

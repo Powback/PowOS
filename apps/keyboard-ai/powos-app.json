@@ -1,0 +1,16 @@
+{
+  "id": "dev.powos.keyboard-ai",
+  "name": "Keyboard AI",
+  "version": "0.1.0",
+  "description": "What the keyboard learned: how you write replies, learned from the AI reply button's drafts you picked and what you actually sent (text only, never screenshots). Per-app and per-contact style, recent examples, how often a draft is picked and how much you edit it. Switch learning off per app or clear it.",
+  "icon": "icon.svg",
+  "ui": { "dir": "out/ui/" },
+  "page": { "entry": "pages/main.js" },
+  "module": { "path": "module/", "lang": "rust", "database": "powos-keyboard-ai", "stdb": "2.12" },
+  "sync": { "tables": ["reply", "profile", "app_pref", "day_stat"], "peers": "realm" },
+  "backend": null,
+  "widgets": [],
+  "surfaces": { "launcher": true, "desktop": true },
+  "permissions": [],
+  "budget": { "phone": { "memMB": 8, "idle": "unload" }, "desktop": { "memMB": 16 } }
+}

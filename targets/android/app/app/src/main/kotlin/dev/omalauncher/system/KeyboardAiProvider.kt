@@ -38,10 +38,9 @@ class KeyboardAiProvider : ContentProvider() {
     ): Bundle {
         val c = context ?: return answer(KeyboardAi.error("failed", "no context"))
         val uid = Binder.getCallingUid()
-        val why = KeyboardAi.admit(KeyboardAi.Caller(uid, packagesOf(c, uid), signersOf(c, uid), currentIme(c)), Process.myUid())
-        if (why != null) {
-            Log.w(TAG, "$method refused: $why")
-            return answer(KeyboardAi.error("denied", why))
+        KeyboardAi.gate(method, KeyboardAi.Caller(uid, packagesOf(c, uid), signersOf(c, uid), currentIme(c)), Process.myUid())?.let {
+            Log.w(TAG, "$method refused: ${it.optString("why")}")
+            return answer(it)
         }
         val ask = runCatching { JSONObject(arg ?: "{}") }.getOrNull() ?: return answer(KeyboardAi.error("bad-request", "arg isn't JSON"))
         return answer(
@@ -61,6 +60,7 @@ class KeyboardAiProvider : ContentProvider() {
             "probe" -> probe()
             "capture" -> capture(c, ask)
             "drafts" -> drafts(ask)
+            "outcome" -> outcome(ask)
             "cancel" -> cancel(ask.optString("shot"), drop = true)
             "release" -> KeyboardAi.ok().also { shots.drop(ask.optString("shot")) }
             else -> KeyboardAi.error("bad-request", "no method $method")
@@ -140,6 +140,25 @@ class KeyboardAiProvider : ContentProvider() {
         } finally {
             synchronized(running) { if (running[id] === p) running.remove(id) }
         }
+    }
+
+    /**
+     * The keyboard's report on an answer: recorded by PowOS Linux in the background (`powos manager --kb-outcome`), so
+     * the keyboard's call returns at once; one at a time (a profile regeneration can take a model turn).
+     */
+    private fun outcome(ask: JSONObject): JSONObject {
+        val request = KeyboardAi.outcomeRequest(ask) ?: return KeyboardAi.ok().put("recorded", false)
+        if (Guest.unavailable() != null) return KeyboardAi.ok().put("recorded", false)
+        outcomes.execute {
+            runCatching {
+                val p = Guest.process("exec powos manager --kb-outcome", mergeErrors = true).start()
+                p.outputStream.use { it.write(request.toString().toByteArray()) }
+                val out = Thread({ runCatching { p.inputStream.bufferedReader().forEachLine { Log.i(TAG, "outcome: $it") } } }, "kb-ai-outcome")
+                out.start()
+                if (!p.waitFor(OUTCOME_MS, TimeUnit.MILLISECONDS)) p.destroyForcibly()
+            }.onFailure { Log.w(TAG, "outcome failed", it) }
+        }
+        return KeyboardAi.ok().put("recorded", true)
     }
 
     private fun cancel(
@@ -250,8 +269,10 @@ class KeyboardAiProvider : ContentProvider() {
     private companion object {
         const val TAG = "PowosKeyboardAi"
         const val DRAFTS_MS = 75_000L
+        const val OUTCOME_MS = 180_000L
         const val MAX_SIDE = 1600
         val shots = KeyboardAi.Shots()
         val running = HashMap<String, java.lang.Process>()
+        val outcomes: java.util.concurrent.ExecutorService = java.util.concurrent.Executors.newSingleThreadExecutor()
     }
 }

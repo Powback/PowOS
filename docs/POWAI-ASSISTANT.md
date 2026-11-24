@@ -402,7 +402,7 @@ button lights and the bar says "Capturing screen" on the touch-down; "Listening"
 placeholder chips while drafting.
 
 - **Door:** `content://com.powos.app.keyboardai` (`system/KeyboardAiProvider.kt`, contract v1 in `KeyboardAi.kt`):
-  `probe`, `capture`, `drafts`, `cancel`, `release`. Exported, checked per call (`KeyboardAi.admit`): the
+  `probe`, `capture`, `drafts`, `outcome`, `cancel`, `release`. Exported, checked per call (`KeyboardAi.admit`): the
   package `com.swipekeyboard` signed with android-app-dev's key (SHA-256 pinned) **and** the current input method;
   PowOS itself; root/shell (they can screencap anyway; the device check calls it from adb).
 - **AI:** `powos manager --drafts` (`lib/ai/manager/reply_drafts.py`) in PowOS Linux: the chat's own sign-in (the
@@ -419,9 +419,41 @@ placeholder chips while drafting.
   PowOS's memory only (`KeyboardAi.Shots`) until the chips are dismissed or 3 min, goes to the guest on stdin, and
   claude keeps no session. Off for password and incognito fields (keyboard side); secure windows are refused
   (dumpsys on root, a blacked-out capture on any path) and the button then stays off for that field.
-- **Checks:** `test/tier1/test-reply-drafts.py` (contract + parsing), `KeyboardAiTest.kt` (permission check,
-  secure-window parse, crop, contract), the keyboard's `ReplyDraftsTest.java`, device
-  `tools/phone/verify/keyboard-ai-reply.sh` (provider end to end with a canned voice-note transcript).
+- **Learning the user's style (11-24):** the drafts get better with use - the same AI is fed what the user actually
+  sent, over and over. Text only, never screenshots.
+  - *Recorded* (`lib/ai/manager/reply_learn.py`): each answered request is an `offer` row - app package, the contact /
+    thread the model read off the screenshot (the answer's `"contact"`, not shown to the keyboard), field hint, the
+    variations, the press (the shot id = session). The answer carries a `rid`; the keyboard (`ReplyController`,
+    `ReplyOutcome`) reports its `outcome` through the provider's new `outcome` call (same caller check, `KeyboardAi.gate`):
+    `more`, `dismissed` (✕, or the field / keyboard gone with chips up), or `picked` + the index + the text actually
+    committed - the field when the app clears it after its send button, at the enter key's action, or when the field
+    is left - so edits show. The provider answers at once and runs `powos manager --kb-outcome` in the background.
+  - *Stored* in the Keyboard AI app's own database (`apps/keyboard-ai`, db `powos-keyboard-ai`; one DB per app):
+    `reply`, `profile`, `app_pref` (per-app off switch), `day_stat` (counts per day and app). Bounded: 2000 reply rows,
+    none older than 120 days; stats 400 days. Rows carry `origin` + `at` and the manifest lists them under `"sync"`,
+    so they follow the user's devices once per-table sync (docs/REMOTE-POWOS.md §2.5, milestone M7) runs - until then
+    each device learns on its own.
+  - *Used* in each request (`context` + `prompt_block`, before the screenshot's text): the 5 past committed replies
+    ranked by same app (+2), same contact (+2; the likely one = the app's last contact within 30 min), word overlap
+    with the voice note / field text (Jaccard, x1.5) and recency; the app's style profile and up to 3 contact
+    profiles. A few hundred words at most. Embeddings later, if a local embedder lands (rank() is the place).
+  - *Profiles*: a 5-line style summary per app and per contact, made by the same `claude -p` path (text only, its own
+    system prompt) from the newest 40 committed replies (with the draft each began as, when edited): the first after
+    3 picks, then after every 8 new ones (app) / 5 (contact), in the outcome's background process, one at a time.
+  - *Controls*: the Keyboard AI app's page "What the keyboard learned" (launcher): profiles and recent examples per
+    app, a per-app Learning / Off switch (off forgets that app; the module and reply_learn store nothing for it and
+    the prompt gets nothing; the answer then has no `rid`, so the keyboard reports nothing), clear per app, clear all.
+    Password / incognito fields: nothing recorded (keyboard, provider `outcomeRequest` and reply_learn all check).
+  - *Measured*: per press, picked or not (pick rate); per pick, the normalised edit distance (Levenshtein / longer
+    length, 0 = sent as drafted) from the picked draft to the committed text. The page shows both overall, per app
+    and per week (8 weeks) - improvement = pick rate up, edits down.
+  - The database missing or down never fails a draft: that request just doesn't learn.
+- **Checks:** `test/tier1/test-reply-drafts.py` (contract + parsing), `test/tier1/test-reply-learn.py` (ranking,
+  prompt block, offer/outcome recording, edit distance, privacy exclusions, off switch, profile regeneration
+  trigger, end to end over a stand-in SpacetimeDB), `KeyboardAiTest.kt` (permission check incl. `outcome`,
+  secure-window parse, crop, contract, outcome request), the keyboard's `ReplyDraftsTest.java` (incl. rid, outcome
+  arg, sent detection), device `tools/phone/verify/keyboard-ai-reply.sh` (provider end to end with a canned
+  voice-note transcript).
 
 ## 4. Risks and limits
 

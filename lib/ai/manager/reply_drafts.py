@@ -10,12 +10,15 @@ content block, no tools, no MCP, no session persisted (the screenshot never land
 
 stdin: one JSON request (contract v1, see [parse_request]):
   {"v": 1, "image": "<base64 jpeg>", "mime": "image/jpeg", "transcript": "...", "text": "...", "app": "com.whatsapp",
-   "hint": "Message", "inputType": 147457, "n": 3, "avoid": ["an earlier variation", ...]}
-stdout: one JSON line - {"ok": true, "variations": ["...", ...], "model": "..."} or {"ok": false, "error": "...",
-  "why": "..."}. Errors: "bad-request", "no-reply" (the model answered nothing usable), "model" (claude failed),
-  "timeout".
+   "hint": "Message", "inputType": 147457, "imeOptions": 0, "n": 3, "avoid": ["an earlier variation", ...],
+   "session": "<the press's screenshot id>"}
+stdout: one JSON line - {"ok": true, "variations": ["...", ...], "model": "...", "learn": bool, "rid": "..."} or
+  {"ok": false, "error": "...", "why": "..."}. Errors: "bad-request", "no-reply" (the model answered nothing usable),
+  "model" (claude failed), "timeout". "rid" (only when learn): the id the keyboard reports this answer's outcome with.
 
-Nothing is written to disk: the image goes from stdin to claude's stdin.
+Learning (reply_learn.py): the prompt carries the user's past committed replies most like this one and their style
+profiles; the answer is recorded as text (app, contact the model read off the screen, hint, variations) in the
+Keyboard AI app's database. The image is never written anywhere: it goes from stdin to claude's stdin.
 """
 from __future__ import annotations
 
@@ -24,6 +27,9 @@ import os
 import re
 import subprocess
 import sys
+
+sys.path.insert(0, os.path.dirname(os.path.realpath(__file__)))  # reply_learn beside it (also under python -I)
+import reply_learn  # noqa: E402
 
 CONTRACT = 1
 MODEL = os.environ.get("POWOS_DRAFTS_MODEL", "sonnet")
@@ -38,8 +44,10 @@ in (the keyboard itself is cropped away), the text field they are in and, when t
 instruction. Write what THEY would type into that field next: in their voice, in the conversation's language, the \
 length that fits the app (a chat message is short; an email can be a few sentences). Follow the voice instruction when \
 there is one; otherwise answer the latest message or fill the field sensibly. Each variation must differ in tone or \
-content. Never explain, never add quotes or labels, never write as an assistant. Answer ONLY with JSON: \
-{"variations": ["...", "..."]}"""
+content. When the prompt says how they write and shows replies they sent before, write like that (their length, tone, \
+language, punctuation, emoji) without copying them. Never explain, never add quotes or labels, never write as an \
+assistant. Answer ONLY with JSON: {"contact": "<the person or thread name shown on screen, or empty>", \
+"variations": ["...", "..."]}"""
 
 # EditorInfo.inputType's class and variation bits (android.text.InputType), named for the prompt.
 _CLASS = {1: "text", 2: "number", 3: "phone", 4: "datetime"}
@@ -89,18 +97,21 @@ def parse_request(raw: str) -> dict:
     try:
         n = max(1, min(MAX_VARIATIONS, int(req.get("n", 3))))
         input_type = int(req.get("inputType", 0))
+        ime_options = int(req.get("imeOptions", 0))
     except (TypeError, ValueError):
         raise BadRequest("n / inputType not numbers") from None
     avoid = [a.strip()[:MAX_LEN] for a in req.get("avoid") or [] if isinstance(a, str) and a.strip()][:10]
     return {
-        "image": image, "mime": mime, "n": n, "inputType": input_type, "avoid": avoid,
+        "image": image, "mime": mime, "n": n, "inputType": input_type, "imeOptions": ime_options, "avoid": avoid,
+        "session": text("session", 100),
         "transcript": text("transcript"), "text": text("text"), "app": text("app", 200), "hint": text("hint", 200),
     }
 
 
-def prompt_text(req: dict) -> str:
-    """The user turn's text that goes with the screenshot."""
-    lines = [f"App: {req['app'] or 'unknown'}", f"Field: {field_kind(req['inputType'])}"]
+def prompt_text(req: dict, learned: str = "") -> str:
+    """The user turn's text that goes with the screenshot; [learned]: reply_learn.prompt_block's part."""
+    lines = [learned, ""] if learned else []
+    lines += [f"App: {req['app'] or 'unknown'}", f"Field: {field_kind(req['inputType'])}"]
     if req["hint"]:
         lines.append(f"Field hint: {req['hint']}")
     lines.append(f"Already in the field: {json.dumps(req['text'])}" if req["text"] else "The field is empty.")
@@ -113,11 +124,11 @@ def prompt_text(req: dict) -> str:
     return "\n".join(lines)
 
 
-def user_message(req: dict) -> dict:
+def user_message(req: dict, learned: str = "") -> dict:
     """claude's stream-json input: one user message, the screenshot then the text."""
     return {"type": "user", "message": {"role": "user", "content": [
         {"type": "image", "source": {"type": "base64", "media_type": req["mime"], "data": req["image"]}},
-        {"type": "text", "text": prompt_text(req)},
+        {"type": "text", "text": prompt_text(req, learned)},
     ]}}
 
 
@@ -156,6 +167,19 @@ def parse_variations(text: str, n: int = MAX_VARIATIONS) -> list[str]:
     return out[:n]
 
 
+def parse_contact(text: str) -> str:
+    """The "contact" the model read off the screen, "" when it gave none."""
+    for m in re.finditer(r"\{", text or ""):
+        try:
+            obj, _ = json.JSONDecoder().raw_decode(text[m.start():])
+        except ValueError:
+            continue
+        if isinstance(obj, dict) and "variations" in obj:
+            c = obj.get("contact")
+            return " ".join(c.split())[:100] if isinstance(c, str) else ""
+    return ""
+
+
 def claude_cmd() -> list[str]:
     cmd = os.environ.get("MANAGER_CLAUDE_CMD", "claude").split()
     return cmd + ["-p", "--input-format", "stream-json", "--output-format", "stream-json", "--verbose",
@@ -163,9 +187,9 @@ def claude_cmd() -> list[str]:
                   "--system-prompt", SYSTEM]
 
 
-def run(req: dict) -> dict:
+def run(req: dict, learned: str = "") -> dict:
     try:
-        p = subprocess.run(claude_cmd(), input=json.dumps(user_message(req)) + "\n", capture_output=True, text=True,
+        p = subprocess.run(claude_cmd(), input=json.dumps(user_message(req, learned)) + "\n", capture_output=True, text=True,
                            encoding="utf-8", errors="replace", timeout=TIMEOUT_S)
     except subprocess.TimeoutExpired:
         return {"ok": False, "error": "timeout", "why": f"no answer in {TIMEOUT_S} s"}
@@ -187,7 +211,21 @@ def run(req: dict) -> dict:
     variations = parse_variations(result.get("result") or "", req["n"])
     if not variations:
         return {"ok": False, "error": "no-reply", "why": "the model's answer had no variations"}
-    return {"ok": True, "variations": variations, "model": model}
+    return {"ok": True, "variations": variations, "model": model, "contact": parse_contact(result.get("result") or "")}
+
+
+def drafts(req: dict, learn=reply_learn) -> dict:
+    """One answered request with learning: the learned context in the prompt, the answer recorded as an offer."""
+    ctx = learn.context(req)
+    out = run(req, learn.prompt_block(ctx) if ctx["learn"] else "")
+    contact = out.pop("contact", "") or ctx.get("contact", "")
+    if not out["ok"]:
+        return out
+    rid = learn.record_offer(req, out["variations"], contact) if ctx["learn"] else None
+    out["learn"] = bool(rid)
+    if rid:
+        out["rid"] = rid
+    return out
 
 
 def main() -> int:
@@ -196,7 +234,7 @@ def main() -> int:
     except BadRequest as e:
         print(json.dumps({"ok": False, "error": "bad-request", "why": str(e)}))
         return 2
-    out = run(req)
+    out = drafts(req)
     print(json.dumps(out, ensure_ascii=False))
     return 0 if out["ok"] else 1
 
