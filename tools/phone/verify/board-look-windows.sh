@@ -539,9 +539,41 @@ rddrag() {
   local pg; pg=$(wwpages "$key")
   [ -n "$pg" ] && [ "$pg" != none ] && pass "$1: $key opened as a web window (page $pg)" || fail "$1: dragging $key out opened no window"
 }
+# rdseed: the dock's recent section gets an app with no window of the case's own making (11-24: every recent app on the
+# user's phone had a window, so the dock-recent drag had nothing to drag - a FAIL that judged the phone, not the
+# product). A harmless app (Notes / Clock, as the split cases use) with no task, not pinned and not windowed is launched
+# the host's way (apps.launch records the launch and settles the strip; full screen, so home stops), Home pressed, its
+# task closed again (only that one: this case started it) and the strip re-read - a recent app with no window then.
+# Prints the app's key, or "none: <why>" when no such app can be made (the user's windows and tasks are never closed).
+rdseed() { local p k t before id
+  for p in $SPLIT_ALT; do
+    grep -q " $p/" <<<"$TASKS0" && continue
+    k=$(appkey "$p"); [ "$k" = none ] && continue; k=${k%%|*}
+    t=$(ev "Promise.all([importShim('./state.ts'),$WW]).then(([s,m])=>String(s.dock.value.includes('$k')||m.webWins.value.some(w=>w.key==='$k')))")
+    [ "$t" = false ] || continue
+    before=$(tasks)
+    ev "importShim('./bridge.ts').then(b=>b.powos.apps.launch('$k',{fullScreen:true})).then(()=>'ok')" >/dev/null; sleep 3
+    id=$(tasks | while read -r i q v; do grep -q "^$i " <<<"$before" || { grep -q "$p" <<<"$q" && echo "$i"; }; done | head -1)
+    sh_ "input keyevent 3" >/dev/null; sleep 2
+    [ -n "$id" ] && { sh_ "am stack remove $id" >/dev/null; log "rdseed: closed task $id ($p): this case started it" >&2; }
+    hemit apps.changed null; sleep 1
+    homefocused || { echo "none: home isn't back in front after launching $p and pressing Home"; return; }
+    echo "$k"; return
+  done
+  echo "none: Notes and Clock each have the user's task, a window or a dock pin - only closing the user's own would free one"; }
+RDNJ=""
 if [ "$CASE" = recent-drag ]; then
-  A1=$(wwopen "$CALC"); sleep 3; chk open
-  if [ "$A1" = none ]; then fail "setup: no web window for Calculator"
+  # Seeded before Calculator's window, so Home and the full-screen launch never touch the window the case shows.
+  if [ "$(rdfree ".home .dock-tray .dock-recent")" = none ]; then
+    SEED=$(rdseed); log "dock-recent: no app without a window there at the start - seeded: $SEED"
+    case $SEED in none*) RDNJ=${SEED#none: } ;; esac
+  fi
+  A1=none; [ -z "$RDNJ" ] && { A1=$(wwopen "$CALC"); sleep 3; chk open; }
+  if [ -n "$RDNJ" ]; then
+    # Not judged, no verdict: this SKIP is the log's first verdict line, the exit 2 follows the restore (below).
+    echo "SKIP: recent-drag not judged - no app without a window in the dock's recents: $RDNJ"
+    step setup "not judged: no app without a window in the dock's recents"; note "NOT JUDGED: $RDNJ"
+  elif [ "$A1" = none ]; then fail "setup: no web window for Calculator"
   else
     step setup "Calculator's window $A1 on the page shown: the dock is a taskbar"
     OPEN='importShim("./state.ts").then(s=>{s.drawer.value=1;return "ok"})'
@@ -590,3 +622,5 @@ if [ "$CASE" = calc-density ]; then
 fi
 
 e2e_finish
+# recent-drag's precondition couldn't be made without closing the user's own: not judged (rc 2), never a FAIL.
+[ -n "$RDNJ" ] && [ "$NFAIL" = 0 ] && { echo "NOT JUDGED (rc 2): recent-drag - $RDNJ"; exit 2; }
