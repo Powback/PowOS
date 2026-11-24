@@ -4,14 +4,18 @@
  * empty middle) and not two pages side by side (the user, 2026-10-22: tiles anywhere across it, one bottom bar).
  *
  * The host keeps one layout, the folded one (ShellHome.kt, GRID_COLUMNS: 6). The wide page has its own cells over it,
- * kept in the store ("home.wide": item key -> cell + the host page it was on), so folding never changes and moving a
- * tile wide never moves it folded. Wide page n covers the host's pages 2n-1 and 2n (pages [1, 3]: one wide page); an
- * item with no wide cell yet - the first time (the migration), or added folded - gets the place it had when the two
- * pages showed side by side: x + columns + 1 for the right one, or the first free spot when that is taken. The host's
- * layout is backed up once in the store ("home.wide.backup") before the first wide cells are written.
+ * kept in the store ("home.wide": item key -> cell + the host page it is on). Wide page n covers the host's pages 2n-1
+ * and 2n (pages [1, 3]: one wide page): its left half is the first, its right half the second. Both screens show ONE
+ * layout (the user, 11-24: a change unfolded wasn't reflected folded): an edit on either is laid out again on the other
+ * (hosts/reflow.ts, hosts/flowsync.ts) - same pages, same order, sizes in cells; a tile placed by hand on a screen keeps
+ * its spot there. An item with no wide cell yet (added folded, the first wide run) is laid out from its folded place
+ * (x + columns + 1 on the right half where that's free). The host's layout is backed up once in the store
+ * ("home.wide.backup") before the first wide cells are written.
  */
 import { signal } from "@preact/signals";
 import type { Bridge, Cell, Home, HomeItem } from "../types.ts";
+import { edited, forget, migrate, wideView, type Ctx, type WideCell } from "./flowsync.ts";
+import { halfOf, pairsOf } from "./reflow.ts";
 
 /** Wider than this (CSS px) is the wide page: the inner display, never the cover screen. */
 const WIDE = 700;
@@ -117,27 +121,8 @@ function turned(m: { w: number; h: number }) {
 
 const STORE = "home.wide";
 const BACKUP = "home.wide.backup";
-/** A tile's cell on the wide page and the host page it was on then (moved to another page folded: placed again). */
-type WideCell = Cell & { hp: number };
-
-/** Cells [c] covers, as "x,y". */
-const covers = (c: Cell) => {
-  const out: string[] = [];
-  for (let y = c.y; y < c.y + c.h; y++) for (let x = c.x; x < c.x + c.w; x++) out.push(`${x},${y}`);
-  return out;
-};
-
-/** The first free spot for [c]'s size on a page whose taken cells are [used], row by row; [c] itself when it's free. */
-function freeSpot(c: Cell, used: Set<string>, columns: number): Cell {
-  if (!covers(c).some((k) => used.has(k))) return c;
-  const w = Math.min(c.w, columns);
-  for (let y = 0; y < 256; y++)
-    for (let x = 0; x + w <= columns; x++) {
-      const at = { x, y, w, h: c.h };
-      if (!covers(at).some((k) => used.has(k))) return at;
-    }
-  return c;
-}
+/** Home's own page writes the shared layout (the launcher overlay, ?mode=pull, only reads it). */
+const writes = !pageMode;
 
 /** Asked often and changing nothing: not logged (a keyboard's resize stream, every home.get, a resize's settle). */
 const QUIET = ["resize", "read", "visualViewport", "settled"];
@@ -178,54 +163,32 @@ export function wide(n: Bridge): Bridge {
   }
   const load = (h: Home) => (loading ??= read(h));
 
-  /** Where [it] shows when it has no wide cell: its half of the wide page, as the side-by-side pages had it. */
-  function sideBySide(it: HomeItem, half: number): Cell | null {
-    return it.cell && { ...it.cell, x: it.cell.x + half * (cols + 1) };
-  }
+  /** The edits' link to the other screen (hosts/flowsync.ts). */
+  const ctx: Ctx = { n, cells: async () => cells ?? (await load(await n.home.get())), saveCells: () => void save() };
+  /** An edit on the screen on now ([key] null: a removal, a folder): laid out again on the other screen. */
+  const edit = (key: string | null) => (writes ? edited(ctx, wideNow() ? "wide" : "folded", key) : Promise.resolve());
 
-  /** The items on the wide pages: kept cells first, then the others where the side-by-side pages had them. */
-  function layOut(h: Home, where: Map<number, [number, number]>, kept: Record<string, WideCell>) {
-    const columns = cols * 2 + 1;
-    const used = new Map<number, Set<string>>();
-    const take = (page: number, c: Cell) => {
-      if (!used.has(page)) used.set(page, new Set());
-      covers(c).forEach((k) => used.get(page)!.add(k));
-    };
-    const own = (it: HomeItem) => kept[it.key]?.hp === it.page;
-    let changed = false;
-    const out = new Map<string, HomeItem>();
-    for (const it of h.items.filter(own)) {
-      const { hp: _, ...cell } = kept[it.key];
-      const page = where.get(it.page)?.[0] ?? 1;
-      take(page, cell);
-      out.set(it.key, { ...it, page, cell });
+  /** The items on the wide pages: kept cells, the others laid out from their folded place (flowsync.ts wideView). */
+  async function layOut(h: Home, kept: Record<string, WideCell>) {
+    const { pairs: wp, items: placed, missing } = await wideView(n, h, kept);
+    const at = new Map(placed.map((p) => [p.key, p]));
+    for (const key of missing) {
+      const p = at.get(key);
+      const hp = h.items.find((i) => i.key === key)!.page;
+      if (p) kept[key] = { ...p.cell, hp };
     }
-    for (const it of h.items.filter((i) => !own(i))) {
-      const [page, half] = where.get(it.page) ?? [1, 0];
-      const side = sideBySide(it, half);
-      const cell = side && freeSpot(side, used.get(page) ?? new Set(), columns);
-      if (cell) {
-        take(page, cell);
-        kept[it.key] = { ...cell, hp: it.page };
-        changed = true;
-      }
-      out.set(it.key, { ...it, page, cell });
-    }
-    return { items: h.items.map((i) => out.get(i.key)!), changed };
+    const pageOf = (it: HomeItem) => at.get(it.key)?.page ?? (wp.findIndex((p) => p.includes(it.page)) + 1 || 1);
+    return { items: h.items.map((it) => ({ ...it, page: pageOf(it), cell: at.get(it.key)?.cell ?? null })), changed: missing.length > 0 };
   }
 
   async function toWide(h: Home): Promise<Home> {
     cols = h.columns;
+    if (writes) await migrate(ctx, h);
     if (!wideNow()) return h;
-    const pages = [...h.pages].sort((a, b) => a - b);
-    pairs = [];
-    for (let i = 0; i < pages.length; i += 2) pairs.push(pages.slice(i, i + 2));
-    if (!pairs.length) pairs = [[1]];
-    const where = new Map<number, [number, number]>();
-    pairs.forEach((p, i) => p.forEach((page, half) => where.set(page, [i + 1, half])));
+    pairs = pairsOf(h.pages);
     hostPage = new Map(h.items.map((it) => [it.key, it.page]));
     const kept = await load(h);
-    const { items, changed } = layOut(h, where, kept);
+    const { items, changed } = await layOut(h, kept);
     // Items gone from home keep their wide cell: one that comes back (re-added, a host list read mid-change) takes its
     // own place again instead of the first free cell - dropping it moved WireGuard to the middle column and Steam onto
     // its spot (2026-10-23). An absent item's cell holds nothing: layOut only places the host's items.
@@ -237,10 +200,9 @@ export function wide(n: Bridge): Bridge {
   function toHost(page: number, cell: Cell | null): [number, Cell | null] {
     if (!wideNow()) return [page, cell];
     const pair = pairs[page - 1] ?? [];
-    const half = cell && cell.x + cell.w / 2 > cols + 0.5 ? 1 : 0;
-    let host = pair[half] ?? pair[0];
-    // No page there yet: a new one after all of them.
-    if (host == null) host = Math.max(0, ...pairs.flat()) + 1;
+    const half = cell ? halfOf(cell, cols) : 0;
+    // No page there yet (a new wide page, or the right half of a wide page that shows only one): a new one after all.
+    const host = pair[half] ?? Math.max(0, ...pairs.flat()) + 1;
     if (!cell) return [host, null];
     const w = Math.min(cell.w, cols);
     return [host, { ...cell, w, x: Math.max(0, Math.min(cols - w, cell.x - half * (cols + 1))) }];
@@ -254,27 +216,29 @@ export function wide(n: Bridge): Bridge {
   }
 
   /**
-   * Moved or resized on the wide page: only its wide cell changes - folded it stays where it was. Onto another wide
-   * page, the host moves it to that page's half too (the folded screen must find it on a page that page covers).
+   * Moved or resized on the wide page: its wide cell is where it was put, on the host page of the half it is over (the
+   * host moves it there at once when that's another page); then the folded layout follows (flowsync.ts). Folded: the
+   * host's place, then the wide layout follows.
    */
   async function place(key: string, cell: Cell, page: number) {
-    if (!wideNow()) return n.home.place(key, cell, page);
-    const hp = hostPage.get(key);
-    if (hp != null && pairs[page - 1]?.includes(hp)) {
-      keep(key, cell, hp);
-      return emit("home.changed", null);
+    if (!wideNow()) {
+      await n.home.place(key, cell, page);
+      return void edit(key);
     }
     const [p, c] = toHost(page, cell);
     keep(key, cell, p);
-    return n.home.place(key, c!, p);
+    if (hostPage.get(key) !== p) await n.home.place(key, c!, p);
+    else emit("home.changed", null);
+    void edit(key);
   }
 
-  /** Added on the wide page (an app dropped there, a panel): the host's page and cell for it, then its wide cell. */
+  /** Added (an app dropped there, a panel): wide, its wide cell where it was dropped; then the other screen follows. */
   async function added(key: string, page: number, cell: Cell | null | undefined) {
     if (wideNow() && cell) {
       keep(key, cell, toHost(page, cell)[0]);
       emit("home.changed", null);
     }
+    void edit(cell ? key : null);
     return key;
   }
 
@@ -377,7 +341,14 @@ export function wide(n: Bridge): Bridge {
           keep(made, at, at.hp);
           emit("home.changed", null);
         }
+        forget(key);
+        void edit(null);
         return made;
+      },
+      remove: async (key) => {
+        await n.home.remove(key);
+        forget(key);
+        void edit(null);
       },
       addPanel: async (name, page, cell) => {
         const [p, c] = toHost(page, cell);
