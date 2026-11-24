@@ -67,14 +67,33 @@ p=$(q "$BARE"); [ -n "$p" ] || { fail "no bare spot to long-press"; exit 1; }
 sh_ "input swipe $p $p 900"; sleep 1.5; chk edit
 [ "$(q '!!document.querySelector(".home.editing")')" = true ] || { fail "a long press at $p isn't edit mode"; exit 1; }
 a=$(px ".home-tile[data-key=\"$KA\"]" 0.5 0.3); b=$(px ".home-tile[data-key=\"$KB\"]")
-TOUCHED=1
-sh_ "input motionevent DOWN ${a% *} ${a#* }"; sleep 0.8
-for k in 1 2 3 4 5 6 7 8; do
-  sh_ "input motionevent MOVE $(( ${a% *} + (${b% *} - ${a% *}) * k / 8 )) $(( ${a#* } + (${b#* } - ${a#* }) * k / 8 ))"
+[ -n "$a" ] && [ -n "$b" ] || { fail "A or B has no box on screen (a='$a' b='$b')"; exit 1; }
+# The drag in three parts, each probed: the hold (grid.tsx LONG_PRESS_MS 420 - held 1 s), the path (all moves in ONE
+# on-device shell, 40 ms apart, so adb's per-call latency can't stretch or bunch them), the release. Before 11-24 every
+# event was its own `adb shell su -c input ...` (~0.3-1 s each under load) and nothing was probed: the FAIL said only
+# "stacks on home: 0".
+path=""; for k in 1 2 3 4 5 6 7 8 9 10 11 12; do
+  path="$path $(( ${a% *} + (${b% *} - ${a% *}) * k / 12 )),$(( ${a#* } + (${b#* } - ${a#* }) * k / 12 ))"
 done
-sleep 0.4; sh_ "input motionevent UP ${b% *} ${b#* }"; sleep 1.5; chk drop
-r=$(q '(()=>{const s=document.querySelectorAll(".home-tile.stacked");if(s.length!==1)return "stacks on home: "+s.length;return "ok dots "+s[0].querySelectorAll(".stack-dots i").length})()')
-echo "stack: $r" | tee -a "$OUT/log.txt"; [ "$r" = "ok dots 2" ] || { fail "A onto B: $r"; exit 1; }
+echo "drag: A $a -> B $b via$path" | tee -a "$OUT/log.txt"
+LIFT='(()=>{const t=document.querySelector(".home-tile.lifted"),c=document.querySelector(".carried");return "lifted="+(t?t.dataset.key:"none")+" carried="+!!c+" editing="+!!document.querySelector(".home.editing")})()'
+HOVER="(()=>{const d=devicePixelRatio,x=${b% *}/d,y=${b#* }/d;const under=[...document.querySelectorAll('.home-tile')].find(t=>{const r=t.getBoundingClientRect();return !t.classList.contains('lifted')&&x>=r.left&&x<r.right&&y>=r.top&&y<r.bottom});const s=document.querySelector('.drop-spot');return 'under='+(under?under.dataset.key:'none')+' spot='+(s?s.className.replace('drop-spot','').trim()||'cell':'none')+' carried='+!!document.querySelector('.carried')})()"
+TOUCHED=1
+sh_ "input motionevent DOWN ${a% *} ${a#* }"; sleep 1.0
+r=$(q "$LIFT"); echo "hold: $r" | tee -a "$OUT/log.txt"
+case "$r" in "lifted=$KA"*) ;; *) fail "the 1 s hold on A didn't lift it ($r)" ;; esac
+sh_ "for p in$path; do input motionevent MOVE \${p%,*} \${p#*,}; sleep 0.04; done"; sleep 0.6
+r=$(q "$HOVER"); echo "hover: $r" | tee -a "$OUT/log.txt"
+case "$r" in *spot=stack-aim*) ;; *) fail "held over B, no stack aim ($r)"; "$T/shot.sh" "$OUT/hover-fail.png" 2>&1 | tail -1 ;; esac
+sh_ "input motionevent UP ${b% *} ${b#* }"; chk drop
+# The stack shows optimistically at the release; give the store write and home.changed up to 3 s.
+for i in 1 2 3 4 5 6; do
+  r=$(q '(()=>{const s=document.querySelectorAll(".home-tile.stacked");if(s.length!==1)return "stacks on home: "+s.length;return "ok dots "+s[0].querySelectorAll(".stack-dots i").length})()')
+  [ "$r" = "ok dots 2" ] && break; sleep 0.5
+done
+store=$(q "(async()=>{$HC return JSON.stringify(await hc('store.get',['home.stacks']))})()")
+echo "stack: $r; store home.stacks: $store; $(q "$LIFT")" | tee -a "$OUT/log.txt"
+[ "$r" = "ok dots 2" ] || { fail "A onto B: $r"; "$T/shot.sh" "$OUT/drop-fail.png" 2>&1 | tail -1; exit 1; }
 "$T/shot.sh" "$OUT/stacked-edit.png" 2>&1 | tail -1
 
 step "out of edit mode: a swipe on the stack shows the other widget, home's page stays"
