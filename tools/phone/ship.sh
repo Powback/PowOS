@@ -359,7 +359,15 @@ run)
   rooted_go() { rooted_due && ! rooted_after_apk && ! pkgs_pending; }
   # bg_go: work the runner stays up for without a request - a rooted deploy due, or a packages build due / out.
   # A post-deploy gate deferred for no verdict (post_gate_retry) keeps the runner up too, until it gates again.
-  bg_go() { rooted_go || pkgs_out || pkgs_due || [ -s "$Q/gate-deferred/postgate" ]; }
+  # apps_due: apps/<app>/ modules (apps_changed) changed since the last apps ship ($Q/apps-live, else the installed APK's
+  # commit - the same base step 3 uses) up to HEAD, and the apps step didn't fail on HEAD. Like rooted_go it keeps the
+  # runner up without a request (11-24: keyboard-ai 7d8fbc3d, a new bundled app, needed a hand-run apps/install.sh on
+  # the rooted OnePlus - the apps step only ran while a request was open, and an offline phone marked it failed).
+  apps_due() { local h b; h=$(git rev-parse HEAD 2>/dev/null) || return 1
+    [ "$(cat "$Q/failed-apps" 2>/dev/null)" != "$h" ] || return 1
+    b=$(cat "$Q/apps-live" 2>/dev/null || true); [ -n "$b" ] || b=$(cat "$HOME/.cache/powos-installed-commit" 2>/dev/null || true)
+    [ -n "$b" ] && git cat-file -e "$b^{commit}" 2>/dev/null && [ -n "$(apps_changed "$b" "$h")" ]; }
+  bg_go() { rooted_go || apps_due || pkgs_out || pkgs_due || [ -s "$Q/gate-deferred/postgate" ]; }
   # THE PACKAGES (11-10): kwin 3.76's PKGBUILD (patches 0067/0068) landed and shipped as "code", but no step ever built
   # or published a package - only an agent's hand-run build-pkgs.sh did, so the phone stayed on 3.74 and the game-audio
   # check failed on the missing KWin half. pkg_names A B: targets/android/pkgs/<name>/ dirs with a PKGBUILD at B whose
@@ -1120,7 +1128,9 @@ run)
           echo "$(date +%T) ${T:0:9}: apps held - the shell's bindings for$vwait aren't live yet (the module goes first, with the shell's ship)"; }
       elif [ -n "$achg" ] && ! apk_out && [ "$age" -ge "$QS" ] && [ "$(cat "$Q/failed-apps" 2>/dev/null)" != "$T" ] && gate_ready apps; then
         rm -f "$Q/apps-held"
-        if verify_held; then echo $$ > "$Q/wants-phone"
+        # Offline (11-24 19:17: keyboard-ai's install hit "adb.sh: phone offline" and was marked FAILED for good): wait.
+        if phone_offline; then offline_wait apps
+        elif verify_held; then echo $$ > "$Q/wants-phone"
         elif ship_lock; then
           echo $$ > "$Q/installing"
           an=$(joined ${snotes[@]+"${snotes[@]}"} ${anotes[@]+"${anotes[@]}"}); an=${an:-"app update"}
@@ -1139,6 +1149,9 @@ run)
             arc=10; echo "apps: the phone's modules and the shell's bindings don't match after the publish (above)" >> "$alog"; fi
           rm -rf "$SL"; rm -f "$Q/installing"; [ "$(cat "$Q/wants-phone" 2>/dev/null)" = $$ ] && rm -f "$Q/wants-phone"
           if [ $arc = $GATE_NV ]; then gate_deferred apps "$T"   # no gate verdict: not failed, gated again (gate_ready)
+          elif [ $arc != 0 ] && { link_down "$alog" || phone_offline || { [ $arc = 69 ] && date +%s > "$Q/phone-offline"; }; }; then
+            # The phone dropped off mid-publish: nothing failed, the same tip goes again once it's back (as the rooted step).
+            offline_wait apps
           elif [ $arc = 0 ]; then
             echo "$T" > "$Q/apps-live"; rm -f "$Q/failed-apps"; gate_clear apps
             echo "$(date '+%F %T') ${T:0:9} apps ($achg) for $who_s: $an" >> "$Q/shipped.log"

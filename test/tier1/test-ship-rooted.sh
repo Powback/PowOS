@@ -11,8 +11,11 @@
 # the committed file it just deployed is marked ROOTED_BROKEN - a file check, not an env var: the ship runner is
 # one long-lived background process for the whole test, so it never re-reads a shell var the test script exports
 # after the fact; it DOES freshly read whatever origin's tip has) in a temp HOME/origin, as
-# tools/phone/ship-queue-test.sh does for the shell/APK/apps kinds. Every commit here avoids shell/ and apps/ so
-# only the new rooted step is exercised. Nothing reaches the real phone, docker, launchd or ~/.cache.
+# tools/phone/ship-queue-test.sh does for the shell/APK/apps kinds. Commits avoid shell/; sections 1-5 also avoid apps/.
+# Sections 6-7 (11-24) cover the rooted phone's other half: a new/changed bundled app module (apps/keyboard-ai) is
+# installed by the apps step in the same ship - waiting, never failing, while the phone is offline, and with no request
+# left open - and a lib/ai/manager change starts the rooted deploy through the REAL derivation
+# (tools/phone/rooted-inputs.py on this checkout). Nothing reaches the real phone, docker, launchd or ~/.cache.
 set -uo pipefail
 src=$(cd "$(dirname "$0")/../.." && pwd)
 T=$(mktemp -d "${TMPDIR:-/tmp}/ship-rooted-test.XXXXXX")
@@ -21,7 +24,9 @@ export SHIP_QUIET_S=3 SHIP_QUIET_SHELL_S=1 SHIP_POLL_S=1
 export SHIP_GATE_FIRST=1   # these tests cover the gate-then-push mode; deploy-first is the default
 # The rooted deploy's inputs (ship.sh rooted_inputs): derived from the real rooted.sh/powos-deploy.sh, which this
 # harness replaces with a stub - so name them (test/tier1/test-rooted-inputs.py covers the derivation itself).
-export SHIP_ROOTED_INPUTS="targets/android/rooted targets/android/pkgs"
+# The real derivation's pathspecs are added, so a lib/ai/manager change (section 7) is judged as on the ship runner.
+derived=$(python3 "$src/tools/phone/rooted-inputs.py" | paste -sd' ' -) || { echo "FAIL rooted-inputs.py"; exit 1; }
+export SHIP_ROOTED_INPUTS="targets/android/rooted targets/android/pkgs $derived"
 # The phone's VPN link (ship.sh phone_offline): $HOME/phone-offline = adb.sh --vpn-state's rc 69 (handshake stale).
 export SHIP_PHONE_STATE=$T/bin/phone-state SHIP_OFFLINE_POLL_S=1
 unset POWOS_SHIP_SERVICE SHIP_AGENT
@@ -57,7 +62,11 @@ ROOTED
   # units_gate's checks (6cdd4f82: the real ones read this repo's units/) run before every rooted deploy: they pass
   # here, as in tools/phone/ship-queue-test.sh - the rooted deploy itself is what's tested.
   mkdir -p test/tier1; for t in test-units-registry.py test-powos-dispatch.py; do echo 'print("ok")' > "test/tier1/$t"; done
-  chmod +x shell/dev/gate.sh tools/phone/*.sh targets/android/rooted/rooted.sh
+  # The apps step's stubs: build/install log; $HOME/install-offline = apps/install.sh hits adb.sh's rc 69.
+  mkdir -p apps
+  printf '#!/bin/bash\necho "APPBUILD $*" >> "$LOG"\n' > apps/build.sh
+  printf '#!/bin/bash\n[ -e "$HOME/install-offline" ] && { echo "APPINSTALL-OFFLINE $1" >> "$LOG"; echo "adb.sh: phone offline: its WireGuard handshake is 999s old (> 180s) - not running adb" >&2; exit 69; }\necho "APPINSTALL $*" >> "$LOG"\n' > apps/install.sh
+  chmod +x shell/dev/gate.sh tools/phone/*.sh targets/android/rooted/rooted.sh apps/*.sh
   echo "x" > NOTES.txt
   echo "guard" > targets/android/rooted/powos-run.sh
   printf '.claude/\n' > .gitignore   # the ship service's own checkout (.claude/worktrees/ship-runner) lives inside $T/B
@@ -130,6 +139,32 @@ wait_for "grep -q '^ROOTED $to' \"\$LOG\"" 20; sleep 2
   ok "rc 69 mid-deploy: not failed, not mailed" || { bad "rc 69 marked failed"; cat "$LOG"; tail -6 "$Q/runner.log"; }
 rm -f "$HOME/deploy-offline"
 wait_for "[ \"\$(cat \"\$Q/rooted-live\" 2>/dev/null)\" = \"$to\" ]" 30 && ok "phone back: the same tip deploys" || { bad "rooted not retried"; cat "$LOG"; tail -8 "$Q/runner.log"; }
+
+# 6. 11-24: a NEW bundled app module (apps/keyboard-ai, 7d8fbc3d) on the rooted phone. The phone is offline when it
+#    lands: the apps step waits (not failed, not mailed); the phone comes back but drops off mid-install (rc 69): still
+#    not failed; then it installs - the same tip, no new commit, and with the request long closed (apps_due).
+: > "$LOG"; touch "$HOME/phone-offline"
+git pull -q --rebase 2>/dev/null; mkdir -p apps/keyboard-ai; echo '{"id":"dev.powos.keyboard-ai"}' > apps/keyboard-ai/powos-app.json
+echo 'v1' > apps/keyboard-ai/page.tsx; git add -A; git commit -qm "keyboard-ai"; git push -q origin HEAD:main 2>/dev/null
+req --note "keyboard ai"; ta=$(tip)
+wait_for "grep -q '${ta:0:9}: apps waits for the phone' \"\$Q/runner.log\"" 20
+grep -q "${ta:0:9}: apps waits for the phone" "$Q/runner.log" && ! grep -q '^APPINSTALL' "$LOG" && ok "offline: the app install waits" || { bad "apps offline wait"; cat "$LOG"; tail -6 "$Q/runner.log"; }
+touch "$HOME/install-offline"; rm -f "$HOME/phone-offline"
+wait_for "grep -q '^APPINSTALL-OFFLINE keyboard-ai' \"\$LOG\"" 20; sleep 2
+[ "$(cat "$Q/failed-apps" 2>/dev/null)" != "$ta" ] && ! grep -q '^MAIL' "$LOG" && ! grep -q "${ta:0:9}: apps ship FAILED" "$Q/runner.log" &&
+  ok "rc 69 mid-install: not failed, not mailed" || { bad "apps rc 69 marked failed"; cat "$LOG"; tail -6 "$Q/runner.log"; }
+rm -f "$HOME/install-offline"
+wait_for "[ \"\$(cat \"\$Q/apps-live\" 2>/dev/null)\" = \"$ta\" ]" 40 && grep -q '^APPINSTALL keyboard-ai install --note' "$LOG" &&
+  ok "phone back: keyboard-ai installed on the rooted phone, same tip" || { bad "keyboard-ai not installed"; cat "$LOG"; tail -8 "$Q/runner.log"; }
+grep -q '^ROOTED' "$LOG" && bad "an apps/ change started a rooted deploy" || ok "an apps/ change starts no rooted deploy"
+
+# 7. A changed app module ships again, and a lib/ai/manager change (derived from rooted.sh/powos-deploy.sh) deploys.
+: > "$LOG"
+land apps/keyboard-ai/page.tsx "v2" "keyboard-ai v2"; mkdir -p lib/ai/manager; land lib/ai/manager/manager.py "print(2)" "manager change"
+req --note "manager + app"; tm=$(tip)
+wait_for "grep -q '^ROOTED $tm' \"\$LOG\"" 40 && ok "lib/ai/manager change: rooted deploy" || { bad "lib/ai/manager not deployed"; cat "$LOG"; tail -8 "$Q/runner.log"; }
+wait_for "[ \"\$(cat \"\$Q/apps-live\" 2>/dev/null)\" = \"$tm\" ]" 30 && [ "$(grep -c '^APPINSTALL keyboard-ai' "$LOG")" = 1 ] &&
+  ok "changed module installed once" || { bad "changed module"; cat "$LOG"; tail -8 "$Q/runner.log"; }
 
 for _ in $(seq 15); do [ -n "$(cat "$Q/runner.lock/pid" 2>/dev/null)" ] || break; sleep 1; done
 echo "---"
