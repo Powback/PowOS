@@ -17,29 +17,36 @@ class KeyboardAiTest {
     private val signer = setOf(KeyboardAi.KEYBOARD_SIGNER)
     private val ime = DefaultKeyboard.IME
 
+    private fun admit(
+        uid: Int,
+        packages: List<String>,
+        signers: Set<String>,
+        currentIme: String?,
+    ) = KeyboardAi.admit(KeyboardAi.Caller(uid, packages, signers, currentIme), me)
+
     @Test fun keyboardSignedAndActiveMayCall() {
-        assertNull(KeyboardAi.admit(kb, me, pkg, signer, ime))
+        assertNull(admit(kb, pkg, signer, ime))
     }
 
     @Test fun powosRootAndShellMayCall() {
-        assertNull(KeyboardAi.admit(me, me, emptyList(), emptySet(), null))
-        assertNull(KeyboardAi.admit(KeyboardAi.ROOT_UID, me, emptyList(), emptySet(), null))
-        assertNull(KeyboardAi.admit(KeyboardAi.SHELL_UID, me, emptyList(), emptySet(), null))
+        assertNull(admit(me, emptyList(), emptySet(), null))
+        assertNull(admit(KeyboardAi.ROOT_UID, emptyList(), emptySet(), null))
+        assertNull(admit(KeyboardAi.SHELL_UID, emptyList(), emptySet(), null))
     }
 
     @Test fun otherAppsAreRefused() {
-        assertNotNull(KeyboardAi.admit(kb, me, listOf("com.evil"), signer, ime))
-        assertNotNull(KeyboardAi.admit(kb, me, emptyList(), emptySet(), ime))
+        assertNotNull(admit(kb, listOf("com.evil"), signer, ime))
+        assertNotNull(admit(kb, emptyList(), emptySet(), ime))
     }
 
     @Test fun keyboardPackageWithAnotherSignerIsRefused() {
-        val why = KeyboardAi.admit(kb, me, pkg, setOf("00".repeat(32)), ime)
+        val why = admit(kb, pkg, setOf("00".repeat(32)), ime)
         assertTrue(why!!.contains("signed"))
     }
 
     @Test fun keyboardNotTheInputMethodIsRefused() {
-        assertTrue(KeyboardAi.admit(kb, me, pkg, signer, "com.google.android.inputmethod.latin/.LatinIME")!!.contains("input method"))
-        assertNotNull(KeyboardAi.admit(kb, me, pkg, signer, null))
+        assertTrue(admit(kb, pkg, signer, "com.google.android.inputmethod.latin/.LatinIME")!!.contains("input method"))
+        assertNotNull(admit(kb, pkg, signer, null))
     }
 
     private val dump =

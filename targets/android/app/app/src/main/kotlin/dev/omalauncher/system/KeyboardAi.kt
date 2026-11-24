@@ -48,21 +48,26 @@ object KeyboardAi {
     const val SHELL_UID = 2000
 
     /**
-     * Why the caller may not use the button (null: it may). [currentIme] is Settings.Secure.DEFAULT_INPUT_METHOD
-     * ("pkg/.Service"); [signers] the caller's certificates as lowercase SHA-256 hex.
+     * Who is calling: its uid, the packages of that uid, their certificates as lowercase SHA-256 hex, and the current
+     * input method (Settings.Secure.DEFAULT_INPUT_METHOD, "pkg/.Service").
      */
+    data class Caller(
+        val uid: Int,
+        val packages: List<String>,
+        val signers: Set<String>,
+        val currentIme: String?,
+    )
+
+    /** Why [caller] may not use the button (null: it may); [myUid] is PowOS's own. */
     fun admit(
-        uid: Int,
+        caller: Caller,
         myUid: Int,
-        packages: List<String>,
-        signers: Set<String>,
-        currentIme: String?,
     ): String? =
         when {
-            uid == myUid || uid == ROOT_UID || uid == SHELL_UID -> null
-            DefaultKeyboard.PACKAGE !in packages -> "only PowOS's keyboard may ask (uid $uid: ${packages.joinToString()})"
-            KEYBOARD_SIGNER !in signers -> "the keyboard isn't signed with PowOS's keyboard key"
-            currentIme?.substringBefore('/') != DefaultKeyboard.PACKAGE -> "the keyboard isn't the current input method"
+            caller.uid == myUid || caller.uid == ROOT_UID || caller.uid == SHELL_UID -> null
+            DefaultKeyboard.PACKAGE !in caller.packages -> "only PowOS's keyboard may ask (uid ${caller.uid}: ${caller.packages.joinToString()})"
+            KEYBOARD_SIGNER !in caller.signers -> "the keyboard isn't signed with PowOS's keyboard key"
+            caller.currentIme?.substringBefore('/') != DefaultKeyboard.PACKAGE -> "the keyboard isn't the current input method"
             else -> null
         }
 

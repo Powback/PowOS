@@ -38,33 +38,38 @@ class KeyboardAiProvider : ContentProvider() {
     ): Bundle {
         val c = context ?: return answer(KeyboardAi.error("failed", "no context"))
         val uid = Binder.getCallingUid()
-        val why = KeyboardAi.admit(uid, Process.myUid(), packagesOf(c, uid), signersOf(c, uid), currentIme(c))
+        val why = KeyboardAi.admit(KeyboardAi.Caller(uid, packagesOf(c, uid), signersOf(c, uid), currentIme(c)), Process.myUid())
         if (why != null) {
             Log.w(TAG, "$method refused: $why")
             return answer(KeyboardAi.error("denied", why))
         }
-        val ask = runCatching { JSONObject(arg ?: "{}") }.getOrElse { return answer(KeyboardAi.error("bad-request", "arg isn't JSON")) }
-        val out =
-            runCatching {
-                when (method) {
-                    "probe" -> probe(c)
-                    "capture" -> capture(c, ask)
-                    "drafts" -> drafts(ask)
-                    "cancel" -> cancel(ask.optString("shot"), drop = true)
-                    "release" -> KeyboardAi.ok().also { shots.drop(ask.optString("shot")) }
-                    else -> KeyboardAi.error("bad-request", "no method $method")
-                }
-            }.getOrElse {
+        val ask = runCatching { JSONObject(arg ?: "{}") }.getOrNull() ?: return answer(KeyboardAi.error("bad-request", "arg isn't JSON"))
+        return answer(
+            runCatching { dispatch(c, method, ask) }.getOrElse {
                 Log.w(TAG, "$method failed", it)
                 KeyboardAi.error("failed", it.toString())
-            }
-        return answer(out)
+            },
+        )
     }
+
+    private fun dispatch(
+        c: Context,
+        method: String,
+        ask: JSONObject,
+    ): JSONObject =
+        when (method) {
+            "probe" -> probe()
+            "capture" -> capture(c, ask)
+            "drafts" -> drafts(ask)
+            "cancel" -> cancel(ask.optString("shot"), drop = true)
+            "release" -> KeyboardAi.ok().also { shots.drop(ask.optString("shot")) }
+            else -> KeyboardAi.error("bad-request", "no method $method")
+        }
 
     private fun answer(o: JSONObject) = Bundle().apply { putString("json", o.toString()) }
 
     /** Which screenshot path this phone has, whether PowOS AI can run, and (rooted) whether the focused window is secure. */
-    private fun probe(c: Context): JSONObject =
+    private fun probe(): JSONObject =
         KeyboardAi.ok()
             .put("contract", KeyboardAi.CONTRACT)
             .put("capture", captureVia())
@@ -85,31 +90,31 @@ class KeyboardAiProvider : ContentProvider() {
     ): JSONObject {
         val via = captureVia()
         if (via == "root" && rootFocusSecure() == true) return KeyboardAi.error("secure", "this screen is private (FLAG_SECURE)")
-        val full: Bitmap =
-            when (via) {
-                "root" -> rootScreencap(c)
-                "accessibility" -> accessibilityShot()
-                "live" -> LiveCapture.latest()
-                else -> null
-            } ?: return if (via == "none") {
-                KeyboardAi.error("needs-access", "allow PowOS's screen access: Accessibility > PowOS keyboard screenshots")
-            } else {
-                KeyboardAi.error("failed", "the $via screenshot failed")
-            }
+        if (via == "none") return KeyboardAi.error("needs-access", "allow PowOS's screen access: Accessibility > PowOS keyboard screenshots")
+        val full = grab(c, via) ?: return KeyboardAi.error("failed", "the $via screenshot failed")
         val keep = KeyboardAi.cropBottom(full.height, ask.optInt("imeTop"), ask.optInt("screenH"))
         val cropped = if (keep < full.height) Bitmap.createBitmap(full, 0, 0, full.width, keep) else full
         if (cropped !== full) full.recycle()
-        if (KeyboardAi.blackedOut(sample(cropped))) {
-            cropped.recycle()
-            return KeyboardAi.error("secure", "this screen is private (the capture is blacked out)")
-        }
-        val jpeg = jpeg(cropped)
+        val blank = KeyboardAi.blackedOut(sample(cropped))
+        val jpeg = if (blank) null else jpeg(cropped)
         val w = cropped.width
         val h = cropped.height
         cropped.recycle()
+        if (jpeg == null) return KeyboardAi.error("secure", "this screen is private (the capture is blacked out)")
         Log.i(TAG, "capture via $via: ${w}x$h, ${jpeg.size / 1024} KB")
         return KeyboardAi.ok().put("shot", shots.put(jpeg)).put("w", w).put("h", h).put("via", via)
     }
+
+    private fun grab(
+        c: Context,
+        via: String,
+    ): Bitmap? =
+        when (via) {
+            "root" -> rootScreencap(c)
+            "accessibility" -> accessibilityShot()
+            "live" -> LiveCapture.latest()
+            else -> null
+        }
 
     private fun drafts(ask: JSONObject): JSONObject {
         val id = ask.optString("shot")
