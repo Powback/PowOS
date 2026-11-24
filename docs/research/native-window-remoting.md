@@ -557,7 +557,7 @@ text in the buffer.
 - Memory mirroring and execution splitting stay dead ends (now with measured dirty rates). CRIU pre-copy is a viable
   sub-second **server-to-server** move for terminal/headless apps (e.g. `.58` → gpu-195), not a phone path.
 
-### 8.6 Proposed phone follow-up (not run)
+### 8.6 Proposed phone follow-up (built 11-24 as §8.7)
 
 One verify-queue job in a free window, never in the user's session, no Steam/game changes:
 
@@ -573,6 +573,50 @@ One verify-queue job in a free window, never in the user's session, no Steam/gam
    key→commit from the client-side `WAYLAND_DEBUG`, bytes from `ss -ti`, Wi-Fi RSSI and TCP retransmits.
 4. Pass/fail against the same bar as 8.2; film one run with the S25 at 240 fps for photon latency (REMOTE-WINDOWS §3).
    Also answers §7 Q3 (does KWin on Adreno accept waypipe's DMA-BUFs, or must the client fall back to shm).
+
+### 8.7 Phone results (2026-11-24): built and queued, numbers pending
+
+The owner approved the phone run on 11-24 (board task `remote-linux-window-from-58-on-the-oneplus-via-w`). What
+exists now (commit 56c3a324):
+
+- **waypipe on the phone, managed**: `targets/android/pkgs/waypipe` (Arch's 0.11.3 recipe, aarch64, built on PowOS's
+  rootfs so it links the phone's own ffmpeg `libavcodec.so.63`; the §8.2 ARGB video patch as `0001`) and
+  `targets/android/pkgs/socat` (the TCP relay; Arch Linux ARM's socat needs openssl 4, the rootfs/phone have 3.6 and
+  pacman refuses: openssl 4 breaks `sudo`'s `libssl.so=3`, so it is built on the rootfs too). Both are unit
+  `units/phone/waypipe.json`, installed by the rooted deploy (`rooted.sh` push, `powos-deploy.sh` `pacman -U`;
+  `tools/phone/rooted-inputs.py` picks them up as `targets/android/pkgs`). Build lessons: Arch's `rust` also needs
+  openssl 4 on the rootfs, so the PKGBUILD uses `rustup` with a pinned 1.90.0 toolchain in `$srcdir`; and meson's
+  `auto` features silently built a waypipe without lz4/zstd/video when `bindgen` was missing (`waypipe --version`
+  said `video: false`), so every feature is now `enabled` (a missing dependency fails the build). 0.11.3-2 reports
+  lz4, zstd, dmabuf and video all true.
+- **Server on `.58` only** (gpu-195 untouched): the same measurement image, Compose project `rmm`, profile `phone`
+  (`tools/research/remoting/dc --profile phone`, `nomad.slice`, no `tc`), `bin/phone-serve APP MODE`: socat listens
+  on .58's TCP 15100, the phone's socat dials in, then the waypipe server starts the app. Kate and Dolphin in `gpu`
+  mode (lossless; Qt draws shm anyway), Firefox in `video` mode (the patched build, `--video=h264`). Checked from the
+  Mac: port reachable through .58's firewalld zone (1025-65535/tcp), container removed after.
+- **Check `tools/phone/verify/waypipe-window.sh`** (analysis `waypipe-window.py`): in the chroot as the session user,
+  `waypipe --debug -s /tmp/wpw/wp.sock client` on KWin's `wayland-0` + `socat TCP:192.168.50.58:15100
+  UNIX-CONNECT:...`; asserts a new `l:` web window whose body is live (KWin's buffers on the consumer, S6) with the
+  PowOS title bar, screenshots it; input through the phone's own path, no touch: KWin shows the Android keyboard for
+  the focused text field (Kate's editor, Firefox's textarea) and `input keyevent` keys go home's SystemIME -> KWin ->
+  the remote app (60 letters 200 ms apart; scroll = DOWN held 8 s for Kate, F8 = page.js's 10 s scroll for Firefox;
+  Dolphin has no text field, so window, screenshot and idle bytes only). Latency = a pressed `wl_keyboard.key` from
+  KWin -> the first damaged `wl_surface.commit` the client writes to KWin, from waypipe's own `--debug` stamps
+  (waypipe 0.11 is Rust, not libwayland: `WAYLAND_DEBUG` prints nothing; `--debug` logs every processed message with
+  µs stamps). That is the phone-side twin of §8.2's sway-side number: network both ways + the app on .58, not KWin's
+  repaint or the panel. Bytes and retransmits from `ss -ti` of the TCP connection per phase, RSSI/link speed from
+  `cmd wifi status`, DMA-BUF vs shm from the buffer requests the client sends KWin (`zwp_linux_buffer_params_v1`
+  vs `wl_shm_pool.create_buffer`) and whether KWin advertised `zwp_linux_dmabuf_v1` (§7 Q3). One JSON line per app in
+  the job's `results.jsonl`, a `BAR <app>: PASS|FAIL: ...` line against §8.2's bar.
+- **Queued** (verify queue job `20261124-014658-31577`, budget 480 s, behind the earlier checks): it waits for the
+  ship of 56c3a324 to deploy the packages (exits "not now" until `pacman -Q waypipe socat` shows them), then runs in
+  a free window. Before the run, at 01:47: RSSI -42 dBm, 648 Mbps link on 5 GHz (PowFi_5G-1).
+
+| app | mode | key->commit p50 / p95 ms | scroll fps | gap p95 ms | idle / typing KB/s | scroll MB/s | retrans | buffers (KWin) | bar |
+|---|---|---|---|---|---|---|---|---|---|
+| kate | gpu | pending | | | | | | | |
+| dolphin | gpu | pending | | | | | | | |
+| firefox | video | pending | | | | | | | |
 
 ---
 
