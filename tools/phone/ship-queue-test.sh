@@ -10,6 +10,10 @@ T=$(mktemp -d "${TMPDIR:-/tmp}/ship-queue-test.XXXXXX")
 export HOME=$T/home PHONE=$T/phone LOG=$T/log GIT_CONFIG_GLOBAL=$T/gitconfig SHIP_DIR=$T/home/.cache/powos-ship-queue
 export SHIP_QUIET_S=2 SHIP_QUIET_SHELL_S=2 SHIP_POLL_S=0.2
 export SHIP_GATE_FIRST=1   # these tests cover the gate-then-push mode; deploy-first is the default
+# The rooted deploy's inputs (ship.sh rooted_inputs): derived from the real rooted.sh/powos-deploy.sh by
+# tools/phone/rooted-inputs.py, which this tree lacks (its rooted.sh is a stub) - without this the fallback counts all
+# of targets/android, so an APK-only change (targets/android/app) also started a rooted deploy. Name them instead.
+export SHIP_ROOTED_INPUTS="targets/android/rooted targets/android/session"
 # The phone's VPN link (ship.sh phone_offline): $HOME/phone-offline = adb.sh --vpn-state's rc 69 (handshake stale).
 export SHIP_PHONE_STATE=$T/bin/phone-state SHIP_OFFLINE_POLL_S=1
 # The gate's job machine (.58): $HOME/gate-down = it doesn't answer - the gate stub exits 75 (NO VERDICT), and the
