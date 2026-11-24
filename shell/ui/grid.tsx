@@ -43,6 +43,8 @@ import { PendingDetailSheet, SkeletonWidgetTile } from "./pending.tsx";
 import { canStack, dropOnStack, homeView, loadStacks, membersOf, stackHooks, StackFaces, startAddToStack, editStack } from "./stacks.tsx";
 import { stackable } from "./stackmodel.ts";
 import type { Cell, HomeItem } from "../types.ts";
+import { noteRows } from "../hosts/flowsync.ts";
+import { wideHome } from "../hosts/wide.ts";
 
 const LONG_PRESS_MS = 420;
 const SLOP = 10;
@@ -90,6 +92,8 @@ function measure(el: HTMLElement, columns: number) {
   const down = height - 2 * pad;
   const square = Math.max(1, Math.min(MAX_SQUARE_ROWS, Math.floor(down / (across / columns))));
   const rows = Math.max(square, usedRows());
+  // The rows a page of this screen holds, for the other screen's edits to flow into (hosts/flowsync.ts).
+  noteRows(wideHome.peek(), square);
   const next = { left: r.left, top: r.top, width: size.width, height, cellW: across / columns, cellH: down / rows, rows, pad };
   // The same grid again: no new value, so no render (the launcher settling shut animates the dock back every frame;
   // the folded height counted back in leaves the grid as it was). Where the grid is on screen (left, top: read by a

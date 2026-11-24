@@ -3454,6 +3454,82 @@ async function wideAcross() {
   return c?.x === 5 && c.y === 12 ? [] : [`${tile.key} placed across the middle at 5,12 shows at ${c?.x},${c?.y}`];
 }
 
+/**
+ * One home layout on both screens (hosts/reflow.ts, flowsync.ts; the user 11-24: "changed the home layout unfolded,
+ * not reflected folded"). In the page: [edit] runs on the screen on now through the bridge as the grid does
+ * (powos.home.place), then waits until the other screen is laid out again (flowsync's queue; absent = the old code,
+ * which kept the screens apart - then the check after the fold is what fails).
+ */
+async function foldSyncEdit(edit) {
+  const { powos } = await window.__gw.mod("./bridge.ts");
+  const F = await window.__gw.mod("./hosts/flowsync.ts").catch(() => null);
+  // An app by its label (the mock's keys come from its app list), a widget by its key.
+  const items = (await powos.home.get()).items;
+  for (const [k, cell, page] of edit) await powos.home.place(items.find((i) => i.label === k)?.key ?? k, cell, page);
+  await F?.flowSettled();
+  return (await powos.home.get()).items.length;
+}
+
+/** In the page: the layout shown now, key -> [page, x, y, w, h], once home has [n] items. */
+async function foldSyncRead(n) {
+  const S = await window.__gw.mod("./state.ts");
+  await window.__gw.until(() => S.home.value.items.filter((i) => i.cell).length >= n);
+  await window.__gw.frames(2);
+  return Object.fromEntries(S.home.value.items.filter((i) => i.cell).map((i) => [i.label ?? i.key, [i.page, i.cell.x, i.cell.y, i.cell.w, i.cell.h]]));
+}
+
+/** Two tiles of [got] on one cell of a page (neither screen may have one). */
+const foldSyncOverlaps = (got) => {
+  const e = Object.entries(got);
+  const hit = (a, b) => a[0] === b[0] && a[1] < b[1] + b[3] && b[1] < a[1] + a[3] && a[2] < b[2] + b[4] && b[2] < a[2] + a[4];
+  return e.flatMap(([k, a], i) => e.slice(i + 1).filter(([, b]) => hit(a, b)).map(([j]) => `${k} and ${j} overlap`));
+};
+
+/**
+ * Edited unfolded, then folded (and the reverse): the edit shows on the other screen, reflowed. [from]/[to] the two
+ * viewports, [edit] the places made at [from], [want] key -> [page, x, y, w, h] expected at [to] (null: any spot).
+ * Shots of both screens go to the gate's cache (fold-sync-<name>-<from|to>.png) for a look.
+ */
+async function foldSync(page, name, { from, to, edit, want }) {
+  await viewTo(page, from);
+  await restAt(page, from);
+  const n = await page.evaluate(foldSyncEdit, edit);
+  await page.screenshot({ path: `/cache/fold-sync-${name}-edited.png` });
+  await viewTo(page, to);
+  await restAt(page, to);
+  const got = await page.evaluate(foldSyncRead, n);
+  await page.screenshot({ path: `/cache/fold-sync-${name}-other.png` });
+  const fails = foldSyncOverlaps(got);
+  if (Object.keys(got).length < n) fails.push(`${n} items on home, ${Object.keys(got).length} shown after the fold`);
+  for (const [key, w] of Object.entries(want)) {
+    const g = got[key];
+    if (!g || w.some((v, i) => v !== null && v !== g[i])) fails.push(`${name}: ${key} at ${JSON.stringify(g)} on the other screen, expected ${JSON.stringify(w)}`);
+  }
+  return fails;
+}
+
+/** The mock's home (bridge.ts), edited on one screen and looked at on the other. */
+const FOLDED_VIEW = { width: 404, height: 899 };
+const UNFOLDED_VIEW = { width: 821, height: 883 };
+const FOLD_SYNC = {
+  // Unfolded: terminal (page 2, the right half) moved to the left half under weather's row; weather made 5x3 and the
+  // apps beside it moved below. Folded: terminal on page 1 under weather, weather 5x3 (page 1 keeps its order).
+  unfolded: {
+    from: UNFOLDED_VIEW,
+    to: FOLDED_VIEW,
+    edit: [["Chrome", { x: 0, y: 5, w: 1, h: 1 }, 1], ["Signal", { x: 1, y: 5, w: 1, h: 1 }, 1], ["Spotify", { x: 2, y: 5, w: 1, h: 1 }, 1], ["weather.owl", { x: 0, y: 2, w: 5, h: 3 }, 1], ["terminal.owl", { x: 0, y: 6, w: 6, h: 4 }, 1]],
+    want: { "weather.owl": [1, 0, 2, 5, 3], "terminal.owl": [1, 0, 6, 6, 4], Chrome: [1, 0, 5, 1, 1], "monitor.owl": [2, null, null, 4, 3] },
+  },
+  // Folded: glance (page 2) moved to the foot of page 2, clock made 4x2. Unfolded: glance in the right half's foot,
+  // clock 4x2 - not where the first wide run had them.
+  folded: {
+    from: FOLDED_VIEW,
+    to: UNFOLDED_VIEW,
+    edit: [["glance.owl", { x: 0, y: 7, w: 2, h: 3 }, 2], ["clock.owl", { x: 0, y: 0, w: 4, h: 2 }, 1]],
+    want: { "glance.owl": [1, 7, 7, 2, 3], "clock.owl": [1, 0, 0, 4, 2] },
+  },
+};
+
 /** In the page: the wide screen's one bar - dock | search pill | recent apps, left to right, on one line. */
 async function wideBar() {
   const S = await window.__gw.mod("./state.ts");
@@ -15443,6 +15519,10 @@ try {
   if (process.env.SHELL_PAGES !== "0")
     runs.push(open(browser, `${ORIGIN}/index.html`, "recents-renders", { width: 404, height: 900 }).then((r) => whenReady(r, () => r.page.evaluate(recentsRendersCheck))));
   if (process.env.SHELL_PAGES !== "0")
+    // One layout on both screens (FS1, the user 11-24): edited unfolded then folded, and the reverse. Each starts on the
+    // other screen first, so the first wide run's cells exist (the old code then kept the two apart).
+    for (const [label, c] of Object.entries(FOLD_SYNC))
+      runs.push(open(browser, `${ORIGIN}/index.html`, `fold-sync-${label}`, c.to).then((r) => whenReady(r, () => foldSync(r.page, label, c))));
     runs.push(open(browser, `${ORIGIN}/index.html`, "wide-home", { width: 821, height: 883 }).then((r) => whenReady(r, async () => [...(await r.page.evaluate(wideMigrated)), ...(await r.page.evaluate(wideAcross)), ...(await r.page.evaluate(wideBar)), ...(await r.page.evaluate(wideLauncherBar)), ...(await r.page.evaluate(wideBarParked))])));
     runs.push(open(browser, `${ORIGIN}/index.html?mode=pull`, "launcher-keyboard", { width: 1280, height: 800 }).then((r) => whenReady(r, () => launcherKeyboardKeepsFocus(r.page))));
   // The launcher's dock, opened after PowOS AI's pull (dev/dock-check.js launcherDockOpens - the user, 2026-10-30, the

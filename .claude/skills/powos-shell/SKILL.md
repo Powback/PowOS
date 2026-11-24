@@ -578,9 +578,22 @@ strip only - not the cause when a drag in a tile fails.
   (rounded boxes only: a region blurred the whole square, an untinted corner).
 - Wide home (hosts/wide.ts, unfolded >= 700 px): ONE page of 13 columns per pair of host pages (the user's [1, 3] = one
   page); tiles go anywhere on it. The host keeps only the folded layout; wide cells live in the store "home.wide"
-  (key -> cell + hp, the host page then; hp changed folded = placed again). No wide cell: the side-by-side spot
-  (x + 7 on the right), else the first free one. Moved/resized wide = store only (folded never moves); onto another
-  wide page = the host moves it too. First wide run backs the host layout up to "home.wide.backup". Gate: wide-home.
+  (key -> cell + hp = the host page of the HALF its middle is over). First wide run backs the host layout up to
+  "home.wide.backup". Gate: wide-home.
+- ONE layout on both screens (11-24, "changed unfolded, not reflected folded"; hosts/reflow.ts pure + test/reflow.test.ts,
+  hosts/flowsync.ts + test/flowsync.test.ts, tier1 test-home-reflow.sh): items, host page, order (row then column) and
+  size in cells are shared. Wide page n = host pages pair[0] (left half, cols 0-5) + pair[1] (right half, 7-12). Every
+  wide.ts edit (place/add/addPanel/remove/group) calls flowsync `edited(screen, key)`: the other screen is laid out
+  again, queued (flowSettled() waits): wide edit -> foldedFromWide -> host home.place per changed item; folded edit ->
+  wideFromFolded -> store only. Flow: old spot if free and in order, else next free after the previous item, else any
+  free spot on the page, else the next page (new pages after all) - never dropped; wider than 6 = 6. Pins (store
+  "home.flow" {pins:{wide,folded}, rows}): an item placed by hand on a screen keeps its spot there while free; the
+  edited item is unpinned on the other screen. Folded rows for wide edits = grid.tsx noteRows (square rows measured
+  folded; default 10, never fewer than a page uses). Stacks: members follow their anchor (home.stacks). Migration (no
+  home.flow; home page only): any kept wide cell off its side-by-side spot = wide edited -> all wide cells pinned, folded
+  laid out from wide; items moved folded since the backup pinned folded (wide wins on both). Gate fold-sync-unfolded /
+  -folded (edit on one viewport, check the other; shots /cache/fold-sync-*.png in the gate-tx volume); device
+  verify/fold-layout-sync.sh (saves + restores layout and the 3 stores exactly).
 - Edit mode: the foot's pill is a grid tile (searchwidget.tsx footSearch, key panel:search, lowest free row: whole
   row folded, middle 5 columns wide); placeItem() turns a move/resize of it into addPanel("search"). The dock stays;
   the edit sheet takes the pill's slot (wide: the bar's middle). Gate: edit-search-folded/-unfolded.
