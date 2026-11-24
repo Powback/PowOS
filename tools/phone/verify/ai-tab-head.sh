@@ -38,8 +38,9 @@ sh_ "dumpsys window | grep -m1 mCurrentFocus" | grep -qi PowosLock && { sh_ "inp
 chk lock
 sh_ "am start -W -a android.intent.action.MAIN -c android.intent.category.HOME >/dev/null"; sleep 1.5; chk home
 sh_ "input swipe $((W * 3 / 10)) $((H / 2)) $((W * 9 / 10)) $((H / 2)) 350"; sleep 1.5; chk ai
-# The tab named $1's centre in screen pixels ("x y"), from the live page (read only).
-seg() { cdp 'JSON.stringify((()=>{const b=[...document.querySelectorAll(".ai-screen.shown .ai-seg")].find((e)=>e.textContent.trim().startsWith("'"$1"'"));if(!b)return "";const r=b.getBoundingClientRect();return Math.round((r.left+r.width/2)*devicePixelRatio)+" "+Math.round((r.top+r.height/2)*devicePixelRatio)})())'; }
+# The tab named $1's centre in screen pixels (x y, its JSON quotes dropped: kept, `input tap "x y"` got one argument and
+# never tapped - the 11-24 emulator FAIL, Chat still open on all three tabs), from the live page (read only).
+seg() { cdp 'JSON.stringify((()=>{const b=[...document.querySelectorAll(".ai-screen.shown .ai-seg")].find((e)=>e.textContent.trim().startsWith("'"$1"'"));if(!b)return "";const r=b.getBoundingClientRect();return Math.round((r.left+r.width/2)*devicePixelRatio)+" "+Math.round((r.top+r.height/2)*devicePixelRatio)})())' | tr -d '"'; }
 # The open screen's header and the tab strip against the status bar.
 probe='JSON.stringify((()=>{const s=document.querySelector(".ai-screen.shown"),R=(e)=>{if(!e)return null;const r=e.getBoundingClientRect();return {t:Math.round(r.top*10)/10,b:Math.round(r.bottom*10)/10,h:Math.round(r.height)}};const hs=s?[...s.querySelectorAll(".ag-top")].filter((h)=>h.getBoundingClientRect().height>0):[];const h=hs[0];return {shown:!!s,inset:parseFloat(getComputedStyle(document.documentElement).getPropertyValue("--inset-top"))||0,ih:innerHeight,n:hs.length,title:h?.querySelector(".ai-title")?.textContent.trim()??"",head:R(h),back:R(h?.querySelector(".session-back")),segs:R(s?.querySelector(".ai-segs"))}})())'
 res=()
@@ -58,7 +59,8 @@ for f in "$OUT"/ai-tab-head-$SCREEN-*.png; do
     python3 "$ROOT/lib/ai/agents/powos-agents-cli" task set "$TASK" --image "/home/powos/design-qa/$(basename "$f")" >/dev/null 2>&1
 done
 printf '%s\n' "${res[@]}"
-printf '%s\n' "${res[@]}" | python3 -c '
+# The judge reads one "<tab> <json>" line per tab. Held in a quoted heredoc so the Python needs no shell escapes.
+judge=$(cat <<'PY'
 import json, sys
 bad = []
 for line in sys.stdin:
@@ -67,10 +69,12 @@ for line in sys.stdin:
     except Exception: bad.append(f"{tab}: no layout read over CDP ({raw[:120]})"); continue
     if not p.get("shown"): bad.append(f"{tab}: the AI page or its tab is not on screen"); continue
     i, h, b, s = p["inset"], p["head"], p["back"], p["segs"]
-    if p["n"] != 1: bad.append(f"{tab}: {p[\"n\"]} headers, want 1"); continue
-    if p["title"] != tab: bad.append(f"{tab}: the header says {p[\"title\"]!r}")
-    if h["t"] < i - 0.5 or (b and b["t"] < i - 0.5): bad.append(f"{tab}: the header (top {h[\"t\"]}) is under the status bar ({i})")
-    if not s or s["t"] < i - 0.5 or s["b"] > p["ih"] + 0.5: bad.append(f"{tab}: the tab strip is cut off ({s} in {p[\"ih\"]})")
+    if p["n"] != 1: bad.append(f"{tab}: {p['n']} headers, want 1"); continue
+    if p["title"] != tab: bad.append(f"{tab}: the header says {p['title']!r}")
+    if h["t"] < i - 0.5 or (b and b["t"] < i - 0.5): bad.append(f"{tab}: the header (top {h['t']}) is under the status bar ({i})")
+    if not s or s["t"] < i - 0.5 or s["b"] > p["ih"] + 0.5: bad.append(f"{tab}: the tab strip is cut off ({s} in {p['ih']})")
 print("FAIL: " + "; ".join(bad) if bad else "PASS: Agents, Progress and Devices each open under one header below the status bar, the tab strip whole")
 sys.exit(1 if bad else 0)
-'
+PY
+)
+printf '%s\n' "${res[@]}" | python3 -c "$judge"

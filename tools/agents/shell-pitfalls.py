@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""shell-pitfalls.py [file...] - lint the phone checks' shell for four pitfalls that produced false check FAILs.
+"""shell-pitfalls.py [file...] - lint the phone checks' shell for five pitfalls that produced false check FAILs.
 
 WHY (11-10): three checks FAILed on shell pitfalls, not product bugs; each cost a queue run plus an agent.
   awk-ternary   `printf "%d", t>0?t:0` - BSD awk (the Mac's, 20200816) parses `>` as an output redirect: syntax
@@ -14,6 +14,11 @@ WHY (11-10): three checks FAILed on shell pitfalls, not product bugs; each cost 
                 (ww-popup-x11)
   logcat-dup-tag  one tag twice in a logcat filterspec (`-s Tag:I Tag:W`): the last spec wins, so `Tag:W` drops the
                 tag's I lines - the check reads nothing. `Tag:I` already includes W/E. (ww-popups 11-10 09:21)
+  py-c          a `python3 -c '...'` program that doesn't compile, or has a backslash inside an f-string's {...}
+                (a SyntaxError before Python 3.12; the Mac's /usr/bin/python3 is 3.9). Inside shell single quotes
+                `\\"` reaches Python as backslash-quote, so `f"{p[\\"n\\"]}"` breaks on every version. Put the
+                program in a quoted heredoc (`prog=$(cat <<'PY' ... PY)`, `python3 -c "$prog"`) and write p['n'].
+                (ai-tab-head 11-23)
 
 Escape a deliberate case with `# lint-ok: <why>` on the line (or on the line just above it).
 With no arguments it scans tools/phone/**/*.sh and tools/agents/*.sh. Exit 1 if anything is found.
@@ -478,6 +483,123 @@ def check_logcat_dup_tag(lines):
     return sorted(set(hits))
 
 
+# ---------------------------------------------------------------- (e) python3 -c '...' programs
+PY_C_RE = re.compile(r"\bpython3?(?:\s+-[A-Za-z]+)*\s+-c\s+'")
+HEREDOC_RE = re.compile(r"""<<-?\s*(['"]?)([A-Za-z_][A-Za-z0-9_]*)\1""")
+FSTR_RE = re.compile(r"""(?<![A-Za-z0-9_])[rRbB]?[fF][rRbB]?("{3}|'{3}|"|')""")
+
+
+def toplevel_offsets(text):
+    """bytearray, 1 where the offset is outside any shell quote, comment or heredoc body (rough, but enough to skip
+    programs that sit inside a double-quoted remote command, whose text the shell rewrites first)."""
+    top = bytearray(len(text))
+    i, q, pending = 0, None, []
+    while i < len(text):
+        c = text[i]
+        if q is None:
+            top[i] = 1
+            if c == "\\":
+                i += 2
+                continue
+            if c in "'\"":
+                q = c
+            elif c == "#" and (i == 0 or text[i - 1] in " \t;\n"):
+                j = text.find("\n", i)
+                i = len(text) if j < 0 else j
+                continue
+            elif text.startswith("<<", i) and not text.startswith("<<<", i):
+                m = HEREDOC_RE.match(text, i)
+                if m:
+                    pending.append(m.group(2))
+            elif c == "\n" and pending:
+                j = i + 1
+                for d in pending:  # skip each body up to its delimiter line
+                    m = re.compile(r"^\t*" + re.escape(d) + r"[ \t]*$", re.M).search(text, j)
+                    j = len(text) if not m else m.end()
+                pending = []
+                i = j
+                continue
+        elif q == "'":
+            if c == "'":
+                q = None
+        else:
+            if c == "\\":
+                i += 2
+                continue
+            if c == '"':
+                q = None
+        i += 1
+    return top
+
+
+def single_quoted_word(text, start):
+    """text[start - 1] is the opening '. The word's shell value, following the '\\'' and '"'"' joins."""
+    out, i = [], start
+    while True:
+        end = text.find("'", i)
+        if end < 0:
+            return None
+        out.append(text[i:end])
+        if text.startswith("'\\''", end):
+            out.append("'"); i = end + 4
+        elif text.startswith("'\"'\"'", end):
+            out.append("'"); i = end + 5
+        else:
+            return "".join(out)
+
+
+def fstring_brace_backslash(prog):
+    """1-based program lines where an f-string's {...} holds a backslash (a SyntaxError before Python 3.12)."""
+    hits = []
+    for m in FSTR_RE.finditer(prog):
+        qt, i, depth, field_bs = m.group(1), m.end(), 0, False
+        while i < len(prog):
+            c = prog[i]
+            if depth == 0:
+                if prog.startswith(qt, i) or (c == "\n" and len(qt) == 1):
+                    break
+                if c == "\\":
+                    i += 2
+                    continue
+                if prog.startswith("{{", i):
+                    i += 2
+                    continue
+                if c == "{":
+                    depth, field_bs = 1, False
+            elif c == "\\":
+                field_bs = True
+            elif c == "{":
+                depth += 1
+            elif c == "}":
+                depth -= 1
+                if depth == 0 and field_bs:
+                    hits.append(prog.count("\n", 0, i) + 1)
+            i += 1
+    return hits
+
+
+def check_py_c(text):
+    """[(offset, why)] for top-level python3 -c '...' programs that won't compile on the hosts' Pythons."""
+    hits, top = [], None
+    for m in PY_C_RE.finditer(text):
+        if top is None:
+            top = toplevel_offsets(text)
+        if not top[m.start()]:
+            continue
+        prog = single_quoted_word(text, m.end())
+        if prog is None:
+            continue
+        bs = fstring_brace_backslash(prog)
+        if bs:
+            hits.append((m.start(), f"backslash inside an f-string {{...}} (program line {bs[0]})"))
+            continue
+        try:
+            compile(prog, "<python3 -c>", "exec")
+        except SyntaxError as e:
+            hits.append((m.start(), f"SyntaxError: {e.msg} (program line {e.lineno})"))
+    return hits
+
+
 def lint_file(path):
     with open(path, encoding="utf-8", errors="replace") as f:
         text = f.read()
@@ -498,6 +620,10 @@ def lint_file(path):
         if not lint_ok(lines, ln):
             found.append((ln, "logcat-dup-tag", "a tag twice in a logcat filterspec: the last spec wins (Tag:W drops"
                                                 " its I lines); give it once, Tag:I includes W"))
+    for off, why in check_py_c(text):
+        ln = text.count("\n", 0, off) + 1
+        if not lint_ok(lines, ln):
+            found.append((ln, "py-c", f"python3 -c program: {why}; move it to a quoted heredoc"))
     return sorted(set(found))
 
 
