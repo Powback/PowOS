@@ -15,7 +15,7 @@ OUT=${1:-$HOME/.cache/powos-verify/ai-wide-$MODE-$(date +%m%d-%H%M)}; mkdir -p "
 IMG=ai-wide-$MODE-unfolded.png
 L=$HOME/.cache/powos-verify.lock
 TASK=${BOARD_TASK:-ai-page-two-pane-wide-layout}
-sh_() { "$A" shell "su -c '$*'" 2>/dev/null | tr -d '\r'; }
+. "$here/base.sh"  # sh_ and the shared check helpers (tools/phone/verify/base.sh)
 irq() { sh_ "awk '\''/touch-0/{s+=\$2+\$3+\$4+\$5+\$6+\$7+\$8+\$9} END{print s}'\'' /proc/interrupts"; }
 restore() { sh_ "am start -a android.intent.action.MAIN -c android.intent.category.HOME >/dev/null; cmd device_state state reset"; echo "restored"; }
 . "$here/window-lock.sh"; window_lock ai-wide.sh 120

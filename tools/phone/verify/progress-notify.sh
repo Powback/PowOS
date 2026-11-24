@@ -17,7 +17,7 @@ here=$(cd "$(dirname "$0")" && pwd); T=$here/..; A="$T/adb.sh"
 OUT=${1:-$HOME/.cache/powos-verify/progress-notify-$(date +%m%d-%H%M)}; mkdir -p "$OUT"; R=$OUT/log.txt
 L=$HOME/.cache/powos-verify.lock
 N=$(date +%s)$RANDOM; ID=powos-check-$N; TITLE="PowOS progress check $N"
-sh_() { "$A" shell "su -c '$*'" 2>/dev/null | tr -d '\r'; }
+. "$here/base.sh"  # sh_ and the shared check helpers (tools/phone/verify/base.sh)
 # A script run as the session user (its run dir), through user.sh. Never sudo in it.
 us() { printf 'export XDG_RUNTIME_DIR=${XDG_RUNTIME_DIR:-/run/powos-app}\n%s\n' "$1" > "$OUT/u.sh"; "$T/user.sh" "$OUT/u.sh" 2>/dev/null | grep -v "file pushed" | tr -d '\r'; }
 log() { echo "$*" | tee -a "$R"; }

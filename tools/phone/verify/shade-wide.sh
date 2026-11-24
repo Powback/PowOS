@@ -9,7 +9,7 @@ set -uo pipefail
 here=$(cd "$(dirname "$0")" && pwd); T=$here/..; A="$T/adb.sh"
 [ -n "${LOCK_HELD:-}" ] || { echo "shade-wide: run it through tools/phone/verify/queue.sh add"; exit 3; }
 OUT=$HOME/.cache/powos-verify/shade-wide-$(date +%m%d-%H%M); mkdir -p "$OUT"
-sh_() { "$A" shell "su -c '$*'" 2>/dev/null | tr -d '\r'; }
+. "$here/base.sh"  # sh_ and the shared check helpers (tools/phone/verify/base.sh)
 q() { "$T/cdp.sh" eval "$1" "$2" 2>/dev/null | tail -1 | tr -d '"\\\r'; }
 irq() { sh_ "awk '\''/touch-0/{s+=\$2+\$3+\$4+\$5+\$6+\$7+\$8+\$9} END{print s}'\'' /proc/interrupts"; }
 home() { sh_ "input keyevent 4; am start -a android.intent.action.MAIN -c android.intent.category.HOME >/dev/null"; sleep 1; }

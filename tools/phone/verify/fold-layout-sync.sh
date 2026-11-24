@@ -18,7 +18,7 @@ here=$(cd "$(dirname "$0")" && pwd); T=$here/..; A="$T/adb.sh"
 OUT=${1:-$HOME/.cache/powos-verify/fold-layout-sync-$(date +%m%d-%H%M)}; mkdir -p "$OUT"
 L=$HOME/.cache/powos-verify.lock
 SD=/data/data/com.powos.app/files/shell-data
-sh_() { "$A" shell "su -c '$*'" 2>/dev/null | tr -d '\r'; }
+. "$here/base.sh"  # sh_ and the shared check helpers (tools/phone/verify/base.sh)
 q() { "$T/cdp.sh" eval home "$1" 2>/dev/null | tail -1 | tr -d '"\\\r'; }
 # A host call from the page (its own resolve chained, only our id taken), answered as base64 JSON (q strips quotes).
 HC='const hc=(m,a)=>new Promise((ok,no)=>{const h=window.__powosHost,id=920000+Math.floor(Math.random()*9999),r=h.resolve,j=h.reject;const done=()=>{h.resolve=r;h.reject=j};h.resolve=(i,v)=>i===id?(done(),ok(v)):r(i,v);h.reject=(i,e)=>i===id?(done(),no(e)):j(i,e);PowosHost.postMessage(JSON.stringify([id,m,JSON.stringify(a)]))});const b64=(v)=>btoa(unescape(encodeURIComponent(JSON.stringify(v))));'
