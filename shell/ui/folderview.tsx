@@ -17,7 +17,6 @@ import { folder, home } from "../state.ts";
 import { AppPress, folderNames, morphing, nameFolder, type DragOut } from "./folders.tsx";
 import { library } from "./library.tsx";
 import { POW_FOLDER } from "./launcherview.ts";
-import { geometry } from "./grid.tsx";
 import { spring, springFast } from "./spring.ts";
 
 const MORPH_MS = spring.ms;
@@ -190,14 +189,15 @@ function Sheet({ s, closing, onHold, done }: { s: Shown; closing: boolean; onHol
   const swipe = useRef<number | null>(null);
   useMorph(root, closing, done);
   const close = () => (folder.value = null);
-  const g = geometry.value;
   const cols = Math.min(4, Math.max(1, s.apps.length));
   return (
     <div
       ref={root}
       class={`folder-view ${closing ? "" : "open"}`}
       data-key={s.key}
-      style={{ "--fcell-w": `${g.cellW || 76}px`, "--fcell-h": `${Math.max(g.cellH, g.cellW) || 86}px`, "--fcols": cols }}
+      // Its own size, not home's cells (shell.css .folder-view --ficon/--fcell-*): a side dock or a dense grid made the
+      // sheet a cramped popup (the user 11-24: "the open folder view could look a bit bigger").
+      style={{ "--fcols": cols }}
       onClick={close}
       // A list in the folder scrolled down owns a drag down (scrollown.ts): it scrolls back first; at its top the sheet's.
       onPointerDown={(e) => (swipe.current = scrollOwner(e.target as Element, { x: e.clientX, y: e.clientY, axis: "y", d: 1, stop: root.current }) ? null : e.clientY)}

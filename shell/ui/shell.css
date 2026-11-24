@@ -1220,7 +1220,18 @@ html.ww-glued .page-glass-img { transition: --glass-x var(--spring-ms) var(--spr
  * moves). Behind it a page-sized frost (.folder-focus: the compositor's blur and a soft dim) while home's own content
  * steps out - the compositor blurs only what's under the window, never home's tiles, so they fade instead.
  */
-.folder-view { position: fixed; inset: 0; z-index: 30; display: flex; align-items: center; justify-content: center; touch-action: none; }
+/*
+ * Its own measure, generous (the user 11-24: "the open folder view could look a bit bigger"): icons larger than home's
+ * (--ficon, 60 folded .. 72 unfolded), labels at body size, the content --edge + --gap in; four columns always fit the
+ * screen (a cell narrows before the sheet overflows), a row is the icon, its label and room around them.
+ */
+.folder-view {
+  --ficon: clamp(60px, 15vw, 72px);
+  --fpad: calc(var(--edge) + var(--gap));
+  --fcell-w: min(calc(var(--ficon) + 40px), calc((100vw - 2 * var(--edge) - 2 * var(--fpad)) / 4));
+  --fcell-h: calc(var(--ficon) + 44px);
+  position: fixed; inset: 0; z-index: 30; display: flex; align-items: center; justify-content: center; touch-action: none;
+}
 .folder-view .folder-focus.tile {
   position: absolute;
   inset: 0;
@@ -1236,21 +1247,24 @@ html:has(.folder-view.open) .home :is(.page-track > .page, .bar, .dock, .dock-tr
 .home-tile.opened .folder-face, .lib-card.opened { opacity: 0; }
 .folder-sheet {
   position: relative;
-  width: calc(var(--fcols) * var(--fcell-w) + 2 * var(--edge));
+  width: calc(var(--fcols) * var(--fcell-w) + 2 * var(--fpad));
+  /* A folder of one or two apps is still a surface, not a chip. */
+  min-width: min(calc(100% - 2 * var(--edge)), calc(3 * var(--fcell-w) + 2 * var(--fpad)));
   max-width: calc(100% - 2 * var(--edge));
 }
 /* A surface: --radius (§3's scale; 20px is a pill's). Its content sits --edge in, the title and grid --gap apart. */
 .folder-sheet .folder-bg.tile { position: absolute; inset: 0; border-radius: var(--radius); transform-origin: 0 0; }
-.folder-body { position: relative; display: flex; flex-direction: column; gap: var(--gap); padding: var(--edge); }
+.folder-body { position: relative; display: flex; flex-direction: column; gap: var(--edge); padding: var(--fpad); }
 .folder-title {
   font: inherit;
-  font-size: var(--text-item);
+  font-size: calc(var(--text-item) * 1.4);
+  font-weight: 600;
   text-align: center;
   color: var(--color-foreground);
   background: transparent;
   border: 0;
   border-radius: 8px;
-  padding: 4px 10px;
+  padding: 6px 10px;
   outline: none;
 }
 input.folder-title:focus { background: var(--soft-fill); }
@@ -1259,15 +1273,17 @@ input.folder-title:focus { background: var(--soft-fill); }
   display: grid;
   grid-template-columns: repeat(var(--fcols), var(--fcell-w));
   grid-auto-rows: var(--fcell-h);
+  justify-content: center;
   max-height: 64vh;
   overflow-y: auto;
   overscroll-behavior: contain;
 }
 /* Up and down are the grid's own (a folder with more apps than fit scrolls - both ways, the user 11-24); a hold that
    then moves is a drag out (folders.tsx AppPress stops the pan), a swipe down at its top the sheet's (folderview.tsx). */
-.folder-grid .app { touch-action: pan-y; min-width: 0; }
-.folder-grid .app .app-icon { width: min(var(--icon), 58%); transform-origin: 0 0; }
-.folder-grid .app-label { text-shadow: none; max-width: 100%; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; padding: 0 2px; }
+.folder-grid .app { touch-action: pan-y; min-width: 0; padding: 8px 2px; }
+.folder-grid .tile-app { gap: 8px; }
+.folder-grid .app .app-icon { width: min(var(--ficon), 100%); transform-origin: 0 0; }
+.folder-grid .app-label { font-size: var(--text-body); text-shadow: none; max-width: 100%; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; padding: 0 2px; }
 .chosen-actions { z-index: 9; }
 
 /* OWL widgets (owl.tsx): the tree fills the tile as Render.kt's WidgetContent, a Column. */

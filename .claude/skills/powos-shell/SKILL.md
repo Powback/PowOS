@@ -357,7 +357,10 @@ WindowBlur.kt, WallpaperBackdrop.kt, LiquidGlass.kt; page side shell/ui/nativegl
   tile inside its plain rim) draws only the inner tile, filling the shape (S25 "double border", 2026-11-23). Generic,
   no vendor check; JVM tests IconFrameTest (tools/agents/jvm-offload.sh :app:testDebugUnitTest --tests '*IconFrame*').
   The S25 has no adb from the Mac (VPN peer 10.13.13.2, no wireless-debugging pairing): it gets APKs via PowApps pull.
-- Sizes per context: --icon (grid/drawer), --strip-icon (dock/strip), 58% of a tile/folder cell, library 2x2.
+- Sizes per context: --icon (grid/drawer), --strip-icon (dock/strip), 58% of a tile cell, library 2x2. The open
+  folder sheet has its own measure (11-24 "could look a bit bigger"; shell.css .folder-view --ficon 60..72 by 15vw,
+  --fcell-w narrows so 4 columns always fit, --fpad = edge+gap, labels --text-body), never home's cell geometry - a
+  side dock made it a cramped popup. Shots folder-open(-side,-many,-pow).
 
 ## Running bar (board running-indicator)
 - AppCell (dock, dock recents, drawer, drawer recents, recent widget) sets `data-run` from ui/running.ts (`running`
