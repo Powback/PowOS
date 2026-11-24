@@ -1148,7 +1148,11 @@ EOS
         # result - so a name that claims a version is checkable against what it actually says it ran on.
         ver=$(head -1 "$log" 2>/dev/null | grep -oE '^VERSION .*' | cut -c1-80)
         [ -z "$skipwhy" ] || line=$r
-        board "$task" "verify $r: $(printf %s "$line" | cut -c1-160)${ver:+ ($ver)} (log ~/.cache/powos-verify-queue/done/$n.log)" "$([ $rc = 0 ] && [ -z "$skipwhy" ] && echo $close || echo 0)" "$img"
+        # What the check measured before its verdict ("RESULT: " lines, perf-scenarios.sh result()): on the board with
+        # it, so a timeout or a later step's FAIL never loses numbers already taken (11-24: round 1124-0303's idle
+        # paints/s were only in the log).
+        meas=$(grep -a '^RESULT: ' "$log" | cut -c9- | cut -c1-220 | tr -d '\000-\037' | paste -sd ';' - | cut -c1-700)
+        board "$task" "verify $r: $(printf %s "$line" | cut -c1-160)${ver:+ ($ver)}${meas:+ | measured: $meas} (log ~/.cache/powos-verify-queue/done/$n.log)" "$([ $rc = 0 ] && [ -z "$skipwhy" ] && echo $close || echo 0)" "$img"
         echo "$(date +%T) $n: $r"
         case $r in PASS*) uc=pass ;; "FAIL timeout"*) uc=timeout ;; FAIL*|INVALID*) uc=fail ;; *) uc=skip ;; esac
         [ -n "$pfinal" ] && uc=precond   # its last try burnt the time like the others: no verdict worth the seconds

@@ -112,7 +112,11 @@ _sess_fifos() { local d; d=$(mktemp -d "${TMPDIR:-/tmp}/sess.XXXXXX") && mkfifo 
 _sess_read() { local line buf="" c=$'\001' rc
   while IFS= read -r -t "${SESS_TIMEOUT_S:-40}" line <&"$1"; do line=${line%$'\r'}
     case $line in
-      *"$c$2 "*) rc=${line##*"$c$2 "}; line=${line%"$c$2 "*}; [ -n "$line" ] && buf+="$line"$'\n'; printf '%s' "$buf"; return "${rc:-0}" ;;
+      *"$c$2 "*) rc=${line##*"$c$2 "}; line=${line%"$c$2 "*}; [ -n "$line" ] && buf+="$line"$'\n'
+        # The answer is read whole before it is written out, so a caller that stops reading early (`sh_ ... | grep -q`)
+        # loses nothing from the session's stream; its EPIPE is no error here (it printed "printf: write error: Broken
+        # pipe" into every check log, 11-24). The callers read to the end anyway (e2e-lib kg/homefocused).
+        { printf '%s' "$buf"; } 2>/dev/null; return "${rc:-0}" ;;
       *"$c"__s*) buf= ;;
       *) buf+="$line"$'\n' ;;
     esac

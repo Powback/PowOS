@@ -56,10 +56,19 @@ rec_off() {
   ev "(document.querySelector('.fps-meter').click(),'ok')" statusbar >/dev/null
   local f= i; for i in $(seq 1 20); do sleep 1; f=$(newest); [ -n "$f" ] && [ "$f" != "$BEFORE" ] && break; f=; done
   [ -n "$f" ] || { fail "$1: no new perf trace after the stop"; return 1; }
-  sh_ "cat $PDIRF/$f" > "$OUT/$1.json"
-  log "$1: $f -> $OUT/$1.json"
-  python3 "$here/perf-summary.py" "$1" "$OUT/$1.json" | tee -a "$OUT/log.txt"
+  # The trace over exec-out, gzip'd: one adb call the watchdog can kill. Through the session's line reader (sh_ "cat")
+  # the single-line trace (the V8 sampler's profile in it) never came back: round 1124-0303 hung there past the
+  # queue's 300 s budget with an empty idle.json, its measured numbers lost.
+  "$A" exec-out "su -c 'gzip -1 -c $PDIRF/$f'" 2>/dev/null | gunzip > "$OUT/$1.json" 2>/dev/null
+  [ -s "$OUT/$1.json" ] || { fail "$1: couldn't read the trace $PDIRF/$f off the phone"; return 1; }
+  log "$1: $f -> $OUT/$1.json ($(wc -c < "$OUT/$1.json" | tr -d ' ') bytes)"
+  local sum; sum=$(python3 "$here/perf-summary.py" "$1" "$OUT/$1.json"); printf '%s\n' "$sum" | tee -a "$OUT/log.txt"
+  result "$(printf '%s\n' "$sum" | head -1)$(printf '%s\n' "$sum" | grep -m1 '^  while moving' | sed 's/^ */; /')"
 }
+# result <text>: a measured number as it is taken - a "RESULT: " line the queue puts on the board task with the
+# verdict (queue.sh), so what was measured before a timeout or a later step's FAIL is never lost (11-24: round
+# 1124-0303's idle numbers were only in the log).
+result() { echo "RESULT: $*" | tee -a "$OUT/log.txt"; }
 
 # A page swipe never tears a native surface down (perf-1793735444160: windows.slide -> Plasma's SurfaceView
 # surfaceChanged -> startNative -> awaitPendingStop, 450-560 ms main-thread freezes per swipe; fixed f313f709: off-page
@@ -98,14 +107,25 @@ print(int(max([x.get("ms",0) for x in n.get("longest") or []] or [0])))' "$OUT/s
     pass "${slides:-0} slides, no reconnect/surfaceDestroyed, longest stall ${stall:-0} ms (< $SWIPE_STALL_MS)"
   fi
 }
+# The start points by the shell's own page-swipe rule (e2e-lib pageswipept: scrollown.ts roomAt, stackSwipeAt, OWN): a
+# full home has no empty spot (round 1124-0308: "no empty spot on home"), so a widget, tile or icon under the finger
+# does - a quick sideways drag there pages home. The way back is found on the next page, after the first swipe (its
+# items differ); then both points are reused for every rep.
 sc_swipe() {
-  local p d=$((W * 45 / 100)) i; p=$(freept "" -1 "$d" .3); [ "$p" != none ] && [ -n "$p" ] || { fail "swipe: no empty spot on home"; return 1; }
-  set -- $p; local x=$1 y=$2
+  local p q d=$((W * 45 / 100)) i x y bx by pg0 pg1
+  p=$(pageswipept -1 "$d"); set -- $p; [ $# -ge 3 ] || { fail "swipe: no point on home where a sideways swipe is a page swipe ($p)"; return 1; }
+  x=$1 y=$2; log "swipe: from $x,$y ($3; finger left $d px)"
   surf_on
   rec_on
   for i in $(seq 1 "$REPS"); do
-    chk swipe$i; swipe "$x" "$y" $((x - d)) "$y" 220 "page swipe to the next page" || break; sleep 1.2
-    chk swipe$i-back; swipe $((x - d)) "$y" "$x" "$y" 220 "page swipe back" || break; sleep 1.2
+    chk swipe$i; pg0=$(hpage); swipe "$x" "$y" $((x - d)) "$y" 220 "page swipe to the next page" || break; sleep 1.2
+    if [ -z "${bx:-}" ]; then
+      pg1=$(hpage); [ "$pg1" != "$pg0" ] || note "swipe: the page stayed $pg0 after a swipe from $x,$y"
+      q=$(pageswipept 1 "$d"); set -- $q
+      if [ $# -ge 3 ]; then bx=$1 by=$2; log "swipe back: from $bx,$by ($3; finger right $d px)"
+      else bx=$((x - d)) by=$y; note "swipe back: no page-swipe point on page $pg1 ($q) - from where the first ended"; fi
+    fi
+    chk swipe$i-back; swipe "$bx" "$by" $((bx + d)) "$by" 220 "page swipe back" || break; sleep 1.2
   done
   rec_off swipe
   step swipe "page swipes done ($REPS pairs)"; pass "recorded"
@@ -263,19 +283,40 @@ sc_idle() {
 d=json.load(open(sys.argv[1]))
 print("; ".join("%s%s %s" % (p["page"], " hidden" if p.get("hidden") else "", " ".join("%s=%s" % kv for kv in (p.get("perSec") or {}).items())) for p in d.get("pages", [])))' "$OUT/idle-cdp.json" 2>/dev/null)
   log "idle pages per second: ${pages:-unreadable}"
+  # On the board: the pages that drew anything (home always), each page's counters that aren't 0.
+  result "idle pages/s: $(python3 -I -c 'import json,sys
+d=json.load(open(sys.argv[1])); o=[]
+for p in d.get("pages", []):
+  v=[(k,x) for k,x in (p.get("perSec") or {}).items() if x]
+  if v or p["page"]=="home": o.append("%s%s %s" % (p["page"], " hidden" if p.get("hidden") else "", " ".join("%s=%s" % kv for kv in v) or "nothing"))
+print("; ".join(o) or "unreadable")' "$OUT/idle-cdp.json" 2>/dev/null)"
   rec_on
   sleep "$IDLE_S"
   rec_off idle
   local r; r=$(python3 -I -c 'import json,sys
 d=json.load(open(sys.argv[1])); r=d.get("renders") or {}; s=max(1,(r.get("durationMs") or 1)/1000)
 print("%d commits (%.1f/s), %d renders, %d needless in %.0f s; top %s" % (r.get("commits",0), r.get("commits",0)/s, r.get("renders",0), r.get("needlessRenders",0), s, ", ".join("%s %d" % (x["name"], x["renders"]) for x in (r.get("byCount") or [])[:6])))' "$OUT/idle.json" 2>/dev/null)
-  log "idle home: ${r:-no renders section}"
+  log "idle home: ${r:-no renders section}"; result "idle home ${IDLE_S} s: ${r:-no renders section}"
   step idle "home left alone ${IDLE_S} s: commits and paints"
   pass "${r:-?} | pages: ${pages:-?}"
 }
+# Each scenario fits the queue's budget (E2E_DL, e2e-lib: QUEUE_BUDGET_S - the restore's reserve) by design: one queue
+# job per scenario (`--only idle`, `--only swipe`, ...). A run of several checks before each one that it has the time
+# its scenario takes (sc_est, measured rounds + margin); one that doesn't is not started - a SKIP naming the --only
+# to queue - so the scenarios already measured keep their results (their RESULT lines) instead of a kill mid-way.
+sc_est() { case $1 in swipe) echo $((25 + REPS * 12)) ;; launcher|trace) echo $((20 + REPS * 8)) ;; shade) echo $((20 + REPS * 7)) ;;
+  shade-scroll) echo $((45 + REPS * 6)) ;; idle) echo $((35 + IDLE_S * 2)) ;; *) echo 60 ;; esac; }
+LEFT=
 for s in swipe launcher shade shade-scroll idle trace; do
   if [ -z "$ONLY" ]; then [ $s = trace ] && continue; else [ "$ONLY" = $s ] || continue; fi
+  if [ -n "$LEFT" ] || [ $((SECONDS + $(sc_est $s))) -ge "$E2E_DL" ]; then LEFT="$LEFT $s"; continue; fi
+  log "-- scenario $s (t=$SECONDS s, ~$(sc_est $s) s, budget to $E2E_DL s)"
   "sc_${s//-/_}"; hemit system.home null
 done
+if [ -n "$LEFT" ]; then
+  step budget "scenarios left for their own queue jobs"
+  skipped "out of budget" "not run (${E2E_DL} s budget):$LEFT - queue each alone: $(for s in $LEFT; do printf '%s ' "--only $s"; done)"
+  result "not run (budget):$LEFT"
+fi
 meter_back
 e2e_finish

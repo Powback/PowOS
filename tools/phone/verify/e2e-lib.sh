@@ -215,7 +215,7 @@ SEARCHED="document.activeElement&&document.activeElement.matches('.bar textarea'
 # homefocused: home (com.powos.app) holds the input focus on ANY display. Never `grep -m1 mCurrentFocus`: dumpsys lists a
 # web window's or KWin's virtual display first (its mCurrentFocus=null), so a focused search read as unfocused (e2e
 # round 193, appapi 01/02 folded: the page had the focus and asked for the keyboard).
-homefocused() { sh_ "dumpsys window | grep mCurrentFocus" | grep -q com.powos.app; }
+homefocused() { case $(sh_ "dumpsys window | grep mCurrentFocus") in *com.powos.app*) return 0 ;; esac; return 1; }
 searchpt() { ev "$SEARCHPT"; }
 # recentsdown: waits (<= ~3 s) till the switcher's layer neither shows nor takes touches; "up" when it still does.
 # RC1 (e2e-lookw-relaunch 1103-1805 [02-home] "off (under div.recents)"): Home over home's main page opens the switcher
@@ -244,6 +244,20 @@ freept() {
   # the left gap was all the check did and the page "didn't change" (e2e-desktop 1029-1430 [36-page2]).
   local ws; ws=$(winrects)
   ev "(()=>{const b='$1'.split(' ').filter(Boolean).map(Number),ws='$ws'.split(',').filter(Boolean).map(s=>s.split(' ').map(Number)),r=devicePixelRatio,d=${2:-0},len=${3:-0},W=innerWidth*r;let best=null,room=-1;const x0=innerWidth*${4:-.06},xs=[];for(let x=${4:-.06};x<=.94;x+=.04)xs.push(innerWidth*x);for(const w of [b,...ws])if(w.length===4)for(const e of [(w[2]+61)/r,(w[0]-61)/r])if(e>=x0&&e<innerWidth)xs.push(e);for(let y=${5:-.2};y<=${6:-.75}+1e-9;y+=.05)for(const cx of xs){const cy=innerHeight*y,px=cx*r,py=cy*r;if(b.length===4&&px>=b[0]-60&&px<=b[2]+60&&py>=b[1]-120&&py<=b[3]+60)continue;if(ws.some(w=>px>=w[0]-40&&px<=w[2]+40&&py>=w[1]-140&&py<=w[3]+40))continue;const e=document.elementFromPoint(cx,cy);if(!e||!e.closest('.page-track'))continue;if(e.closest('.webwindow,.tile,.home-tile,.app,.panel,.widget,.island,.owl,button,a,input,textarea,.bar,.dock,[data-key]'))continue;const m=d<0?px-20:d>0?W-20-px:len;if(m>=len)return Math.round(px)+' '+Math.round(py);if(m>room){room=m;best=Math.round(px)+' '+Math.round(py)}}return best||'none'})()"
+}
+
+# pageswipept <way -1|1> <length px>: where a sideways swipe that long ([way] -1: finger left, to the next page; 1: back)
+# is home's PAGE swipe, by the shell's own rule (gesture.ts startGesture/claimSideways): on home's page track or its
+# search bar, outside every window and the dock, not on a control that owns its drag (gesture.ts OWN), no scroller under
+# the finger with room that way (scrollown.ts roomAt - the same function), no widget stack that pages itself
+# (stackmodel.ts stackSwipeAt). A full home has no empty spot (perf-scenarios 1124-0308: "no empty spot on home"), so
+# a widget, a tile or an icon under the finger is fine: a quick drag on them pages home. Prefers an empty spot, then
+# one over items, then the search bar (sideways there always pages, chromeWay). Never moves anything.
+# Prints "x y kind" (kind: empty|item|bar), or none.
+PAGESWIPE_OWN=".letter-bar, input[type=range], [role=slider], [data-owns-gesture], .resize-handle, .menu, .mic, .cc-editing"
+pageswipept() {
+  local ws; ws=$(winrects)
+  ev "Promise.all([importShim('./ui/scrollown.ts'),importShim('./ui/stackmodel.ts'),importShim('./ui/desktops.ts')]).then(([S,K,D])=>{const r=devicePixelRatio,d=${1:--1},len=${2:-0},W=innerWidth*r,home=document.querySelector('.home'),ws='$ws'.split(',').filter(Boolean).map(s=>s.split(' ').map(Number));if(!home)return 'none';const best=[null,null,null],ys=[];for(let y=.15;y<=.95+1e-9;y+=.04)ys.push(y);for(const fy of ys)for(let fx=.04;fx<=.96+1e-9;fx+=.04){const cx=innerWidth*fx,cy=innerHeight*fy,px=cx*r,py=cy*r;if((d<0?px-20:W-20-px)<len)continue;if(ws.some(w=>px>=w[0]-40&&px<=w[2]+40&&py>=w[1]-140&&py<=w[3]+40))continue;const e=document.elementFromPoint(cx,cy);if(!e||!home.contains(e)||e.closest('.webwindow,.dock,.strip,.dock-pages,.cc-subs,$PAGESWIPE_OWN'))continue;let k;if(e.closest('.home > .bar'))k=2;else{if(!e.closest('.page-track')||D.inWindow(cx,cy))continue;if(S.roomAt(e,cx,cy,home).x[d<0?1:0])continue;if(K.stackSwipeAt(e,d*len/r,cx,cy))continue;k=e.closest('.tile,.home-tile,.app,.panel,.widget,.island,.owl,.aw-face,.stack-strip,button,a,[data-key]')?1:0}if(!best[k])best[k]=Math.round(px)+' '+Math.round(py)+' '+['empty','item','bar'][k]}return best.find(Boolean)||'none'})"
 }
 
 # Tasks and windows.
@@ -480,12 +494,14 @@ e2e_setup() {
   [ "${1:-}" != inner ] || [ "$W" -gt 2000 ] || { echo "ENV: the inner screen didn't come on ($WH) - stopping"; exit 5; }
   DENS=$(sh_ "wm density" | grep -oE '[0-9]+' | tail -1)
   kg() { sh_ "dumpsys window policy | grep -m1 -E \"mIsShowing=\""; }
-  if kg | grep -q true; then
+  # kg_up: read to the end (a `kg | grep -q` closed the pipe on the session's answer: "Broken pipe" in every log).
+  kg_up() { case $(kg) in *true*) return 0 ;; esac; return 1; }
+  if kg_up; then
     sh_ "wm dismiss-keyguard"; sleep 1.5
-    kg | grep -q true && { swipe $((W / 2)) $((H * 9 / 10)) $((W / 2)) $((H / 4)) 300 "the lock face"; sleep 1.5; }
-    kg | grep -q true && { echo "ENV: the keyguard didn't go (a PIN?) - stopping"; exit 5; }
+    kg_up && { swipe $((W / 2)) $((H * 9 / 10)) $((W / 2)) $((H / 4)) 300 "the lock face"; sleep 1.5; }
+    kg_up && { echo "ENV: the keyguard didn't go (a PIN?) - stopping"; exit 5; }
   fi
-  sh_ "dumpsys window | grep -m1 mCurrentFocus" | grep -qi PowosLock && { swipe $((W / 2)) $((H * 9 / 10)) $((W / 2)) $((H / 4)) 300 "the lock face"; sleep 1.5; }
+  case $(sh_ "dumpsys window | grep -m1 mCurrentFocus") in *[Pp]owos[Ll]ock*) true ;; *) false ;; esac && { swipe $((W / 2)) $((H * 9 / 10)) $((W / 2)) $((H / 4)) 300 "the lock face"; sleep 1.5; }
   chk lock
   # Home's page first: going home while home shows turns it to page 1 (state.ts goHome).
   PAGE0=$(hpage); [[ $PAGE0 =~ ^-?[0-9]+$ ]] || PAGE0=0; LAY0=$(layout)
