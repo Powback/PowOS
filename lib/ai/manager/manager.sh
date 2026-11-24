@@ -237,9 +237,16 @@ manager_run() {
         shift
     done
 
+    _manager_turn "$store" "${passthru[@]}"
+}
+
+# manager_run's turn once its own flags are handled: the sidebar's --list-json query, else the persona load and the chat
+# turn. $1: the session store, the rest: the broker's flags (manager_run's pass-throughs).
+_manager_turn() {
+    local store="$1"; shift
     # Lightweight data query for the widget sidebar — skip the (expensive)
     # persona load / mcp wiring / context gathering the chat path needs.
-    if [[ " ${passthru[*]} " == *" --list-json "* ]]; then
+    if [[ " $* " == *" --list-json "* ]]; then
         export COMMS_ROOT
         python3 "$MANAGER_SERVER" --agent-id manager --session-store "$store" --list-json
         return
@@ -255,9 +262,9 @@ manager_run() {
     # The AI config, the Anthropic endpoint included (/etc/powos/ai/endpoint.conf: the fleet's auth authority), so the
     # manager's claude uses it wherever it's started - not only from a session whose environment.d already has it
     # (a phone's PowOS session doesn't).
-    _manager_load_or_install "${passthru[@]}" || return
-    _manager_signed_in "${passthru[@]}" || return 4
-    _manager_chat "$store" "${passthru[@]}"
+    _manager_load_or_install "$@" || return
+    _manager_signed_in "$@" || return 4
+    _manager_chat "$store" "$@"
 }
 
 # No endpoint and no Claude login in the image (the non-root build before its user signs in): no claude run that only
