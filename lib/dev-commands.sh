@@ -721,6 +721,86 @@ EOF
     echo "  4. powos dev enable $name"
 }
 
+# dev_fork's pieces (split for the complexity ratchet): the fork's build.sh. A KDE app: cmake.
+_dev_fork_build_sh_kde() {
+    local proj_dir="$1"
+    cat > "$proj_dir/build.sh" << 'BUILDEOF'
+#!/bin/bash
+# Build script for KDE app
+set -euo pipefail
+
+SRC_DIR="$(dirname "$0")/src"
+OUTPUT_DIR="${1:-/var/lib/powos/extensions/$(basename $(dirname "$0"))}"
+
+echo "Building from: $SRC_DIR"
+echo "Output to: $OUTPUT_DIR"
+
+mkdir -p "$OUTPUT_DIR/usr/bin"
+mkdir -p "$OUTPUT_DIR/usr/lib64"
+mkdir -p "$OUTPUT_DIR/usr/share/applications"
+
+cd "$SRC_DIR"
+rm -rf build && mkdir -p build && cd build
+
+cmake .. \
+    -DCMAKE_INSTALL_PREFIX=/usr \
+    -DCMAKE_BUILD_TYPE=Release \
+    -DBUILD_TESTING=OFF
+
+make -j$(nproc)
+make install DESTDIR="$OUTPUT_DIR"
+
+echo "Build complete!"
+BUILDEOF
+}
+
+# Any other fork: probe the common build systems (cmake, make, configure).
+_dev_fork_build_sh_generic() {
+    local proj_dir="$1"
+    cat > "$proj_dir/build.sh" << 'BUILDEOF'
+#!/bin/bash
+set -euo pipefail
+
+SRC_DIR="$(dirname "$0")/src"
+OUTPUT_DIR="${1:-/var/lib/powos/extensions/$(basename $(dirname "$0"))}"
+
+echo "Building from: $SRC_DIR"
+echo "Output to: $OUTPUT_DIR"
+
+mkdir -p "$OUTPUT_DIR/usr/bin"
+
+cd "$SRC_DIR"
+
+# Try common build systems
+if [[ -f "CMakeLists.txt" ]]; then
+    rm -rf build && mkdir -p build && cd build
+    cmake .. -DCMAKE_INSTALL_PREFIX=/usr
+    make -j$(nproc)
+    make install DESTDIR="$OUTPUT_DIR"
+elif [[ -f "Makefile" ]]; then
+    make
+    make install PREFIX=/usr DESTDIR="$OUTPUT_DIR"
+elif [[ -f "configure" ]]; then
+    ./configure --prefix=/usr
+    make
+    make install DESTDIR="$OUTPUT_DIR"
+else
+    echo "No recognized build system. Edit build.sh manually."
+    exit 1
+fi
+
+echo "Build complete!"
+BUILDEOF
+}
+
+# The fork's executable build.sh: cmake for a KDE app, else a generic build-system probe.
+_dev_fork_build_sh() {
+    local proj_dir="$1" type="$2"
+    if [[ "$type" == "kde" ]]; then _dev_fork_build_sh_kde "$proj_dir"
+    else _dev_fork_build_sh_generic "$proj_dir"; fi
+    chmod +x "$proj_dir/build.sh"
+}
+
 dev_fork() {
     local upstream=""
     local use_docker=""
@@ -776,7 +856,9 @@ dev_fork() {
         name="$app"
         type="kde"
 
-        # Load KDE config
+        # Load KDE config. Declared first: without the conf (a phone, a fresh install) the array is undeclared and
+        # under set -u bash reads ${KDE_APP_CATEGORIES[dolphin]} as an indexed array, "dolphin: unbound variable".
+        declare -A KDE_APP_CATEGORIES=()
         local kde_conf="${POWOS_ROOT:-/var/lib/powos}/sources/kde/dev.conf"
         if [[ -f "$kde_conf" ]]; then
             source "$kde_conf"
@@ -834,74 +916,7 @@ EOF
         echo "BUILD_DEPS=\"$BUILD_DEPS\"" >> "$proj_dir/project.conf"
     fi
 
-    # Create build.sh for KDE apps
-    if [[ "$type" == "kde" ]]; then
-        cat > "$proj_dir/build.sh" << 'BUILDEOF'
-#!/bin/bash
-# Build script for KDE app
-set -euo pipefail
-
-SRC_DIR="$(dirname "$0")/src"
-OUTPUT_DIR="${1:-/var/lib/powos/extensions/$(basename $(dirname "$0"))}"
-
-echo "Building from: $SRC_DIR"
-echo "Output to: $OUTPUT_DIR"
-
-mkdir -p "$OUTPUT_DIR/usr/bin"
-mkdir -p "$OUTPUT_DIR/usr/lib64"
-mkdir -p "$OUTPUT_DIR/usr/share/applications"
-
-cd "$SRC_DIR"
-rm -rf build && mkdir -p build && cd build
-
-cmake .. \
-    -DCMAKE_INSTALL_PREFIX=/usr \
-    -DCMAKE_BUILD_TYPE=Release \
-    -DBUILD_TESTING=OFF
-
-make -j$(nproc)
-make install DESTDIR="$OUTPUT_DIR"
-
-echo "Build complete!"
-BUILDEOF
-    else
-        # Generic build.sh
-        cat > "$proj_dir/build.sh" << 'BUILDEOF'
-#!/bin/bash
-set -euo pipefail
-
-SRC_DIR="$(dirname "$0")/src"
-OUTPUT_DIR="${1:-/var/lib/powos/extensions/$(basename $(dirname "$0"))}"
-
-echo "Building from: $SRC_DIR"
-echo "Output to: $OUTPUT_DIR"
-
-mkdir -p "$OUTPUT_DIR/usr/bin"
-
-cd "$SRC_DIR"
-
-# Try common build systems
-if [[ -f "CMakeLists.txt" ]]; then
-    rm -rf build && mkdir -p build && cd build
-    cmake .. -DCMAKE_INSTALL_PREFIX=/usr
-    make -j$(nproc)
-    make install DESTDIR="$OUTPUT_DIR"
-elif [[ -f "Makefile" ]]; then
-    make
-    make install PREFIX=/usr DESTDIR="$OUTPUT_DIR"
-elif [[ -f "configure" ]]; then
-    ./configure --prefix=/usr
-    make
-    make install DESTDIR="$OUTPUT_DIR"
-else
-    echo "No recognized build system. Edit build.sh manually."
-    exit 1
-fi
-
-echo "Build complete!"
-BUILDEOF
-    fi
-    chmod +x "$proj_dir/build.sh"
+    _dev_fork_build_sh "$proj_dir" "$type"
 
     # Dockerize if requested
     if [[ -n "$use_docker" ]]; then
@@ -1309,6 +1324,48 @@ dev_override_diff() {
 # the bridge from runtime `dev fork` (per-machine) to the committable sources/
 # overlay system. The patch is git-format (a/ b/) so `git apply`/`patch -p1`
 # both accept it — generated via a throwaway git repo (no text munging).
+# dev_patch's pieces (split for the complexity ratchet). Where a fork's patches live: KDE forks share
+# sources/kde/patches/<app>/, others get their own tree.
+_dev_patch_dest() {
+    local proj="$1" sources="$2" name="$3" utype
+    utype="$(_dev_conf_get "$proj/project.conf" UPSTREAM_TYPE)"
+    if [[ "$utype" == "kde" ]]; then echo "$sources/kde/patches/$name"
+    else echo "$sources/$name/patches/$name"; fi
+}
+
+# The fork's src vs a pristine-upstream git base, as a clean a/ b/ patch on stdout (incl. deletions).
+_dev_patch_diff() {
+    local proj="$1"
+    # Diff src vs a pristine-upstream git base → clean a/ b/ patch (incl. deletions).
+    local tmp; tmp="$(mktemp -d)"
+    cp -a "$proj/upstream/." "$tmp/" 2>/dev/null
+    # upstream/ is a clone and carries its own .git — drop it, or `git init` is
+    # a no-op and the base commit fails ("nothing to commit"), aborting under
+    # set -e before any patch is written.
+    rm -rf "$tmp/.git"
+    ( cd "$tmp" && git init -q && git add -A \
+        && git -c user.email=powos@localhost -c user.name=PowOS commit -qm base ) 2>/dev/null
+    if command -v rsync &>/dev/null; then
+        # --checksum: by content (by size+mtime, a same-size edit within the same second was skipped).
+        rsync -a --checksum --delete --exclude=.git "$proj/src/" "$tmp/"
+    else
+        cp -a "$proj/src/." "$tmp/"
+    fi
+    (cd "$tmp" && git add -A && git -c core.autocrlf=false diff --cached)
+    rm -rf "$tmp"
+}
+
+# How to commit the written patch: a git checkout gets the exact command, else where to take it.
+_dev_patch_hint() {
+    local dest="$1" srcroot="$2" out="$3" name="$4" desc="$5"
+    if git -C "$dest" rev-parse --is-inside-work-tree &>/dev/null; then
+        plog "Review it, then:  git -C \"$srcroot\" add \"$out\" && git -C \"$srcroot\" commit -m \"$name: $desc\""
+    else
+        pwarn "$srcroot isn't a git checkout: copy the patch into one" \
+            "(or: powos self pull, then run this again) to commit it."
+    fi
+}
+
 dev_patch() {
     local name="${1:-}" desc="${2:-changes}"
     [[ -z "$name" ]] && { plog "Usage: powos dev patch <name> [description]"; return 1; }
@@ -1321,32 +1378,17 @@ dev_patch() {
 
     # Repo sources dir: the bundled source on a running system, else the dev
     # checkout that holds this lib.
-    local sources="${POWOS_SRC:-/var/lib/powos/src}/sources"
+    # The checkout `powos self`/`reload` use first (powos_src_find: a git clone such as ~/Projects/PowOS): a patch
+    # written into the baked /var/lib/powos/src of a phone landed outside any git tree.
+    local srcroot; srcroot="${POWOS_SRC:-$(powos_src_find 2>/dev/null || echo /var/lib/powos/src)}"
+    local sources="$srcroot/sources"
     [[ -d "$sources" ]] || sources="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)/sources"
 
     # KDE forks share sources/kde/patches/<app>/; others get their own tree.
-    local utype dest
-    utype="$(_dev_conf_get "$proj/project.conf" UPSTREAM_TYPE)"
-    if [[ "$utype" == "kde" ]]; then dest="$sources/kde/patches/$name"
-    else dest="$sources/$name/patches/$name"; fi
+    local dest; dest="$(_dev_patch_dest "$proj" "$sources" "$name")"
     mkdir -p "$dest"
 
-    # Diff src vs a pristine-upstream git base → clean a/ b/ patch (incl. deletions).
-    local tmp; tmp="$(mktemp -d)"
-    cp -a "$proj/upstream/." "$tmp/" 2>/dev/null
-    # upstream/ is a clone and carries its own .git — drop it, or `git init` is
-    # a no-op and the base commit fails ("nothing to commit"), aborting under
-    # set -e before any patch is written.
-    rm -rf "$tmp/.git"
-    ( cd "$tmp" && git init -q && git add -A \
-        && git -c user.email=powos@localhost -c user.name=PowOS commit -qm base ) 2>/dev/null
-    if command -v rsync &>/dev/null; then
-        rsync -a --delete --exclude=.git "$proj/src/" "$tmp/"
-    else
-        cp -a "$proj/src/." "$tmp/"
-    fi
-    local patch; patch="$(cd "$tmp" && git add -A && git -c core.autocrlf=false diff --cached)"
-    rm -rf "$tmp"
+    local patch; patch="$(_dev_patch_diff "$proj")"
 
     if [[ -z "$patch" ]]; then
         pwarn "No changes between src and upstream — nothing to patch."
@@ -1356,11 +1398,13 @@ dev_patch() {
     local count n out
     count="$(find "$dest" -maxdepth 1 -name '*.patch' 2>/dev/null | wc -l)"
     n="$(printf '%03d' "$((count + 1))")"
-    out="$dest/${n}-${desc}.patch"
+    # The file name as a slug ("manager test" made "001-manager test.patch"); the description stays as typed.
+    local slug; slug="$(printf '%s' "$desc" | tr '[:upper:]' '[:lower:]' | tr -cs 'a-z0-9' '-' | sed 's/^-*//; s/-*$//')"
+    out="$dest/${n}-${slug:-changes}.patch"
     printf '%s\n' "$patch" > "$out"
 
     pok "Wrote committable patch → $out"
-    plog "Review it, then:  git add \"$out\" && git commit -m \"$name: $desc\""
+    _dev_patch_hint "$dest" "$srcroot" "$out" "$name" "$desc"
     plog "Every image build applies it to the app source (git apply / patch -p1)."
 }
 

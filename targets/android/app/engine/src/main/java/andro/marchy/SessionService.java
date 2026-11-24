@@ -152,15 +152,18 @@ public class SessionService extends Service {
         startLocation(this);
         // Active network for the NetworkManager stand-in (android-nm): apps cannot see the interfaces.
         getSystemService(ConnectivityManager.class).registerDefaultNetworkCallback(network);
-        // Requests from Linux for Android-only actions (Wi-Fi panel, launching Android apps).
-        requests = new AndroidRequests(this, runDir(this));
-        requests.startWatching();
-        // No root: the phone's own adb (Wireless debugging) handed to the Linux side in run/adb-link (AdbLink).
+        // No root: the phone's own adb (Wireless debugging) handed to the Linux side in run/adb-link (AdbLink). Before
+        // the requests start: their run/android-request.verbs lists "adb-link" only if AdbLink.current is set when it
+        // is written - after it, no no-root phone ever advertised the verb and `powos android link` said "update the
+        // app" (S25 11-23, APK 29924289).
         if (!RootMode.enabled()) {
             adbLink = new AdbLink(this, runDir(this));
             AdbLink.current = adbLink;
             adbLink.refreshNow();
         }
+        // Requests from Linux for Android-only actions (Wi-Fi panel, launching Android apps).
+        requests = new AndroidRequests(this, runDir(this));
+        requests.startWatching();
         // Android apps in PowOS's application menu (.desktop entries in the rootfs, launched through the requests above).
         apps = new AndroidApps(this);
         apps.register(this);

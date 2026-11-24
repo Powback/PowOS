@@ -658,7 +658,9 @@ def publish_module(d, m):
     # Published outside the ship service (apps/install.sh run by it sets POWOS_SHIPPED=1): said loudly - a schema
     # ahead of what other apps' bindings decode breaks their subscriptions (2026-10-30: powos-agents' work.try_line,
     # published from an agent's worktree before the shell's bindings had it).
-    if not os.environ.get("POWOS_SHIPPED"):
+    # A person's own app (local.*: database local-*) ships its bindings with this same install - nobody else decodes
+    # its schema, so the warning only frightened them (no-root S25, 11-23). Shared/system databases keep it.
+    if not os.environ.get("POWOS_SHIPPED") and not mod["database"].startswith("local-"):
         print(f"powos app: WARNING - publishing {mod['database']} outside the ship service: if its schema changed, "
               "every client's bindings must already have the change (tools/phone/ship.sh ships the module with them)",
               file=sys.stderr)

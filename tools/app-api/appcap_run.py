@@ -268,7 +268,14 @@ def main() -> int:
                 data = (b if isinstance(b, str) else json.dumps(b)).encode()
                 headers["content-type"] = "text/plain" if isinstance(b, str) else "application/json"
             if auth and tok_handle:                      # resolve in-process, never print
-                val = appcap_store.get_secret(tok_handle).decode()
+                try:
+                    val = appcap_store.get_secret(tok_handle).decode()
+                except KeyError:
+                    # No session/key stored yet (an imported OpenAPI with global security, never signed in): a plain
+                    # refusal, not a traceback - the caller (AI, widget, CLI) says what is missing.
+                    print(f"REFUSED: no {auth} credential for '{spec.get('app')}' yet ({tok_handle}): sign in or add "
+                          "its key in App API first", file=sys.stderr)
+                    return 3
                 t = (spec.get("auth") or {}).get("tokens", {}).get(auth, {})
                 headers[t.get("header", "authorization")] = (
                     val if t.get("type") != "bearer" or val.lower().startswith("bearer") else "Bearer " + val)
