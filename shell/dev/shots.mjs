@@ -321,6 +321,16 @@ const DOCK_WIN = (extra) =>
   `const W = await U('./ui/webwindows.tsx'); const D = await U('./ui/desktops.ts'); const p = S.pages.value[0]; const k = S.dock.value.find((d) => d.startsWith('a:')) ?? 'a:x';` +
   ` W.webWins.value = [{ id: 2, key: 'a:y', label: 'Files', page: p, x: Math.round(innerWidth * 0.35), y: 200, w: Math.round(innerWidth * 0.45), h: 300, live: true }, { id: 1, key: k, label: 'Docked app', page: p, x: 30, y: 80, w: Math.round(innerWidth * 0.5), h: 380, live: true }];` +
   PAINT + ` await sleep(300); ${extra}`;
+/**
+ * TB1 (docs/WEB_WINDOWS.md "Title bar: native parity"): a maximised window whose app went immersive (a video full
+ * screen, a game) - its bar auto-hidden, the app taking the whole work area; [reveal]: a pull from the top edge slid the
+ * bar in over the app (the app keeps its size).
+ */
+const BAR_AUTOHIDE = (reveal) =>
+  `const W = await U('./ui/webwindows.tsx'); const R = await U('./ui/barreveal.ts'); const p = S.pages.value[0];` +
+  ` W.webWins.value = [{ id: 1, key: 'a:Chrome', label: 'Chrome', page: p, x: 40, y: 120, w: 360, h: 420, live: true }];` +
+  PAINT + ` await sleep(200); W.toggleMaximise(1); await sleep(400); window.__mockEvents.emit('webwindows.immersive', { id: 1, on: true }); await sleep(1200);` +
+  (reveal ? ` R.BAR_REVEAL.ms = 600000; R.revealBar(1); await sleep(1200);` : "");
 const TILE_SIZES = { unfolded: SIZES.unfolded, "unfolded-land": LAND_SIZES["unfolded-land"] };
 /**
  * WT1/WT2: two floating windows (Chrome, Dolphin); Dolphin's bar dragged onto Chrome's, held ([up] false: the lit bar and
@@ -422,6 +432,9 @@ const SCENES = [
   ["ww-tile-dock-3", "home", TILES(2) + DOCK_DRAG(0.92, 0.6, true), "wallpaper", undefined, TILE_SIZES],
   // WT1/WT2: tabs - Dolphin's bar held over Chrome's (the lit bar, the ghost tab), let go (one window, two tabs), and the
   // stack tiled beside a third window.
+  // TB1: the auto-hidden bar of an immersive maximised app, and slid in by a pull from the top edge.
+  ["ww-bar-autohide", "home", BAR_AUTOHIDE(false), "wallpaper", undefined, TILE_SIZES],
+  ["ww-bar-reveal", "home", BAR_AUTOHIDE(true), "wallpaper", undefined, TILE_SIZES],
   ["ww-tabs-aim", "home", TABS(false), "wallpaper", undefined, TILE_SIZES],
   ["ww-tabs", "home", TABS(true), "wallpaper", undefined, TILE_SIZES],
   // WT3: a window dragged over a maximised one tabs into it (the strip's ghost tab; let go: a maximised group of two, the
