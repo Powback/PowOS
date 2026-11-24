@@ -11,13 +11,19 @@
  *
  * Every step is marked (powos.lock.mark: logcat PowosUnlock, with the phone's uptime, next to the native steps):
  * ready (the page shown and painting), swipe start, swipe commit.
+ *
+ * What's new is the shade's own cards and groups (notifications.tsx Card/Stack, locked: no actions, no opening, no
+ * dismiss): a tap on a card expands it in place - its whole text, its picture - and a tap again folds it; a group's
+ * "+N more" unfolds the rest and its head folds it again (the user, 11-24: "Update installed · 18 changes ... and 14
+ * more" couldn't be opened). The face takes the finger only once it moves (SLOP): it used to capture every touch at
+ * pointerdown, so no tap ever reached a card. Opening the app is still the unlock's.
  */
 import { useEffect, useLayoutEffect, useRef, useState } from "preact/hooks";
 import { powos } from "../bridge.ts";
-import { ago, useMinuteClock } from "./time.ts";
+import { useMinuteClock } from "./time.ts";
 import type { Battery, NotificationList } from "../types.ts";
 import { chargeLine } from "./charge.ts";
-import { NotifGlyph, notifIconSrc, type GroupedNotification } from "./notifications.tsx";
+import { foldAll, grouped, Stack, type Group, type GroupedNotification } from "./notifications.tsx";
 import { arrive, leave } from "./notifmotion.ts";
 
 /** Lifted this far (of the height) when let go, it unlocks. */
@@ -26,24 +32,32 @@ const UNLOCK = 0.33;
 const FLICK = 0.45;
 /** ms without a move before the release: the finger was held still. */
 const STILL = 80;
-/** What's new, at most. */
+/** What's new, at most: rows (a group, a single, a conversation). */
 const SHOWN = 5;
+/** px the finger moves before it's the face's swipe; less, and let go, it was a tap (a card's, a group's). */
+const SLOP = 10;
 
 const two = (n: number) => String(n).padStart(2, "0");
 
-type Note = NotificationList["items"][number];
-/** A card on the face: shown, or on its way out (gone from the list, fading as its gap closes: §6). */
-type Row = { n: Note; leaving?: boolean };
+/** A row on the face (a group, a single, a conversation: the shade's): shown, or on its way out (gone from the list,
+ * fading as its gap closes: §6). */
+type Row = { g: Group; leaving?: boolean };
 
 /**
- * [prev]'s rows brought to [items]: the new list in its order, and every card that left it kept where it was, leaving -
- * it was dropped in one frame (the cards under it jumped up).
+ * [prev]'s rows brought to [items]: the new list in its order, and every row that left it kept where it was, leaving -
+ * it was dropped in one frame (the rows under it jumped up).
  */
-export function lockRows(prev: Row[], items: Note[]): Row[] {
-  const keys = new Set(items.map((n) => n.key));
-  const out: Row[] = items.map((n) => ({ n }));
-  prev.forEach((r, i) => keys.has(r.n.key) || out.splice(Math.min(i, out.length), 0, { n: r.n, leaving: true }));
+export function lockRows(prev: Row[], items: Group[]): Row[] {
+  const keys = new Set(items.map((g) => g.id));
+  const out: Row[] = items.map((g) => ({ g }));
+  prev.forEach((r, i) => keys.has(r.g.id) || out.splice(Math.min(i, out.length), 0, { g: r.g, leaving: true }));
   return out;
+}
+
+/** The shade's grouping, one row each, in its order: the conversations, the singles, then the groups. */
+function lockGroups(items: GroupedNotification[]): Group[] {
+  const { convos, singles, groups } = grouped(items);
+  return [...convos, ...singles, ...groups].slice(0, SHOWN);
 }
 
 /**
@@ -54,6 +68,31 @@ function lift(p: number, settling: boolean) {
   const root = document.documentElement;
   root.classList.toggle("lock-settling", settling);
   root.style.setProperty("--lock-lift", String(p));
+}
+
+/**
+ * The finger moved past SLOP: the face's swipe from here on, wherever it goes (captured). Less: still maybe a tap - false.
+ */
+function claim(d: { x0: number; y0: number; moved: boolean }, e: PointerEvent): boolean {
+  if (Math.hypot(e.clientX - d.x0, e.clientY - d.y0) <= SLOP) return false;
+  d.moved = true;
+  void powos.lock.mark("swipe start");
+  try {
+    (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
+  } catch {
+    // A pointer already up (or a synthetic one): nothing to capture.
+  }
+  return true;
+}
+
+/** A swipe let go: how far it lifted the face (p), its speed up (v) and whether it unlocks. */
+function verdict(d: { y0: number; last: [number, number]; v: number }, cancelled: boolean) {
+  const p = Math.max(0, (d.y0 - d.last[0]) / innerHeight);
+  // Held still before letting go: no flick. A finger at rest sends no moves, so the last one's speed is stale.
+  const v = performance.now() - d.last[1] > STILL ? 0 : d.v;
+  // A flick decides; otherwise where it was let go. Taken away (a system gesture had the finger): it falls back.
+  const open = !cancelled && (v > FLICK ? true : v < -FLICK ? false : p > UNLOCK);
+  return { p, v, open };
 }
 
 export function Lock() {
@@ -67,9 +106,12 @@ export function Lock() {
   /** The finger on the face: where it went down, its last sample and its velocity up (px/ms). */
   const drag = useRef<{
     id: number;
+    x0: number;
     y0: number;
     last: [number, number];
     v: number;
+    /** Moved past SLOP: the face's swipe (captured); until then a tap may be a card's. */
+    moved: boolean;
   } | null>(null);
   /** The face on its way out (unlock asked): no new swipe until it is shown again. */
   const going = useRef(false);
@@ -78,30 +120,44 @@ export function Lock() {
   const notes = useRef<HTMLDivElement>(null);
   const seen = useRef(new WeakSet<Element>());
   const [rows, setRows] = useState<Row[]>([]);
-  useEffect(() => setRows((prev) => lockRows(prev, list.items.slice(0, SHOWN))), [list]);
+  useEffect(() => setRows((prev) => lockRows(prev, lockGroups(list.items as GroupedNotification[]))), [list]);
   /** The cards leaving, by key: each one's cancel (it came back before it was gone). */
   const leaving = useRef(new Map<string, () => void>());
   useLayoutEffect(() => {
-    const cards = [...(notes.current?.children ?? [])] as HTMLElement[];
+    const cards = [...(notes.current?.querySelector(".notif-items")?.children ?? [])] as HTMLElement[];
     arrive(cards.filter((c) => !seen.current.has(c)));
     for (const c of cards) seen.current.add(c);
-    const going = new Set(rows.filter((r) => r.leaving).map((r) => r.n.key));
+    const going = new Set(rows.filter((r) => r.leaving).map((r) => r.g.id));
     for (const [key, cancel] of leaving.current) if (!going.has(key)) (cancel(), leaving.current.delete(key));
     for (const c of cards) {
       const key = c.dataset.key!;
       if (!going.has(key) || leaving.current.has(key)) continue;
       leaving.current.set(key, leave(c, () => {
         leaving.current.delete(key);
-        setRows((r) => r.filter((x) => !(x.leaving && x.n.key === key)));
+        setRows((r) => r.filter((x) => !(x.leaving && x.g.id === key)));
       }));
     }
   });
+  // lockScroll: expanded past the room it has (a long group unfolded), the list scrolls - and only then: a swipe on the
+  // cards is the face's unlock while everything fits (shell.css .lock-notes[data-scrolls]).
+  useEffect(() => {
+    const box = notes.current;
+    const items = box?.firstElementChild;
+    if (!box || !items || typeof ResizeObserver !== "function") return;
+    const fit = () => box.toggleAttribute("data-scrolls", items.scrollHeight > box.clientHeight + 1);
+    const ro = new ResizeObserver(fit);
+    ro.observe(box);
+    ro.observe(items);
+    return () => ro.disconnect();
+  }, []);
   useEffect(() => {
     const refresh = () => {
       // Shown again (the screen back on, the PIN pad backed out of): the face whole, wherever it was left.
       going.current = false;
       drag.current = null;
       lift(0, false);
+      // Folded again, as a shut shade starts (notifications.tsx).
+      foldAll();
       // Painting again (a frame after being shown): from here the swipe is answered.
       requestAnimationFrame(() => void powos.lock.mark("ready"));
       powos.system.battery().then(setBattery);
@@ -121,11 +177,9 @@ export function Lock() {
     const d = drag.current;
     if (!d || d.id !== e.pointerId) return;
     drag.current = null;
-    const p = Math.max(0, (d.y0 - d.last[0]) / innerHeight);
-    // Held still before letting go: no flick. A finger at rest sends no moves, so the last one's speed is stale.
-    const v = performance.now() - d.last[1] > STILL ? 0 : d.v;
-    // A flick decides; otherwise where it was let go. Taken away (a system gesture had the finger): it falls back.
-    const open = !cancelled && (v > FLICK ? true : v < -FLICK ? false : p > UNLOCK);
+    // Never moved: a tap (a card's own, handled there), not a swipe.
+    if (!d.moved) return;
+    const { p, v, open } = verdict(d, cancelled);
     lift(open ? 1 : 0, true);
     if (!open) return void powos.lock.mark(`swipe fell back p=${p.toFixed(2)} v=${v.toFixed(2)}`);
     // Asked the moment the swipe commits; the face's slide out runs alongside (no wait for it to end).
@@ -139,19 +193,21 @@ export function Lock() {
       class="lock"
       onPointerDown={(e) => {
         if (drag.current || going.current) return;
-        void powos.lock.mark("swipe start");
-        (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
+        // Not captured yet: a tap on a card or a group's head is theirs (captured here, no tap ever reached them).
         drag.current = {
           id: e.pointerId,
+          x0: e.clientX,
           y0: e.clientY,
           last: [e.clientY, performance.now()],
           v: 0,
+          moved: false,
         };
         lift(0, false);
       }}
       onPointerMove={(e) => {
         const d = drag.current;
         if (!d || d.id !== e.pointerId) return;
+        if (!d.moved && !claim(d, e)) return;
         const t = performance.now();
         const [ly, lt] = d.last;
         if (t > lt) d.v = (ly - e.clientY) / (t - lt);
@@ -174,19 +230,17 @@ export function Lock() {
           .toLowerCase()}
         {battery.level != null && ` · ${battery.charging ? "⚡" : ""}${battery.level}%`}
       </div>
+      {/* The shade's cards, locked (notifications.tsx Stack/Card): K2's icons are the shade's (the small icon in its app's
+          color, else the app's), each card wears THE backdrop (.lock-note, shell.css K3). It scrolls only once it's
+          taller than the room it has (lockScroll); else a swipe on it is the face's. */}
       <div class="lock-notes" ref={notes}>
-        {rows.map(({ n, leaving: out }) => (
-          <div key={n.key} data-key={n.key} class={`lock-note tile${out ? " leaving" : ""}`} inert={out || undefined}>
-            {/* K2: the shade's own icon (notifications.tsx SmallIcon's NotifGlyph): the notification's small icon in its app's
-                color, else the app's icon - System UI, Play services and the like have no drawer icon, and showed none. */}
-            <NotifGlyph n={n as GroupedNotification} fallback={notifIconSrc(n)} />
-            <span class="lock-note-main">
-              <span class="lock-note-title">{n.title || n.app}</span>
-              <span class={`lock-note-text muted${n.text.includes("\n") ? " lines" : ""}`}>{n.text}</span>
-            </span>
-            <span class="muted lock-note-time">{ago(n.time)}</span>
-          </div>
-        ))}
+        <div class="notif-items">
+          {rows.map(({ g, leaving: out }) => (
+            <div key={g.id} data-key={g.id} class={`lock-row${out ? " leaving" : ""}`} inert={out || undefined}>
+              <Stack g={g} locked class="lock-note" />
+            </div>
+          ))}
+        </div>
       </div>
       {/* How it charges, as the stock lock screen says it: "Super fast charging · 1 h until full" (charge.ts). */}
       <div class="lock-foot">

@@ -9450,7 +9450,8 @@ async function lockUnlockGlassScene() {
   let asked = 0;
   powos.lock.unlock = async () => void asked++;
   const now = Date.now();
-  const items = [1, 2, 3, 4, 5].map((i) => ({ key: `gate.k4.${i}`, app: "Gate", pkg: "dev.gate", title: `Card ${i}`, text: "the blur goes with me", time: now - i * 60000 }));
+  // Five apps (one app's five are one group on the face now, as in the shade): five cards on the screen.
+  const items = [1, 2, 3, 4, 5].map((i) => ({ key: `gate.k4.${i}`, app: `Gate ${i}`, pkg: `dev.gate${i}`, title: `Card ${i}`, text: "the blur goes with me", time: now - i * 60000 }));
   window.__mockEvents.emit("notifications.changed", { available: true, items });
   try {
     if (!(await window.__gw.until(() => document.querySelectorAll(".lock-note").length === 5, 3000))) return ["K4: the 5 notification cards never showed on the lock face"];
@@ -9545,6 +9546,132 @@ async function lockCardsScene() {
   } finally {
     undo();
   }
+}
+
+/**
+ * LX1 (lock-screen-can-t-tap-to-expand-collapse-notific; the user, 11-24: on the lock face a tap didn't expand a
+ * notification - "Update installed · 18 changes ... and 14 more" couldn't be opened, nor folded again): with a real
+ * finger (CDP touch, so the face's capture and touch-action are the phone's), on the lock face
+ *  - the cards are the shade's (notifications.tsx Stack/Card): a group of 5 shows 3 and "+2 more";
+ *  - a tap on the update's card expands it in place, all 18 lines whole (none clamped, reachable: the list scrolls
+ *    when it's taller than its room); a tap again folds it;
+ *  - a tap on "+2 more" unfolds the group (5 cards shown); a tap on its head folds it again;
+ *  - no tap asked the unlock or opened an app; a swipe up starting on a card still unlocks.
+ */
+const LX_LINES = Array.from({ length: 18 }, (_, i) => `Change ${i + 1}: something got better`).join("\n");
+/** LX1's list: five updates from one sender (one has 18 lines) and one mail; the host's list() answers it too. */
+function lxSetup(lines) {
+  const now = Date.now();
+  const { powos } = window.__gwBridge;
+  window.__lx = { unlock: 0, open: 0 };
+  powos.lock.unlock = async () => void window.__lx.unlock++;
+  powos.notifications.open = async () => void window.__lx.open++;
+  const own = (i, text) => ({ key: `gate.lx.u${i}`, app: "PowOS", pkg: "com.powos.app", title: "Update installed", text, time: now - i * 60000, clearable: true });
+  const mail = { key: "gate.lx.mail", app: "Mail", pkg: "dev.gate.mail", title: "Your order has shipped", text: "It arrives Thursday.", time: now - 30000, icon: "./icons/powos.svg", clearable: true };
+  const list = { available: true, items: [own(1, `18 changes\n${lines}`), own(2, "3 changes"), own(3, "2 changes"), own(4, "1 change"), own(5, "5 changes"), mail] };
+  powos.notifications.list = async () => list;
+  window.__mockEvents.emit("notifications.changed", list);
+}
+/** Where a finger taps [el] (its middle, or 14 px down on a tall one), or null when it isn't laid out. */
+function lxAt(el) {
+  const b = el?.getBoundingClientRect();
+  return b?.height > 0 ? [Math.round(b.left + b.width / 2), Math.round(b.top + Math.min(b.height / 2, 14))] : null;
+}
+/** The update's card (its 18 lines): expanded, its text still cut, how many lines show, where to tap it. */
+function lxCard() {
+  const card = document.querySelector(".lock-notes .notif[aria-expanded]:has(.notif-text.lines)");
+  const text = card?.querySelector(".notif-text");
+  if (!text) return { cardAt: null };
+  const lh = parseFloat(getComputedStyle(text).lineHeight) || 16;
+  return { expanded: card.getAttribute("aria-expanded") === "true", clamped: text.scrollHeight > text.clientHeight + 2, lines: Math.round(text.clientHeight / lh), cardAt: lxAt(card.querySelector(".notif-title") ?? card) };
+}
+/** The face's group: open, its "+N more", how many of its cards are laid out, where its head and "+N more" are. */
+function lxGroup() {
+  const stack = document.querySelector(".lock-notes .notif-stack");
+  if (!stack) return { stack: false, shown: 0 };
+  const laid = (c) => c.getBoundingClientRect().height > 4 && !c.closest("[inert]");
+  const more = stack.querySelector(".notif-show-more");
+  return {
+    stack: true,
+    open: stack.classList.contains("open"),
+    more: more?.textContent.trim() ?? null,
+    shown: [...stack.querySelectorAll(".notif")].filter(laid).length,
+    moreAt: lxAt(more),
+    headAt: lxAt(stack.querySelector(".notif-group-head")),
+  };
+}
+/** The face's group (lxGroup), the list's reach and the update's card (lxCard). */
+function lxState() {
+  const notes = document.querySelector(".lock-notes");
+  const reach = !!notes && (notes.scrollHeight <= notes.clientHeight + 1 || notes.hasAttribute("data-scrolls"));
+  return { reach, lx: window.__lx, ...lxGroup(), ...lxCard() };
+}
+/** LX1's driver on [r]'s page: a real finger (fingerOf), the state read (lxState), a wait for a state. */
+async function lxDriver(r) {
+  const f = await fingerOf(r.page);
+  await r.page.evaluate(async () => (window.__gwBridge = await window.__gw.mod("./bridge.ts")));
+  await r.page.evaluate(lxSetup, LX_LINES);
+  // Its helpers as the page's globals (an evaluated function carries no closure).
+  await r.page.evaluate([lxAt, lxCard, lxGroup].map(String).join("\n"));
+  const st = () => r.page.evaluate(lxState);
+  // The state wanted, then the list at rest (a fold's spring moves what's under it: a tap mid-way lands beside it).
+  const until = async (ok, ms = 3000) => {
+    const end = Date.now() + ms;
+    let s = await st();
+    while (!ok(s) && Date.now() < end) await f.wait(60), (s = await st());
+    if (!ok(s)) return s;
+    await r.page.evaluate(() => window.__gw.settled());
+    return st();
+  };
+  return { f, st, until };
+}
+/** LX1, the update's card: a tap expands it whole, a tap again folds it. */
+async function lxCardSteps({ f, until }, label, fails) {
+  let s = await until((x) => x.stack && x.cardAt && x.more);
+  if (!s.stack) return void fails.push(`LX1 ${label}: the lock face shows no group (the shade's .notif-stack): 5 updates of one sender aren't grouped as in the shade`);
+  if (s.more !== "+2 more") fails.push(`LX1 ${label}: the group of 5 doesn't show 3 and "+2 more" (${s.more})`);
+  if (!s.cardAt) return void fails.push(`LX1 ${label}: no card for the update (its 18 lines)`);
+  if (!s.clamped) fails.push(`LX1 ${label}: folded, the update's 18 lines aren't clamped (nothing to expand)`);
+  await f.tap(s.cardAt);
+  s = await until((x) => x.expanded && !x.clamped);
+  if (!s.expanded) return void fails.push(`LX1 ${label}: a tap on the update's card didn't expand it`);
+  if (s.clamped || s.lines < 18) fails.push(`LX1 ${label}: expanded, the update's text is still cut (${s.lines} lines shown of 19)`);
+  if (!s.reach) fails.push(`LX1 ${label}: expanded, the list overflows the face and doesn't scroll (the rest unreachable)`);
+  await f.tap(s.cardAt);
+  s = await until((x) => !x.expanded);
+  if (s.expanded) fails.push(`LX1 ${label}: a tap again on the expanded card didn't fold it`);
+}
+/** LX1, the group: "+2 more" unfolds it (5 cards), a tap on its head folds it (3). */
+async function lxGroupSteps({ f, until }, label, fails) {
+  let s = await until((x) => x.moreAt);
+  if (!s.moreAt) return;
+  await f.tap(s.moreAt);
+  s = await until((x) => x.open && x.shown === 5);
+  if (!s.open || s.shown !== 5) return void fails.push(`LX1 ${label}: a tap on "+2 more" didn't unfold the group (${s.shown} of 5 cards shown, open ${s.open})`);
+  await f.tap(s.headAt);
+  s = await until((x) => !x.open && x.shown === 3, 4000);
+  if (s.open || s.shown !== 3) fails.push(`LX1 ${label}: a tap on the open group's head didn't fold it (${s.shown} shown, open ${s.open})`);
+}
+/** LX1, the swipe: from a card, up half the screen - still the face's unlock. */
+async function lxSwipeStep({ f, st, until, r }, label, fails) {
+  const s = await st();
+  if (!s.cardAt) return;
+  const [x, y] = s.cardAt;
+  const H = (await r.page.evaluate(() => innerHeight)) * 0.5;
+  await f.swipe(Array.from({ length: 13 }, (_, i) => ({ x, y: Math.round(y - (H * i) / 12) })));
+  if (!(await until((v) => v.lx.unlock > 0)).lx.unlock) fails.push(`LX1 ${label}: a swipe up starting on a notification card didn't unlock`);
+}
+async function lockExpandScene(r, label) {
+  const d = { ...(await lxDriver(r)), r };
+  const fails = [];
+  await lxCardSteps(d, label, fails);
+  await lxGroupSteps(d, label, fails);
+  const s = await d.st();
+  if (s.lx.unlock) fails.push(`LX1 ${label}: a tap asked the unlock (${s.lx.unlock}x) - a tap is the card's, the swipe is the face's`);
+  if (s.lx.open) fails.push(`LX1 ${label}: a tap on the locked face opened an app (opening stays behind the unlock)`);
+  await lxSwipeStep(d, label, fails);
+  console.log(`     lock-expand-${label}: ${JSON.stringify({ ...(await d.st()), cardAt: undefined, moreAt: undefined, headAt: undefined })}`);
+  return fails;
 }
 
 /**
@@ -15368,6 +15495,10 @@ try {
         console.log(`     lock-cards-${label}: ${await r.page.evaluate(() => window.__lockCards).catch(() => "?")}`);
         return fails;
       })));
+  // LX1: a tap on the lock face expands a card / unfolds a group, a tap again folds it (shade's cards). Folded and unfolded.
+  if (process.env.SHELL_PAGES !== "0")
+    for (const [label, viewport] of [["folded", { width: 404, height: 900 }], ["unfolded", { width: 821, height: 883 }]])
+      runs.push(open(browser, `${ORIGIN}/index.html?mode=lock`, `lock-expand-${label}`, viewport).then((r) => whenReady(r, () => lockExpandScene(r, label))));
   // TI1: tiled windows' bars, the w.f touch rects, the divider's pill (the user's layout, 10-31 15:08, unfolded).
   if (process.env.SHELL_PAGES !== "0")
     runs.push(open(browser, `${ORIGIN}/index.html`, "tile-bars-unfolded", { width: 821, height: 883 }).then((r) => whenReady(r, () => tileBarsScene(r))));

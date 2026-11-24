@@ -168,12 +168,17 @@ interface CardProps {
   class?: string;
   /** One of the singles: its app's small icon beside its name (SmallIcon). */
   small?: boolean;
+  /**
+   * On the lock face (lock.tsx): the same card and the same tap to expand/fold, but nothing that acts for a locked
+   * phone - no icon that opens the app, no actions, no reply, no slide to dismiss (opening stays behind the unlock).
+   */
+  locked?: boolean;
 }
 
 type Drag = { x: number; y: number; t: number; dx: number; sideways: boolean | null };
 
-/** A card's touch: slid sideways (a clearable one) it's dismissed, a tap toggles it expanded. */
-function useCardGesture(n: PhoneNotification) {
+/** A card's touch: slid sideways (a clearable one, never [locked]) it's dismissed, a tap toggles it expanded. */
+function useCardGesture(n: PhoneNotification, locked = false) {
   const el = useRef<HTMLDivElement>(null);
   const drag = useRef<Drag | null>(null);
   const settle = (dx: number) => {
@@ -201,7 +206,7 @@ function useCardGesture(n: PhoneNotification) {
       const dx = e.clientX - d.x;
       const dy = e.clientY - d.y;
       if (d.sideways == null && Math.hypot(dx, dy) > SLOP) {
-        d.sideways = Math.abs(dx) > Math.abs(dy) && n.clearable;
+        d.sideways = Math.abs(dx) > Math.abs(dy) && n.clearable && !locked;
         if (d.sideways) el.current!.setPointerCapture(e.pointerId);
       }
       if (!d.sideways) return;
@@ -245,8 +250,8 @@ export function NotifGlyph({ n, fallback, ...attrs }: { n: GroupedNotification; 
   return <span class="notif-icon notif-small" style={style} {...(attrs as preact.JSX.HTMLAttributes<HTMLSpanElement>)} />;
 }
 
-function Card({ n, name, more = 0, class: cls = "", small = false }: CardProps) {
-  const { el, handlers } = useCardGesture(n);
+export function Card({ n, name, more = 0, class: cls = "", small = false, locked = false }: CardProps) {
+  const { el, handlers } = useCardGesture(n, locked);
   const open = openCards.value.has(n.key);
   const icon = notifIconSrc(n);
   const picture = (n as GroupedNotification).picture;
@@ -255,7 +260,10 @@ function Card({ n, name, more = 0, class: cls = "", small = false }: CardProps) 
       <div class="notif-head">
         {/* PowOS's own (its app isn't in the drawer, no icon from the host): PowOS's mark; another without one: none. */}
         {/* The icon opens the app (a tap on the body only expands it). */}
-        {small ? (
+        {locked ? (
+          // Locked: the icon itself, no tap (opening the app is behind the unlock).
+          small ? <NotifGlyph n={n} fallback={icon} /> : icon && <img class="notif-icon" src={icon} alt="" />
+        ) : small ? (
           <SmallIcon n={n} fallback={icon} />
         ) : icon && (
           <img
@@ -282,8 +290,8 @@ function Card({ n, name, more = 0, class: cls = "", small = false }: CardProps) 
           grows the card to it and it fades in (notifications.css) - mounted on open it was 0 tall until it loaded, then
           popped in (§6). */}
       {picture && <img class="notif-picture" src={picture} alt="" />}
-      <Actions n={n} onOpen={open ? () => openNotif(n) : undefined} />
-      {replying.value?.key === n.key && <Reply n={n} index={replying.value.index} />}
+      {!locked && <Actions n={n} onOpen={open ? () => openNotif(n) : undefined} />}
+      {!locked && replying.value?.key === n.key && <Reply n={n} index={replying.value.index} />}
     </div>
   );
 }
@@ -312,7 +320,7 @@ export function notifIconSrc(n: { icon?: string | null; app: string; pkg?: strin
   return n.icon || (POWOS.has(n.pkg ?? "") || POWOS.has(n.app) ? "./icons/powos.svg" : null);
 }
 
-interface Group {
+export interface Group {
   id: string;
   name: string;
   items: PhoneNotification[];
@@ -325,7 +333,7 @@ interface Group {
  * then one group per app with several - Android's group key when it has one (its bundle), PowOS's own per sender
  * (deploy notes: "PowOS · updates") - the groups by their newest.
  */
-function grouped(items: GroupedNotification[]): { convos: Group[]; singles: Group[]; groups: Group[] } {
+export function grouped(items: GroupedNotification[]): { convos: Group[]; singles: Group[]; groups: Group[] } {
   const own = (n: GroupedNotification) => POWOS.has(n.pkg ?? "") || POWOS.has(n.app);
   const convos = items.filter((n) => n.conversation && !own(n)).sort((a, b) => b.time - a.time);
   const map = new Map<string, Group>();
@@ -392,6 +400,12 @@ const toggle = (id: string, stack?: Element | null) => {
   foldAway(stack?.querySelector<HTMLElement>(":scope > .notif-rest"), set);
 };
 
+/** Every card and group folded, at once: the lock face shown again starts folded (lock.tsx), as a shut shade does. */
+export function foldAll() {
+  if (openCards.peek().size) openCards.value = new Set();
+  if (expanded.peek().size) expanded.value = new Set();
+}
+
 /**
  * One group: a single notification is its card. More than one: its head (the group's name, its count) then up to three
  * of its cards in full, one after another - each readable, with its own actions, dismissal and reply (the user, 11-01
@@ -401,33 +415,39 @@ const toggle = (id: string, stack?: Element | null) => {
  * on the far side.
  */
 const SHOWN = 3;
-function Stack({ g }: { g: Group }) {
+/** A group's head: its icon, name and count; with more than three, the fold mark - a tap unfolds or folds it. */
+function GroupHead({ g, more, open }: { g: Group; more: number; open: boolean }) {
+  const icon = notifIconSrc(g.items[0]);
+  return (
+    <button type="button" class="notif-group-head" aria-expanded={open} onClick={(e) => more > 0 && toggle(g.id, e.currentTarget.parentElement)}>
+      {icon && <img class="notif-icon" src={icon} alt="" />}
+      <span class="notif-app">{g.name}</span>
+      <span class="notif-more">{g.items.length}</span>
+      {more > 0 && (
+        <span class="notif-fold" aria-label={open ? "collapse" : "expand"}>
+          ⌃
+        </span>
+      )}
+    </button>
+  );
+}
+
+/** [locked]: on the lock face (lock.tsx) - its cards locked (Card), the group's own unfold the shade's. [cls]: on each card. */
+export function Stack({ g, locked, class: cls }: { g: Group; locked?: boolean; class?: string }) {
   const [top, ...others] = g.items;
-  if (!others.length) return <Card n={top} name={g.name !== top.app ? g.name : undefined} />;
+  if (!others.length) return <Card n={top} name={g.name !== top.app ? g.name : undefined} class={cls} small={locked} locked={locked} />;
   const more = g.items.length - SHOWN;
   const open = more > 0 && expanded.value.has(g.id);
+  const card = (n: PhoneNotification) => <Card key={n.key} n={n} name={g.name} class={`in-group ${cls ?? ""}`} locked={locked} />;
   return (
     <div class={`notif-stack ${open ? "open" : ""}`} data-depth={Math.min(2, others.length)}>
-      <button type="button" class="notif-group-head" aria-expanded={open} onClick={(e) => more > 0 && toggle(g.id, e.currentTarget.parentElement)}>
-        {notifIconSrc(top) && <img class="notif-icon" src={notifIconSrc(top)!} alt="" />}
-        <span class="notif-app">{g.name}</span>
-        <span class="notif-more">{g.items.length}</span>
-        {more > 0 && (
-          <span class="notif-fold" aria-label={open ? "collapse" : "expand"}>
-            ⌃
-          </span>
-        )}
-      </button>
+      <GroupHead g={g} more={more} open={open} />
       <div class="notif-shown">
-        {g.items.slice(0, SHOWN).map((n) => (
-          <Card key={n.key} n={n} name={g.name} class="in-group" />
-        ))}
+        {g.items.slice(0, SHOWN).map(card)}
       </div>
       <div class="notif-rest" inert={!open}>
         <div>
-          {g.items.slice(SHOWN).map((n) => (
-            <Card key={n.key} n={n} name={g.name} class="in-group" />
-          ))}
+          {g.items.slice(SHOWN).map(card)}
         </div>
       </div>
       {more > 0 && !open && (

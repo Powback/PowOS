@@ -2866,9 +2866,20 @@ html[data-mode="lock"] body { background: none; }
 html.lock-settling[data-mode="lock"] { transition: --lock-lift var(--spring-ms) var(--spring); }
 .lock-time { font: 300 88px/1 var(--font-body); color: var(--color-foreground); letter-spacing: 2px; }
 .lock-date { margin-top: 8px; color: var(--color-foreground); font-size: var(--text-body); }
-.lock-notes { margin-top: 28px; width: 100%; display: flex; flex-direction: column; gap: var(--gap); }
-.lock-note { display: flex; align-items: center; gap: 10px; padding: 9px 12px; }
+/*
+ * What's new: the shade's cards and groups (notifications.tsx Stack/Card, locked; lock.tsx). A tap expands a card or
+ * unfolds a group in place (notifications.css .expanded / .notif-stack.open). The list keeps to the room between the
+ * date and the foot; taller than that (unfolded), it scrolls - only then does a swipe on it pan (data-scrolls, set in
+ * lock.tsx), else the whole face is the unlock swipe (.notif's own pan-y would hand the finger to the browser).
+ */
+.lock-notes { margin: 28px 0 12px; width: 100%; flex: 0 1 auto; min-height: 0; }
+.lock-notes > .notif-items { gap: var(--gap); }
+.lock .notif { touch-action: none; }
+/* K2's icon size on the face (the head's icon, the singles'). */
 .lock-note .notif-icon { width: 22px; height: 22px; flex: none; }
+.lock-notes[data-scrolls] { overflow-y: auto; overscroll-behavior: contain; touch-action: pan-y; }
+.lock-notes[data-scrolls] .notif { touch-action: pan-y; }
+.lock .notif-group-head { color: var(--color-foreground); }
 /*
  * K3: the cards wear THE backdrop (theme.css --backdrop-tint / --backdrop-blur-native), as home's widgets and the open
  * shade do - one tint, one compositor radius, no veil, no sheen - not the plain .tile reference fill at home's 140.
@@ -2881,12 +2892,6 @@ html.glass:root .lock .lock-note.tile {
     linear-gradient(var(--backdrop-tint), var(--backdrop-tint)) border-box,
     var(--glass-image) calc(-1 * var(--gx)) calc(-1 * var(--gy)) / var(--glass-w) var(--glass-h) no-repeat border-box;
 }
-.lock-note-main { flex: 1; min-width: 0; display: flex; flex-direction: column; }
-.lock-note-title { font-weight: bold; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: var(--text-small); }
-.lock-note-text { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: var(--text-small); }
-/* A text of several lines (an update's changes, one per line: AgentMail's deploy notice) shows them, up to six. */
-.lock-note-text.lines { white-space: pre-line; display: -webkit-box; -webkit-line-clamp: 6; -webkit-box-orient: vertical; }
-.lock-note-time { font-size: var(--text-small); }
 /* The foot: the charging line (lock.tsx chargeLine) over the hint, both at the bottom. */
 .lock-foot { margin-top: auto; display: flex; flex-direction: column; align-items: center; gap: 6px; }
 .lock-charge { color: var(--color-foreground); font-size: var(--text-small); }

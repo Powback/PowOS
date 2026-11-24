@@ -366,6 +366,19 @@ const LOCK_NOTES =
   "const now = Math.floor(Date.now() / 1000); E.emit('notifications.changed', { available: true, items: [" +
   `['Signal', 'Mats', 'are we still on for tonight?', 120, ${ICON("#3a76f0")}], ['Gmail', 'Your order has shipped', 'It arrives Thursday.', 3600, ${ICON("#c5221f")}], ['PowOS', 'Update installed', 'The lock face follows the theme\\nThe shade opens where the finger starts\\nFaster unlock', 7200, ${ICON("#2e7d5b")}]` +
   "].map(([app, title, text, ago, icon], i) => ({ key: 'l' + i, app, icon, title, text, time: now - ago, clearable: true, profile: null, conversation: false })) });";
+/**
+ * LX1's lock face (lock-screen-can-t-tap-to-expand-collapse-notific): five updates from PowOS (one of 18 changes) and a
+ * mail - the shade's group on the face, "+2 more". LOCK_TAP_CARD: a tap on the update's card (expanded, all 18 lines);
+ * LOCK_TAP_MORE: a tap on "+2 more" (the group unfolded).
+ */
+const LOCK_GROUP =
+  "const now = Date.now(); const lines = Array.from({ length: 18 }, (_, i) => 'Change ' + (i + 1) + ': something got better').join('\\n');" +
+  " const own = (i, text) => ({ key: 'lx' + i, app: 'PowOS', pkg: 'com.powos.app', title: 'Update installed', text, time: now - i * 60000, clearable: true, conversation: false });" +
+  ` const list = { available: true, items: [own(1, '18 changes\\n' + lines), own(2, '3 changes'), own(3, '2 changes'), own(4, '1 change'), own(5, '5 changes'), { key: 'lxm', app: 'Mail', pkg: 'dev.mail', title: 'Your order has shipped', text: 'It arrives Thursday.', time: now - 30000, icon: ${ICON("#c5221f")}, clearable: true, conversation: false }] };` +
+  " (await U('./bridge.ts')).powos.notifications.list = async () => list; E.emit('notifications.changed', list); await sleep(900);";
+const LOCK_TAP_CARD =
+  " { const c = document.querySelector('.lock-notes .notif:has(.notif-text.lines)'); const b = c.getBoundingClientRect(); const ev = (t) => c.dispatchEvent(new PointerEvent(t, { bubbles: true, clientX: b.left + 40, clientY: b.top + 12, pointerId: 3, isPrimary: true })); ev('pointerdown'); ev('pointerup'); await sleep(900); }";
+const LOCK_TAP_MORE = " document.querySelector('.lock-notes .notif-show-more').click(); await sleep(900);";
 /** The battery the lock face reads (lock.tsx: system.battery on lock.shown, then "battery.changed"), as the host sends it. */
 const CHARGE = (v) => ` await sleep(800); const B = (await U('./bridge.ts')).powos; const v = ${v}; B.system.battery = async () => v; E.emit('lock.shown', null); E.emit('battery.changed', v); await sleep(600);`;
 /**
@@ -792,6 +805,10 @@ const SCENES = [
   ["lock", "lock", "", "wallpaper"],
   // The lock face with what's new (lock.tsx): the cards on THE backdrop over the dimmed wallpaper, the hint at the foot.
   ["lock-notes", "lock", LOCK_NOTES + " await sleep(600);", "wallpaper"],
+  // LX1: the shade's group on the lock face, folded; a card tapped open (its 18 lines); the group unfolded.
+  ["lock-group", "lock", LOCK_GROUP, "wallpaper"],
+  ["lock-card-open", "lock", LOCK_GROUP + LOCK_TAP_CARD, "wallpaper"],
+  ["lock-group-open", "lock", LOCK_GROUP + LOCK_TAP_MORE, "wallpaper"],
   // Charging on the lock face (charge.ts): a 25 W charger with Android's estimate, then a wireless pad with no estimate.
   ["lock-charging", "lock", LOCK_NOTES + CHARGE("{ level: 64, charging: true, plugged: 'ac', full: false, held: false, speed: 'superfast', watts: 25, wattsFrom: 'charger', fullInMs: 3540000 }"), "wallpaper"],
   ["lock-charging-wireless", "lock", CHARGE("{ level: 31, charging: true, plugged: 'wireless', full: false, held: false, speed: 'normal', watts: 5, wattsFrom: 'charger', fullInMs: null }"), "wallpaper"],

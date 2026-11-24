@@ -89,8 +89,8 @@ function play(root: ParentNode, before: ReturnType<typeof snapshot>) {
   fadeIn([...root.querySelectorAll(ITEMS)].filter((el) => !before.seen.has(el) && visible(el)));
 }
 
-/** The open shade's notification list, or null (shut: nothing to animate). */
-const shownList = () => document.querySelector<HTMLElement>(".notif-panel.shown .notif-items");
+/** The open shade's notification list, or the lock face's (lock.tsx: the same cards), or null (shut: nothing to animate). */
+const shownList = () => document.querySelector<HTMLElement>(".notif-panel.shown .notif-items, .lock-notes > .notif-items");
 
 /**
  * [change] (a signal set) animated: measured before, played after its render (the render runs in a microtask, so
