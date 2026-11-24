@@ -216,12 +216,29 @@ class PowosLockActivity : Activity() {
         // Up since the screen went off: the page's clock and notifications brought up to now.
         LockFace.host(this).bridge.emit("lock.shown", null)
         watchdog?.start()
+        // The charging line follows the charger while the face is up (plugged in, unplugged, level, time until full).
+        lastBattery = null
+        @Suppress("DEPRECATION")
+        registerReceiver(battery, IntentFilter(Intent.ACTION_BATTERY_CHANGED))
     }
 
     override fun onPause() {
         watchdog?.stop()
+        runCatching { unregisterReceiver(battery) }
         super.onPause()
     }
+
+    /** The last battery sent ("battery.changed"): the broadcast repeats on every voltage step, the page hears changes. */
+    private var lastBattery: String? = null
+    private val battery =
+        object : BroadcastReceiver() {
+            override fun onReceive(c: Context, intent: Intent) {
+                val json = dev.omalauncher.system.Charging.from(c, intent).json().toString()
+                if (json == lastBattery) return
+                lastBattery = json
+                LockFace.host(this@PowosLockActivity).bridge.emit("battery.changed", json)
+            }
+        }
 
     private var watchdog: PageWatchdog? = null
 

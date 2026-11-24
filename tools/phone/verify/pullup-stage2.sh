@@ -85,10 +85,10 @@ back
 # 4. open, the list at its end, up again
 $p/adb.sh shell input swipe "$X" $((H * 85 / 100)) "$X" $((H * 62 / 100)) 250
 sleep 0.8
-# The list's end by its A-Z bar's last letter (a tap: jump() scrolls at once, clamped at the end). Not flings: each
+# The list's end by its A-Z bar's last letter, not its foot's "All" (a tap: jump() scrolls at once, clamped at the end). Not flings: each
 # fling that starts at the end is itself the over-pull (search + keyboard) and the keyboard relaid the list (end=false,
 # 2026-10-23).
-lp=$(ev '(() => { const s = [...document.querySelectorAll(".drawer .letter-bar span")].pop(); if (!s) return "none"; const r = s.getBoundingClientRect(), d = devicePixelRatio; return Math.round((r.left + r.width / 2) * d) + " " + Math.round((r.top + r.height / 2) * d); })()')
+lp=$(ev '(() => { const s = [...document.querySelectorAll(".drawer .letter-bar span:not(.all)")].pop(); if (!s) return "none"; const r = s.getBoundingClientRect(), d = devicePixelRatio; return Math.round((r.left + r.width / 2) * d) + " " + Math.round((r.top + r.height / 2) * d); })()')
 [ "$lp" != none ] && $p/adb.sh shell input tap $lp
 sleep 1.5
 end=$(ev '(() => { const l = document.querySelector(".drawer-list"); return l ? (l.scrollTop + l.clientHeight >= l.scrollHeight - 1) : "none"; })()')

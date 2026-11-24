@@ -33,9 +33,9 @@ const keyOf = (r: unknown, i: number): unknown => {
 
 /**
  * [next] with each row equal to its [prev] counterpart (same id, same content) replaced by that previous object - and
- * [prev] itself when nothing changed at all (same rows, same order), so a signal or setState holding it doesn't fire.
+ * [prev] itself when nothing changed at all (the same rows in the same order - in any order with [anyOrder]), so a signal or setState holding it doesn't fire.
  */
-export function stableRows<T>(prev: readonly T[] | null | undefined, next: readonly T[]): T[] {
+export function stableRows<T>(prev: readonly T[] | null | undefined, next: readonly T[], anyOrder = false): T[] {
   if (!prev?.length) return next.length || !prev ? (next as T[]) : (prev as T[]);
   const was = new Map<unknown, T>();
   prev.forEach((r, i) => was.set(keyOf(r, i), r));
@@ -46,5 +46,12 @@ export function stableRows<T>(prev: readonly T[] | null | undefined, next: reado
     if (keep !== prev[i]) changed = true;
     return keep;
   });
-  return changed ? out : (prev as T[]);
+  if (!changed) return prev as T[];
+  // [anyOrder] (a table's rows: they have no order, a resubscribe can deliver them reshuffled): the same rows in another
+  // order are no change.
+  if (anyOrder && prev.length === out.length) {
+    const had = new Set<T>(prev);
+    if (out.every((r) => had.delete(r))) return prev as T[];
+  }
+  return out;
 }

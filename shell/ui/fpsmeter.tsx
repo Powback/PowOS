@@ -221,7 +221,7 @@ function shownNumber(): number {
 function drawText(u: NonNullable<typeof ui>) {
   const f = shownNumber();
   if (f !== shownFps) { shownFps = f; u.num.textContent = f < 0 ? "\u2007\u2007\u2013" : String(f).padStart(3, "\u2007"); }
-  const label = rec ? `REC ${Math.floor((performance.now() - recStart) / 1000)}s` : busy ? "SEND" : "";
+  const label = rec ? `REC ${Math.floor((performance.now() - recStart) / 1000)}s` : arming ? "ARM" : busy ? "SEND" : "";
   if (label !== shownRec) { shownRec = label; u.label.textContent = label; u.root.classList.toggle("rec", rec); }
 }
 
@@ -330,15 +330,52 @@ export function takeSource(): "verify" | "user" {
 }
 let recSource: "verify" | "user" = "user";
 
-function beginRecord() {
+/**
+ * The trace's warm-up, before the recording counts anything. The host's Chrome trace carries V8's sampler
+ * (WebTrace.kt), whose start logs every compiled function in a V8 interrupt on the pages' main thread (one renderer for
+ * every WebView of the app): home froze ~690 ms right after the record tap (perf-1795459754955.trace.json), and that
+ * was the recording's worst frame. So the host's side starts first; this page's timers then run JS in that renderer
+ * (which takes the interrupt) until a stall shows it happened, or WARM_MAX_MS. The window stays in the trace, named by
+ * a user-timing measure; the frames, long tasks and renders count from after it (settleAt), so it is never a user's frame.
+ */
+const WARM_MAX_MS = 1500, WARM_STALL_MS = 120, WARM_MARK = "powos perf: profiler warm-up (not counted)";
+let arming = false;
+let warm: { ms: number; stallMs: number; seen: boolean } | null = null;
+async function armTrace(): Promise<{ ms: number; stallMs: number; seen: boolean } | null> {
+  const native = powos.perf?.native;
+  if (!native) return null;
+  const at = performance.now();
+  arming = true;
+  if (ui) drawText(ui);
+  try {
+    if ((await native(true).catch(() => null)) == null) return null;
+    let last = performance.now(), stall = 0;
+    while (performance.now() - at < WARM_MAX_MS) {
+      await new Promise((r) => setTimeout(r, 16));
+      const now = performance.now(), gap = now - last - 16;
+      last = now;
+      stall = Math.max(stall, gap);
+      if (gap > WARM_STALL_MS) break;
+    }
+    const end = performance.now();
+    try { performance.measure(WARM_MARK, { start: at, end }); } catch { /* no user timing */ }
+    return { ms: Math.round(end - at), stallMs: Math.round(stall), seen: stall > WARM_STALL_MS };
+  } finally {
+    arming = false;
+  }
+}
+
+async function beginRecord() {
   recSource = takeSource();
+  busy = true;
+  warm = await armTrace();
+  busy = false;
   recStart = performance.now(); settleAt = recStart + SETTLE_MS; recN = 0;
   recT = new Float32Array(MAX_FRAMES); recDt = new Float32Array(MAX_FRAMES);
   observe(); rec = true;
   settleTimer = window.setTimeout(() => { if (rec) beginMain(); }, SETTLE_MS); // home's frames, from the same point
   recId = Date.now(); homeParts = []; homeGot = 0; surfaceParts = new Map();
   void powos.store.set(STORE, { on: true, rec: recId, renders: overlay }).catch(() => {});
-  void powos.perf?.native?.(true).catch(() => null); // the host's main-thread blocks (MainStallWatch.kt), from now
   if (!raf) start();
   stopTimer = window.setTimeout(() => void toggleRecord(), MAX_REC_MS);
 }
@@ -376,7 +413,7 @@ async function endRecord() {
   const sum = fromMain ? summarise({ ...mn, evs: events, durMs, mode: `main shell (home), ${mode} bar recorded` })
     : summarise({ t: recT, dt: recDt, n, evs: events, durMs, mode: `${mode} window only, main shell not reporting (${powos.host})` });
   const renders = takeRenders(home), surfaces = takeSurfaces();
-  Object.assign(sum, { settle: SETTLE_MS, home: homeLine(home), native: nativeLine(native), renders: rendersSummary(renders),
+  Object.assign(sum, { settle: SETTLE_MS, warmup: warmLine(warm), home: homeLine(home), native: nativeLine(native), renders: rendersSummary(renders),
     surfaces: surfacesSummary(surfaces) });
   const full = { summary: sum, main: fromMain ? { frameDeltas: Array.from(mn.dt, (x) => Math.round(x * 10) / 10) } : undefined, when: new Date().toISOString(), ua: navigator.userAgent, dpr: devicePixelRatio,
     frameTimes: Array.from(recT.subarray(0, n), (x) => Math.round(x)), frameDeltas: Array.from(recDt.subarray(0, n), (x) => Math.round(x * 10) / 10), events, home, native, renders, surfaces };
@@ -388,7 +425,13 @@ async function endRecord() {
 
 async function toggleRecord() {
   if (busy) return;
-  if (rec) await endRecord(); else beginRecord();
+  if (rec) await endRecord(); else await beginRecord();
+}
+
+/** The summary's warm-up entry: how long the trace's start took before the recording began, and its stall. */
+function warmLine(w: typeof warm) {
+  if (!w) return "no warm-up (host without perf.native)";
+  return { ms: w.ms, stallMs: w.stallMs, note: w.seen ? `the trace's V8 sampler start stalled the pages ${w.stallMs} ms before the recording began: not counted (trace: "${WARM_MARK}")` : "no stall seen while the trace started" };
 }
 
 export function FpsMeter() {

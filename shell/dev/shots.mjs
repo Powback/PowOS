@@ -58,6 +58,8 @@ const DESKTOP_SIZES = {
   laptop: { width: 1280, height: 800, insets: { top: 0, bottom: 0 } },
 };
 /** The phone's screens plus a wide desktop window: for pages whose layout follows their width (the AI page). */
+/** The AI page's tabs at every layout: folded, unfolded, and both sideways (the side-docked one). */
+const AI_TAB_SIZES = { ...SIZES, ...LAND_SIZES };
 const WIDE_SIZES = { ...SIZES, window: { width: 1600, height: 1000, insets: { top: 0, bottom: 0 } } };
 
 /**
@@ -319,6 +321,16 @@ const DOCK_WIN = (extra) =>
   `const W = await U('./ui/webwindows.tsx'); const D = await U('./ui/desktops.ts'); const p = S.pages.value[0]; const k = S.dock.value.find((d) => d.startsWith('a:')) ?? 'a:x';` +
   ` W.webWins.value = [{ id: 2, key: 'a:y', label: 'Files', page: p, x: Math.round(innerWidth * 0.35), y: 200, w: Math.round(innerWidth * 0.45), h: 300, live: true }, { id: 1, key: k, label: 'Docked app', page: p, x: 30, y: 80, w: Math.round(innerWidth * 0.5), h: 380, live: true }];` +
   PAINT + ` await sleep(300); ${extra}`;
+/**
+ * TB1 (docs/WEB_WINDOWS.md "Title bar: native parity"): a maximised window whose app went immersive (a video full
+ * screen, a game) - its bar auto-hidden, the app taking the whole work area; [reveal]: a pull from the top edge slid the
+ * bar in over the app (the app keeps its size).
+ */
+const BAR_AUTOHIDE = (reveal) =>
+  `const W = await U('./ui/webwindows.tsx'); const R = await U('./ui/barreveal.ts'); const p = S.pages.value[0];` +
+  ` W.webWins.value = [{ id: 1, key: 'a:Chrome', label: 'Chrome', page: p, x: 40, y: 120, w: 360, h: 420, live: true }];` +
+  PAINT + ` await sleep(200); W.toggleMaximise(1); await sleep(400); window.__mockEvents.emit('webwindows.immersive', { id: 1, on: true }); await sleep(1200);` +
+  (reveal ? ` R.BAR_REVEAL.ms = 600000; R.revealBar(1); await sleep(1200);` : "");
 const TILE_SIZES = { unfolded: SIZES.unfolded, "unfolded-land": LAND_SIZES["unfolded-land"] };
 /**
  * WT1/WT2: two floating windows (Chrome, Dolphin); Dolphin's bar dragged onto Chrome's, held ([up] false: the lit bar and
@@ -354,6 +366,8 @@ const LOCK_NOTES =
   "const now = Math.floor(Date.now() / 1000); E.emit('notifications.changed', { available: true, items: [" +
   `['Signal', 'Mats', 'are we still on for tonight?', 120, ${ICON("#3a76f0")}], ['Gmail', 'Your order has shipped', 'It arrives Thursday.', 3600, ${ICON("#c5221f")}], ['PowOS', 'Update installed', 'The lock face follows the theme\\nThe shade opens where the finger starts\\nFaster unlock', 7200, ${ICON("#2e7d5b")}]` +
   "].map(([app, title, text, ago, icon], i) => ({ key: 'l' + i, app, icon, title, text, time: now - ago, clearable: true, profile: null, conversation: false })) });";
+/** The battery the lock face reads (lock.tsx: system.battery on lock.shown, then "battery.changed"), as the host sends it. */
+const CHARGE = (v) => ` await sleep(800); const B = (await U('./bridge.ts')).powos; const v = ${v}; B.system.battery = async () => v; E.emit('lock.shown', null); E.emit('battery.changed', v); await sleep(600);`;
 /**
  * The Friction page (PowOS AI's ⋯ › Friction, aifriction.tsx): open problems in three areas - a P0 by count, a P1, one
  * being fixed by a board task - and one fixed this week, set after the screen opens (its feed subscribes as it shows).
@@ -418,6 +432,9 @@ const SCENES = [
   ["ww-tile-dock-3", "home", TILES(2) + DOCK_DRAG(0.92, 0.6, true), "wallpaper", undefined, TILE_SIZES],
   // WT1/WT2: tabs - Dolphin's bar held over Chrome's (the lit bar, the ghost tab), let go (one window, two tabs), and the
   // stack tiled beside a third window.
+  // TB1: the auto-hidden bar of an immersive maximised app, and slid in by a pull from the top edge.
+  ["ww-bar-autohide", "home", BAR_AUTOHIDE(false), "wallpaper", undefined, TILE_SIZES],
+  ["ww-bar-reveal", "home", BAR_AUTOHIDE(true), "wallpaper", undefined, TILE_SIZES],
   ["ww-tabs-aim", "home", TABS(false), "wallpaper", undefined, TILE_SIZES],
   ["ww-tabs", "home", TABS(true), "wallpaper", undefined, TILE_SIZES],
   // WT3: a window dragged over a maximised one tabs into it (the strip's ghost tab; let go: a maximised group of two, the
@@ -439,16 +456,32 @@ const SCENES = [
   ["ds2-open-180", "pull", "if (S.dock.value.length < 6) S.dock.value = S.recent.value.slice(0, 6); S.dockTry.value = 'bottom'; S.searchTry.value = 'dock'; await sleep(300); const fe = document.querySelector('.pull-screen .dock .dock-search-face'); const f = fe ? fe.getBoundingClientRect() : { left: innerWidth / 2 - 24, top: innerHeight - 70, width: 48, height: 48 }; E.emit('pull.begin', { kind: 'apps', search: true, from: { left: f.left, top: f.top, width: f.width, height: f.height } }); E.emit('pull.drag', { p: 1 }); E.emit('pull.end', { open: true }); await new Promise(requestAnimationFrame); document.getAnimations().filter((a) => a.timeline === document.timeline).forEach((a) => { a.pause(); a.currentTime = 180; }); await sleep(50);", "blurred"],
   ["dsearch-bar-bottom", "home", "if (S.dock.value.length < 6) S.dock.value = S.recent.value.slice(0, 6); S.dockTry.value = 'bottom'; S.searchTry.value = 'bar'; await sleep(300);", "wallpaper"],
   ["dsearch-btn-bottom", "home", "if (S.dock.value.length < 6) S.dock.value = S.recent.value.slice(0, 6); S.dockTry.value = 'bottom'; S.searchTry.value = 'dock'; await sleep(300);", "wallpaper"],
+  // The side dock's alignment (ui/dockalign.ts, the user 2026-11-23: docked apps "so far up"): top = pinned from the top,
+  // recents under them; bottom (the default) = pinned at the foot within thumb reach, recents above, only they scroll.
+  ...["left", "right"].flatMap((side) => ["top", "bottom"].map((al) => [`dock-align-${side}-${al}`, "home", `for (let i = 0; i < 50 && !S.recent.value.length; i++) await sleep(100); S.dock.value = S.recent.value.slice(0, 4); S.dockTry.value = '${side}'; S.dockAlignTry.value = '${al}'; S.searchTry.value = 'bar'; await sleep(400);`, "wallpaper"])),
+  // Many recent apps: only the recents scroll, the pinned stay at the foot; then the recents scrolled to their far end.
+  ...["", "-scrolled"].map((sc) => [`dock-align-right-bottom-many${sc}`, "home", `const B = (await U('./bridge.ts')).powos; const ks = [...S.byKey.value.keys()]; S.dock.value = ks.slice(0, 4); B.usage.recent = async (n) => ks.slice(4).slice(0, n); document.dispatchEvent(new Event('visibilitychange')); S.dockTry.value = 'right'; S.dockAlignTry.value = 'bottom'; S.searchTry.value = 'bar'; await sleep(400);${sc ? " const rc = document.querySelector('.home > .dock .dock-recent'); rc.scrollTop = -rc.scrollHeight; await sleep(200);" : ""}`, "wallpaper"]),
+  ["dock-align-right-bottom-btn", "home", "for (let i = 0; i < 50 && !S.recent.value.length; i++) await sleep(100); S.dock.value = S.recent.value.slice(0, 4); S.dockTry.value = 'right'; S.dockAlignTry.value = 'bottom'; S.searchTry.value = 'dock'; await sleep(400);", "wallpaper"],
   ["dsearch-bar-right", "home", "if (S.dock.value.length < 6) S.dock.value = S.recent.value.slice(0, 6); S.dockTry.value = 'right'; S.searchTry.value = 'bar'; await sleep(300);", "wallpaper"],
   ["dsearch-btn-right", "home", "if (S.dock.value.length < 6) S.dock.value = S.recent.value.slice(0, 6); S.dockTry.value = 'right'; S.searchTry.value = 'dock'; await sleep(300);", "wallpaper"],
   ["dsearch-bar-left", "home", "if (S.dock.value.length < 6) S.dock.value = S.recent.value.slice(0, 6); S.dockTry.value = 'left'; S.searchTry.value = 'bar'; await sleep(300);", "wallpaper"],
   ["dsearch-btn-left", "home", "if (S.dock.value.length < 6) S.dock.value = S.recent.value.slice(0, 6); S.dockTry.value = 'left'; S.searchTry.value = 'dock'; await sleep(300);", "wallpaper"],
+  // Side dock right vs left: the launcher and PowOS AI's panel fill the width the same way (board side-dock-on-the-right-launcher-and-ai-chat-aren).
+  ...["left", "right"].flatMap((side) => [
+    [`side-${side}-drawer`, "home", `S.dockTry.value = '${side}'; await sleep(200); S.drawer.value = 1; await sleep(400);`, "wallpaper"],
+    [`side-${side}-ai`, "home", `S.dockTry.value = '${side}'; await sleep(200); S.openPanel('ai'); await sleep(500);`, "wallpaper"],
+    [`side-${side}-chat`, "home", `S.dockTry.value = '${side}'; await sleep(200); S.chat.value = { busy: false, items: ${CHAT_SAMPLE} }; S.chatting.value = true; S.drawer.value = 1; await sleep(400);`, "wallpaper"],
+  ]),
   ["home-dockright", "home", "S.dockTry.value = 'right'; await sleep(200);", "wallpaper"],
   ["edit-dockright", "home", "S.dockTry.value = 'right'; await sleep(200); S.editing.value = true;", "wallpaper"],
   ["edit-land", "home", "S.editing.value = true;", "wallpaper", undefined, LAND_SIZES],
   ["edit-theme", "home", "S.editing.value = true; await sleep(200); [...document.querySelectorAll('.edit-act')].find(b => b.textContent.trim() === 'theme')?.click();", "wallpaper"],
   // Picking tiles in edit mode (ui/homeselect.ts) and a folder made of them, open (ui/folders.tsx).
   ["edit-add-app", "home", "S.editing.value = true; await sleep(300); [...document.querySelectorAll('.edit-act')].find((b) => b.textContent.trim() === '+ app').click(); await sleep(400);", "wallpaper"],
+  // Widget stacks (ui/stacks.tsx): at rest with its dots, mid-swipe (the next widget sliding in), the edit sheet.
+  ["home-stack", "home", "const K = await U('./ui/stacks.tsx'); const M = await U('./ui/stackmodel.ts'); const n = S.pages.value[S.page.value]; const ws = S.home.value.items.filter((i) => i.page === n && M.stackable(i)).slice(0, 3); K.stacks.value = { s: { keys: ws.map((w) => w.key), shown: 0, anchor: ws[0].key } }; await sleep(400);", "wallpaper"],
+  ["home-stack-swipe", "home", "const K = await U('./ui/stacks.tsx'); const M = await U('./ui/stackmodel.ts'); const n = S.pages.value[S.page.value]; const ws = S.home.value.items.filter((i) => i.page === n && M.stackable(i)).slice(0, 3); K.stacks.value = { s: { keys: ws.map((w) => w.key), shown: 0, anchor: ws[0].key } }; await sleep(400); const st = document.querySelector('.stack-strip'); const r = st.getBoundingClientRect(); const P = (t, x) => new PointerEvent(t, { pointerId: 9, pointerType: 'touch', clientX: x, clientY: r.top + r.height / 2, bubbles: true, isPrimary: true }); st.dispatchEvent(P('pointerdown', r.left + r.width * 0.7)); for (let k = 1; k <= 6; k++) st.dispatchEvent(P('pointermove', r.left + r.width * 0.7 - (r.width * 0.45 * k) / 6)); await sleep(150);", "wallpaper"],
+  ["edit-stack", "home", "const K = await U('./ui/stacks.tsx'); const M = await U('./ui/stackmodel.ts'); const n = S.pages.value[S.page.value]; const ws = S.home.value.items.filter((i) => i.page === n && M.stackable(i)).slice(0, 3); K.stacks.value = { s: { keys: ws.map((w) => w.key), shown: 0, anchor: ws[0].key } }; await sleep(400); K.editStack.value = 's'; await sleep(400);", "wallpaper"],
   ["edit-chosen", "home", "S.editing.value = true; const H = await U('./ui/homeselect.ts'); H.chosen.value = S.home.value.items.filter((i) => i.kind === 'app').slice(0, 2).map((i) => i.key); await sleep(200);", "wallpaper"],
   ["folder-open", "home", "S.editing.value = true; const H = await U('./ui/homeselect.ts'); H.chosen.value = S.home.value.items.filter((i) => i.kind === 'app').slice(0, 3).map((i) => i.key); await sleep(200); document.querySelector('.chosen-actions .group-folder')?.click(); await sleep(600); S.editing.value = false; await sleep(200);", "wallpaper"],
   // A widget's settings sheet (ui/widgetsheet.tsx, apps/sheet.ts DetailSheet): anchored under home's first widget - a
@@ -476,6 +509,16 @@ const SCENES = [
   // Uniform icons (ui/iconshape.ts): Linux-like pictures swapped in - a wide monitor (Konsole), a folder (Dolphin), a
   // tiny glyph with wide padding (Foot, as Terminal), a full-bleed square (Kate), a circle (Steam) - in the drawer and dock.
   ["icons-mixed", "home", `const B = (await U('./bridge.ts')).powos; const list = B.apps.list.bind(B.apps); const svg = (b) => 'data:image/svg+xml,' + encodeURIComponent('<svg xmlns="http://www.w3.org/2000/svg" width="192" height="192">' + b + '</svg>'); const I = { Konsole: svg('<rect x="40" y="58" width="112" height="76" rx="6" fill="#31363b"/><rect x="40" y="58" width="112" height="14" rx="4" fill="#7f8c8d"/><text x="54" y="118" font-size="32" fill="#eff0f1" font-family="monospace">&gt;_</text>'), Dolphin: svg('<path d="M28 58h48l12 12h76v66H28z" fill="#1d99f3"/><path d="M28 78h136v58H28z" fill="#3daee9"/>'), Terminal: svg('<rect x="80" y="80" width="32" height="32" rx="4" fill="#da4453"/><path d="M86 90l8 6-8 6" stroke="#fff" stroke-width="3" fill="none"/>'), Kate: svg('<rect width="192" height="192" fill="#f67400"/><path d="M60 50v92M60 96l50-46M60 96l50 46" stroke="#fff" stroke-width="14" fill="none"/>'), Steam: svg('<circle cx="96" cy="96" r="84" fill="#1b2838"/><circle cx="120" cy="80" r="22" fill="none" stroke="#c7d5e0" stroke-width="8"/>') }; B.apps.list = async () => (await list()).map((a) => (I[a.label] ? { ...a, icon: I[a.label] } : a)); E.emit('apps.changed'); await sleep(600); S.dock.value = ['l:konsole', 'l:dolphin', 'a:chrome', 'l:steam', 'a:maps']; await sleep(1500); S.drawer.value = 1; await sleep(300);`, "wallpaper"],
+  // Every .pow site as a launcher app (WebApps.kt, the user 11-23): each kind's mark on its icon - installable PWA, plain
+  // page, sleeping service, unreachable now - in the dock, and the app menu's info line for the sleeping one.
+  ["web-app-marks", "home", `const B = (await U('./bridge.ts')).powos; const list = B.apps.list.bind(B.apps); const svg = (b) => 'data:image/svg+xml,' + encodeURIComponent('<svg xmlns="http://www.w3.org/2000/svg" width="192" height="192">' + b + '</svg>'); const W = (host, label, web, fill, extra) => ({ key: 'w:' + host, label, kind: 'web', url: 'http://' + host + '/', web, icon: svg('<rect width="192" height="192" rx="40" fill="' + fill + '"/><text x="96" y="124" font-size="88" text-anchor="middle" fill="#fff" font-family="sans-serif">' + label[0] + '</text>'), ...extra }); const web = [W('powscan.pow', 'PowScan', 'pwa', '#2f7d6d'), W('cdn.pow', 'CDN', 'page', '#5a6aa8'), W('ararat.pow', 'Ararat', 'sleeps', '#8a5a2b', { webCategory: 'games' }), W('pihole.pow', 'Pi-hole', 'page', '#9b2d3a', { webCategory: 'infrastructure', offline: true })]; B.apps.list = async () => [...web, ...(await list())]; E.emit('apps.changed'); await sleep(600); S.dock.value = web.map((w) => w.key); await sleep(1200);`, "wallpaper"],
+  // The Pow folder (the user 11-23: every .pow app in one "Pow" folder; dev/pow-folder-check.js): the launcher's All
+  // view with the folder's cell under P and no loose .pow app; the folder open in place (by category, infrastructure
+  // last, kind marks); the folder and a .pow app pinned to the dock and on home.
+  ["pow-folder", "home", `const C = await U('./dev/pow-folder-check.js'); await C.setWeb(C.WEB); S.drawer.value = 1; await sleep(300); (await U('./ui/drawer.tsx')).launcherLetter.value = 'P'; await sleep(500);`, "wallpaper"],
+  ["pow-folder-open", "home", `const C = await U('./dev/pow-folder-check.js'); await C.setWeb(C.WEB); S.drawer.value = 1; await sleep(300); (await U('./ui/drawer.tsx')).launcherLetter.value = 'Pow'; await sleep(500);`, "wallpaper"],
+  ["pow-folder-dock", "home", `const C = await U('./dev/pow-folder-check.js'); await C.setWeb(C.WEB); S.dock.value = ['lib:pow', 'w:powscan.pow', ...S.dock.value.slice(0, 3)]; const G = await U('./ui/grid.tsx'); const P = await U('./ui/powtiles.ts'); for (const k of ['lib:pow', 'w:ararat.pow']) { const sp = G.placeNewCells(1, 1); await P.addToHome(k, sp.page, sp.cell); } await sleep(1200);`, "wallpaper"],
+  ["web-app-menu", "home", `const B = (await U('./bridge.ts')).powos; const list = B.apps.list.bind(B.apps); const svg = (b) => 'data:image/svg+xml,' + encodeURIComponent('<svg xmlns="http://www.w3.org/2000/svg" width="192" height="192">' + b + '</svg>'); const a = { key: 'w:ararat.pow', label: 'Ararat', kind: 'web', url: 'http://ararat.pow/', web: 'sleeps', webCategory: 'games', icon: svg('<rect width="192" height="192" rx="40" fill="#8a5a2b"/>') }; B.apps.list = async () => [a, ...(await list())]; E.emit('apps.changed'); await sleep(600); S.dock.value = [a.key]; await sleep(900); const el = document.querySelector('.app[data-key="w:ararat.pow"]'); S.menu.value = { app: a, at: el ? el.getBoundingClientRect() : new DOMRect(40, 600, 64, 64) }; await sleep(500);`, "wallpaper"],
   ["icons-mixed-dock", "home", `const B = (await U('./bridge.ts')).powos; const list = B.apps.list.bind(B.apps); const svg = (b) => 'data:image/svg+xml,' + encodeURIComponent('<svg xmlns="http://www.w3.org/2000/svg" width="192" height="192">' + b + '</svg>'); const I = { Konsole: svg('<rect x="40" y="58" width="112" height="76" rx="6" fill="#31363b"/><rect x="40" y="58" width="112" height="14" rx="4" fill="#7f8c8d"/><text x="54" y="118" font-size="32" fill="#eff0f1" font-family="monospace">&gt;_</text>'), Dolphin: svg('<path d="M28 58h48l12 12h76v66H28z" fill="#1d99f3"/><path d="M28 78h136v58H28z" fill="#3daee9"/>'), Terminal: svg('<rect x="80" y="80" width="32" height="32" rx="4" fill="#da4453"/><path d="M86 90l8 6-8 6" stroke="#fff" stroke-width="3" fill="none"/>'), Kate: svg('<rect width="192" height="192" fill="#f67400"/><path d="M60 50v92M60 96l50-46M60 96l50 46" stroke="#fff" stroke-width="14" fill="none"/>'), Steam: svg('<circle cx="96" cy="96" r="84" fill="#1b2838"/><circle cx="120" cy="80" r="22" fill="none" stroke="#c7d5e0" stroke-width="8"/>') }; B.apps.list = async () => (await list()).map((a) => (I[a.label] ? { ...a, icon: I[a.label] } : a)); E.emit('apps.changed'); await sleep(600); S.dock.value = ['l:konsole', 'l:dolphin', 'a:chrome', 'l:steam', 'a:maps']; await sleep(1500);`, "wallpaper"],
   // The unfolded home's dock as a taskbar: pinned apps (one with a window in front, one running), an unpinned app's
   // minimised window and a Linux app's window after them.
@@ -483,6 +526,12 @@ const SCENES = [
   ["running-drawer", "home", "(await U('./ui/drawer.tsx')).drawerRecents.value = 'on'; S.drawer.value = 1; await sleep(200);", "wallpaper"],
   // A finger held on the A-Z bar at M (drawer.tsx highlight): M's apps bright and lifted, the rest dim, M enlarged.
   ["drawer-scrub", "home", `S.drawer.value = 1; await sleep(300); const m = [...document.querySelectorAll('.letter-bar span')].find((s) => s.textContent === 'M'); const r = m.getBoundingClientRect(); Element.prototype.setPointerCapture = () => {}; m.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true, pointerId: 1, buttons: 1, clientX: r.x + r.width / 2, clientY: r.y + r.height / 2 })); await sleep(400);`, "wallpaper"],
+  // Released: the launcher stays on the letter's apps under its chip (ui/launcherview.ts; the user, 11-23).
+  ["drawer-letter", "home", `S.drawer.value = 1; await sleep(300); const m = [...document.querySelectorAll('.letter-bar span')].find((s) => s.textContent === 'S'); const r = m.getBoundingClientRect(); Element.prototype.setPointerCapture = () => {}; const o = { bubbles: true, pointerId: 1, buttons: 1, clientX: r.x + r.width / 2, clientY: r.y + r.height / 2 }; m.dispatchEvent(new PointerEvent('pointerdown', o)); await sleep(100); m.dispatchEvent(new PointerEvent('pointerup', { ...o, buttons: 0 })); await sleep(400);`, "wallpaper"],
+  // "All" at the A-Z bar's foot held (the bubble reads All), then the top one released: every app under its letter's
+  // heading, under an "All" chip (ui/launcherview.ts ALL; the user, 11-23).
+  ["drawer-all-held", "home", `S.drawer.value = 1; await sleep(300); const m = [...document.querySelectorAll('.letter-bar span.all')].at(-1); const r = m.getBoundingClientRect(); Element.prototype.setPointerCapture = () => {}; m.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true, pointerId: 1, buttons: 1, clientX: r.x + r.width / 2, clientY: r.y + r.height / 2 })); await sleep(400);`, "wallpaper"],
+  ["drawer-all", "home", `S.drawer.value = 1; await sleep(300); const m = document.querySelector('.letter-bar span.all'); const r = m.getBoundingClientRect(); Element.prototype.setPointerCapture = () => {}; const o = { bubbles: true, pointerId: 1, buttons: 1, clientX: r.x + r.width / 2, clientY: r.y + r.height / 2 }; m.dispatchEvent(new PointerEvent('pointerdown', o)); await sleep(100); m.dispatchEvent(new PointerEvent('pointerup', { ...o, buttons: 0 })); await sleep(400);`, "wallpaper"],
   ["swipe-up-right", "home", "", "wallpaper", { from: [0.73, 0.72], to: [0.73, 0.28], ms: 220 }],
   ["swipe-up-left", "home", "", "wallpaper", { from: [0.25, 0.72], to: [0.25, 0.28], ms: 220 }],
   ["search-widget", "home", "await (await U('./bridge.ts')).powos.home.addPanel('search', 0, { x: 0, y: 4, w: 6, h: 1 }); await sleep(300);", "wallpaper"],
@@ -494,15 +543,21 @@ const SCENES = [
   ["search-typing", "home", "const f = document.querySelector('.bar textarea, .bar input'); f?.focus(); if (f) { f.value = 'weather tomorrow in oslo and remind me to bring an umbrella'; f.dispatchEvent(new Event('input', { bubbles: true })); }", "wallpaper"],
   // The bar's send button (ui/bar.tsx Send; the user, 2026-10-30: "add like a send button on the right side"): none
   // while empty, right of the mic once there's text - in home's bar and in the launcher's.
+  // SP1 (the user 11-23): home's bar tapped - the launcher's search in the SAME bar, home's face (glyph, no hint).
+  ["search-open", "home", "S.searchTry.value = 'bar'; await sleep(300); document.querySelector('.home > .bar')?.click(); await sleep(900);", "wallpaper"],
+  // SE1: the search's menu ("show as dock button") - edit mode only: a tap on the bar there.
+  ["search-spot-edit", "home", "S.searchTry.value = 'bar'; S.editing.value = true; await sleep(500); const p = document.querySelector('.home > .bar .bar-pill'); const r = p.getBoundingClientRect(); const o = { bubbles: true, pointerId: 9, pointerType: 'touch', clientX: r.left + r.width / 3, clientY: r.top + r.height / 2 }; p.dispatchEvent(new PointerEvent('pointerdown', o)); p.dispatchEvent(new PointerEvent('pointerup', o)); await sleep(500);", "wallpaper"],
   ["send-empty", "home", "S.query.value = ''; await sleep(300);", "wallpaper"],
   ["send-text", "home", "S.query.value = 'weather'; await sleep(300);", "wallpaper"],
   ["send-launcher", "home", "S.openPanel('apps', { search: true }); await sleep(400); S.query.value = 'weather'; await sleep(300);", "wallpaper"],
   ["send-ai", "home", "S.page.value = -1; await sleep(400); const f = document.querySelector('.ai-compose textarea'); if (f) { f.value = 'what is on tonight'; f.dispatchEvent(new Event('input', { bubbles: true })); } await sleep(300);", "wallpaper"],
   ["ai", "home", "S.page.value = -1;", "wallpaper"],
+  // Folded, unfolded and both turned sideways (folded-land: the dock a column on the side): the tab header under the
+  // status bar at each (gate ai-tab-header).
   // OE1 (the user, 11-03 21:14: "Why is the search [bar] just under the chat here?"): every tab, the bar where home's is.
-  ["ai-tab-agents", "home", "S.page.value = -1; await sleep(400); S.aiScreen.value = 'fleet';", "wallpaper"],
-  ["ai-tab-progress", "home", "S.page.value = -1; await sleep(400); S.aiScreen.value = 'progress';", "wallpaper"],
-  ["ai-tab-devices", "home", "S.page.value = -1; await sleep(400); S.aiScreen.value = 'devices';", "wallpaper"],
+  ["ai-tab-agents", "home", "S.page.value = -1; await sleep(400); S.aiScreen.value = 'fleet';", "wallpaper", undefined, AI_TAB_SIZES],
+  ["ai-tab-progress", "home", "S.page.value = -1; await sleep(400); S.aiScreen.value = 'progress';", "wallpaper", undefined, AI_TAB_SIZES],
+  ["ai-tab-devices", "home", "S.page.value = -1; await sleep(400); S.aiScreen.value = 'devices';", "wallpaper", undefined, AI_TAB_SIZES],
   ["chat", "home", `S.chat.value = { busy: false, items: ${CHAT_SAMPLE} }; S.chatting.value = true; S.drawer.value = 1;`, "wallpaper"],
   ["chat-open", "home", `S.chat.value = { busy: false, items: ${CHAT_SAMPLE} }; S.chatting.value = true; S.drawer.value = 1; await sleep(300); document.querySelector('.chat .tl-row')?.click(); await sleep(100); document.querySelectorAll('.chat .tl-row.has-out')[0]?.click(); document.querySelectorAll('.chat .tl-row.has-out')[2]?.click();`, "wallpaper"],
   ["present", "home", `S.chat.value = { busy: false, items: ${PRESENT_SAMPLE} }; S.chatting.value = true; S.drawer.value = 1;`, "wallpaper"],
@@ -539,6 +594,12 @@ const SCENES = [
   ["ai-v2-calm", "home", board(true).replace("P.board.value = B.map", "P.board.value = B.filter((r) => r.status !== 'waiting').map"), "wallpaper"],
   ["queued", "home", `S.chat.value = { busy: true, items: ${CHAT_SAMPLE}.slice(0, 3), queued: [{ id: 1, text: "also check the battery health" }, { id: 2, text: "and remind me at 6 to charge it" }] }; S.chatting.value = true; S.drawer.value = 1;`, "wallpaper"],
   ["queued-ai", "home", `S.chat.value = { busy: true, items: ${CHAT_SAMPLE}.slice(0, 3), queued: [{ id: 1, text: "also check the battery health" }, { id: 2, text: "and remind me at 6 to charge it" }] }; S.page.value = -1;`, "wallpaper"],
+  // The stop button (bar.tsx Stop): PowOS AI answering, the pill's send is stop - the AI page, the drawer's chat, the
+  // side button's overlay; then stopped (the partial answer, a quiet "stopped", send gone).
+  ["ai-stop", "home", `S.chat.value = { busy: true, stoppable: true, items: ${CHAT_SAMPLE}.slice(0, 3) }; S.page.value = -1;`, "wallpaper"],
+  ["chat-stop", "home", `S.chat.value = { busy: true, stoppable: true, items: ${CHAT_SAMPLE}.slice(0, 3) }; S.chatting.value = true; S.drawer.value = 1;`, "wallpaper"],
+  ["assist-stop", "assist", `await sleep(200); E.emit('assist.context', { text: 'Inbox - 3 unread', screenshot: window.__shotsApp }); await sleep(1500); S.chat.value = { busy: true, stoppable: true, items: ${CHAT_SAMPLE}.slice(0, 3) };`, "app"],
+  ["ai-stopped", "home", `S.chat.value = { busy: false, stoppable: true, items: [...${CHAT_SAMPLE}.slice(0, 3), { kind: "note", text: "stopped", error: false }] }; S.page.value = -1;`, "wallpaper"],
   ["kbd-chat", "home", `E.emit('system.insets', { top: 45, bottom: 16, left: 0, right: 0, keyboard: 330 }); S.chat.value = { busy: false, items: ${CHAT_SAMPLE} }; S.chatting.value = true; S.drawer.value = 1;`, "wallpaper"],
   ["kbd-ai", "home", `E.emit('system.insets', { top: 45, bottom: 16, left: 0, right: 0, keyboard: 330 }); S.page.value = -1;`, "wallpaper"],
   ["kbd-assist", "assist", "E.emit('system.insets', { top: 45, bottom: 16, left: 0, right: 0, keyboard: 0 }); await sleep(200); E.emit('assist.context', { text: 'Inbox - 3 unread', screenshot: window.__shotsApp });", "app"],
@@ -731,6 +792,9 @@ const SCENES = [
   ["lock", "lock", "", "wallpaper"],
   // The lock face with what's new (lock.tsx): the cards on THE backdrop over the dimmed wallpaper, the hint at the foot.
   ["lock-notes", "lock", LOCK_NOTES + " await sleep(600);", "wallpaper"],
+  // Charging on the lock face (charge.ts): a 25 W charger with Android's estimate, then a wireless pad with no estimate.
+  ["lock-charging", "lock", LOCK_NOTES + CHARGE("{ level: 64, charging: true, plugged: 'ac', full: false, held: false, speed: 'superfast', watts: 25, wattsFrom: 'charger', fullInMs: 3540000 }"), "wallpaper"],
+  ["lock-charging-wireless", "lock", CHARGE("{ level: 31, charging: true, plugged: 'wireless', full: false, held: false, speed: 'normal', watts: 5, wattsFrom: 'charger', fullInMs: null }"), "wallpaper"],
   // The screen-off display (aod.tsx): black, the time and date dimmed in the theme's colours, an icon per app.
   ["aod", "aod", LOCK_NOTES + " await sleep(400);", "wallpaper"],
   // The Friction page (aifriction.tsx), and one problem opened (its facts and the logged words).

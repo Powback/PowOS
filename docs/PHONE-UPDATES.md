@@ -68,7 +68,9 @@ launcher), which needs the owner's OK for a public route. The store's URLs here 
   (`com.powos.updates`) shows exactly that on a phone, with Check now / Update now; `powos-core` carries the widgets
   (`desktop/plasmoid` -> `/usr/share/plasma/plasmoids`), so a widget fix reaches a phone without a new base.
 - **Rooted phones** (the OnePlus): the ship service (`tools/phone/ship.sh`) installs APKs, pushes the shell and deploys
-  over adb; `PowosUpdates` doesn't run there (its card and the widget say so: "kept current by your PowStation"). Each of those ships also publishes the pull updates above.
+  over adb; `PowosUpdates` doesn't run there (its card and the widget say so: "kept current by your PowStation"). Each of those ships also publishes the pull updates above. While the OnePlus is offline the APK still
+  goes to PowApps (`ship-apk.sh --publish-only`: device-free gate + build) and the OnePlus install follows when it's back
+  (docs/AGENT-HANDBOOK.md, Shipping, "OnePlus offline").
 - **Dev shortcut**: `tools/phone/nonroot-sync.sh` pushes to an adb-paired non-root phone directly (no store round trip).
 
 ## Safety

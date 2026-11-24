@@ -177,7 +177,7 @@
    home-folder-folded once the pill sat under the dock by default). */
 .home.pill-below > .dock:not(.dock-ghost) { top: var(--bar-drop); }
 /* Edit mode: the foot's row rises over the edit bar (--edit-rise, measured from the inset, so undropped first) - the
-   screen-fixed bar's translate carries the rise (--bar-edit-rise: its translate is --track-counter's, FX1). */
+   screen-fixed bar's translate carries the rise (--bar-edit-rise: its translate is the --bar-counter's, FX1). */
 .home.editing { --bar-drop: 0px; --bar-edit-rise: var(--edit-rise); }
 /* The search bar goes down to the screen's foot as the dock gives way (under the dock already: it stays). */
 .home > .bar { transform: translateY(calc(var(--p) * (var(--strip-height) + var(--bar-drop)))); }
@@ -310,6 +310,9 @@
 .page-dots i { --on: 0; position: relative; width: 6px; height: 6px; border-radius: 50%; background: color-mix(in srgb, var(--color-foreground) 28%, transparent); transform: scale(calc(1 + var(--on) * 0.25)); transition: transform var(--spring-ms) var(--spring); }
 .page-dots i::after { content: ""; position: absolute; inset: 0; border-radius: inherit; background: color-mix(in srgb, var(--color-foreground) 85%, transparent); opacity: var(--on); transition: opacity var(--spring-ms) var(--spring); }
 .page-dots.live i, .page-dots.live i::after { transition: none; }
+/* Home's dots follow every finger move (pagedots.tsx): composited, they move without repainting (gate home-paints). */
+.home-dots i { will-change: transform; }
+.home-dots i::after { will-change: opacity; }
 /* Home's: at the stage's foot, in the gap above the pill / dock, over the pages' width only (the stage is already
    clear of a side dock); it fades with the pages as the launcher opens. */
 .home-dots { position: absolute; left: 0; right: 0; bottom: calc(var(--gap) / 2 - 7px); opacity: calc(1 - var(--p)); pointer-events: none; }
@@ -411,6 +414,9 @@
   transition: width var(--spring-fast-ms) var(--spring-fast), margin-left var(--spring-fast-ms) var(--spring-fast), opacity var(--spring-fast-ms) var(--spring-fast);
 }
 .pill .send.shown { width: 40px; margin-left: 0; opacity: 1; pointer-events: auto; }
+/* The same button while PowOS AI answers and the field is empty (bar.tsx Send [stop]): a square in the arrow's place,
+   its tap stops the answer. Its own class, not .shown - "shown" means there is something to send. */
+.pill .send.stop { width: 40px; margin-left: 0; opacity: 1; pointer-events: auto; }
 @media (prefers-reduced-motion: reduce) { .pill .send { transition: none; } }
 /* A send tapped mid-dictation, waiting (<= 3 s) for the recognizer's final words (dictation.ts finish): a small ring
    spins in the arrow's place; it's mounted only while waiting, so a settled pill draws nothing. */
@@ -532,7 +538,7 @@ html:root .home:has(.drawer .chat) .launcher-frame.tile {
 :root[data-light="false"][data-wallpaper="light"], :root[data-light="true"][data-wallpaper="dark"] { --chat-fill: 94%; }
 /* Home's widgets are PowOS AI's frost (the material block near the end: same tint, same compositor blur, 2026-10-28 "the
    color of the widgets sucks"); this --glass-dim is only the plain/CSS-glass fallback. Their text is often small and plain - a touch more of the tint than the reference (4.0 -> 4.5:1). */
-.page .home-tile > .tile, .lib-card.tile, .page .seam {
+:is(.page .home-tile, .page .stack-page) > .tile, .lib-card.tile, .page .seam {
   /* Measured over the crystal on the inner screen (the widgets' preview): 32% left plain text at 4.2:1, 42% reaches
      4.5; secondary text in a widget is the foreground itself - its size says it's secondary, a see-through colour
      there was 3.7:1. */
@@ -541,7 +547,7 @@ html:root .home:has(.drawer .chat) .launcher-frame.tile {
   --glass-fill: var(--text-fill);
   --color-muted: var(--color-foreground);
 }
-:is(:root[data-light="false"][data-wallpaper="light"], :root[data-light="true"][data-wallpaper="dark"]) :is(.page .home-tile > .tile, .lib-card.tile) { --glass-dim: 68%; }
+:is(:root[data-light="false"][data-wallpaper="light"], :root[data-light="true"][data-wallpaper="dark"]) :is(:is(.page .home-tile, .page .stack-page) > .tile, .lib-card.tile) { --glass-dim: 68%; }
 .dock { background: none; }
 /* The dock: no slab and no plates - the icons bare on the wallpaper, as the search pill floats above them. */
 .launcher-frame { border-radius: var(--radius) var(--radius) 0 0; box-shadow: var(--lift-edge), var(--lift-shadow-up); }
@@ -672,11 +678,34 @@ html:root .ai-panel .tile { background: var(--soft-fill); }
 .drawer :is(.app-label, .heading), .letter-bar span { text-shadow: 0 0 2px var(--color-background), 0 0 4px var(--color-background), 0 0 7px var(--color-background), 0 0 12px color-mix(in srgb, var(--color-background) 70%, transparent); }
 .letter-bar span { transition: transform var(--spring-fast-ms) var(--spring-fast), color var(--spring-fast-ms) var(--spring-fast); }
 .letter-bar span.on { color: var(--accent-text); transform: scale(1.5); }
+/* "All" at the bar's top and foot (drawer.tsx LetterBar ends): a word, the letters' size and a heavier weight
+   to stay legible across the bar's 22px; scaled less when lit so it stays within the frost's edge. */
+.letter-bar span.all { font-weight: 600; }
+.letter-bar span.all.on { transform: scale(1.3); }
 /* Scrubbing the A-Z bar (drawer.tsx highlight): the letter's cells bright with a soft lift, the rest dim; eased in
    and back. opacity/scale/translate only (composited, no layout), changed per letter, not per pointermove. */
 .grid.az .app { transition: background var(--spring-fast-ms) var(--spring-fast), opacity var(--spring-fast-ms) var(--spring-fast), scale var(--spring-fast-ms) var(--spring-fast), translate var(--spring-fast-ms) var(--spring-fast); }
 .grid.az[data-scrub] .app { opacity: 0.4; }
 .grid.az[data-scrub] .app[data-lit] { opacity: 1; scale: 1.05; translate: 0 -2px; }
+/* The launcher's sections (drawer.tsx Sections; ui/launcherview.ts): Recent, Suggested, Quick launch, each under its
+   heading; a letter's apps under a chip that goes back to them. Spacing only, no plates or lines between them. */
+.launcher-section + .launcher-section { margin-top: 8px; }
+.launcher-section > .heading { color: var(--color-muted); font-size: var(--text-small); }
+.launcher-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin: 12px 0 4px 8px;
+  padding: 4px 10px 4px 12px;
+  border: 0;
+  border-radius: 999px;
+  background: var(--soft-fill);
+  color: var(--accent-text);
+  font: var(--text-body) var(--font-body);
+}
+.launcher-chip-letter { font-weight: 600; }
+/* A place's icon: the app squircle, the soft fill, its glyph in the accent - one icon shape (DESIGN-LANGUAGE.md §1). */
+.app.place .place-icon { display: flex; align-items: center; justify-content: center; background: var(--soft-fill); color: var(--accent-text); }
 /* The letter under the finger, big, beside the bar. */
 .letter-bubble {
   position: absolute;
@@ -694,6 +723,7 @@ html:root .ai-panel .tile { background: var(--soft-fill); }
   font: bold 28px var(--font-body);
   pointer-events: none;
 }
+.letter-bubble.all { font-size: 20px; }
 /* Experimental A-Z list (drawer.tsx AzOverlay, Settings > style > experimental): the letter's apps as rows, centred over
    the drawer page (not by the bar), every name whole - wrapped, never cut. Touch stays on the bar (pointer capture): the
    list takes none. It and each letter's rows fade in on the spring; it fades out (usePresence). */
@@ -765,6 +795,52 @@ html:root .ai-panel .tile { background: var(--soft-fill); }
   aspect-ratio: 1;
   border-radius: 50%;
   background: var(--color-red);
+  box-shadow: 0 0 0 1.5px var(--color-background);
+}
+/*
+ * A .pow web app's kind (apps.tsx WebMark; the user 11-23): a small chip on the icon's lower right - installable PWA,
+ * plain web page, sleeping service - in the surface colour, its glyph muted, ringed in the background like the unread
+ * dot so it reads on any icon. Unreachable right now (off the LAN/VPN): the icon faded, the chip says so. Static.
+ */
+.app-web-mark {
+  position: absolute;
+  right: -4%;
+  bottom: -4%;
+  width: 34%;
+  aspect-ratio: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 50%;
+  background: var(--color-surface);
+  color: var(--color-muted);
+  box-shadow: 0 0 0 1.5px var(--color-background);
+}
+.app-web-mark .icon { width: 66%; height: 66%; }
+.app-icon.offline .app-icon-face { opacity: 0.45; }
+/*
+ * The Pow folder's icon (apps.tsx PowFolderIcon; the user 11-23: every .pow app in one "Pow" folder): its first four
+ * apps small on the icon plate in a 2x2, as a folder face shows them, and PowOS's mark on the lower corner where a web
+ * app's kind mark sits, ringed like it. Static.
+ */
+.pow-face {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  grid-template-rows: 1fr 1fr;
+  gap: 7%;
+  padding: 15%;
+  box-sizing: border-box;
+  background: var(--icon-plate);
+}
+.app-icon .pow-face > img { width: 100%; height: 100%; object-fit: cover; border-radius: var(--icon-radius); }
+.app-icon .pow-mark {
+  position: absolute;
+  right: -4%;
+  bottom: -4%;
+  width: 36%;
+  height: auto;
+  aspect-ratio: 1;
+  border-radius: var(--icon-radius);
   box-shadow: 0 0 0 1.5px var(--color-background);
 }
 /*
@@ -863,6 +939,8 @@ html:root .menu.tile { --glass-blur-native: var(--backdrop-blur-native); backgro
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+/* A web app's kind, host and category (apps.tsx webInfo) under its name. */
+.menu-sub { padding: 0 12px 6px; color: var(--color-muted); font-size: var(--text-small); line-height: 1.3; }
 .menu-item { padding: 10px 12px; text-align: left; border-radius: 8px; }
 .menu-item:active { background: var(--soft-fill); }
 
@@ -940,7 +1018,7 @@ html:has(.sheet:not(.pop)) :is(.stage, .bar, .dock, .ai-screen .ai-scroll) {
 /* N1: on the track's clock (above) - the glass holds still on screen only when both run on the same thread. */
 html.ww-glued .page-glass-img { transition: --glass-x var(--spring-ms) var(--spring); }
 .page-track.dragging .page-glass-img, .page-glass-img.sliding, html.ww-glued :is(.page-track.dragging .page-glass-img, .page-glass-img.sliding) { transition: none; }
-.glass :is(.page .home-tile > .tile, .lib-card.tile) { background: var(--glass-fill); }
+.glass :is(:is(.page .home-tile, .page .stack-page) > .tile, .lib-card.tile) { background: var(--glass-fill); }
 .home-tile { position: absolute; padding: calc(var(--gap) / 2); touch-action: none; }
 .home-tile.lifted { opacity: 0.25; }
 /* Editing home, a widget's content is a picture: the tile takes every press (pick, lift, drag; its actions and resize
@@ -956,7 +1034,7 @@ html.ww-glued .page-glass-img { transition: --glass-x var(--spring-ms) var(--spr
     calc(var(--gap) / 2 * (1 - var(--jt))) calc(var(--gap) / 2 * (1 - var(--jr)))
     calc(var(--gap) / 2 * (1 - var(--jb))) calc(var(--gap) / 2 * (1 - var(--jl)));
 }
-.home-tile.joined > .tile {
+.home-tile.joined > .tile, .home-tile.joined .stack-strip, .home-tile.joined .stack-page > .tile {
   border-radius:
     calc(var(--radius) * var(--ctl)) calc(var(--radius) * var(--ctr))
     calc(var(--radius) * var(--cbr)) calc(var(--radius) * var(--cbl));
@@ -1715,7 +1793,11 @@ input.folder-title:focus { background: var(--soft-fill); }
    the properties themselves transition, on the main thread: a window riding home moves on the frame its page does. */
 @property --slide-x { syntax: "<length-percentage>"; inherits: false; initial-value: 0px; }
 @property --bar-counter { syntax: "<length>"; inherits: false; initial-value: 0px; }
-.home, .ai-screen { transform: translateX(var(--slide-x)); transition: transform var(--spring-ms) var(--spring); }
+/* Not inherited (gate home-paints, 11-23): set on home every finger move, an inherited --track-counter restyled all of
+   home and re-rastered the pill, the widgets and the library each move. The bar reads its own --bar-counter. */
+@property --track-counter { syntax: "<length>"; inherits: false; initial-value: 0px; }
+/* will-change: composited for the whole swipe, not only its settle - under a finger the slide moved them by paint. */
+.home, .ai-screen { transform: translateX(var(--slide-x)); transition: transform var(--spring-ms) var(--spring); will-change: transform; }
 html.ww-glued :is(.home, .ai-screen) { transition: --slide-x var(--spring-ms) var(--spring); }
 .home.sliding, .ai-screen.sliding, html.ww-glued :is(.home.sliding, .ai-screen.sliding) { transition: none; }
 .ai-screen {
@@ -2616,6 +2698,22 @@ html[data-mode="shade"], html[data-mode="shade"] body { background: transparent;
   margin-left: 10px; padding: 4px 14px; border-radius: 999px; border: none; font: var(--text-small) var(--font-body);
   background: var(--color-foreground); color: var(--color-surface);
 }
+/* A card dragged up and toward a side (ui/carddock.ts): the half of the screen Open Canvas will give it, lit while the
+   finger is in that dock zone (recents.tsx DockTarget). Under the cards, over the scrim; never takes a touch. */
+.recents-dock {
+  position: absolute; top: calc(var(--inset-top, 0px) + 12px); bottom: calc(var(--inset-bottom, 0px) + 12px);
+  width: calc(50% - 18px); border-radius: var(--radius); pointer-events: none;
+  display: flex; align-items: flex-start; justify-content: center; padding-top: 28px;
+  background: color-mix(in srgb, var(--color-foreground) 14%, transparent); border: var(--frame) solid var(--line);
+  font: var(--text-small) var(--font-body); color: var(--color-foreground);
+  animation: recents-dock-in var(--spring-fast-ms) var(--spring-fast) both;
+}
+.recents-dock.left { left: 12px; }
+.recents-dock.right { right: 12px; }
+.recents-dock.leaving { animation: recents-dock-out var(--spring-fast-ms) var(--spring-fast) both; }
+@keyframes recents-dock-in { from { opacity: 0; transform: scale(0.96); } }
+@keyframes recents-dock-out { to { opacity: 0; transform: scale(0.96); } }
+@media (prefers-reduced-motion: reduce) { .recents-dock { animation: none; } }
 .recents-menu-scrim { position: fixed; inset: 0; z-index: 1; }
 .recents-menu {
   position: fixed; z-index: 2; width: 220px; display: flex; flex-direction: column; padding: 6px 0;
@@ -2787,7 +2885,10 @@ html.glass:root .lock .lock-note.tile {
 /* A text of several lines (an update's changes, one per line: AgentMail's deploy notice) shows them, up to six. */
 .lock-note-text.lines { white-space: pre-line; display: -webkit-box; -webkit-line-clamp: 6; -webkit-box-orient: vertical; }
 .lock-note-time { font-size: var(--text-small); }
-.lock-hint { margin-top: auto; font-size: var(--text-small); }
+/* The foot: the charging line (lock.tsx chargeLine) over the hint, both at the bottom. */
+.lock-foot { margin-top: auto; display: flex; flex-direction: column; align-items: center; gap: 6px; }
+.lock-charge { color: var(--color-foreground); font-size: var(--text-small); }
+.lock-hint { font-size: var(--text-small); }
 
 /* Other apps' Android widgets (appwidget.tsx): the widget's own frame fills the tile, drawn by the widget itself (its
    background, its corners) - no PowOS frame around it; selected, an outline shows it. */
@@ -3116,18 +3217,18 @@ html[data-mode="quicktools"], html[data-mode="quicktools"] body { background: tr
 }
 /* A dark theme over a dark wallpaper: the tint a touch lighter, so the glass shows over pure black - the theme's glass
    colour towards white in oklab, its hue kept (it was lifted towards a cool blue-grey in every theme). */
-:root[data-light="false"]:not([data-wallpaper="light"]) :is(.chrome-surface, .app-screen.tile, .lib-card.tile, .ai-screen .tile, .folder-sheet .folder-bg.tile, .home:has(.ai-panel) .launcher-frame.tile, .notif-panel :is(.cc.v3, .notif-own), .page .home-tile > .tile, :is(.home > .bar .bar-pill, .home .dsb-glass)) {
+:root[data-light="false"]:not([data-wallpaper="light"]) :is(.chrome-surface, .app-screen.tile, .lib-card.tile, .ai-screen .tile, .folder-sheet .folder-bg.tile, .home:has(.ai-panel) .launcher-frame.tile, .notif-panel :is(.cc.v3, .notif-own), :is(.page .home-tile, .page .stack-page) > .tile, :is(.home > .bar .bar-pill, .home .dsb-glass)) {
   --frost-base: color-mix(in oklab, var(--glass-tone) 88%, white);
 }
-html:root .chrome-surface, html.glass-native .app-screen.tile.sheet, html:root .lib-card.tile, html:root .ai-screen .tile, html:root .folder-sheet .folder-bg.tile, html:root .home:has(.ai-panel) .launcher-frame.tile, html:root .notif-panel .cc.v3, html:root .page .home-tile > .tile, html:root :is(.home > .bar .bar-pill, .home .dsb-glass) {
+html:root .chrome-surface, html.glass-native .app-screen.tile.sheet, html:root .lib-card.tile, html:root .ai-screen .tile, html:root .folder-sheet .folder-bg.tile, html:root .home:has(.ai-panel) .launcher-frame.tile, html:root .notif-panel .cc.v3, html:root :is(.page .home-tile, .page .stack-page) > .tile, html:root :is(.home > .bar .bar-pill, .home .dsb-glass) {
   --glass-blur-native: var(--frost-blur-native);
   /* Glass, not a slab, over a black backdrop too (blur of black is black): a faint light from above and a lit edge. */
   background: linear-gradient(180deg, var(--frost-sheen), transparent 45%), linear-gradient(var(--frost-fill), var(--frost-fill)), linear-gradient(var(--glass-veil), var(--glass-veil));
   box-shadow: var(--lift-edge), var(--lift-shadow);
 }
 /* Home's widgets: the frost above, with their own (lighter) compositor blur - --widget-blur-native (theme.css). */
-html:root .page .home-tile > .tile, html:root .lib-card.tile { --glass-blur-native: var(--widget-blur-native); }
-/* The library's folder cards are home's tiles too: every widget rule names .lib-card.tile beside .page .home-tile > .tile,
+html:root :is(.page .home-tile, .page .stack-page) > .tile, html:root .lib-card.tile { --glass-blur-native: var(--widget-blur-native); }
+/* The library's folder cards are home's tiles too: every widget rule names .lib-card.tile beside :is(.page .home-tile, .page .stack-page) > .tile,
    so tint, edge and blur are the widgets' own in every theme (the user, 18:41 and 19:09 "doesnt seem the same still?"). */
 /* Home's search bar (the foot's pill, bar.tsx) is the widgets' glass too: their frost, edge and compositor blur (2026-10-28
    "make the search bar have the same tint and blur as the widgets"). */
@@ -3162,7 +3263,7 @@ html:root:not(.glass-native) .ai-screen .tile { background: var(--frost-fill); }
  * showed every widget, pill and card as a white slab (the user, 11-14: "the blur bg stuff is white"); THE backdrop is
  * the theme's one tint everywhere (theme.css, 10-31). Only labels straight on the wallpaper turn (theme.css --on-wallpaper).
  */
-:root :is(.page .home-tile > .tile, .lib-card.tile, .page .seam, :is(.home > .bar .bar-pill, .home .dsb-glass), .page .search-face .bar-pill, .folder-sheet .folder-bg.tile) {
+:root :is(:is(.page .home-tile, .page .stack-page) > .tile, .lib-card.tile, .page .seam, :is(.home > .bar .bar-pill, .home .dsb-glass), .page .search-face .bar-pill, .folder-sheet .folder-bg.tile) {
   --frost-fill: var(--shade-tint);
   --frost-sheen: transparent;
   --glass-veil: transparent;
@@ -3571,12 +3672,18 @@ html[data-sideways] .home.dock-right:not(.wide) > .bar { margin-right: var(--sid
 /* The launcher's app grid and folders page start a row gap below the panel's top edge, not pinned to it (the user,
    2026-10-31: "Give them a little breathing space on the top"); they still scroll up under the edge. */
 .home .drawer-page > .drawer-list { padding-top: 24px; }
-.home.dock-left .drawer-clip { padding-left: var(--side-dock); }
-.home.dock-right .drawer-clip { padding-right: var(--side-dock); }
+/* The launcher (and PowOS AI / the chat in its window) keeps clear of the side dock only while that dock is SHOWN beside
+   it: home's unfolded launcher adopts home's dock (.adopts.wide, not under the wide AI panel), the overlay's launcher
+   renders its dock (pull.tsx dockShown -> :has(> .dock)) on the app grid. Everywhere else the dock has slid out to its
+   edge and the panel takes the full width (the user, 2026-11-23: "A launcher is not full width if the docking is on
+   the right" - folded, 64 px of empty column stood where the slid-out dock had been, on either side). */
+.home:is(.dock-left, .dock-right):is(.adopts.wide, .pull-screen:has(> .dock)):not(:has(.ai-panel)) { --dock-reserve: var(--side-dock); }
+.home.dock-left .drawer-clip { padding-left: var(--dock-reserve, 0px); }
+.home.dock-right .drawer-clip { padding-right: var(--dock-reserve, 0px); }
 /* The folders page waits a dock, an A-Z bar and a gutter beyond the apps page (drawer.tsx Pages steps by width + gap):
    with the drawer narrowed by the dock it sat right after the apps page's clip, under the side dock on the cover. */
-.home:is(.dock-left, .dock-right) .drawer-track { --page-gap: calc(var(--side-dock) + var(--letter-bar) + 4px + var(--edge)); }
-.home.wide:is(.dock-left, .dock-right) .drawer-track { --page-gap: calc(var(--side-dock) + var(--letter-bar) + 2 * var(--wide-margin)); }
+.home:is(.dock-left, .dock-right):is(.adopts.wide, .pull-screen:has(> .dock)) .drawer-track { --page-gap: calc(var(--side-dock) + var(--letter-bar) + 4px + var(--edge)); }
+.home.wide:is(.dock-left, .dock-right):is(.adopts, .pull-screen:has(> .dock)) .drawer-track { --page-gap: calc(var(--side-dock) + var(--letter-bar) + 2 * var(--wide-margin)); }
 .home.pull-screen:is(.dock-left, .dock-right):has(> .dock) .stage > .launcher-frame { inset: 0 0 calc(-1 * (48px + var(--foot))); }
 /* Unfolded, the launcher's recent apps (the dock's recent page) sit at the app grid's spacing, not a sixth of the width
    each: a couple more icons in the row, same icon size (the user, 2026-10-29: "the recent ones are too spread out"). */
@@ -3909,6 +4016,41 @@ html[data-sideways] .home.dock-right:not(.wide) > .bar { margin-right: var(--sid
 /* A side column centres its pinned apps and the button after them (auto margins: nothing cut once it scrolls). */
 .home.search-dock:is(.dock-left, .dock-right) .dock-pages > .dock-page:first-child { margin-top: auto; }
 .home.search-dock:is(.dock-left, .dock-right) .dock-pages > .dock-page:last-child { margin-bottom: auto; }
+/*
+ * A side dock aligned to the bottom (Settings > style > home > "side dock alignment", ui/dockalign.ts; the user,
+ * 2026-11-23: "I cant really reach my docked icons easily cause they are so far up"): the pinned apps sit at the
+ * column's foot within thumb reach, the recent apps stacked above them - the newest nearest the pinned, growing upward
+ * (column-reverse). Only the recents scroll (their own box shrinks); the pinned group never leaves the screen. The
+ * whole column scrolls only if the pinned apps alone outgrow it. The search button (dockdrop.ts buttonSlot) starts the
+ * pinned group: the separator between the two, with the recents' 12 px gap.
+ */
+.home.dock-end:is(.dock-left, .dock-right) .dock-pages { flex-direction: column-reverse; justify-content: flex-start; }
+.home.dock-end:is(.dock-left, .dock-right) .dock-pages > .dock-page:is(:first-child, :last-child) { margin-top: 0; margin-bottom: 0; }
+.home.dock-end:is(.dock-left, .dock-right) .dock-pages > .dock-page:not(.dock-recent) { flex: none; }
+.home.dock-end:is(.dock-left, .dock-right) .dock-pages > .dock-page.dock-recent {
+  flex: 0 1 auto;
+  min-height: 0;
+  flex-direction: column-reverse;
+  justify-content: flex-start;
+  margin-bottom: 12px;
+  overflow-x: hidden;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  touch-action: pan-y;
+}
+/* Where more recents wait past an end, they fade there (the drawer's scroll-driven --scroll-fade mask), never cut. */
+.home.dock-end:is(.dock-left, .dock-right) .dock-pages > .dock-page.dock-recent {
+  --scroll-fade: 24px;
+  -webkit-mask-image: linear-gradient(transparent, black var(--scroll-fade-t), black calc(100% - var(--scroll-fade-b)), transparent);
+  mask-image: linear-gradient(transparent, black var(--scroll-fade-t), black calc(100% - var(--scroll-fade-b)), transparent);
+}
+@supports (animation-timeline: scroll()) {
+  .home.dock-end:is(.dock-left, .dock-right) .dock-pages > .dock-page.dock-recent {
+    animation: scroll-fade-t linear both, scroll-fade-b linear both;
+    animation-timeline: scroll(self y), scroll(self y);
+    animation-range: 0 var(--scroll-fade), calc(100% - var(--scroll-fade)) 100%;
+  }
+}
 
 /*
  * PowOS AI's glanceable line (powai.tsx Strip, AI7): one slim row under the header - agents working · the task moving
@@ -4443,6 +4585,14 @@ html:root :is(.ai-screen.status, .ai-left) .ais-stack > .ais-card-peek { align-s
 .ai-screen.stacked > .ai-scroll { position: relative; inset: auto; flex: 1; min-height: 0; padding-top: 0; padding-bottom: 0; scroll-padding-block: 0; --ai-fade-at: 0px;
   -webkit-mask-image: linear-gradient(to bottom, transparent, black 14px, black calc(100% - var(--ai-fade, 0px)), transparent); mask-image: linear-gradient(to bottom, transparent, black 14px, black calc(100% - var(--ai-fade, 0px)), transparent); }
 .ai-screen.stacked > .ai-segs { margin-top: auto; }
+/*
+ * A tab's header (Agents, Progress, Devices: back, name, a glance; aipanes.tsx TabHead, agents.tsx AgentsView) sits
+ * where the chat's header does - on its own line under the status bar (--ai-head-top), never behind the clock (the
+ * user, 11-23: "surely we can do the page dock cutoff thing more nicely"; the page has no top padding, its scroller
+ * starts under this row and fades in under it). Unfolded it heads the right column's glass (.ai-right's padding).
+ */
+.ai-screen.stacked > .ag-top { flex: none; position: relative; z-index: 2; min-height: 36px; margin-top: var(--ai-head-top); }
+.ai-right > .ag-top { flex: none; min-height: 36px; }
 /* Home's shared bar sits under the tabs (its AI-page role is its own task): its room kept, on every tab. */
 .ai-screen.stacked > .ai-bar-slot { flex: none; height: calc(var(--pill-height) + var(--ai-foot)); }
 /*
@@ -4503,9 +4653,9 @@ html:has(.home > .bar[data-role="ai"] textarea:focus) .ai-screen.stacked > .ai-s
  */
 .home > .bar.seated { z-index: 5; }
 /* FX1 (the user, 11-03 22:53: "there's still some page block for the search bar on the last page"): the bar never rides
-   a page - --track-counter (gesture.ts applyTrack) undoes home's slide in the same frame, on its curve; under a finger
-   (.sliding) it follows at once. --bar-lift: the keyboard's lift on PowOS AI's page (bar.tsx seatOnAi). */
-.home:not(.pull-screen) > .bar { translate: var(--track-counter, 0px) calc(var(--bar-lift, 0px) - var(--bar-edit-rise, 0px)); transition: opacity var(--spring-fast-ms) var(--spring-fast), visibility 0s, translate var(--spring-ms) var(--spring); }
+   a page - its --bar-counter (gesture.ts applyTrack, beside home's --track-counter) undoes home's slide in the same
+   frame, on its curve; under a finger (.sliding) it follows at once. --bar-lift: the keyboard's lift on PowOS AI's page (bar.tsx seatOnAi). */
+.home:not(.pull-screen) > .bar { translate: var(--bar-counter) calc(var(--bar-lift, 0px) - var(--bar-edit-rise, 0px)); transition: opacity var(--spring-fast-ms) var(--spring-fast), visibility 0s, translate var(--spring-ms) var(--spring); }
 .home:not(.pull-screen).sliding > .bar, .home:not(.pull-screen) > .bar.sliding { transition: opacity var(--spring-fast-ms) var(--spring-fast), visibility 0s; }
 /* N1b: with a web window the counter is the bar's own registered --bar-counter (gesture.ts applyTrack sets it beside
    home's --track-counter), on home's clock: the bar holds still while home slides on the main thread. */
@@ -4542,16 +4692,38 @@ html.ww-glued .home.button-morph:not(.pull-screen, .sliding) > .bar:not(.sliding
 .ai-screen.panes[data-bar-room] .ai-bar-slot { height: 0; margin-top: -8px; }
 .ai-screen.panes[data-bar-room] > :is(.ai-left, .ai-right) { margin-bottom: calc(var(--bar-room) + var(--ai-gut)); }
 .ai-screen.panes[data-bar-room] > .ai-left { max-height: calc(100% - var(--bar-room) - var(--ai-gut)); }
-/* The role's glyph (the launcher's apps, the AI page's manager) where home's prompt glyph is. */
+/* The role's glyph (the AI page's manager) where home's prompt glyph is. */
 .pill .prompt.role-icon { display: flex; align-items: center; justify-content: center; height: 40px; }
-/* Switching pages changes the role in place: its hint and glyph fade in anew (one animation name per role, so a
-   change of role restarts it), no jump. */
-@keyframes bar-role-search { from { opacity: 0; } to { opacity: 1; } }
-@keyframes bar-role-apps { from { opacity: 0; } to { opacity: 1; } }
+/* PowOS AI's page changes the role in place: its hint and glyph fade in. Home and the launcher are one face (SP1, the
+   user 11-23: the bar "re-initializes with an animation"): no fade between them. */
 @keyframes bar-role-ai { from { opacity: 0; } to { opacity: 1; } }
-.bar.role-search .bar-pill textarea::placeholder, .bar.role-search .bar-pill .lead > .prompt { animation: bar-role-search var(--spring-ms) var(--spring); }
-.bar.role-apps .bar-pill textarea::placeholder, .bar.role-apps .bar-pill .lead > .prompt { animation: bar-role-apps var(--spring-ms) var(--spring); }
 .bar.role-ai .bar-pill textarea::placeholder, .bar.role-ai .bar-pill .lead > .prompt { animation: bar-role-ai var(--spring-ms) var(--spring); }
 @media (prefers-reduced-motion: reduce) {
   .bar[data-role] .bar-pill textarea::placeholder, .bar[data-role] .bar-pill .lead > .prompt { animation: none; }
 }
+
+/*
+ * Widget stacks (ui/stacks.tsx): one slot, the widget on top filling it as a lone widget's face does (every
+ * `.home-tile > .tile` rule names `.stack-page > .tile` too), its neighbour beside it only while a finger swipes.
+ * Dots inside the stack's foot, the home page dots' look at a smaller size.
+ */
+.stack-strip { position: relative; width: 100%; height: 100%; overflow: hidden; border-radius: var(--radius); touch-action: none; }
+.stack-track { position: absolute; inset: 0; }
+.stack-page { position: absolute; top: 0; width: 100%; height: 100%; }
+.stack-page > .tile { height: 100%; box-sizing: border-box; }
+.page-dots.stack-dots { position: absolute; left: 0; right: 0; bottom: 3px; z-index: 2; height: 8px; gap: 4px; }
+.page-dots.stack-dots i { width: 4px; height: 4px; }
+/* A widget let go here stacks with this one: its whole box marked, filled softly (no hard line: design language). */
+.drop-spot.stack-aim { border-style: solid; background: color-mix(in srgb, var(--color-accent) 14%, transparent); }
+.stack-scrim { position: fixed; inset: 0; z-index: 40; display: flex; align-items: center; justify-content: center; padding: var(--edge); }
+.stack-sheet { width: min(100%, 380px); max-height: 80vh; display: flex; flex-direction: column; gap: 10px; padding: 12px var(--edge) var(--edge); overflow: hidden; }
+html:root .stack-sheet.tile { --glass-blur-native: var(--backdrop-blur-native); background: var(--menu-tint); }
+.stack-sheet-head { font: var(--text-item) var(--font-body); font-weight: bold; color: var(--color-foreground); text-align: center; }
+.stack-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px; overflow-y: auto; touch-action: pan-y; }
+.stack-list li { display: flex; align-items: center; gap: 4px; padding: 6px 8px; border-radius: 8px; background: var(--soft-fill); }
+.stack-list li.on { background: color-mix(in srgb, var(--color-accent) 18%, transparent); }
+.stack-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--color-foreground); }
+.stack-list button, .stack-sheet-acts button { padding: 6px 10px; border-radius: 8px; }
+.stack-list button:disabled { opacity: 0.35; }
+.stack-sheet-acts { display: flex; gap: 6px; justify-content: flex-end; flex-wrap: wrap; }
+.stack-sheet .danger { color: var(--color-red); }

@@ -132,6 +132,11 @@ function foldedGridFails(cells, feet) {
 async function gridClear(position) {
   const list = document.querySelector(".home > .stage .drawer-list:not(.drawer-folders)");
   if (!list) return ["no drawer list"];
+  // The launcher opens on its short sections (ui/launcherview.ts); a letter with many apps is the list that reaches the
+  // foot: manyApps' ~90 "Zz" apps under Z, as the A-Z bar shows them. Back to the sections after.
+  const D = await importShim("./ui/drawer.tsx");
+  D.launcherLetter.value = "Z";
+  await sleep(150);
   list.scrollTop = list.scrollHeight;
   await sleep(150);
   await frame();
@@ -142,6 +147,7 @@ async function gridClear(position) {
   if (folded()) fails.push(...foldedGridFails(cells, feet));
   else fails.push(...lastRowFails(list, cells, position === "bottom" ? feet.find(([n]) => n === "dock")?.[1] : null, 8));
   list.scrollTop = 0;
+  D.launcherLetter.value = null;
   return [...new Set(fails)];
 }
 
@@ -164,11 +170,14 @@ async function openedAdopting(S, button) {
   return f.bars === 1 && f.docks === 0 ? fails : [...fails, `open folded: ${f.bars} bars, ${f.docks} docks (one bar, no dock)`];
 }
 
-/** A phone's worth of apps (60), so the grid scrolls and its last row meets the foot (the mock's few fit on one page). */
+/**
+ * A phone's worth of apps (120), so the grid scrolls and its last row meets the foot (the mock's few fit on one page).
+ * 120: the launcher shows a letter's apps (gridClear: Z), and the ~90 "Zz" ones must still overfill the folded list.
+ */
 async function manyApps(powos) {
   const list = await powos.apps.list();
-  if (list.length >= 60 || !list.length) return;
-  const more = Array.from({ length: 60 - list.length }, (_, i) => ({ ...list[i % list.length], key: `a:dev.lb1/.A${i}`, label: `Zz ${i}` }));
+  if (list.length >= 120 || !list.length) return;
+  const more = Array.from({ length: 120 - list.length }, (_, i) => ({ ...list[i % list.length], key: `a:dev.lb1/.A${i}`, label: `Zz ${i}` }));
   powos.apps.list = async () => [...list, ...more];
   window.__mockEvents.emit("apps.changed", {});
   await sleep(300);

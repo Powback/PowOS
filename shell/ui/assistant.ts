@@ -57,6 +57,55 @@ export function unqueue(id: number) {
   powos.ai.unqueue?.(id);
 }
 
+/**
+ * The stop button (the pill's send, turned, while a turn runs: bar.tsx Send). Optimistic both ways (the user's rule: no
+ * silence over 100 ms): it shows the instant a send goes - before the host's busy arrives - and turns back to send the
+ * instant it's tapped, before the turn has ended. A host that never takes the stop (busy, not stopping, 10 s on) gets it
+ * back, so the turn can be stopped again. Hosts from before ai.stop (no `stoppable`): never shown.
+ */
+const sentAt = signal(0);
+const stopAt = signal(0);
+const SEND_SHOWS_MS = 4000;
+const STOP_ROLLBACK_MS = 10000;
+const tick = signal(0);
+let ticking: ReturnType<typeof setTimeout> | null = null;
+/** Re-evaluates [answering] when an optimistic window ends (a timer, not polling: one per window). */
+function expireAt(ms: number) {
+  if (ticking) clearTimeout(ticking);
+  ticking = setTimeout(() => ((ticking = null), tick.value++), ms + 20);
+}
+
+/** A turn runs that the pill's stop can end (pure: the page's state machine, test-ai-stop.ts). */
+export function stopShown(c: { busy: boolean; stoppable?: boolean; stopping?: boolean }, now: number, sent: number, stop: number): boolean {
+  // An older host, or a stop under way: no stop. Tapped: back to send at once, until the turn has ended - or rolled
+  // back past STOP_ROLLBACK_MS when the host never took it.
+  if (!c.stoppable || c.stopping || tappedRecently(stop, now)) return false;
+  return c.busy || justSent(sent, now);
+}
+const tappedRecently = (stop: number, now: number) => stop > 0 && now - stop < STOP_ROLLBACK_MS;
+const justSent = (sent: number, now: number) => sent > 0 && now - sent < SEND_SHOWS_MS;
+
+export const answering = computed(() => {
+  tick.value;
+  return stopShown(chat.value, Date.now(), sentAt.value, stopAt.value);
+});
+
+// The host's busy arrived (the send's window is over) / the turn ended (the stop's is): the optimistic marks go.
+effect(() => {
+  const c = chat.value;
+  if (c.busy && sentAt.peek()) sentAt.value = 0;
+  if (!c.busy && !c.stopping && stopAt.peek()) stopAt.value = 0;
+});
+
+/** The stop button's tap: the turn under way ends (ai.stop); what it said stays, a "stopped" line follows. */
+export function stopAnswer() {
+  if (!answering.peek()) return;
+  stopAt.value = Date.now();
+  sentAt.value = 0;
+  expireAt(STOP_ROLLBACK_MS);
+  powos.ai.stop?.().catch(() => (stopAt.value = 0));
+}
+
 /** What goes along with a question (the side button's screen, crop, live frames: assist.tsx); null: nothing. */
 let askContext: ((text: string) => Promise<string>) | null = null;
 /** Asks also put the chat in the app switcher (ai.send's recents): over an app (assist mode), not from home. */
@@ -73,6 +122,8 @@ export function setAskContext(f: ((text: string) => Promise<string>) | null, rec
 
 async function send(t: string) {
   sent = { text: t, at: Date.now() };
+  // The stop shows now, not when the host's busy comes back (see answering).
+  if (!chat.peek().busy) (sentAt.value = Date.now(), expireAt(SEND_SHOWS_MS));
   // The question first, the context after it: the chat shows the question (powai.tsx), and `sent` matches it by prefix.
   powos.ai.send(askContext ? await askContext(t) : t, askRecents);
 }

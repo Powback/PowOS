@@ -5,6 +5,7 @@
  * the phone, so the shell still runs.
  */
 import type {
+  FilePlace,
   Clip,
   BackgroundApp,
   HostWebWindow,
@@ -26,6 +27,7 @@ import type {
   ChromeState,
   Cell,
   Chat,
+  ChatItem,
   ClaudeSignInState,
   DesktopWindow,
   VirtualDesktop,
@@ -36,6 +38,8 @@ import type {
   PhoneNotification,
   RecentTask,
   SplitPair,
+  CanvasDockResult,
+  CanvasState,
   RunState,
   AppLinks,
   AppWindow,
@@ -144,7 +148,8 @@ function native(host: NonNullable<Window["PowosHost"]>): Bridge {
       background: () => call<BackgroundApp[]>("apps.background"),
       stopBackground: (key) => call<boolean>("apps.stopBackground", key),
     },
-    usage: { recent: (limit) => call<string[]>("usage.recent", limit) },
+    usage: { recent: (limit) => call<string[]>("usage.recent", limit), frequent: (limit) => call<string[]>("usage.frequent", limit) },
+    files: { places: () => call<FilePlace[]>("files.places"), open: (id) => call<boolean>("files.open", id) },
     home: {
       get: () => call<Home>("home.get"),
       place: (key, cell, page) => call("home.place", key, cell, page),
@@ -306,6 +311,7 @@ function native(host: NonNullable<Window["PowosHost"]>): Bridge {
       behind: (q) => call("shade.behind", q),
       homePull: (on, exclude, mainPage, regions) =>
         call<boolean>("shade.homePull", on, exclude ?? null, mainPage ?? false, regions ?? null),
+      homeClaim: () => call<void>("shade.homeClaim"),
       open: () => call("shade.open"),
     },
     overlay: {
@@ -379,6 +385,10 @@ function native(host: NonNullable<Window["PowosHost"]>): Bridge {
       info: (id) => call<boolean>("tasks.info", id),
       screenshot: (id) => call<string | null>("tasks.screenshot", id),
       toWindow: (id) => call<boolean>("tasks.toWindow", id),
+      canvas: () => call<boolean>("tasks.canvas"),
+      canvasDock: (id, side, other) => call<CanvasDockResult>("tasks.canvasDock", id, side, other),
+      canvasState: () => call<CanvasState | null>("tasks.canvasState"),
+      canvasSides: () => call<number[]>("tasks.canvasSides"),
     },
     recents: {
       slot: (rect) => call("recents.slot", rect),
@@ -506,7 +516,28 @@ function mock(): Bridge {
   const recent = ["a:chrome", "l:konsole", "a:spotify", "a:signal", "l:dolphin", "a:youtube"];
   const data = (name: string) => `powos-shell:${name}`;
   let samples: Promise<Record<string, unknown>> | null = null;
-  let chat: Chat = { busy: false, items: [], queued: [] };
+  let chat: Chat = { busy: false, items: [], queued: [], stoppable: true };
+  /** The mock turn under way's stop (ai.stop): ends it as PowosAiChat.stop does. */
+  let stopTurn: (() => void) | null = null;
+  /**
+   * The mock turn's body: a step, then the answer after 600 ms - or, for a long ask ("long" in it), the start of an
+   * answer and 30 s more, so the stop button can be seen and tapped (the gate's ai-stop scenes). True: stopped (ai.stop).
+   */
+  async function mockTurn(text: string, step: (next: Partial<Chat>) => void): Promise<boolean> {
+    let stopped = false;
+    const wait = (ms: number) =>
+      new Promise<void>((r) => {
+        const t = setTimeout(r, ms);
+        stopTurn = () => ((stopped = true), clearTimeout(t), r());
+      });
+    await wait(400);
+    if (!stopped) step({ items: [...chat.items, { kind: "tool", name: "Bash", hint: "powos status", ok: null }] });
+    const long = /\blong\b/i.test(text);
+    if (!stopped && long) step({ items: [...chat.items, { kind: "assistant", text: "(mock) Here is the start of a long answer…" }] });
+    if (!stopped) await wait(long ? 30000 : 600);
+    stopTurn = null;
+    return stopped;
+  }
   // Dev tools / the gate: the mock host's chat set by hand (its later events build on it, as the host's would).
   (window as unknown as { __mockChat?: (next: Partial<Chat>) => void }).__mockChat = (next) => events.emit("ai.changed", (chat = { ...chat, ...next }));
   let screen: WidgetScreen = { key: null };
@@ -628,7 +659,12 @@ function mock(): Bridge {
       links: async (pkg) => ({ pkg, label: pkg, links: [{ uri: `https://${pkg}.example/item/.*`, activity: ".ItemActivity" }] }),
       ...mockBackground(icon),
     },
-    usage: { recent: async (limit) => recent.slice(0, limit) },
+    // Most used: some recent, some opened less lately (the launcher's Suggested leaves out what Recent shows).
+    usage: { recent: async (limit) => recent.slice(0, limit), frequent: async (limit) => ["a:chrome", "a:maps", "a:spotify", "a:camera", "l:kate", "a:calendar", "a:signal"].slice(0, limit) },
+    files: {
+      places: async () => [{ id: "downloads", label: "Downloads" }, { id: "documents", label: "Documents" }, { id: "camera", label: "Camera" }, { id: "music", label: "Music" }, { id: "linux", label: "Linux home" }],
+      open: async (id) => (console.log("[mock] files.open", id), true),
+    },
     home: homeLayout(home, homeChanged, () => apps),
     store: {
       get: async <T>(name: string) => {
@@ -685,20 +721,11 @@ function mock(): Bridge {
         // Mid-turn: queued, as PowosAiChat does; the next turn when this one ends.
         if (chat.busy) return void step({ queued: [...(chat.queued ?? []), { id: Date.now(), text }] });
         step({ busy: true, items: [...chat.items, { kind: "user", text }] });
-        await new Promise((r) => setTimeout(r, 400));
-        step({
-          items: [...chat.items, { kind: "tool", name: "Bash", hint: "powos status", ok: null }],
-        });
-        await new Promise((r) => setTimeout(r, 600));
-        const items = chat.items.slice(0, -1);
-        step({
-          busy: false,
-          items: [
-            ...items,
-            { kind: "tool", name: "Bash", hint: "powos status", ok: true },
-            { kind: "assistant", text: `(mock) You asked: ${text}` },
-          ],
-        });
+        const stopped = await mockTurn(text, step);
+        // Its running step done (or not, stopped), then its answer - or a quiet "stopped", as PowosAiChat.stopped.
+        const items = chat.items.map((i) => (i.kind === "tool" && i.ok == null ? { ...i, ok: !stopped } : i));
+        const end: ChatItem = stopped ? { kind: "note", text: "stopped", error: false } : { kind: "assistant", text: `(mock) You asked: ${text}` };
+        step({ busy: false, stopping: false, items: [...items, end] });
         const next = chat.queued?.[0];
         if (next) {
           step({ queued: chat.queued!.slice(1) });
@@ -706,6 +733,12 @@ function mock(): Bridge {
         }
       },
       unqueue: async (id) => void events.emit("ai.changed", (chat = { ...chat, queued: (chat.queued ?? []).filter((q) => q.id !== id) })),
+      stop: async () => {
+        if (!chat.busy || chat.stopping || !stopTurn) return;
+        events.emit("ai.changed", (chat = { ...chat, stopping: true }));
+        // The host's stop takes a moment (powos manager --stop): the page's button has already turned back to send.
+        setTimeout(() => stopTurn?.(), 300);
+      },
       verdict: async (task, works, line) => console.log(`[mock] verdict: ${task} ${works ? "works" : "still broken"}${line ? ` (${line})` : ""}`),
       verifyGo: async (task) => {
         console.log(`[mock] test now: ${task}`);
@@ -965,6 +998,8 @@ function mock(): Bridge {
       behind: async () => {},
       // The gate reads the last regions home excluded from the host's pulls (W-IN1: they follow the windows).
       homePull: async (...args: unknown[]) => (((globalThis as { __homePullRegions?: unknown }).__homePullRegions = args[3] ?? null), true),
+      // The gate counts home's sideways claims sent to the host (scroll-own: a strip's drag must never be the shade's).
+      homeClaim: async () => void ((globalThis as { __homeClaims?: number }).__homeClaims = ((globalThis as { __homeClaims?: number }).__homeClaims ?? 0) + 1),
       open: async () => console.log("[mock] shade open"),
     },
     overlay: { closed: async () => console.log("[mock] overlay closed") },
@@ -1229,7 +1264,7 @@ function mock(): Bridge {
         keyboard: 0,
       }),
       notifications: async (open = true) => (console.log(`[mock] notification shade ${open ? "down" : "up"}`), true),
-      battery: async () => ({ level: 76, charging: false }),
+      battery: async () => ({ level: 76, charging: false, plugged: null, full: false, held: false, speed: null, watts: null, wattsFrom: null, fullInMs: null }),
       // No wallpaper to frost in a browser: the plain fills (ui/glass.ts's __glass.use() tries one by hand).
       glass: async () => ({ wallpaper: null, blurBehind: false }),
     },

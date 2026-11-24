@@ -1,0 +1,16 @@
+#!/bin/bash
+# criu-dst (criu-b, root): receive CRIU image dirs as tar streams on :2800, one per connection; when the final dump
+# ("f") has arrived, restore it (CRIU --unprivileged) and log wall-clock ms for each step to /ck/dst.log.
+rm -rf /ck; mkdir -p /ck; cd /ck
+# CRIU rebinds tmux's listening socket at its old path; the directory must exist (same-filesystem requirement)
+mkdir -p -m 700 /tmp/tmux-0; rm -f /tmp/tmux-0/default
+ms() { date +%s%3N; }
+while :; do
+  socat -u TCP-LISTEN:2800,reuseaddr - | tar -C /ck -xf - || exit 1
+  echo "recv $(ls -t /ck | grep -v log | head -1) $(ms)" >> /ck/dst.log
+  if [ -d /ck/f ]; then
+    t=$(ms); criu restore --unprivileged -D /ck/f -d -v2 -o /tmp/criu-restore.log; rc=$?
+    echo "restore rc=$rc $t $(ms)" >> /ck/dst.log
+    exit 0
+  fi
+done

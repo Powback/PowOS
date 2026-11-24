@@ -5,19 +5,33 @@
  * icon (or a long press) opens its menu. Android's split screen is one card (t.split): its apps' icons as ONE combined
  * icon (GroupIcon, the dock's DG1 group cell's) over the whole split - each side's last frame at its share of the
  * screen, side by side or one over the other as on the screen (t.splitLayout).
+ *
+ * Unfolded with Open Canvas ([canDock]): pushed up AND toward a side (ui/carddock.ts) it docks into the native split
+ * view on that side - the card follows the finger sideways too and the target half lights up ([onDockHover]) while
+ * it's in a dock zone; a mostly vertical push is a removal as before.
  */
 import { useRef, useState } from "preact/hooks";
 import type { RecentTask, SplitSide } from "../types.ts";
 import { spring } from "./spring.ts";
 import { tick } from "./haptics.ts";
 import { memo } from "./memo.ts";
+import { cardRelease, dockSide, type DockSide } from "./carddock.ts";
 
-/** Pushed up this far (of its height), or flicked up (px/ms), a card is removed. */
-const REMOVE = 0.4;
-const FLICK = 0.5;
 const SLOP = 10;
 /** Held this long without moving: the card's menu (Android's long-press timeout). */
 const LONG_PRESS = 450;
+
+/** A press on a card as it goes: where it began, how far up / sideways the card is, the dock half it targets. */
+interface Drag {
+  x: number;
+  y: number;
+  dy: number;
+  dx: number;
+  side: DockSide | null;
+  up: boolean | null;
+  samples: { y: number; t: number }[];
+  press: number;
+}
 
 export interface Rect {
   left: number;
@@ -37,6 +51,9 @@ export const TaskCard = memo(function TaskCard({
   onOpen,
   onRemove,
   onMenu,
+  canDock,
+  onDockHover,
+  onDock,
 }: {
   t: RecentTask;
   /** The first card: where the window of the app the switcher was opened over lands (recents.tsx). */
@@ -56,35 +73,66 @@ export const TaskCard = memo(function TaskCard({
   /** False: it stays (the card springs back). */
   onRemove: (id: number) => boolean | void;
   onMenu: (id: number, card: HTMLElement) => void;
+  /** Open Canvas is there (unfolded, supported, an Android app's card): up and to a side docks it. */
+  canDock?: boolean;
+  /** The half a dock would go to as the finger moves (null: none) - the layer shows it. */
+  onDockHover?: (side: DockSide | null) => void;
+  /** Let go in a dock zone; false: it stays (the card springs back). */
+  onDock?: (id: number, side: DockSide) => boolean | void;
 }) {
   const el = useRef<HTMLDivElement>(null);
   const shot = useRef<HTMLElement>(null);
-  const drag = useRef<{
-    x: number;
-    y: number;
-    dy: number;
-    up: boolean | null;
-    samples: { y: number; t: number }[];
-    press: number;
-  } | null>(null);
+  const drag = useRef<Drag | null>(null);
   const gone = useRef(false);
 
   /** Back to its place, as a spring from where the finger left it. */
-  const springBack = (dy: number) => {
+  const springBack = (dy: number, dx = 0) => {
     const card = el.current!;
     card.style.transform = "";
     card.style.opacity = "";
     card.animate(
       [
-        { transform: `translateY(${dy}px)`, opacity: String(1 - Math.min(1, -dy / card.clientHeight)) },
+        { transform: `translate(${dx}px, ${dy}px)`, opacity: String(1 - Math.min(1, -dy / card.clientHeight)) },
         { transform: "none", opacity: "1" },
       ],
       { duration: spring.ms, easing: spring.easing },
     );
   };
 
+  /** The half shown under the finger (or none), told to the layer only when it changes; entering one ticks. */
+  const hover = (side: DockSide | null) => {
+    const d = drag.current;
+    if (!d || d.side === side) return;
+    d.side = side;
+    if (side) tick();
+    onDockHover?.(side);
+  };
+
+  /**
+   * Docked: the card goes on toward its half and fades (the app comes up there); [onDock] refusing it (no partner,
+   * the host said no) springs it back. The half's highlight goes either way.
+   */
+  const dockAway = (dx: number, dy: number, side: DockSide) => {
+    const card = el.current!;
+    onDockHover?.(null);
+    if (onDock?.(t.id, side) === false) return springBack(dy, dx);
+    gone.current = true;
+    const to = side === "left" ? -card.getBoundingClientRect().right : innerWidth - card.getBoundingClientRect().left;
+    card.style.transform = "";
+    const a = card.animate(
+      [
+        { transform: `translate(${dx}px, ${dy}px)`, opacity: "1" },
+        { transform: `translate(${dx + to * 0.25}px, ${dy}px) scale(0.9)`, opacity: "0" },
+      ],
+      { duration: spring.ms, easing: spring.easing, fill: "forwards" },
+    );
+    // Cancelled too (the host refused the dock: recents.tsx undocked cancels the fly-off): the card takes touches
+    // again - only onfinish left it "gone" for good, every later press on it ignored.
+    a.onfinish = a.oncancel = () => (gone.current = false);
+  };
+
   /** Removed: on up and out at the finger's speed (at least a brisk one), then gone from the list. */
-  const flingAway = (dy: number, v: number) => {
+  const flingAway = (dy: number, v: number, dx = 0) => {
     const card = el.current!;
     gone.current = true;
     const to = -(card.getBoundingClientRect().bottom + 40);
@@ -93,11 +141,42 @@ export const TaskCard = memo(function TaskCard({
     card.style.transform = "";
     card.animate(
       [
-        { transform: `translateY(${dy}px)`, opacity: String(1 - Math.min(1, -dy / card.clientHeight)) },
-        { transform: `translateY(${to}px)`, opacity: "0" },
+        { transform: `translate(${dx}px, ${dy}px)`, opacity: String(1 - Math.min(1, -dy / card.clientHeight)) },
+        { transform: `translate(${dx}px, ${to}px)`, opacity: "0" },
       ],
       { duration: ms, easing: spring.easing, fill: "forwards" },
     ).onfinish = () => onRemove(t.id);
+  };
+
+  /** An upward drag's move: down past its place it barely moves (a rubber band), up it follows the finger. */
+  const follow = (d: Drag, e: PointerEvent, dx: number, dy: number) => {
+    d.dy = dy < 0 ? dy : dy * 0.15;
+    // Sideways it follows the finger only where it can dock (the old pure-vertical drag everywhere else).
+    d.dx = canDock ? dx : 0;
+    d.samples.push({ y: e.clientY, t: e.timeStamp });
+    while (d.samples.length > 2 && e.timeStamp - d.samples[0].t > 80) d.samples.shift();
+    const card = el.current!;
+    if (canDock) hover(dockSide({ dx, dy, x: e.clientX, cardH: card.clientHeight, screenW: innerWidth }));
+    card.style.transform = `translate(${d.dx}px, ${d.dy}px)`;
+    card.style.opacity = String(1 - Math.min(1, Math.max(0, -d.dy) / card.clientHeight));
+  };
+
+  /** An upward drag let go ([mx]: the finger's sideways travel): docked, removed or back (ui/carddock.ts cardRelease). */
+  const letGo = (d: Drag, e: PointerEvent, mx: number) => {
+    // The click this release makes (on whatever is under it now - the layer beside the cards, which closes the
+    // switcher) isn't one: swallowed.
+    // (Only the click of this release: one that never came is no longer waited for at the next touch.)
+    const swallow = (c: MouseEvent) => c.stopPropagation();
+    window.addEventListener("click", swallow, { capture: true, once: true });
+    window.addEventListener("pointerdown", () => window.removeEventListener("click", swallow, true), { capture: true, once: true });
+    const first = d.samples[0];
+    const v = (e.clientY - first.y) / Math.max(1, e.timeStamp - first.t);
+    const r = cardRelease({ dx: mx, dy: d.dy, x: e.clientX, cardH: el.current!.clientHeight, screenW: innerWidth }, v, !!canDock);
+    if (r.kind === "dock") return dockAway(d.dx, d.dy, r.side);
+    if (d.side) console.info(`[canvas] card ${t.id} let go outside the ${d.side} dock zone (x ${Math.round(e.clientX)}): ${r.kind}`);
+    if (d.side) onDockHover?.(null);
+    if (r.kind === "remove") flingAway(d.dy, v, d.dx);
+    else springBack(d.dy, d.dx);
   };
 
   const cancelPress = () => {
@@ -119,7 +198,7 @@ export const TaskCard = memo(function TaskCard({
           tick();
           onMenu(t.id, el.current!);
         }, LONG_PRESS);
-        drag.current = { x: e.clientX, y: e.clientY, dy: 0, up: null, samples: [{ y: e.clientY, t: e.timeStamp }], press };
+        drag.current = { x: e.clientX, y: e.clientY, dy: 0, dx: 0, side: null, up: null, samples: [{ y: e.clientY, t: e.timeStamp }], press };
         // The rest of this press is the card's, wherever it goes (a touch is captured by its target anyway): a mouse's or
         // pen's quick swipe whose moves came coalesced into one far above the card (11-02, gate under load) went to the
         // layer beside the cards - its release there "a tap beside the cards", the app it was opened over opened.
@@ -137,13 +216,7 @@ export const TaskCard = memo(function TaskCard({
           if (d.up) el.current!.setPointerCapture(e.pointerId);
           else (drag.current = null), el.current!.releasePointerCapture(e.pointerId);
         }
-        if (!d.up) return;
-        // Down past its place it barely moves (a rubber band), up it follows the finger.
-        d.dy = dy < 0 ? dy : dy * 0.15;
-        d.samples.push({ y: e.clientY, t: e.timeStamp });
-        while (d.samples.length > 2 && e.timeStamp - d.samples[0].t > 80) d.samples.shift();
-        el.current!.style.transform = `translateY(${d.dy}px)`;
-        el.current!.style.opacity = String(1 - Math.min(1, Math.max(0, -d.dy) / el.current!.clientHeight));
+        if (d.up) follow(d, e, dx, dy);
       }}
       onPointerUp={(e) => {
         const d = drag.current;
@@ -158,22 +231,12 @@ export const TaskCard = memo(function TaskCard({
           if (my < 0 && Math.abs(my) > Math.abs(mx)) {
             d.up = true;
             d.dy = my;
+            d.dx = canDock ? mx : 0;
             d.samples.push({ y: e.clientY, t: e.timeStamp });
           } else return; // sideways: the row's scroll
         }
-        if (d.up) {
-          // The click this release makes (on whatever is under it now - the layer beside the cards, which closes the
-          // switcher) isn't one: swallowed.
-          // (Only the click of this release: one that never came is no longer waited for at the next touch.)
-          const swallow = (c: MouseEvent) => c.stopPropagation();
-          window.addEventListener("click", swallow, { capture: true, once: true });
-          window.addEventListener("pointerdown", () => window.removeEventListener("click", swallow, true), { capture: true, once: true });
-          const first = d.samples[0];
-          const v = (e.clientY - first.y) / Math.max(1, e.timeStamp - first.t);
-          const h = el.current!.clientHeight;
-          if (v < -FLICK || (-d.dy > h * REMOVE && v < 0.3)) flingAway(d.dy, v);
-          else springBack(d.dy);
-        } else if (d.up == null) {
+        if (d.up) letGo(d, e, mx);
+        else if (d.up == null) {
           // A tap: on the icon, its menu; elsewhere, the app.
           if ((e.target as HTMLElement).closest(".task-icon")) onMenu(t.id, el.current!);
           else onOpen(t.id, shot.current!);
@@ -183,7 +246,9 @@ export const TaskCard = memo(function TaskCard({
         const d = drag.current;
         cancelPress();
         drag.current = null;
-        if (d?.up) springBack(d.dy);
+        if (d?.side) console.warn(`[canvas] card ${t.id}'s drag in the ${d.side} dock zone was cancelled (pointercancel): no dock`);
+        if (d?.side) onDockHover?.(null);
+        if (d?.up) springBack(d.dy, d.dx);
       }}
       onContextMenu={(e) => e.preventDefault()}
     >

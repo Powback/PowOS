@@ -30,6 +30,10 @@
 #     (10-29 the overlay launcher shell broke the home swipe-up without its APK; 10-30 the web-windows shell left the
 #     phone with no floating windows). Shell-only tips, and Kotlin + shell in separate commits, still ship at once.
 #     Shown by status and the runner log: "shell held for its APK <sha>".
+#   - OnePlus offline (11-23): an APK whose phone is off the VPN still goes to PowApps (the S25 and the razr pull it):
+#     ship-apk.sh --publish-only (device-free gate + build, which publishes; exit 9), its requests get `published=TIP`
+#     and stay pending; the OnePlus install (and its device checks: ship-guard boot, window-render, shell check) runs
+#     when the phone is back, from the same published APK. status shows both. SHIP_PUBLISH_OFFLINE=0 turns it off.
 #   - packages (11-10): targets/android/pkgs/<name>/ changed since the last packages build ($Q/pkgs-live): build-pkgs.sh
 #     <names> under the heavy build slot + publish-repo.sh ([powos] on android.pow, the non-root phones' updates), BESIDE
 #     the loop in its own checkout ($POWOS_RUN_ROOT/ship-runner-pkgs); the rooted deploy (which installs kwin etc. from
@@ -132,9 +136,12 @@ resume)
 status)
   pi=$(paused_info)
   [ -z "$pi" ] || echo "PAUSED $pi since $(date -r "$(stat -c %Y "$Q/paused" 2>/dev/null || stat -f %m "$Q/paused")" +%H:%M) - tools/phone/ship.sh resume$(installing && echo " (an install in flight finishes first)")"
-  echo "requests:"; for r in "$Q"/*.req; do [ -f "$r" ] || continue; ( . "$r"; echo "  ${sha:0:9} $who: $([ "$silent" = 1 ] && echo '(silent)' || echo "$note")" ); done
+  echo "requests:"; for r in "$Q"/*.req; do [ -f "$r" ] || continue; ( published=; . "$r"; echo "  ${sha:0:9} $who: $([ "$silent" = 1 ] && echo '(silent)' || echo "$note")${published:+  [APK published to PowApps (${published:0:9}); OnePlus install pending]}" ); done
   echo "service: $(runner_up && echo "running (pid $(cat "$Q/runner.lock/pid"))" || echo idle)$(agent_loaded && echo " (launchd $LABEL)")"
   echo "live: $(cut -c1-9 "$Q/live" 2>/dev/null || echo -)  installed APK: $(cut -c1-9 "$HOME/.cache/powos-installed-commit" 2>/dev/null || echo -)$([ -s "$Q/failed" ] && echo "  failed at: $(cut -c1-9 "$Q/failed") (waits for a new origin commit)")"
+  if [ -s "$Q/apk-published" ]; then pa=$(cat "$Q/apk-published")
+    git merge-base --is-ancestor "$pa" "$(cat "$HOME/.cache/powos-installed-commit" 2>/dev/null || echo x)" 2>/dev/null ||
+      echo "APK on PowApps: ${pa:0:9} (version code $(cat "$Q/published/ver" 2>/dev/null || echo ?), published $(date -r "$(stat -c %Y "$Q/apk-published" 2>/dev/null || stat -f %m "$Q/apk-published")" '+%m-%d %H:%M')) - the pull phones (S25, razr) get it; the OnePlus install waits$([ -e "$Q/phone-offline" ] && echo " for the phone (offline)")"; fi
   [ -s "$Q/shell-held" ] && { read -r ht hc < "$Q/shell-held"; echo "shell held for its APK ${ht:0:9} (APK inputs + shell in the same commit: $hc) - they land together at the install"; }
   [ -e "$HOME/.config/powos/ship-no-idle-wait" ] && echo "APK installs: at once, no idle wait (~/.config/powos/ship-no-idle-wait)"
   [ -s "$Q/rooted-pending" ] && { read -r rb rt < "$Q/rooted-pending"; echo "rooted deploy pending since ${rb:0:9} (origin ${rt:0:9}; runs after the APK, under the phone-busy rules)"; }
@@ -236,19 +243,23 @@ run)
   apps_changed() { git diff --name-only "$1" "$2" -- apps 2>/dev/null | sed -n 's#^apps/\([^/]*\)/.*#\1#p' | sort -u |
     while read -r a; do [ -f "apps/$a/powos-app.json" ] && echo "$a"; done; }
   # rooted_inputs A B: what changed between A and B that targets/android/rooted/rooted.sh deploy installs (the
-  # rooted-mode part only - its own scripts/session + the small PowOS-side pieces it pushes; the apps-tier pieces
-  # it also pushes, lib/apps/bin/powos, are the "apps" kind above, f105 part 2 - this is part 1; the spacetimedb/
-  # xwayland/kwin packages are BUILT by the "pkgs" step (pkgs_due, 11-10) and installed by this deploy). `deploy`, never `install` (which also re-pushes the rootfs tarball - a human step).
-  # lib/apps/powos-terms + powos-transcribe: powos-deploy.sh installs them (e4bc7be0); a change to them alone must deploy
-  # (11-01: the terminals view-only rewrite ec367873 changed only powos-terms and would never have reached the phone).
-  # targets/android/pkgs (all of it, 11-10): the deploy installs our packages (kwin, xwayland-kgsl, spacetimedb ...)
-  # from out/pkgs, which the "pkgs" step below builds first - a PKGBUILD change alone must deploy too.
-  rooted_inputs() { git diff --name-only "$1" "$2" -- targets/android/rooted targets/android/session \
-    targets/android/pkgs bin/powos-panel-phone desktop/autostart/powos-panel-phone.desktop \
-    lib/powos-tmux-shell lib/self-phone.sh config/etc/profile.d/60-powos-picker-key.sh lib/ai/agents lib/ai/comms/comms-mcp.py \
-    tools/app-api lib/ai/manager lib/ai/sandbox desktop/plasmoid units/phone units/phone-android lib/apps/powos-units lib/apps/powos-terms lib/apps/powos-transcribe \
-    targets/android/steam/unity-screen \
-    2>/dev/null | grep -v -e '^lib/ai/sandbox/node_modules/' -e '^targets/android/pkgs/[^/]*/test/'; }
+  # rooted-mode part, f105 part 1; apps/<app>/ is the "apps" kind above, part 2). The paths are DERIVED from the deploy
+  # at B (tools/phone/rooted-inputs.py: rooted.sh's pushes, narrowed to what powos-deploy.sh installs), never a hand
+  # list: that list fell behind twice (lib/devices, efcf8483; 11-24 most of lib/apps - a27864d4's Steam stall fix in
+  # lib/apps/powos-sleep-gui would never have reached the phone). test/tier1/test-rooted-inputs.py guards it. A
+  # staged-but-not-installed file (lib/apps/powos-noroot-services: the APK's) and shell/APK files start no deploy.
+  # targets/android/pkgs counts whole: the deploy installs our packages (kwin, xwayland-kgsl, spacetimedb ...) from
+  # out/pkgs, which the "pkgs" step below builds first - a PKGBUILD change alone must deploy too. `deploy`, never
+  # `install` (which also re-pushes the rootfs tarball - a human step).
+  # If the derivation fails (a push it can't resolve), the whole of targets/android + lib + units counts (over-
+  # deploying is the safe side) and the error goes to stderr. SHIP_ROOTED_INPUTS (pathspecs) replaces it (tests).
+  rooted_inputs() ( set -f; IFS=$' \t\n'   # a subshell: pathspec globs (tools/app-api/*.py) go to git, unexpanded
+    if [ -n "${SHIP_ROOTED_INPUTS:-}" ]; then specs=$SHIP_ROOTED_INPUTS
+    elif ! specs=$(python3 tools/phone/rooted-inputs.py --rev "$2"); then
+      echo "rooted_inputs: tools/phone/rooted-inputs.py failed at ${2:0:9} - counting all of targets/android lib units" >&2
+      specs="targets/android lib units"; fi
+    # shellcheck disable=SC2086  # one pathspec per word (none has spaces)
+    git diff --name-only "$1" "$2" -- $specs 2>/dev/null | grep -v -e '^lib/ai/sandbox/node_modules/' -e '^targets/android/pkgs/[^/]*/test/' )
   # units_gate: nothing ships to the phone that installs a file no unit claims (DU1: every ship registers what it
   # installs). test-units-registry.py reads every deploy script against units/; a FAIL refuses the rooted deploy.
   # test-powos-dispatch.py: every `powos <subcommand>`'s file is installed by the deploy (powos terms wasn't, 11-01).
@@ -293,7 +304,9 @@ run)
     date +%s > "$Q/phone-offline"; }
   # offline_wait WHAT: logged once per tip and step - the step's requests stay pending, nothing is marked failed.
   offline_wait() { ! grep -qxF "$T $1" "$Q/offline-wait" 2>/dev/null || return 0; echo "$T $1" >> "$Q/offline-wait"
-    echo "$(date +%T) ${T:0:9}: $1 waits for the phone (offline) - kept pending, it goes once the phone is back"; }
+    if [ "$1" = APK ] && [ "$(cat "$Q/apk-published" 2>/dev/null)" = "$T" ]; then
+      echo "$(date +%T) ${T:0:9}: APK published to PowApps; the OnePlus install waits for the phone (offline) - kept pending, it goes once the phone is back"
+    else echo "$(date +%T) ${T:0:9}: $1 waits for the phone (offline) - kept pending, it goes once the phone is back"; fi; }
   # NO GATE VERDICT (11-10): shell/dev/gate.sh exits 75 (only) when its job machine (POW_JOB_CONTEXT, default pow58 = .58)
   # didn't answer within GATE_JOB_WAIT_S - the hub can't pass the full gate, so there is no verdict (its exit 2, a
   # usage/environment error, stays a refusal: never deferred here); push.sh,
@@ -438,6 +451,7 @@ run)
     rm -rf "$Q/apk"; mkdir -p "$Q/apk"; echo "$a" > "$Q/apk/tip"; echo "$Q/done/$(date +%Y%m%d-%H%M%S)-${a:0:9}-apk.log" > "$Q/apk/log"
     # The user's no-idle-wait setting (file present = on): install at once, don't wait for the user to be idle.
     [ -e "$NOIDLE" ] && set -- "$@" --now
+    case " $* " in *" --publish-only "*) touch "$Q/apk/publish-only" ;; esac
     ( cd "$SA" && POWOS_SHIP_SERVICE=1 SHIP_DIR=$Q GATE_PRIORITY=ship bash tools/phone/ship-apk.sh "$@" > "$(cat "$Q/apk/log")" 2>&1; echo $? > "$Q/apk/rc" ) &
     echo $! > "$Q/apk/pid"
   }
@@ -794,6 +808,7 @@ run)
       if [ "$arc" = 0 ] || [ "$inst" = "$A" ]; then
         gate_clear apk
         reap_apk_installed "$A" || [ $? != 2 ] || return 0
+      elif [ "$arc" = 9 ] && [ -f "$Q/apk/publish-only" ]; then apk_published "$A"
       elif [ "$arc" = 8 ]; then echo "$(date +%T) ${A:0:9}: a newer APK is wanted - the pending one is replaced"
       elif [ "$arc" = 4 ]; then echo "$(date +%T) ${A:0:9}: the user stayed active - the APK goes again"
       # No gate verdict (ship-apk exit 75: the gate machine didn't answer): nothing installed, nothing failed - its
@@ -809,8 +824,9 @@ run)
       # to SHIP_APK_LINK_RETRIES (default 2) times; a code fault (build, shell doesn't load, guard) still fails at once.
       # The phone went OFFLINE (no VPN link): not this tip either, and no retry is spent - the APK step waits for the
       # phone (phone_offline) and launches it again once it's back.
-      elif link_down "$alog" || phone_offline; then echo "$(date +%T) ${A:0:9}: APK ship rc $arc while the phone is offline (log $alog) - it goes again once it's back"
-      elif apk_link_fault "$alog" && lr=$(apk_link_retry "$A") && [ "$lr" -le "${SHIP_APK_LINK_RETRIES:-2}" ]; then
+      # A publish-only run never touches the phone: its failure is the tip's (gate, build), never "the phone is offline".
+      elif [ ! -f "$Q/apk/publish-only" ] && { link_down "$alog" || phone_offline; }; then echo "$(date +%T) ${A:0:9}: APK ship rc $arc while the phone is offline (log $alog) - it goes again once it's back"
+      elif [ ! -f "$Q/apk/publish-only" ] && apk_link_fault "$alog" && lr=$(apk_link_retry "$A") && [ "$lr" -le "${SHIP_APK_LINK_RETRIES:-2}" ]; then
         echo "$(date +%T) ${A:0:9}: APK ship rc $arc: the phone link dropped (log $alog) - it goes again ($lr/${SHIP_APK_LINK_RETRIES:-2})"
       else
         echo "$A" > "$Q/failed-apk"
@@ -820,6 +836,16 @@ run)
       rm -rf "$Q/apk"; inst=$(cat "$HOME/.cache/powos-installed-commit" 2>/dev/null || true)
     fi
   }
+  # apk_published A: a --publish-only run published A's APK to PowApps (the phone was offline): recorded, and every
+  # request A covers gets `published=A` - the publish part is done, the request stays pending for the OnePlus install
+  # (done_req at that install, reap_apk_installed). The step launches the install once the phone is back.
+  apk_published() {
+    local A=$1 r sha published n=0 v
+    echo "$A" > "$Q/apk-published"; v=$(cat "$Q/published/ver" 2>/dev/null || echo ?)
+    for r in "$Q"/*.req; do [ -f "$r" ] || continue; sha= published=; . "$r"
+      git merge-base --is-ancestor "$sha" "$A" 2>/dev/null && pending_apk "$sha" && [ "$published" != "$A" ] && { echo "published=$A" >> "$r"; n=$((n+1)); }; done
+    echo "$(date '+%F %T') ${A:0:9} apk PUBLISHED to PowApps (version code $v), $n req; the OnePlus install waits for the phone" >> "$Q/shipped.log"
+    echo "$(date +%T) ${A:0:9}: APK published to PowApps (version code $v) - $n request(s) published, kept pending for the OnePlus install"; }
   # apk_link_fault LOG: the APK ship failed on the adb link to the phone (before or at the install), not on the tip.
   apk_link_fault() {
     [ -f "$1" ] || return 1
@@ -1060,7 +1086,13 @@ run)
         why="no record of the installed build"; [ -n "$inst" ] && why="APK inputs changed: $(apk_inputs "$inst" "$T" | head -3 | paste -sd' ' -)"
         # MODULE FIRST for the shell this APK's install brings (11-01 c615e0f6: the shell held for its APK went live
         # with the install while the agents module waited for the apps step, which never ran): under the ship lock.
-        mfa=0; modules_first APK lock || mfa=$?   # rc 2 (busy / offline): the APK stays pending, tried next pass
+        # The phone OFFLINE (11-23): the pull phones needn't wait for it - publish to PowApps now (device-free gate +
+        # build; the module-first and device checks are the OnePlus install's, below, once it's back). Once per tip.
+        mfa=0
+        if [ "${SHIP_PUBLISH_OFFLINE:-1}" = 1 ] && [ "$(cat "$Q/apk-published" 2>/dev/null)" != "$T" ] && phone_offline; then mfa=3
+          echo "$(date +%T) ship ${T:0:9} as an APK to PowApps only (the phone is offline; its install waits for it) for $who_s - beside the loop"
+          apk_launch "$T" --publish-only "${na[@]}" && echo "note=${an:-(silent)}" > "$Q/apk/notes" || echo "$(date +%T) ${T:0:9}: couldn't check out $SA for the APK"
+        else modules_first APK lock || mfa=$?; fi   # rc 2 (busy / offline): the APK stays pending, tried next pass
         if [ $mfa = 1 ]; then echo "$T" > "$Q/failed-apk"
         elif [ $mfa = 0 ]; then
         echo "$(date +%T) ship ${T:0:9} as an APK ($why) for $who_s - beside the loop"

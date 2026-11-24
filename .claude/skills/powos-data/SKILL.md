@@ -403,6 +403,18 @@ answered when a user item follows it (Thread passes `reply`); then only the ques
 - Rendered by rich.tsx Queued: right-aligned words, no bubble yet, "queued" + x. Checked on the phone: 3 sends during
   a 40 s turn, the x removed #3 (never sent), #2 ran as its own turn.
 
+## Stop (the pill's send while it answers, 11-23)
+- One place: bar.tsx PillSend renders `Stop` instead of `Send` (Pill `stop` prop: the bar in role "ai" or chatting,
+  the assist overlay) while assistant.ts `answering` and the field is empty: `.send.stop` (type=button, aria-label
+  "stop answering", icons.tsx `stop`). Typed text wins (send; it queues). Optimistic both ways: shows on send before the host's busy
+  (SEND_SHOWS_MS), back to send on the tap before the turn ends (rolled back after STOP_ROLLBACK_MS if the host never
+  takes it). Pure state machine `stopShown` (cases in dev/ai-stop-check.js; gate scenes ai-stop-*).
+- Host: `ai.stop` -> PowosAiChat.stop(): `powos manager --stop` (manager.py stop_turn: SIGTERM to the pid in
+  <store>/turn.pid; once() then kills claude + its /proc descendants, emits {"kind":"stopped"}, exits 5); after 5 s
+  the turn's process is destroyed if still running. Turn end with `stopping`: running tools -> ok=false, a quiet
+  note "stopped" (never "didn't answer"), queued messages go next. ai.chat carries `stoppable` (older APK: no stop)
+  and `stopping`. Tests: test-manager.py StopTests.
+
 ## Keyboard / nav padding (shell.css)
 - The page's insets come from the host as --inset-bottom (nav ~16 px folded) and --inset-keyboard (app.tsx applyInsets,
   per page, also the assist page). The pill sits var(--pill-foot) (6 px) above the keyboard plus its own foot: .home

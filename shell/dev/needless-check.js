@@ -41,3 +41,65 @@ export async function needlessRenders() {
   if (r.needlessRenders > 40) fails.push(`home's needless renders ${r.needlessRenders} (want <= 40; 164 before the fix): ${r.needless.slice(0, 6).map(row).join("; ")}`);
   return fails;
 }
+
+/**
+ * home-swipes (the user, 11-23: "everything keeps redrawing"; perf-1795459755191: 27.5 s of page swipes on home, 406
+ * commits, 2383 renders - the bar's pill 116x, its parts 116x each, Seams 37 of 38 needless, PowOS AI's page re-rendered
+ * on every page change, its status page refetched on every visit): page swipes the way gesture.ts drives them (a finger
+ * on the track: pageDrag per move, the page set, the drag ended), between home's pages and PowOS AI's, then home left
+ * alone. A swipe between home's own pages must not re-render the bar's pill at all; idle home commits nothing.
+ */
+export async function homeSwipes() {
+  await window.__gw.settled();
+  const R = await importShim("./ui/renderscan.ts"), S = await importShim("./state.ts"), G = await importShim("./ui/gesture.ts");
+  const swipe = async (to) => {
+    for (const dx of [-12, -40, -90]) { G.pageDrag.value = dx; await window.__gw.frames(1); }
+    G.pageDrag.value = null;
+    S.page.value = to;
+    await window.__gw.sleep(350);
+  };
+  S.page.value = 0;
+  await window.__gw.sleep(400);
+  R.startScan("swipes");
+  let home, ai, idle;
+  try {
+    // Home's own pages (needs two: the gate's home has the app library after its pages - page 1 is that, or page 2).
+    R.reset();
+    for (let i = 0; i < 6; i++) await swipe(i % 2 ? 0 : 1);
+    home = R.renderReport();
+    // To PowOS AI's page and back.
+    R.reset();
+    for (let i = 0; i < 6; i++) await swipe(i % 2 ? 0 : -1);
+    ai = R.renderReport();
+    // Left alone.
+    S.page.value = 0;
+    await window.__gw.sleep(800);
+    R.reset();
+    await window.__gw.sleep(3000);
+    idle = R.renderReport();
+  } finally {
+    R.stopScan("swipes");
+    G.pageDrag.value = null;
+    S.page.value = 0;
+  }
+  return swipeFails(home, ai, idle);
+}
+
+/** homeSwipes' verdicts on its three reports. */
+function swipeFails(home, ai, idle) {
+  const count = (r, names) => r.byCount.filter((x) => names.includes(x.name)).reduce((n, x) => n + x.renders, 0);
+  const PILL = ["Pill", "Lead", "GrowField", "PillSend"];
+  const fails = [];
+  const line = (r) => `${r.commits} commits, ${r.renders} renders, ${r.needlessRenders} needless (pill ${count(r, PILL)}; ${r.byCount.slice(0, 6).map((x) => `${x.name} ${x.renders}`).join(", ")})`;
+  window.__swipes = `home pages x6: ${line(home)} | AI page x6: ${line(ai)} | idle 3 s: ${line(idle)}`;
+  if (count(home, PILL) > 0) fails.push(`swipes between home's pages re-rendered the bar's pill ${count(home, PILL)}x (want 0): ${line(home)}`);
+  // Each swipe to or from the AI page changes the bar's role: its hint and glyph (one pill render), the hint then fitted
+  // to the field (useFittedHint, one more) - two per swipe at most (before: 3 per swipe, its parts 3 each).
+  if (count(ai, ["Pill"]) > 12) fails.push(`6 swipes to PowOS AI's page and back rendered the pill ${count(ai, ["Pill"])}x (want <= 12): ${line(ai)}`);
+  if (home.needlessRenders > 6) fails.push(`swipes between home's pages: ${home.needlessRenders} needless renders (want <= 6): ${line(home)}`);
+  if (ai.needlessRenders > 12) fails.push(`swipes to PowOS AI's page: ${ai.needlessRenders} needless renders (want <= 12): ${line(ai)}`);
+  // The PowOS AI page away renders nothing on agent/board news (aistatus.tsx whileShown; 11-23: 2 commits per 3 s from
+  // StatusColumn/StatusPage/Hero/WorkingNow re-rendering off screen on each agents delta).
+  if (idle.commits > 0) fails.push(`idle home committed ${idle.commits}x in 3 s (want 0: nothing on screen changed): ${line(idle)}`);
+  return fails;
+}

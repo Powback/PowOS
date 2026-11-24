@@ -105,6 +105,7 @@ class LaunchHold(unittest.TestCase):
         g = object.__new__(GUI.Gui)
         g.frozen, g.refused, g.idle_since, g.wins, g.tracked = {}, {}, {}, {}, {100: "steam"}
         g.schedule = lambda: None
+        g.steam_launches = types.SimpleNamespace(preparing=lambda: [])
         g.unit_of = lambda pid: {"id": "steam"} if pid == 100 else None
         return g
 
@@ -149,6 +150,22 @@ class LaunchHold(unittest.TestCase):
             g.consider(100)
         self.assertEqual(refused, ["never list"], "past the pending-launch check")
 
+    def test_launch_steam_prepares_refuses_the_freeze(self):
+        from unittest import mock
+        g = self.gui()
+        u = {"id": "steam", "classes": {"steam"}, "pidfile": None, "rule": {},
+             "busy": {"games": "pause", "cmdline": "SteamLaunch"}}
+        g.unit_of = lambda pid: u
+        g.cls = lambda pid: "steam"
+        g.steam_launches = types.SimpleNamespace(preparing=lambda: ["557340 (Syncing saves)"])
+        refused = []
+        g.refuse = lambda pid, why, retry=None: refused.append(why)
+        with mock.patch.object(GUI, "tree", lambda p: [100, 101]), \
+                mock.patch.object(GUI, "cmdline", lambda p: "steamwebhelper"), \
+                mock.patch.object(GUI.os, "listdir", lambda d: ["100", "101", "self"]):
+            g.consider(100)
+        self.assertEqual(refused, ["preparing a game launch: 557340 (Syncing saves)"])
+
 
 class LinkWatch(unittest.TestCase):
     """A frozen Steam whose CM link the server dropped (socket out of ESTABLISHED) is thawed to reconnect while PowOS is
@@ -169,6 +186,7 @@ class LinkWatch(unittest.TestCase):
         g.freeze = lambda pid, cpu, quiet=False: (g.frozen.update({pid: {}}), g.calls.append(("freeze", quiet)))
         g.pid_active = lambda pid: False
         g.schedule = lambda: None
+        g.steam_launches = types.SimpleNamespace(preparing=lambda: [])
         return g
 
     def patched(self, link=1, cmd="./steam -silent"):
@@ -237,6 +255,20 @@ class LinkWatch(unittest.TestCase):
         with self.patched(link=0):
             g.link_watch()
             g.refused[100] = (time.time() + 60, "launching")  # a launch's Wake during the pulse
+            ms, end, args = self.timers[0]
+            with __import__("unittest").mock.patch.object(GUI.os.path, "isdir", lambda p: True):
+                end(*args)
+        self.assertNotIn(100, g.frozen)
+
+    def test_pulse_left_awake_by_a_launch_steam_prepares(self):
+        """A tap during a keepalive pulse: /usr/bin/steam found the client awake (out of the sleep cgroup) and asked
+        nothing; the launch Steam then prepares keeps it awake at the pulse's end (557340 11-18 21:52: refrozen, the
+        launch ran 1.5 s per pulse, 134 s)."""
+        self.timers = []
+        g = self.gui(frozen_for=GUI.LINK_PULSE_S + 1)
+        with self.patched(link=0):
+            g.link_watch()
+            g.steam_launches = types.SimpleNamespace(preparing=lambda: ["557340 (Getting ready)"])
             ms, end, args = self.timers[0]
             with __import__("unittest").mock.patch.object(GUI.os.path, "isdir", lambda p: True):
                 end(*args)

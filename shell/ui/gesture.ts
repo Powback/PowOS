@@ -24,6 +24,8 @@ import { viewport } from "./viewport.ts";
 import { panelTicks } from "./haptics.ts";
 import { overPull, overRelease } from "./overpull.ts";
 import { inWindow } from "./desktops.ts";
+import { stackSwipeAt } from "./stackmodel.ts";
+import { NO_ROOM, roomAt, roomTakes, type Room } from "./scrollown.ts";
 import { ccEditing, ccExpanded, EXPAND_AT, expandedByDefault, FOLD_AT, settle as settleCc, stretch as stretchCc } from "./ccexpand.ts";
 import { carry, closeDrawer, dockDrag, dockPosition, drawer, editing, folder, launcherIsOverlay, menu, notif, onLibrary, openPanel, page, pageCount, panel, pullKind, pullPanels, selected, separatePanels } from "../state.ts";
 
@@ -431,6 +433,8 @@ interface Gesture {
   own: boolean;
   /** Over something that scrolls only up and down (an Android widget's list): vertical is its own, sideways pages. */
   ownV: boolean;
+  /** What under the finger scrolls itself each way (scrollown.ts), read at the down. */
+  room: Room;
   height: number;
   /** The drawer's way, closed to open: its rise (shell.css --rise). */
   travel: number;
@@ -518,6 +522,7 @@ function startGesture(x: number, y: number, target: Element, t: number) {
     notif: notif.value,
     ...listUnder(target),
     ...ownerUnder(target),
+    room: chrome ? NO_ROOM : roomAt(target, x, y, document.querySelector(".home")),
     target,
     height: document.querySelector(".home")?.clientHeight || innerHeight,
     travel: travelOf(),
@@ -671,6 +676,9 @@ export function sampleVx(samples: [number, number][], now: number) {
 function claim(gs: Gesture, dx: number, dy: number): boolean {
   const way = gs.chrome ? chromeWay(gs.chrome, dx, dy, stripScrolls(gs.target)) : "home";
   if (way === undefined || (way === "home" && Math.hypot(dx, dy) < SLOP)) return false;
+  // On the bottom chrome, decided as anything but home's usual rules (a page swipe, the dock's own strip scrolling, a
+  // lift, a drag toward the edge): never the host's shade pull either.
+  if (way !== "home") claimFromHost();
   // "out": the dock's app lifts out (home.tsx liftOut) - not home's.
   const mode = way && way !== "out" && claimWay(gs, way, dx, dy);
   if (!mode) {
@@ -776,14 +784,37 @@ function claimOnHome(gs: Gesture, dx: number, dy: number): Gesture["mode"] {
   if (vertical && Math.abs(dx) >= 6) logSwipe(`lock=vertical dx=${r(dx)} dy=${r(dy)} ratio=${(Math.abs(dy) / Math.abs(dx)).toFixed(2)} page=${page.value}`);
   // PowOS AI's page and the app library: up and down are their own (they scroll).
   if (vertical && (page.value === -1 || onLibrary() || gs.ownV)) return null;
+  // A list under the finger that can still scroll that way (a widget's, scrollown.ts) scrolls: at its end, home's.
+  if (vertical && roomTakes(gs.room, "y", dy)) return null;
   return vertical ? claimVertical(gs, dy) : claimSideways(gs, dx, dy);
 }
 
-/** Sideways on home: the pages, unless the drawer is open or a strip scrolls sideways itself (logged, as a miss). */
+/**
+ * Sideways on home: the pages, unless the drawer is open, or something under the finger scrolls that way itself
+ * (logged, as a miss). The user, 11-23: "some widgets have a left/right scroller, but using it changes the home PAGE
+ * instead of scrolling the widget's content" - one rule for every scroller (scrollown.ts): the recent apps' strip, a
+ * widget's sideways row, an Android widget's native one; with room left that way the drag is the scroller's (dropped
+ * here, the browser / the widget scrolls it), at its edge home's page swipe - decided at the claim, as a stack's.
+ */
 function claimSideways(gs: Gesture, dx: number, dy: number): Gesture["mode"] {
-  if (!gs.open && !gs.inStrip && PAGED) return "pages";
-  logSwipe(`drop sideways dx=${r(dx)} dy=${r(dy)} open=${gs.open} strip=${gs.inStrip} page=${page.value}`);
+  // Sideways is decided: whoever takes it below, the host's shade pull never does (its own lock may not have decided).
+  claimFromHost();
+  const scroller = roomTakes(gs.room, "x", dx);
+  // A widget stack under the finger with a widget that way pages ITSELF (ui/stacks.tsx asks the same rule); at its
+  // first/last widget the swipe is home's.
+  if (!gs.open && !scroller && PAGED && !stackSwipeAt(gs.target, dx, gs.x0, gs.y0)) return "pages";
+  logSwipe(`drop sideways dx=${r(dx)} dy=${r(dy)} open=${gs.open} scroller=${scroller} page=${page.value}`);
   return null;
+}
+
+/**
+ * Home's page took the finger under way sideways: the host's shade pull on home's body (ShadeHost, on its own gesture
+ * input) never starts for it - the user, 11-23: "scrolling the recent-apps bar on home SOMETIMES activates the
+ * notification screen". The host locks the same axis by itself (HomePullAxis.kt, the same ratio and distance); this is
+ * the page's decision reaching it too. An older host has no homeClaim.
+ */
+function claimFromHost() {
+  if (shadeTakesHome.value && document.documentElement.dataset.mode === "home") powos.shade.homeClaim?.().catch(() => {});
 }
 
 function claimVertical(gs: Gesture, dy: number): Gesture["mode"] {

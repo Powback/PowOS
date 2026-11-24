@@ -18,6 +18,7 @@ class WebTraceTest {
 
     @Test
     fun traceCarriesStacksAndTimeline() {
+        // V8's sampler stays: its start-up cost is the meter's warm-up (fpsmeter.tsx arm), never dropped data.
         for (c in listOf("devtools.timeline", "disabled-by-default-v8.cpu_profiler", "blink.user_timing", "disabled-by-default-devtools.timeline.frame")) {
             assertTrue(c, c in WebTrace.CATEGORIES)
         }

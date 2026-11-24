@@ -2309,6 +2309,111 @@ async function switcherThumbsCheck() {
 }
 
 /**
+ * The switcher's drag up and toward a side docks into Open Canvas (ui/carddock.ts; board switcher-drag-dock-open-canvas,
+ * the user 11-23: "it does play like a click when i activate the switcher and drag the app to one of the sides, but it
+ * doesnt activate splitview for it"). Unfolded, the host says Open Canvas is there: a real touch drag (CDP touch events,
+ * through Chromium's touch-action + gesture pipeline, as on the phone) of the front card up and to the left reaches the
+ * host's tasks.canvasDock(card, "left", partner) - the partner a split-capable app, never a PowOS task (a Linux window,
+ * the lock face) - and a refusal leaves a note on screen (never silent).
+ */
+async function switcherCanvasDragCheck(r) {
+  const cdp = await r.page.target().createCDPSession();
+  await cdp.send("Emulation.setTouchEmulationEnabled", { enabled: true, maxTouchPoints: 5 });
+  const t = { r, cdp };
+  const fails = await canvasDragRefused(t);
+  await gateSleep(2600);
+  fails.push(...(await canvasDragDocks(t)));
+  await gateSleep(2600);
+  fails.push(...(await canvasDragBlocked(t)));
+  await r.page.evaluate(() => window.__mockEvents.emit("recents.end", { to: "home" })).catch(() => {});
+  return fails;
+}
+
+const gateSleep = (ms) => new Promise((ok) => setTimeout(ok, ms));
+
+/** switcher-canvas-drag's switcher: five cards, card [from] in front; the host's dock answers [refuse] (null: ok). */
+function canvasDragSetup({ r }, refuse, from = 1201) {
+  return r.page.evaluate(
+    async (refuse, from) => {
+      const { powos } = await window.__gw.mod("./bridge.ts");
+      window.__dock = [];
+      powos.tasks.canvas = async () => true;
+      // Chrome and Files can be in split view; the lock face (1202, no key), a Linux window (1203) and Settings (1205,
+      // OxygenOS's blocklist) can't.
+      powos.tasks.canvasSides = async () => [1201, 1204];
+      powos.tasks.canvasDock = async (id, side, other) => (window.__dock.push([id, side, other]), refuse ? { ok: false, reason: refuse } : { ok: true });
+      const icon = "data:image/svg+xml," + encodeURIComponent('<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 8 8"><rect width="8" height="8" fill="#e63"/></svg>');
+      const tasks = [
+        { id: 1201, label: "Chrome", key: "a:com.android.chrome/.Main", icon, snapshot: "", webwindow: 3, fullScreen: true },
+        { id: 1202, label: "com.powos.app", key: null, icon, snapshot: "" },
+        { id: 1203, label: "Dolphin", key: "l:org.kde.dolphin", icon, snapshot: "" },
+        { id: 1205, label: "Settings", key: "a:com.android.settings/.Settings", icon, snapshot: "" },
+        { id: 1204, label: "Files", key: "a:com.google.android.documentsui/.Files", icon, snapshot: "" },
+      ];
+      window.__mockEvents.emit("recents.show", { open: true, from, tasks });
+      await new Promise((ok) => setTimeout(ok, 1200));
+      const c = document.querySelector(`.recents .task[data-task="${from}"]`)?.getBoundingClientRect();
+      return c ? { x: c.left + c.width / 2, y: c.top + c.height / 2 } : null;
+    },
+    refuse,
+    from,
+  );
+}
+
+/** A thumb's arc from [at]: up first (a card push, not the row's scroll), then on up and toward the left edge. */
+async function canvasDragLeft({ cdp }, at) {
+  const touch = (type, pts) => cdp.send("Input.dispatchTouchEvent", { type, touchPoints: pts });
+  await touch("touchStart", [{ x: at.x, y: at.y, id: 1 }]);
+  const path = [[0, -14], [-2, -30], [-10, -60], [-30, -100], [-70, -150], [-130, -200], [-200, -240], [-260, -270], [-300, -290]];
+  for (const [dx, dy] of path) {
+    await touch("touchMove", [{ x: at.x + dx, y: at.y + dy, id: 1 }]);
+    await gateSleep(16);
+  }
+  await touch("touchEnd", []);
+  await gateSleep(700);
+}
+
+/** The switcher's note text now. */
+const canvasNote = ({ r }) => r.page.evaluate(() => document.querySelector(".recents-note")?.textContent ?? "");
+
+/** Refused by the host: the reason on screen. */
+async function canvasDragRefused(t) {
+  const at = await canvasDragSetup(t, "Chrome can't be used in split view");
+  if (!at) return ["no card for task 1201 in the switcher"];
+  await canvasDragLeft(t, at);
+  const note = await canvasNote(t);
+  return note.includes("split view") ? [] : [`a refused dock left no note on screen (note: "${note}")`];
+}
+
+/** The same card (refused before) docks: tasks.canvasDock(1201, left, 1204 - Files, the newest split-capable app). */
+async function canvasDragDocks(t) {
+  const at = await canvasDragSetup(t, null);
+  if (!at) return ["no card for task 1201 in the switcher"];
+  await canvasDragLeft(t, at);
+  const dock = await t.r.page.evaluate(() => window.__dock);
+  console.log(`     switcher-canvas-drag: docks ${JSON.stringify(dock)}`);
+  const d = dock[0];
+  if (!d) return ["the drag up-left never called tasks.canvasDock (a card refused once still ignoring touches?)"];
+  const fails = [];
+  if (d[0] !== 1201 || d[1] !== "left") fails.push(`tasks.canvasDock(${d.join(", ")}): want task 1201 on the left`);
+  if (d[2] !== 1204) fails.push(`the partner is task ${d[2]}, want 1204 (Files: not PowOS's lock/Linux tasks, not Settings)`);
+  return fails;
+}
+
+/** The dragged app on OxygenOS's blocklist (Settings): never sent to the host, the user told. */
+async function canvasDragBlocked(t) {
+  const at = await canvasDragSetup(t, null, 1205);
+  if (!at) return ["no card for task 1205 in the switcher"];
+  await canvasDragLeft(t, at);
+  const note = await canvasNote(t);
+  const dock = await t.r.page.evaluate(() => window.__dock);
+  const fails = [];
+  if (dock.length) fails.push(`Settings (not allowed in split view) was sent to the host: ${JSON.stringify(dock)}`);
+  if (!note.includes("Settings can't be used in split view")) fails.push(`dragging Settings to a side left no "can't be used in split view" note ("${note}")`);
+  return fails;
+}
+
+/**
  * The switcher with no cards says "No open apps", and the apps running with no card are behind "N running in
  * background" (the user, 2026-11-03: "I actually do have open apps, they're just running in the background ... like
  * Termux"): collapsed at first; an app with a card isn't counted; opened, each row has its icon, name and a Stop that
@@ -2791,6 +2896,86 @@ async function switcherWindowCardsCheck() {
   for (const [id, what] of [[LINUX, "the floating Linux window (Dolphin)"], [TASK, "the Android window (Calculator)"]])
     if (!cards.some((c) => c.id === id && c.w > 0)) fails.push(`switcher-window-cards: no card for ${what} (cards: ${cards.map((c) => c.id).join(", ") || "none"})`);
   return fails;
+}
+
+/**
+ * KB1 (board keyboard-resizes-the-window-but-not-the-content, the user 11-23: "it doesn't resize the content so I don't
+ * see where I'm typing"): the keyboard up over a right-pinned window and a maximised one - the window being typed into
+ * (the top one) ends at the keyboard's top, and the app size it sends ("w.f" <app h>, what the host resizes the virtual
+ * display / KWin window to) is that shorter body's; the window under it keeps its frame; the keyboard down, the window
+ * is its old size again; home's own field typing leaves the windows alone.
+ */
+async function webWindowKeyboardFitCheck() {
+  const S = await window.__gw.mod("./state.ts");
+  const W = await window.__gw.mod("./ui/webwindows.tsx");
+  // Its helpers come in first (page.evaluate sends one function's source): window.__kbFit, set by the run.
+  const { kbFitKit, kbFitSide, kbFitMax } = window.__kbFit;
+  const k = kbFitKit();
+  S.page.value = 0;
+  await window.__gw.settled();
+  const pg = S.pages.value[0];
+  try {
+    await kbFitSide(W, k, pg);
+    await kbFitMax(W, k, pg);
+  } finally {
+    k.insets(0);
+    W.webWins.value = [];
+  }
+  return k.fails;
+}
+
+/** [webWindowKeyboardFitCheck]'s helpers: insets, a body's rect, the last "w.f" app height, frames, the failures. */
+function kbFitKit() {
+  const fails = [];
+  const KB = 330;
+  const frame = () => new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)));
+  const insets = (keyboard) => window.__mockEvents.emit("system.insets", { top: 24, bottom: 16, left: 0, right: 0, keyboard });
+  const none = { top: NaN, bottom: NaN, height: NaN };
+  const body = (id) => document.querySelector(`.webwindow[data-wwid="${id}"] .webwindow-body`)?.getBoundingClientRect() ?? none;
+  const sentH = (id) => {
+    const parts = (window.__ww.sent.at(-1) ?? "").split(" ");
+    const at = parts.indexOf(String(id), 4);
+    return at < 0 ? NaN : Number(parts[at + 22]);
+  };
+  const want = (ok, msg) => ok || fails.push(`KB1 ${msg}`);
+  const up = async (kb) => (insets(kb), await frame(), await frame());
+  return { fails, KB, insets, body, sentH, want, up, top: () => innerHeight - KB };
+}
+
+/** A right-pinned window over another: the top one (typed into) fits above the keyboard, the other stays. */
+async function kbFitSide(W, k, pg) {
+  const half = Math.round(innerWidth / 2);
+  W.webWins.value = [
+    { id: 981, key: "a:gate.left", label: "Left", page: pg, x: 0, y: 40, w: half, h: innerHeight - 80, live: true },
+    { id: 982, key: "a:gate.chat", label: "Chat", page: pg, x: half, y: 40, w: innerWidth - half, h: innerHeight - 80, live: true },
+  ];
+  await k.up(0);
+  await window.__gw.settled();
+  const [left0, chat0] = [k.body(981), k.body(982)];
+  await k.up(k.KB);
+  const chat = k.body(982);
+  k.want(chat.bottom <= k.top() + 0.5, `side-pinned: the typed-into window's body ends at ${chat.bottom} with the keyboard's top at ${k.top()} (want at or above it)`);
+  k.want(chat.top === chat0.top, `side-pinned: its top moved ${chat0.top} -> ${chat.top} (want kept: there's room)`);
+  const h = k.sentH(982);
+  k.want(Math.abs(h - chat.height) < 1, `side-pinned: the app's size sent is ${h} high, the body ${chat.height} (want the body's: the host resizes the app to it)`);
+  k.want(k.body(981).bottom === left0.bottom, `the window under it changed ${left0.bottom} -> ${k.body(981).bottom} (want kept: the keyboard isn't its)`);
+  await k.up(0);
+  k.want(k.body(982).bottom === chat0.bottom, `keyboard down, the window ends at ${k.body(982).bottom} (want its own ${chat0.bottom} back)`);
+}
+
+/** A maximised window fits too; home's own field typing (the keyboard is home's) leaves it alone. */
+async function kbFitMax(W, k, pg) {
+  W.webWins.value = [{ id: 983, key: "a:gate.max", label: "Max", page: pg, x: 0, y: 24, w: innerWidth, h: innerHeight - 100, restore: { x: 40, y: 120, w: 320, h: 400 }, live: true }];
+  await window.__gw.settled();
+  await k.up(k.KB);
+  k.want(k.body(983).bottom <= k.top() + 0.5, `maximised: the body ends at ${k.body(983).bottom} with the keyboard's top at ${k.top()}`);
+  await k.up(0);
+  const field = document.createElement("input");
+  document.body.append(field);
+  field.focus();
+  await k.up(k.KB);
+  k.want(!document.hasFocus() || k.body(983).bottom > k.top() + 0.5, `home's own field typing shrank the window (its body ends at ${k.body(983).bottom})`);
+  field.remove();
 }
 
 /** [switcherLinuxMaxCheck]'s home: a maximised Linux window (Dolphin), then the switcher up with its card and two apps'. */
@@ -6543,6 +6728,13 @@ async function scrollFadeCheck() {
   return fails;
 }
 
+/** One dock-align case (dev/dock-align-check.js) in [r]'s page; DOCK_SHOTS: its render there. */
+async function dockAlignRun(r, name, position, align) {
+  const failures = await r.page.evaluate(async (p, a) => (await importShim("./dev/dock-align-check.js")).dockAlignCheck(p, a), position, align);
+  if (process.env.DOCK_SHOTS) await r.page.screenshot({ path: `${process.env.DOCK_SHOTS}/${name}.png` });
+  return failures;
+}
+
 /** The folded dock's pinned apps never fade (the user, 2026-10-23): at rest on the pinned page its edges are unmasked. */
 async function dockPinnedNoFade() {
   const S = await window.__gw.mod("./state.ts");
@@ -7464,6 +7656,211 @@ async function folderDissolveCheck() {
  * (b) An app off home, carried from the drawer (apps.tsx dragHome, the drawer's own hold) onto home app C: a folder of
  * the two.
  */
+/**
+ * In the page: widget stacks (ui/stacks.tsx, the user 11-23 "stack widgets and swipe between them like pages like
+ * samsung"). Edit mode: a widget carried onto another makes a stack (one tile, dots, the other member unmounted, kept in
+ * the store); out of edit mode a sideways swipe on it shows the next widget and home's page stays; at the last widget
+ * the stack refuses the swipe (home's pages take it); unstack all = both plain widgets again, side by side, no overlap.
+ */
+async function stackMakeCheck() {
+  const S = await window.__gw.mod("./state.ts");
+  const G = await window.__gw.mod("./ui/grid.tsx");
+  const K = await window.__gw.mod("./ui/stacks.tsx");
+  const M = await window.__gw.mod("./ui/stackmodel.ts");
+  const B = (await window.__gw.mod("./bridge.ts")).powos;
+  const at = (type, x, y) => new PointerEvent(type, { pointerId: 14, pointerType: "touch", clientX: x, clientY: y, bubbles: true, isPrimary: true });
+  const n = S.pages.value[S.page.value];
+  const ws = S.home.value.items.filter((i) => i.page === n && M.stackable(i)).sort((p, q) => p.cell.y - q.cell.y || p.cell.x - q.cell.x);
+  if (ws.length < 2) return [`stacks: the mock's page ${n} has ${ws.length} stackable widget(s), needs 2`];
+  const [a, b] = ws;
+  window.__stk = { a: a.key, b: b.key, before: S.home.value.items.map((i) => [i.key, i.cell, i.page]) };
+  S.editing.value = true;
+  await window.__gw.settled(() => document.querySelector(".edit-sheet"));
+  const r = document.querySelector(`.home-tile[data-key="${b.key}"]`).getBoundingClientRect();
+  const [x, y] = [r.left + r.width / 2, r.top + r.height / 2];
+  G.startCarry({ item: a }, at("pointerdown", x - 30, y - 30), { x: 10, y: 10 });
+  for (let k = 1; k <= 6; k++) window.dispatchEvent(at("pointermove", x - 30 + (30 * k) / 6, y - 30 + (30 * k) / 6));
+  await window.__gw.frames(2);
+  const aimed = !!document.querySelector(".drop-spot.stack-aim");
+  window.dispatchEvent(at("pointerup", x, y));
+  const id = () => M.stackOf(K.stacks.value, a.key);
+  await window.__gw.until(() => id() && M.stackOf(K.stacks.value, b.key) === id());
+  S.editing.value = false;
+  await window.__gw.settled(() => document.querySelector(".stack-strip[data-swipe]"));
+  const strip = document.querySelector(".stack-strip");
+  const stored = M.parseStacks(await B.store.get("home.stacks"));
+  return [
+    [aimed, "a widget held over another shows no stack aim"],
+    [!!id(), `${a.key} let go on ${b.key} made no stack`],
+    [document.querySelectorAll(".home-tile.stacked").length === 1, "not exactly one stack tile"],
+    [strip?.querySelectorAll(".stack-dots i").length === 2, "the stack shows no 2 dots"],
+    [document.querySelectorAll(".stack-page").length === 1, "more than the top widget mounted at rest"],
+    [strip?.querySelector(".stack-page.top")?.dataset.member === a.key, `the dropped widget ${a.key} isn't on top`],
+    [!!M.stackOf(stored, a.key), "the stack wasn't written to the store"],
+  ].filter(([ok]) => !ok).map(([, m]) => `stacks: ${m}`);
+}
+
+/** stackMakeCheck's stack ([b, a], the dropped a on top = the LAST): a swipe right shows b, home's page stays; at the
+ * first widget the stack hands a further swipe right to home's pages. */
+async function stackSwipeCheck() {
+  const S = await window.__gw.mod("./state.ts");
+  const M = await window.__gw.mod("./ui/stackmodel.ts");
+  const { b } = window.__stk;
+  const strip = () => document.querySelector(".stack-strip");
+  const top = () => strip()?.querySelector(".stack-page.top")?.dataset.member;
+  const at = (type, x, y) => new PointerEvent(type, { pointerId: 15, pointerType: "touch", clientX: x, clientY: y, bubbles: true, isPrimary: true });
+  const swipe = async (dx) => {
+    const s = strip().getBoundingClientRect();
+    const [sx, sy] = [s.left + s.width / 2, s.top + s.height / 2];
+    strip().dispatchEvent(at("pointerdown", sx, sy));
+    for (let k = 1; k <= 8; k++) strip().dispatchEvent(at("pointermove", sx + (dx * k) / 8, sy + k));
+    await window.__gw.frames(2);
+    strip().dispatchEvent(at("pointerup", sx + dx, sy + 8));
+    await new Promise((ok) => setTimeout(ok, 450));
+  };
+  const page0 = S.page.value;
+  await swipe(strip().clientWidth * 0.6);
+  const shown1 = top();
+  const mounted = document.querySelectorAll(".stack-page").length;
+  const handsOff = !M.stackSwipeAt(strip(), 50) && M.stackSwipeAt(strip(), -50);
+  await swipe(strip().clientWidth * 0.6);
+  return [
+    [shown1 === b, `a swipe right didn't show the previous widget (top ${shown1}, want ${b})`],
+    [S.page.value === page0, "the swipe on the stack turned home's page too"],
+    [mounted === 1, "the neighbour stayed mounted after the swipe"],
+    [handsOff, "at the first widget the stack still claims a swipe right (or not a swipe left)"],
+    [top() === b, "a swipe past the first widget moved the stack"],
+  ].filter(([ok]) => !ok).map(([, m]) => `stacks: ${m}`);
+}
+
+/** Unstack all: both plain widgets, no overlap; the mock's layout put back as it was. */
+async function stackUnstackCheck() {
+  const S = await window.__gw.mod("./state.ts");
+  const K = await window.__gw.mod("./ui/stacks.tsx");
+  const M = await window.__gw.mod("./ui/stackmodel.ts");
+  const B = (await window.__gw.mod("./bridge.ts")).powos;
+  const { a, b, before } = window.__stk;
+  await K.unstackAll(M.stackOf(K.stacks.value, a));
+  const tile = (k) => document.querySelector(`.home-tile[data-key="${k}"]`);
+  await window.__gw.until(() => !document.querySelector(".stack-strip") && tile(a) && tile(b));
+  const cell = (k) => S.home.value.items.find((i) => i.key === k).cell;
+  const [ca, cb] = [cell(a), cell(b)];
+  const overlap = ca.x < cb.x + cb.w && cb.x < ca.x + ca.w && ca.y < cb.y + cb.h && cb.y < ca.y + ca.h;
+  const fails = [
+    [!document.querySelector(".stack-strip"), "unstack all left a stack"],
+    [!overlap, `unstacked widgets overlap (${JSON.stringify(ca)} / ${JSON.stringify(cb)})`],
+  ].filter(([ok]) => !ok).map(([, m]) => `stacks: ${m}`);
+  for (const [key, c, pg] of before) if (c) await B.home.place(key, c, pg);
+  return fails;
+}
+
+/**
+ * SO1, real touches (CDP) on home (ui/scrollown.ts, gesture.ts claimSideways, the host's HomePullAxis): a widget on home
+ * gets a sideways scroller (as an app island's pan-x strip) - (1) a sideways drag on it scrolls its content and home's
+ * page stays; (2) a diagonal one too, and home tells the host the finger is taken sideways (shade.homeClaim: the host's
+ * shade pull never starts on it); (3) scrolled to its end, a fresh drag the same way is home's page swipe; (4) a
+ * diagonal drag along the dock's recent-apps strip is claimed from the host too, home's page staying. The scene's
+ * page has touch input (hasTouch), so home's touch handlers are the real ones.
+ */
+async function scrollOwnCheck(r) {
+  const at = await r.page.evaluate(scrollOwnSetup);
+  if (at.err) return [`SO1: ${at.err}`];
+  if (at.pages < 2) return [`SO1: home has ${at.pages} page(s) - the edge hand-off needs two`];
+  const f = await soFinger(r.page);
+  try {
+    return [...(await soScroller(f, at)), ...(await soEdge(f, at)), ...(await soDock(f, at))];
+  } finally {
+    await f.touch("touchEnd", []).catch(() => {});
+    await r.page.evaluate(async () => {
+      document.querySelector(".gate-hscroll")?.remove();
+      (await window.__gw.mod("./state.ts")).page.value = 0;
+    }).catch(() => {});
+  }
+}
+
+/** In the page: home's first page, a sideways scroller over its first widget tile; where it and the dock are. */
+async function scrollOwnSetup() {
+  const S = await window.__gw.mod("./state.ts");
+  S.page.value = 0;
+  await window.__gw.settled();
+  const fits = (t) => {
+    const b = t.getBoundingClientRect();
+    return b.width >= 150 && b.height >= 60 && b.left >= 0 && b.right <= innerWidth && b.top > 60;
+  };
+  const tile = [...document.querySelectorAll(".page:not(.away) .home-tile")].find(fits);
+  if (!tile) return { err: "no widget tile >= 150x60 on home's first page" };
+  const sc = document.createElement("div");
+  sc.className = "gate-hscroll";
+  Object.assign(sc.style, { position: "absolute", inset: "0", zIndex: "50", overflowX: "auto", overflowY: "hidden", touchAction: "pan-x" });
+  sc.innerHTML = '<div style="width:400%;height:100%"></div>';
+  tile.appendChild(sc);
+  const b = sc.getBoundingClientRect();
+  const d = document.querySelector(".dock-pages, .dock")?.getBoundingClientRect();
+  globalThis.__homeClaims = 0;
+  return { x: b.left + b.width / 2, y: b.top + b.height / 2, w: b.width, pages: S.pageCount.value, dock: d && { x: d.left + d.width / 2, y: d.top + d.height / 2, w: d.width } };
+}
+
+/** A finger (CDP touches): drag a -> b in [steps] moves; the scene's state (page, scroller, host claims). */
+async function soFinger(page) {
+  const cdp = await page.target().createCDPSession();
+  const sleep = (ms) => new Promise((ok) => setTimeout(ok, ms));
+  const touch = (type, pts) => cdp.send("Input.dispatchTouchEvent", { type, touchPoints: pts });
+  const drag = async (a, b, steps = 12) => {
+    await touch("touchStart", [a]);
+    for (let i = 1; i <= steps; i++) (await touch("touchMove", [{ x: a.x + ((b.x - a.x) * i) / steps, y: a.y + ((b.y - a.y) * i) / steps }]), await sleep(16));
+    await touch("touchEnd", []);
+    await sleep(600);
+  };
+  const state = () =>
+    page.evaluate(async () => {
+      const S = await window.__gw.mod("./state.ts");
+      const sc = document.querySelector(".gate-hscroll");
+      return { page: S.page.value, left: sc?.scrollLeft ?? -1, claims: globalThis.__homeClaims ?? 0 };
+    });
+  return { page, sleep, touch, drag, state };
+}
+
+/** (1) sideways and (2) diagonal on the widget's scroller: it scrolls, home's page stays, the host is told. */
+async function soScroller({ drag, state }, at) {
+  const s0 = await state();
+  await drag({ x: at.x + at.w * 0.3, y: at.y }, { x: at.x - at.w * 0.3, y: at.y + 3 });
+  const s1 = await state();
+  // Down-left, ~35 deg off the horizontal: sideways by home's lock.
+  await drag({ x: at.x + at.w * 0.2, y: at.y - 10 }, { x: at.x - at.w * 0.2, y: at.y + 10 + at.w * 0.08 });
+  const s2 = await state();
+  return [
+    s1.left < 20 && `a sideways drag on a widget's scroller didn't scroll it (scrollLeft ${s1.left})`,
+    s1.page !== s0.page && `a sideways drag on a widget's scroller turned home's page (${s0.page} -> ${s1.page})`,
+    s2.page !== s0.page && `a diagonal drag on a widget's scroller turned home's page (${s0.page} -> ${s2.page})`,
+    s2.left <= s1.left && `a diagonal drag on a widget's scroller didn't scroll it (${s1.left} -> ${s2.left})`,
+    s2.claims < 2 && "home didn't tell the host (shade.homeClaim) that drags on a scroller are taken sideways - the shade could pull",
+  ].filter(Boolean).map((m) => `SO1: ${m}`);
+}
+
+/** (3) the scroller at its end: a fresh drag the same way is home's page swipe. */
+async function soEdge({ page, sleep, drag, state }, at) {
+  const p0 = (await state()).page;
+  await page.evaluate(() => { const sc = document.querySelector(".gate-hscroll"); sc.scrollLeft = sc.scrollWidth; });
+  await sleep(100);
+  await drag({ x: at.x + at.w * 0.35, y: at.y }, { x: at.x - at.w * 0.45, y: at.y + 3 });
+  const p1 = (await state()).page;
+  return p1 === p0 + 1 ? [] : [`SO1: at the scroller's end a sideways drag didn't swipe home's page (${p0} -> ${p1})`];
+}
+
+/** (4) a diagonal drag along the dock's recent-apps strip: claimed from the host, home's page stays. */
+async function soDock({ page, drag, state }, at) {
+  if (!at.dock) return ["SO1: no dock on home"];
+  await page.evaluate(async () => {
+    (await window.__gw.mod("./state.ts")).page.value = 0;
+    await window.__gw.settled();
+    globalThis.__homeClaims = 0;
+  });
+  // Down-right, ~35 deg: sideways by the dock's rule (the strip scrolls, or - not scrolling - home's pages turn).
+  await drag({ x: at.dock.x - at.dock.w * 0.15, y: at.dock.y - 4 }, { x: at.dock.x + at.dock.w * 0.05, y: at.dock.y + 22 }, 8);
+  const s = await state();
+  return s.claims ? [] : ["SO1: a diagonal drag along the dock's recent-apps strip wasn't claimed from the host (shade.homeClaim) - the shade could take it"];
+}
+
 async function folderDragCheck() {
   const S = await window.__gw.mod("./state.ts");
   const G = await window.__gw.mod("./ui/grid.tsx");
@@ -12172,6 +12569,115 @@ async function gripDragScene(r) {
   }
 }
 
+/**
+ * SH1 (the user, 11-23: "The shadow is not positioned correctly when I'm resizing a window"): a window's drop shadow
+ * sits on its frame on EVERY frame of a resize drag - each edge and corner, out and in, down to the smallest window
+ * (under RS6's 9-slice size: the whole shadow again) and back, with the window re-rendered mid-drag (a host event,
+ * a snap: Preact writes the shadow's box while it is a 9-slice). Real
+ * touches (CDP). In the page, [shadowAt] reads where the shadow IS: the whole one's caster, or each 9-slice piece's
+ * box and its caster's box along the axis it isn't stretched on, against the frame's box (1 px).
+ */
+function shadowAt(id) {
+  const frame = document.querySelector(`.webwindow[data-wwid="${id}"]`);
+  const sh = frame?.parentElement?.querySelector(`.ww-shadow[data-wwid="${id}"]`);
+  if (!frame || !sh) return ["no frame or shadow"];
+  const F = frame.getBoundingClientRect();
+  const k = F.width / parseFloat(frame.style.width) || 1;
+  const pieces = [...sh.querySelectorAll(":scope > .ww-s9")];
+  const whole = getComputedStyle(sh.firstElementChild).visibility !== "hidden";
+  if (!sh.classList.contains("sliced")) return window.__shadowWhole(sh, F, pieces.length, whole);
+  if (pieces.length !== 8) return [`sliced with ${pieces.length} pieces (want 8)`];
+  const pad = (sh.firstElementChild.getBoundingClientRect().left - sh.getBoundingClientRect().left) / k;
+  return [...(whole ? ["sliced, but the whole shadow shows too"] : []), ...pieces.flatMap((p, n) => window.__shadowPiece(p, n, F, { P: pad * k, S: pieces[0].getBoundingClientRect().width }))];
+}
+/** SH1, in the page: a whole (not sliced) shadow [sh] cast from frame box [F], shown, no pieces left in it. */
+function shadowWhole(sh, F, pieces, shown) {
+  const c = sh.firstElementChild.getBoundingClientRect();
+  const near = (a, b) => Math.abs(a - b) <= 1;
+  const at = near(c.left, F.left) && near(c.top, F.top) && near(c.width, F.width) && near(c.height, F.height);
+  return [
+    pieces && `${pieces} 9-slice pieces left in a whole shadow`,
+    !at && `whole shadow cast from ${Math.round(c.left)},${Math.round(c.top)} ${Math.round(c.width)}x${Math.round(c.height)}, frame ${Math.round(F.left)},${Math.round(F.top)} ${Math.round(F.width)}x${Math.round(F.height)}`,
+    !shown && "whole shadow hidden",
+  ].filter(Boolean);
+}
+/** SH1, in the page: 9-slice piece [n] (nw n ne w e sw s se) of a shadow [g].P px past frame box [F], corners [g].S px. */
+function shadowPiece(p, n, F, { P, S }) {
+  const near = (a, b) => Math.abs(a - b) <= 1;
+  const [i, j] = [[0, 0], [1, 0], [2, 0], [0, 1], [2, 1], [0, 2], [1, 2], [2, 2]][n];
+  const name = "nw n ne w e sw s se".split(" ")[n];
+  const col = [[F.left - P, S], [F.left - P + S, F.width + 2 * P - 2 * S], [F.right + P - S, S]][i];
+  const row = [[F.top - P, S], [F.top - P + S, F.height + 2 * P - 2 * S], [F.bottom + P - S, S]][j];
+  const b = p.getBoundingClientRect();
+  const out = [];
+  if (!(near(b.left, col[0]) && near(b.width, col[1]) && near(b.top, row[0]) && near(b.height, row[1])))
+    out.push(`piece ${name} at ${Math.round(b.left)},${Math.round(b.top)} ${Math.round(b.width)}x${Math.round(b.height)}, want ${Math.round(col[0])},${Math.round(row[0])} ${Math.round(col[1])}x${Math.round(row[1])}`);
+  return [...out, ...window.__shadowCast(p.firstElementChild.getBoundingClientRect(), [i, j], F).map((e) => `piece ${name} ${e}`)];
+}
+/** SH1, in the page: the caster box [c]'s edges a piece at column/row [ij] shows (a corner its two, an edge its one) on frame [F]'s. */
+function shadowCast(c, [i, j], F) {
+  const edges = [i === 0 && ["left", c.left, F.left], i === 2 && ["right", c.right, F.right], j === 0 && ["top", c.top, F.top], j === 2 && ["bottom", c.bottom, F.bottom]];
+  return edges.filter((e) => e && Math.abs(e[1] - e[2]) > 1).map(([e, got, want]) => `casts its ${e} edge at ${Math.round(got)}, frame's ${Math.round(want)}`);
+}
+
+/** SH1, in the page: window 971 alone on page 0 at its start frame; [side]'s resize zone centre. */
+async function shadowPlace(side) {
+  const S = await window.__gw.mod("./state.ts");
+  const W = await window.__gw.mod("./ui/webwindows.tsx");
+  S.page.value = 0;
+  W.webWins.value = [{ id: 971, key: "a:gate.shadow", label: "Shadow", page: S.pages.value[0], x: 190, y: 250, w: 420, h: 380, live: true }];
+  await window.__gw.settled();
+  const z = document.querySelector(`.webwindow[data-wwid="971"] .ww-edge-${side}`)?.getBoundingClientRect();
+  return z && { x: Math.round(z.left + z.width / 2), y: Math.round(z.top + z.height / 2) };
+}
+/** SH1, in the page: the dragged window re-rendered mid-drag, as a snap (RZ4) or the grips' fade (RZ6) does it. */
+async function shadowRender() {
+  const W = await window.__gw.mod("./ui/webwindows.tsx");
+  const v = W.resizeView.peek();
+  if (v) W.resizeView.value = { ...v, snapped: v.snapped ? "" : "w" };
+  await window.__gw.frames(2);
+}
+
+/**
+ * SH1: out 60, out 120, a render, out to the screen's edge (n/s: into a system strip's reach - a zone height changes,
+ * that move renders the window), back, in to the smallest window, out again, a render, in.
+ */
+const SH1_STEPS = [[60], [120], [120, true], [300], [120], [-260], [-200], [40], [40, true], [10]];
+/** SH1: one real-touch resize drag of window 971 by [side]'s zone ([touch]: CDP), the shadow read after each move. */
+async function shadowDrag(r, touch, side) {
+  const at = await r.page.evaluate(shadowPlace, side);
+  if (!at) return [`SH1: no ${side} resize zone`];
+  const sign = (plus, minus) => (side.includes(plus) ? 1 : side.includes(minus) ? -1 : 0);
+  const [vx, vy] = [sign("e", "w"), sign("s", "n")];
+  const look = async (what) => {
+    const bad = await r.page.evaluate(async () => (await window.__gw.frames(1), window.__shadowAt(971)));
+    return bad.length ? [`SH1: ${side} drag, ${what}: ${bad.slice(0, 3).join("; ")}`] : [];
+  };
+  const fails = [];
+  await touch("touchStart", [{ x: at.x, y: at.y, id: 1 }]);
+  for (const [d, render] of SH1_STEPS) {
+    if (render) await r.page.evaluate(shadowRender);
+    await touch("touchMove", [{ x: at.x + vx * d, y: at.y + vy * d, id: 1 }]);
+    fails.push(...(await look(`move ${d}${render ? " after a render" : ""}`)));
+  }
+  await touch("touchEnd", []);
+  return [...fails, ...(await look("let go"))];
+}
+
+async function shadowTrackScene(r) {
+  const cdp = await r.page.target().createCDPSession();
+  await cdp.send("Emulation.setTouchEmulationEnabled", { enabled: true, maxTouchPoints: 5 });
+  const touch = (type, pts) => cdp.send("Input.dispatchTouchEvent", { type, touchPoints: pts });
+  await r.page.evaluate(`window.__shadowAt = ${shadowAt}; window.__shadowWhole = ${shadowWhole}; window.__shadowPiece = ${shadowPiece}; window.__shadowCast = ${shadowCast}`);
+  const fails = [];
+  try {
+    for (const side of ["n", "s", "e", "w", "ne", "nw", "se", "sw"]) fails.push(...(await shadowDrag(r, touch, side)));
+    return fails;
+  } finally {
+    await r.page.evaluate(async () => ((await window.__gw.mod("./ui/webwindows.tsx")).webWins.value = [])).catch(() => {});
+  }
+}
+
 async function swapScene(r) {
   try {
     for (const step of [SWAP_HELPERS, swapDividerTap, swapHintTap, swapVertical, swapAloneHalf]) {
@@ -13845,6 +14351,110 @@ const MUST = {
   assist: [[".assist-draw", "the circle-to-crop layer over the screen (assist.tsx Draw)"]],
 };
 
+/**
+ * Home's paints (the user's trace perf-1795459755191, 11-23 "everything keeps redrawing": ~140 Paint events a second
+ * through 27 s of page swipes, ~10 ms each, painting again for ~1 s after each - the render overlay's DOM canvas redrawn
+ * every frame of its 700 ms flashes, its measureText forcing the page's style first; renderoverlay.ts now draws
+ * offscreen). Home as the user has it: the live glass (a port and "b.state 1"), the render overlay on, the mock's agent
+ * news flowing, the phone's DPR. Its main thread's Paint events (a devtools trace, the phone trace's measure) counted
+ * while it's left alone, then through real touch swipes between home's pages and to PowOS AI's page and back - per
+ * second, against HOME_PAINTS. The old overlay here: 11 a second idle, ~50 swiping; now ~0.25 (the trace's own start)
+ * and 4-9. The only scene that traces in a plain run (GATE_PROFILE's ww-resize-cost traces too: one trace at a time).
+ * To PowOS AI's page and back (11-23): 258 layer paints (pill, page-track, widgets, library each ~30x: every finger move
+ * re-rastered them - home's --track-counter inherited into its whole subtree, home and the AI screen not composited, the
+ * dots moved by paint), 28 ms; now ~70 (each layer ~2 per swipe: the pages' and the bar's own changes on arrival), ~10
+ * ms. Its ~10 Paint/s left are one empty Paint per move (no layer painted, ~0.3 ms): the bar's counter is a `translate`,
+ * which Chrome doesn't update directly the way it does home's `transform`.
+ */
+const HOME_PAINTS = { idle: 1, swipes: 15, ai: 12, aiLayers: 110 };
+
+/**
+ * This page's paints while [act] runs and [ms] pass: the main thread's Paint events of its frame (a devtools trace, as
+ * the phone's), per second, and the layers painted most (LayerTree.layerPainted: where to look).
+ */
+async function paintsWhile(page, ms, act) {
+  const cdp = await page.target().createCDPSession();
+  const painted = [];
+  cdp.on("LayerTree.layerPainted", (e) => painted.push(e.layerId));
+  const layers = new Map();
+  cdp.on("LayerTree.layerTreeDidChange", (e) => e.layers?.forEach((l) => layers.set(l.layerId, l)));
+  await cdp.send("LayerTree.enable").catch(() => {});
+  await page.tracing.start({ categories: ["devtools.timeline"] });
+  const t0 = Date.now();
+  await Promise.all([act?.(), new Promise((r) => setTimeout(r, ms))]);
+  const secs = (Date.now() - t0) / 1000;
+  const frame = page.mainFrame()._id;
+  const paints = JSON.parse((await page.tracing.stop()).toString()).traceEvents.filter((e) => e.name === "Paint" && e.ph === "X" && e.args?.data?.frame === frame);
+  const by = new Map();
+  for (const id of painted) by.set(id, (by.get(id) ?? 0) + 1);
+  const top = [];
+  for (const [id, n] of [...by].sort((x, y) => y[1] - x[1]).slice(0, 4)) top.push(`${await layerName(cdp, layers.get(id), id)} ${n}x`);
+  await cdp.detach().catch(() => {});
+  const paintMs = Math.round(paints.reduce((t, e) => t + (e.dur || 0), 0) / 100) / 10;
+  return { n: paints.length, perSec: Math.round((paints.length / secs) * 10) / 10, paintMs, layers: painted.length, top };
+}
+
+/** A layer's element ("div.home-tile.widget"), else what it is. */
+async function layerName(cdp, l, id) {
+  if (!l?.backendNodeId) return l && !l.parentLayerId ? "the root layer" : `layer ${id}`;
+  const n = (await cdp.send("DOM.describeNode", { backendNodeId: l.backendNodeId }).catch(() => null))?.node;
+  const at = n?.attributes ?? [];
+  const cls = at.includes("class") ? "." + at[at.indexOf("class") + 1].trim().split(/\s+/).slice(0, 3).join(".") : "";
+  return n ? n.localName + cls : `layer ${id}`;
+}
+
+/** Page swipes by touch (CDP input, as a finger: the gesture's own handlers), [dirs] 1 = to the next page, -1 = back. */
+async function touchSwipes(page, dirs) {
+  const cdp = await page.target().createCDPSession();
+  const touch = (type, x) => cdp.send("Input.dispatchTouchEvent", { type, touchPoints: x == null ? [] : [{ x, y: 630 }] });
+  for (const dir of dirs) {
+    const x0 = dir > 0 ? 700 : 520;
+    await touch("touchStart", x0);
+    for (let i = 1; i <= 6; i++) (await new Promise((r) => setTimeout(r, 16)), await touch("touchMove", x0 - dir * i * 25));
+    await touch("touchEnd");
+    await new Promise((r) => setTimeout(r, 600));
+  }
+  await cdp.detach().catch(() => {});
+}
+
+/**
+ * In the page: the live glass's stand-in, the fps meter on with its render overlay ("perf.meter", as the host
+ * broadcasts the meter's "rs"), the mock's news on, home's first page. What didn't take, or "".
+ */
+async function asTheUsersHome() {
+  const G = window.__gw;
+  const N = await G.mod("./apps/native.ts");
+  const O = await G.mod("./ui/renderoverlay.ts");
+  const ch = new MessageChannel();
+  ch.port2.onmessage = () => {};
+  N.native.value = ch.port1;
+  for (const f of N.fromNative) f("b.state 1");
+  window.__powosMockQuiet = false;
+  (await G.mod("./state.ts")).page.value = 0;
+  await G.settled();
+  await G.until(() => (window.__mockEvents.emit("perf.meter", { on: true, renders: true }), O.overlayOn()), 3000).catch(() => {});
+  if (!document.documentElement.classList.contains("glass-native")) return "the live glass's stand-in didn't take (no html.glass-native)";
+  return O.overlayOn() ? "" : "the meter's rs didn't put the render overlay up";
+}
+
+async function homePaints(page) {
+  const setup = await page.evaluate(asTheUsersHome);
+  if (setup) return [`home-paints: ${setup}`];
+  // Settled (the overlay's mount, the first page's layout); a trace's start itself costs one paint (~0.25/s here).
+  await new Promise((r) => setTimeout(r, 3000));
+  const idle = await paintsWhile(page, 4000);
+  const home = await paintsWhile(page, 4 * 620 + 600, () => touchSwipes(page, [1, -1, 1, -1]));
+  const ai = await paintsWhile(page, 4 * 620 + 600, () => touchSwipes(page, [-1, 1, -1, 1]));
+  const line = (r) => `${r.n} Paint (${r.perSec}/s, ${r.paintMs} ms; ${r.layers} layer paints${r.top.length ? ": " + r.top.join(", ") : ""})`;
+  console.log(`     home-paints: idle 4 s ${line(idle)} | 4 swipes between home's pages ${line(home)} | 4 to PowOS AI's page and back ${line(ai)}`);
+  const fails = [];
+  if (idle.perSec > HOME_PAINTS.idle) fails.push(`idle home painted ${line(idle)} - want <= ${HOME_PAINTS.idle}/s: nothing on it changes`);
+  for (const [what, r, max] of [["between home's pages", home, HOME_PAINTS.swipes], ["to PowOS AI's page and back", ai, HOME_PAINTS.ai]])
+    if (r.perSec > max) fails.push(`page swipes ${what} painted ${line(r)} - want <= ${max}/s: a slide moves layers, it doesn't repaint them`);
+  if (ai.layers > HOME_PAINTS.aiLayers) fails.push(`page swipes to PowOS AI's page and back repainted ${ai.layers} layers (${line(ai)}) - want <= ${HOME_PAINTS.aiLayers}: the pill, widgets and library ride composited, never re-rastered per move`);
+  return fails;
+}
+
 /** The idle check (see the top): after the page settled, IDLE_MS of nothing - no rAF, no paint, no endless animation. */
 async function idle(run) {
   await run.page.evaluate(() => (window.__powosMockQuiet = true)).catch(() => {});
@@ -14059,6 +14669,34 @@ try {
       })));
     }
   }
+  // The stop button (the user, 11-23: the send control becomes STOP while the assistant answers): a long ask turns the
+  // pill's send into stop within 100 ms, typing turns it back, its tap ends the turn (partial answer kept, "stopped"),
+  // send again within 100 ms - in every pill that asks PowOS AI, folded and unfolded (dev/ai-stop-check.js).
+  // Renders: /cache/ai-stop-<case>.png (stop showing) and -after.png (stopped).
+  for (const [name, query, viewport, form, setup] of [
+    ["aipage-folded", "", { width: 404, height: 900 }, '.bar[data-role="ai"]', "page"],
+    ["aipage-unfolded", "", { width: 821, height: 883 }, '.bar[data-role="ai"]', "page"],
+    ["chat-folded", "?mode=pull", { width: 404, height: 900 }, ".bar", "chat"],
+    ["powai-unfolded", "?mode=pull", { width: 821, height: 883 }, ".bar", "ai"],
+    ["assist-folded", "?mode=assist", { width: 404, height: 900 }, ".assist-ask", ""],
+    ["assist-unfolded", "?mode=assist", { width: 821, height: 883 }, ".assist-ask", ""],
+  ]) {
+    runs.push(open(browser, `${ORIGIN}/index.html${query}`, `ai-stop-${name}`, viewport).then((r) => whenReady(r, async () => {
+      await r.page.evaluate(async (how) => {
+        const S = await importShim("./state.ts");
+        if (how === "page") S.page.value = -1;
+        if (how === "chat" || how === "ai") (S.chatting.value = true), (S.drawer.value = 1);
+        if (how === "ai") S.pullKind.value = "ai";
+      }, setup);
+      await r.page.waitForSelector(`form${form} .mic`, { timeout: READY_MS });
+      const started = await r.page.evaluate(async (f) => (await importShim("./dev/ai-stop-check.js")).aiStopStart(f), form);
+      await r.page.screenshot({ path: `/cache/ai-stop-${name}.png` });
+      if (started.length) return started;
+      const ended = await r.page.evaluate(async (f) => (await importShim("./dev/ai-stop-check.js")).aiStopEnd(f), form);
+      await r.page.screenshot({ path: `/cache/ai-stop-${name}-after.png` });
+      return ended;
+    })));
+  }
   // AO1/AO2 (the user, 2026-10-30: "It should hide while I'm drawing so that I can draw like under the drawer"; "when
   // I activate it with like a short click, we should still activate the transcription"): the side-button overlay's
   // short press listens at once, and a stroke into the panel's area hides the panel and goes to the drawing
@@ -14144,6 +14782,13 @@ try {
     });
   }));
   runs.push(open(browser, `${ORIGIN}/index.html`, "dock-key-migration", { width: 821, height: 883 }).then((r) => whenReady(r, () => dockKeyMigration(r))));
+  // The side dock's alignment (dev/dock-align-check.js): folded and unfolded, left and right, top and bottom.
+  const alignCases = [["cover", { width: 404, height: 900 }], ["inner", { width: 821, height: 883 }]].flatMap(([label, view]) => ["left", "right"].flatMap((position) => ["top", "bottom"].map((align) => [`dock-align-${label}-${position}-${align}`, view, position, align])));
+  for (const [name, view, position, align] of alignCases) runs.push(open(browser, `${ORIGIN}/index.html`, name, view).then((r) => whenReady(r, () => dockAlignRun(r, name, position, align))));
+  // The launcher and PowOS AI fill the width with a side dock on either side (dev/side-dock-width-check.js).
+  const widthCases = [["cover", { width: 404, height: 900 }], ["inner", { width: 821, height: 883 }]].flatMap(([label, view]) => ["left", "right"].flatMap((position) => ["apps", "ai"].map((kind) => [`side-dock-width-${label}-${position}-${kind}`, view, position, kind])));
+  for (const [name, view, position, kind] of widthCases)
+    runs.push(open(browser, `${ORIGIN}/index.html`, name, view).then((r) => whenReady(r, () => r.page.evaluate(async (p, k) => (await importShim("./dev/side-dock-width-check.js")).sideDockWidthCheck(p, k), position, kind))));
   const dockViews = { cover: { width: 404, height: 900 }, inner: { width: 821, height: 883 }, desktop: { width: 1280, height: 800 } };
   for (const [label, mode, width, height] of [["cover", "home", 404, 900], ["inner", "home", 821, 883], ["desktop", "desktop", 1280, 800]]) {
     for (const position of ["bottom", "left", "right"]) {
@@ -14379,6 +15024,9 @@ try {
   // GR1: a real finger on the journey's grip point resizes live, every step (ww-grip-drag; e2e round 193 steps 29-32).
   if (process.env.SHELL_PAGES !== "0")
     runs.push(open(browser, `${ORIGIN}/index.html`, "ww-grip-drag", { width: 821, height: 883 }).then((r) => whenReady(r, () => gripDragScene(r))));
+  // SH1: a window's shadow on its frame every frame of a resize drag - all sides, smallest size, a render and a remount mid-drag (ww-shadow-track; the user, 11-23).
+  if (process.env.SHELL_PAGES !== "0")
+    runs.push(open(browser, `${ORIGIN}/index.html`, "ww-shadow-track", { width: 821, height: 883 }).then((r) => whenReady(r, () => shadowTrackScene(r))));
   // NR1: on a phone without root, widgets needing Linux say what they need (nonroot-widgets; the user, 11-03).
   if (process.env.SHELL_PAGES !== "0")
     runs.push(open(browser, `${ORIGIN}/index.html`, "nonroot-widgets", { width: 412, height: 915 }).then((r) => whenReady(r, () => r.page.evaluate(nonrootWidgetsCheck))));
@@ -14444,6 +15092,14 @@ try {
       runs.push(open(browser, `${ORIGIN}/index.html`, name, { width: w, height: h }).then((r) => whenReady(r, async () => {
         const fails = await r.page.evaluate(async () => (await importShim("./dev/az-list-check.js")).azListScene());
         console.log(`     ${name}: ${await r.page.evaluate(() => window.__azList).catch(() => "?")}`);
+        return fails;
+      })));
+    // LD1 (the user, 11-23: "the drag to open as window works for the docked icons but not the recent ones"): every
+    // launcher tile (Recent, Suggested, a letter's apps, search's app rows) and the dock's recent ones start the shared drag.
+    for (const [w, h, name] of [[404, 900, "launcher-drag"], [821, 883, "launcher-drag-unfolded"]])
+      runs.push(open(browser, `${ORIGIN}/index.html`, name, { width: w, height: h }).then((r) => whenReady(r, async () => {
+        const fails = await r.page.evaluate(async () => (await importShim("./dev/launcher-drag-check.js")).launcherDrags());
+        console.log(`     ${name}: ${await r.page.evaluate(() => window.__launcherDrag).catch(() => "?")}`);
         return fails;
       })));
     // HZ-VOTE (perf-1793639664326): the drawer's Web Animation settle holds the host's 120 Hz vote, given back after (drawer-settle-refresh).
@@ -14575,6 +15231,21 @@ try {
         }
         return [];
       })));
+  // Widget stacks (stackCheck): make one by drag, swipe it, the hand-off at its last widget, unstack. Both screens.
+  if (process.env.SHELL_PAGES !== "0")
+    for (const [label, viewport] of [["folded", { width: 404, height: 900 }], ["unfolded", { width: 821, height: 883 }]])
+      runs.push(open(browser, `${ORIGIN}/index.html`, `home-stack-${label}`, viewport).then((r) => whenReady(r, async () => {
+        for (const check of [stackMakeCheck, stackSwipeCheck, stackUnstackCheck]) {
+          const fails = await r.page.evaluate(check);
+          if (fails.length) return fails;
+        }
+        return [];
+      })));
+  // SO1 (the user, 11-23: "some widgets have a left/right scroller, but using it changes the home PAGE instead of
+  // scrolling the widget's content"; "scrolling the recent-apps bar on home SOMETIMES activates the notification
+  // screen"): real touches (CDP) on a widget's sideways scroller and on the dock's recent-apps strip (scrollOwnCheck).
+  if (process.env.SHELL_PAGES !== "0")
+    runs.push(open(browser, `${ORIGIN}/index.html`, "home-scroll-own", { width: 404, height: 900, hasTouch: true }).then((r) => whenReady(r, () => scrollOwnCheck(r))));
   // Folders by drag: home app onto home app, and a drawer app onto a home app (folderDragCheck).
   if (process.env.SHELL_PAGES !== "0")
     runs.push(open(browser, `${ORIGIN}/index.html`, "home-folder-drag", { width: 404, height: 900 }).then((r) => whenReady(r, () => r.page.evaluate(folderDragCheck))));
@@ -14619,6 +15290,21 @@ try {
       console.log(`ai-segs-renders: tab row renders ${JSON.stringify(o.counts)}`);
       return o.fails;
     })));
+  // The tab screens' header (back, name, glance) and the tab strip whole, under the status bar, at every layout: folded,
+  // unfolded, each with a side dock, and the cover turned sideways (dev/ai-tab-head-check.js; the user, 11-23: "surely
+  // we can do the page dock cutoff thing more nicely" - Agents/Progress/Devices started behind the clock).
+  if (process.env.SHELL_PAGES !== "0")
+    for (const [label, view, dock, top] of [
+      ["folded", { width: 404, height: 899 }, "bottom", 45],
+      ["folded-right", { width: 404, height: 899 }, "right", 45],
+      ["unfolded", { width: 821, height: 883 }, "bottom", 45],
+      ["unfolded-left", { width: 821, height: 883 }, "left", 45],
+      ["folded-land", { width: 899, height: 404 }, "right", 0],
+    ])
+      runs.push(open(browser, `${ORIGIN}/index.html`, `ai-tab-head-${label}`, view).then((r) => whenReady(r, async () => {
+        const fails = await r.page.evaluate(async (d, t) => (await importShim("./dev/ai-tab-head-check.js")).aiTabHeadCheck(d, t), dock, top);
+        return fails.map((f) => `ai-tab-head-${label}: ${f}`);
+      })));
   // Try cards show before | after, the after an emulator shot of the fix (the user, 2026-11-01).
   if (process.env.SHELL_PAGES !== "0")
     runs.push(open(browser, `${ORIGIN}/index.html`, "try-pair", { width: 404, height: 900 }).then((r) => whenReady(r, () => aiTryPairCheck(r.page))));
@@ -14700,7 +15386,7 @@ try {
       runs.push(open(browser, `${ORIGIN}/index.html${query}`, `dock-dragout-${kind}`, { width, height }).then((r) => whenReady(r, () => r.page.evaluate(async (k) => (await importShim("./dev/dock-dragout-check.js")).dockDragOut(k), kind))));
   // The drawer's list fades at an edge with more to scroll (2026-10-24): a short screen, so the mock's apps scroll.
   if (process.env.SHELL_PAGES !== "0")
-    runs.push(open(browser, `${ORIGIN}/index.html?mode=pull`, "scroll-fade", { width: 404, height: 560 }).then((r) => whenReady(r, () => r.page.evaluate(scrollFadeCheck))));
+    runs.push(open(browser, `${ORIGIN}/index.html?mode=pull`, "scroll-fade", { width: 404, height: 440 }).then((r) => whenReady(r, () => r.page.evaluate(scrollFadeCheck))));
   if (process.env.SHELL_PAGES !== "0")
     runs.push(open(browser, `${ORIGIN}/index.html?mode=pull`, "launcher-haptics", { width: 404, height: 900 }).then((r) => whenReady(r, () => launcherHapticsCheck(r.page))));
     runs.push(open(browser, `${ORIGIN}/index.html`, "close-up", { width: 404, height: 560 }).then((r) => whenReady(r, () => r.page.evaluate(closeUpCheck))));
@@ -14712,6 +15398,9 @@ try {
     runs.push(open(browser, `${ORIGIN}/index.html`, "switcher-thumbs", { width: 404, height: 900 }).then((r) => whenReady(r, () => r.page.evaluate(switcherThumbsCheck))));
     for (const [name, viewport, layout] of [["folded", { width: 404, height: 900 }, "2v"], ["unfolded", { width: 821, height: 883 }, "2h"]])
       runs.push(open(browser, `${ORIGIN}/index.html`, `switcher-split-pair-${name}`, viewport).then((r) => whenReady(r, () => r.page.evaluate(switcherSplitPairCheck, layout))));
+  // Switcher drag-to-side -> Open Canvas (ui/carddock.ts): a real touch drag reaches the host's tasks.canvasDock.
+  if (process.env.SHELL_PAGES !== "0")
+    runs.push(open(browser, `${ORIGIN}/index.html`, "switcher-canvas-drag", { width: 821, height: 883 }).then((r) => whenReady(r, () => switcherCanvasDragCheck(r))));
   for (const [name, viewport] of [["folded", { width: 404, height: 900 }], ["unfolded", { width: 821, height: 883 }]])
     if (process.env.SHELL_PAGES !== "0")
       runs.push(open(browser, `${ORIGIN}/index.html`, `switcher-background-${name}`, viewport).then((r) => whenReady(r, () => switcherBackgroundCheck(r.page))));
@@ -14734,6 +15423,8 @@ try {
     runs.push(open(browser, `${ORIGIN}/index.html`, "switcher-linux-max", { width: 404, height: 900 }).then((r) => whenReady(r, () => switcherLinuxMaxCheck(r.page))));
     // Every open window (Linux + Android) has its switcher card, a first frame while it shows keeps them (E2E 248).
     runs.push(open(browser, `${ORIGIN}/index.html`, "switcher-window-cards", { width: 821, height: 883 }).then((r) => whenReady(r, () => r.page.evaluate(switcherWindowCardsCheck))));
+    // KB1: the window being typed into ends at the keyboard's top, its app sized to it (board keyboard-resizes-the-window-...).
+    runs.push(open(browser, `${ORIGIN}/index.html`, "ww-keyboard-fit", { width: 821, height: 883 }).then((r) => whenReady(r, async () => (await r.page.evaluate(`${kbFitKit};${kbFitSide};${kbFitMax};window.__kbFit={kbFitKit,kbFitSide,kbFitMax}`), r.page.evaluate(webWindowKeyboardFitCheck)))));
   // Board switcher-opened-over-a-maximised-linux-window-ce: over home, the maximised web window's card is the centred one.
   if (process.env.SHELL_PAGES !== "0")
     runs.push(open(browser, `${ORIGIN}/index.html`, "switcher-centre", { width: 404, height: 900 }).then((r) => whenReady(r, () => r.page.evaluate(switcherCentreCheck))));
@@ -14880,6 +15571,19 @@ try {
   if (process.env.SHELL_PAGES !== "0")
     for (const label of ["folded", "unfolded"])
       runs.push(open(browser, `${ORIGIN}/index.html`, `search-findable-${label}`, dockOpensView[label]).then((r) => whenReady(r, () => r.page.evaluate(async () => (await importShim("./dev/dock-search-check.js")).searchFindable()))));
+  // SP1/SE1 (dev/searchbar-check.js; the user 11-23): home -> search reuses the bar's nodes, nothing animates in; the
+  // search's edit menu (long press, "show as dock button") only in edit mode.
+  if (process.env.SHELL_PAGES !== "0")
+    for (const [label, fn, name] of ["folded", "unfolded"].flatMap((l) => [[l, "barPersists", "persists"], [l, "editOnly", "edit-only"]]))
+      runs.push(open(browser, `${ORIGIN}/index.html`, `searchbar-${name}-${label}`, dockOpensView[label]).then((r) => whenReady(r, () => r.page.evaluate(async (f, l) => (await importShim("./dev/searchbar-check.js"))[f](l), fn, label))));
+  // PF1 (dev/pow-folder-check.js; the user 11-23: "the pow apps should be in a pow folder"): the .pow apps in one Pow
+  // folder in the launcher - no loose w: cell, its view by category, search finds them, the sync updates it live, the
+  // dock and home take it - folded, unfolded and side-docked; no .pow apps: no folder anywhere.
+  if (process.env.SHELL_PAGES !== "0") {
+    for (const [label, side] of [["folded", ""], ["unfolded", ""], ["unfolded", "right"]])
+      runs.push(open(browser, `${ORIGIN}/index.html`, `pow-folder-${label}${side ? `-${side}` : ""}`, dockOpensView[label]).then((r) => whenReady(r, () => r.page.evaluate(async (sd) => (await importShim("./dev/pow-folder-check.js")).powFolder(sd), side))));
+    runs.push(open(browser, `${ORIGIN}/index.html`, "pow-folder-empty", dockOpensView.folded).then((r) => whenReady(r, () => r.page.evaluate(async () => (await importShim("./dev/pow-folder-check.js")).powEmpty()))));
+  }
   // Perf P1 (dev/dock-search-check.js dockSpeechRenders; 02:23 trace): a dictation's words streaming in redraw the dock
   // button only for its on/off, the dock and its cells never - folded and unfolded.
   if (process.env.SHELL_PAGES !== "0")
@@ -15042,6 +15746,16 @@ try {
       console.log(`     needless-renders: ${await r.page.evaluate(() => window.__needless).catch(() => "?")}`);
       return fails;
     })));
+  // Page swipes and an idle home (dev/needless-check.js homeSwipes; the user's trace 11-23: "everything keeps redrawing").
+  if (process.env.SHELL_PAGES !== "0")
+    runs.push(open(browser, `${ORIGIN}/index.html`, "home-swipes", { width: 821, height: 883 }).then((r) => whenReady(r, async () => {
+      const fails = await r.page.evaluate(async () => (await importShim("./dev/needless-check.js")).homeSwipes());
+      console.log(`     home-swipes: ${await r.page.evaluate(() => window.__swipes).catch(() => "?")}`);
+      return fails;
+    })));
+  // Home's paints left alone and through page swipes, as the user's home (homePaints; the trace 11-23).
+  if (process.env.SHELL_PAGES !== "0")
+    runs.push(open(browser, `${ORIGIN}/index.html`, "home-paints", { width: 821, height: 883, deviceScaleFactor: 2.7625, isMobile: true, hasTouch: true }).then((r) => whenReady(r, () => homePaints(r.page))));
   if (process.env.SHELL_PAGES !== "0" && fs.existsSync(path.join(ROOT, "ui/jsprofile.ts")))
     runs.push(open(browser, `${ORIGIN}/index.html`, "perf-trace").then((r) => whenReady(r, () => r.page.evaluate(perfTraceCheck))));
   // f428: a check's fps-meter recording files no ask and no mail; a user's still does (perfSourceCheck).

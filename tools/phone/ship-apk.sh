@@ -17,6 +17,15 @@
 # SHIP_WAIT_MIN=N (tests) gives up after N minutes with exit 4. --now skips the wait (only for urgent fixes).
 # Exit 75 = DEFERRED: the gate gave no verdict (shell/dev/gate.sh exit 75: its job machine, .58, didn't answer) - not
 # a fault of this commit; nothing built in or installed, and the ship service gates it again once the machine is back.
+# --publish-only (11-23: the OnePlus was offline 2 days and the S25/razr got no APK): the device-free part only - the
+# gate on HEAD (tsc + every page booted headless) and the build, whose build-app.sh publishes powos.apk/.ver, the shell
+# bundle and powos-core to PowApps (android.pow/apk, what the pull phones update from). No phone touched: no idle wait,
+# snapshot, install or device checks. Exit 9 = PUBLISHED, not installed. A copy of exactly that APK is kept
+# (<queue>/published/powos.apk + commit + ver); the later install of the same HEAD installs THAT copy (no rebuild, so
+# the pull phones aren't offered the same code twice under a new version code and the OnePlus gets the S25's bits).
+# Why that is enough for PowApps (docs/AGENT-HANDBOOK.md, Shipping -> "OnePlus offline"): build-app.sh has always
+# published at build time, before the install, ship-guard's boot check and window-render - those device checks
+# never gated PowApps; they judge the OnePlus install, and still run there when it's back.
 set -euo pipefail
 cd "$(git rev-parse --show-toplevel)"
 BASE=${POWOS_BASE:-main}   # the one branch (main since 11-13)
@@ -33,8 +42,8 @@ fi
 # the exact fix).
 . tools/lib/need-docker.sh   # cwd is the repo root (cd'd above) - not dirname "$0", which is /tmp after the re-exec
 need_docker || { echo "ship-apk: REFUSED - no docker" >&2; exit 2; }
-note="" now="" silent="" direct=""
-while [ $# -gt 0 ]; do case "$1" in --note) note=$2; shift 2;; --silent) silent=1; shift;; --now) now=1; shift;; --direct) direct=1; shift;; *) echo "unknown: $1" >&2; exit 2;; esac; done
+note="" now="" silent="" direct="" pubonly=""
+while [ $# -gt 0 ]; do case "$1" in --note) note=$2; shift 2;; --silent) silent=1; shift;; --now) now=1; shift;; --direct) direct=1; shift;; --publish-only) pubonly=1; shift;; *) echo "unknown: $1" >&2; exit 2;; esac; done
 [ -n "${note// }" ] || [ -n "$silent" ] || { echo "ship-apk: --note \"...\" (or --silent for a change the user can't see) required" >&2; exit 2; }
 # One shipper: agents each shipping from their own worktree raced (2026-10-23: ~6 APKs and ~15 shell pushes in a night;
 # twice an APK from an older tip wiped newer shell pushes). Only the ship service (tools/phone/ship.sh) runs this.
@@ -93,6 +102,12 @@ if [ -n "$inst" ] && git merge-base --is-ancestor HEAD "$inst" 2>/dev/null; then
   echo "ship-apk: already shipped - the installed build $(git rev-parse --short "$inst") contains $(git rev-parse --short HEAD); nothing to do"
   exit 0
 fi
+# The APK published for the pull phones while the OnePlus was offline (--publish-only): this HEAD's, gated and built.
+pub=$sq/published pubhit=""
+[ "$(cat "$pub/commit" 2>/dev/null)" = "$(git rev-parse HEAD)" ] && [ -s "$pub/powos.apk" ] && pubhit=1
+if [ -n "$pubonly" ] && [ -n "$pubhit" ]; then
+  echo "ship-apk: PUBLISHED already - $(git rev-parse --short HEAD) is on PowApps (version code $(cat "$pub/ver" 2>/dev/null))"; exit 9
+fi
 # The commit's own shell must load before it's built in: the APK ships it whole, and an install resets the overrides
 # that may have covered for it (17:09: 5130d98's home.tsx imported a gesture.ts export only a later commit added -
 # every page failed to boot after the install). The gate on HEAD alone: tsc + every page booted.
@@ -104,7 +119,10 @@ gate_head() { GATE_SCOPE=boot GATE_PRIORITY=ship READY_MS=$1 IDLE_MS=0 bash shel
 nv_exit() { echo "ship-apk: DEFERRED - no gate verdict: the gate's machine didn't answer ($1); this commit is neither passed nor failed, nothing installed - the ship service gates it again once the machine is back" >&2; exit 75; }
 # Exit 2: the gate couldn't run (no docker, a bad argument) - REFUSED with the gate's own message, not "doesn't load".
 gate_err() { echo "ship-apk: REFUSED - the gate couldn't run: $(grep -m1 '^gate:' "$glog" | cut -c1-200) (whole log $glog)" >&2; exit 3; }
-grc=0; gate_head "${READY_MS:-30000}" || grc=$?
+grc=0
+if [ -n "$pubhit" ]; then echo "ship-apk: $(git rev-parse --short HEAD) was gated and built when it was published to PowApps - installing that APK (version code $(cat "$pub/ver" 2>/dev/null))"
+else
+gate_head "${READY_MS:-30000}" || grc=$?
 [ $grc != 75 ] || nv_exit "$(grep -m1 '^gate: NO VERDICT' "$glog" | cut -c1-160)"
 [ $grc != 2 ] || gate_err
 if [ $grc -ne 0 ] && grep -q '^FAIL' "$glog" && ! grep '^FAIL' "$glog" | grep -qv 'not ready'; then
@@ -127,7 +145,19 @@ if ! targets/android/build-app.sh > "$blog" 2>&1; then
   exit 5
 fi
 grep -E "^e: |BUILD|version code|refus|error:" "$blog" || true
+fi
 apk=$HOME/Projects/android-app-dev/output/powos.apk
+if [ -n "$pubhit" ]; then apk=$pub/powos.apk
+elif [ -n "$pubonly" ]; then
+  # Published by the build (build-app.sh -> PowApps). The copy is what the OnePlus installs later.
+  # The commit last: a half-written copy is never taken for this HEAD's.
+  rm -f "$pub/commit"
+  if mkdir -p "$pub" && cp "$apk" "$pub/powos.apk.tmp" && mv "$pub/powos.apk.tmp" "$pub/powos.apk"; then
+    cp "${apk%.apk}.ver" "$pub/ver" 2>/dev/null || true; git rev-parse HEAD > "$pub/commit"
+  else echo "ship-apk: WARNING - couldn't keep the published APK for the OnePlus ($pub): it is built again when the phone is back" >&2; fi
+  echo "ship-apk: PUBLISHED to PowApps - $(git rev-parse --short HEAD), version code $(cat "$pub/ver" 2>/dev/null) (the OnePlus install waits for the phone)"
+  exit 9
+fi
 # The install resets every shell override to this APK's shell, so right after it the phone must get every shell file
 # origin's tip has differently - computed from the APK's OWN assets (assets/shell), never from a commit diff, and pushed
 # as ONE set: a partial re-push left home without an export it imported (APK 29878476, desktopPages, 2026-10-23).

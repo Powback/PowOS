@@ -23,6 +23,13 @@
     "access": {
       "authentication": "existing",
       "exposure": "existing"
+    },
+    "app": {
+      "hosts": [
+        "traefik.pow"
+      ],
+      "name": "Traefik",
+      "category": "infrastructure"
     }
   },
   "remove": {

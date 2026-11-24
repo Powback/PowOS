@@ -1,0 +1,59 @@
+# Remoting measurements on .58 (docs/research/native-window-remoting.md "Measurements (2026-11-23)").
+# Run through the scripts beside this file (they use `docker --context ${POW_JOB_CONTEXT:-pow58} compose -p rmm`).
+#   comp    headless sway = the "phone" compositor, + waypipe client behind a TCP listener (port 5000)
+#   app     waypipe server + the apps (Firefox / Kate / Dolphin); tc netem on both ends' eth0 emulates phone Wi-Fi
+#   criu-a / criu-b   CRIU pre-copy hand-off source and destination (profile criu)
+# cgroup_parent nomad.slice = .58's one hard cap for job work (PowStation/docs/COMPUTE.md "Hard limits").
+# Capabilities below are inside rootless podman's user namespace (no host privilege); label=disable because SELinux
+# (enforcing on .58) denies container_t the render node otherwise.
+name: rmm
+
+x-pow:
+  schema: powos.platform/v1
+  owner: user
+  host: any
+  lifecycleAuthority: powos-container
+  services:
+    comp: {role: build-job, lifecycle: {policy: job}, access: {exposure: none, authentication: none}}
+    app: {role: build-job, lifecycle: {policy: job}, access: {exposure: none, authentication: none}}
+    criu-a: {role: build-job, lifecycle: {policy: job}, access: {exposure: none, authentication: none}}
+    criu-b: {role: build-job, lifecycle: {policy: job}, access: {exposure: none, authentication: none}}
+  datasets: {}
+
+x-common: &common
+  build: .
+  image: localhost/rmm/remoting:latest
+  cgroup_parent: nomad.slice
+  security_opt: [label=disable, seccomp=unconfined]
+  init: true
+  shm_size: 2g
+
+services:
+  comp:
+    <<: *common
+    hostname: comp
+    cpus: 4
+    mem_limit: 8g
+    cap_add: [NET_ADMIN, SYS_PTRACE]
+    devices: [/dev/dri/renderD128:/dev/dri/renderD128]
+  app:
+    <<: *common
+    hostname: app
+    cpus: 6
+    mem_limit: 12g
+    cap_add: [NET_ADMIN, SYS_PTRACE]
+    devices: [/dev/dri/renderD128:/dev/dri/renderD128]
+  criu-a:
+    <<: *common
+    profiles: [criu]
+    hostname: criu-a
+    cpus: 2
+    mem_limit: 4g
+    cap_add: [SYS_ADMIN, SYS_PTRACE, CHECKPOINT_RESTORE, NET_ADMIN, SYS_RESOURCE, DAC_READ_SEARCH]
+  criu-b:
+    <<: *common
+    profiles: [criu]
+    hostname: criu-b
+    cpus: 2
+    mem_limit: 4g
+    cap_add: [SYS_ADMIN, SYS_PTRACE, CHECKPOINT_RESTORE, NET_ADMIN, SYS_RESOURCE, DAC_READ_SEARCH]

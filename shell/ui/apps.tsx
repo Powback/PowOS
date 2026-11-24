@@ -8,7 +8,9 @@ import { placement, shapeOf, type Shape } from "./iconshape.ts";
 import { running, runOf } from "./running.ts";
 import { badgeOf } from "../apps/badge.ts";
 import { useEffect, useLayoutEffect, useRef, useState } from "preact/hooks";
-import { closeDrawer, dock, launch, menu, setDocked, shownHomePage } from "../state.ts";
+import { apps, closeDrawer, dock, launch, menu, setDocked, shownHomePage } from "../state.ts";
+import { computed } from "@preact/signals";
+import { Icon, type IconName } from "./icons.tsx";
 import { startCarry } from "./grid.tsx";
 import { closeApp, windowsOf } from "./desktops.ts";
 import { inLaunchers, toggleLauncher } from "./launchers.tsx";
@@ -16,6 +18,8 @@ import { powos } from "../bridge.ts";
 import { memo } from "./memo.ts";
 import type { App, AppWindow } from "../types.ts";
 import { usePresence } from "./reveal.tsx";
+import { POW_FOLDER, powGroups } from "./launcherview.ts";
+import { addToHome } from "./powtiles.ts";
 import { openNewWindow, webWins } from "./webwindows.tsx";
 
 const LONG_PRESS_MS = 420;
@@ -89,11 +93,16 @@ interface CellProps {
   onTap?: (app: App) => void;
 }
 
-/** Holding [key] and moving: the menu gives way, the launcher closes, and the app follows the finger onto home. */
+/**
+ * Holding [key] and moving: the menu gives way, the launcher closes, and the app follows the finger - onto home, or over
+ * an app into a window or a half, as a dock app does (state.ts Carry.toWindow, dockout.tsx). THE launcher drag: every
+ * launcher tile (AppCell draggable) and search's app rows (drawer.tsx AppResultRow) start it, none has its own.
+ */
 export function dragHome(key: string, e: PointerEvent) {
   menu.value = null;
   closeDrawer();
-  startCarry({ app: key }, e, { x: 30, y: 30 });
+  // The Pow folder is no app to open in a window: home or the dock only.
+  startCarry({ app: key, toWindow: key !== POW_FOLDER }, e, { x: 30, y: 30 });
 }
 
 /**
@@ -129,7 +138,33 @@ const ICON_GIVE_UP_MS = 4000;
  * ICON_GIVE_UP_MS) ends as the app's initial, never as a tile loading forever; a new URL tries the picture again.
  * [app] (its launcher key): the app's unread dot over the corner while its count is above 0 (host.badge, apps/badge.ts).
  */
-export function AppIcon({ src, label, app }: { src: string; label?: string; app?: string }) {
+export function AppIcon(props: { src: string; label?: string; app?: string }) {
+  return props.app === POW_FOLDER ? <PowFolderIcon /> : <AppImage {...props} />;
+}
+
+const collator = new Intl.Collator(undefined, { sensitivity: "base", numeric: true });
+/** The Pow folder's first four apps, in the folder's order (launcherview.ts powGroups): its icon's minis. */
+const powMinis = computed(() => powGroups(apps.value, collator.compare).flatMap((g) => g.apps).slice(0, 4));
+
+/**
+ * The Pow folder's icon (launcherview.ts POW_FOLDER), wherever an app icon goes - the launcher, the dock, a home tile,
+ * a carried ghost: its first four apps small on the icon plate, as a folder shows them, and PowOS's mark on the corner
+ * where a web app's kind mark sits. Static.
+ */
+function PowFolderIcon() {
+  return (
+    <span class="app-icon pow-folder">
+      <span class="app-icon-face pow-face">
+        {powMinis.value.map((a) => (
+          <img key={a.key} src={a.icon} alt="" draggable={false} onError={(e) => ((e.currentTarget as HTMLImageElement).style.visibility = "hidden")} />
+        ))}
+      </span>
+      <img class="pow-mark" src="./icons/powos.svg" alt="" draggable={false} />
+    </span>
+  );
+}
+
+function AppImage({ src, label, app }: { src: string; label?: string; app?: string }) {
   const [missing, setMissing] = useState(false);
   // In the theme's colours when that's on and its copy is made (ui/icontint.ts), else as the app draws it.
   const shown = tinted(src) ?? src;
@@ -148,7 +183,7 @@ export function AppIcon({ src, label, app }: { src: string; label?: string; app?
     if (i && !(i.complete && i.naturalWidth)) i.closest(".app-icon")!.classList.add("loading");
   }, [src]);
   return (
-    <span class={missing ? "app-icon initials" : "app-icon"}>
+    <span class={`${missing ? "app-icon initials" : "app-icon"}${offlineWeb(app) ? " offline" : ""}`}>
       {missing && (label ?? "?")[0]}
       <span class={faceClass(shape, missing)}>
       <img
@@ -175,8 +210,52 @@ export function AppIcon({ src, label, app }: { src: string; label?: string; app?
       />
       </span>
       {badgeOf(app) > 0 && <span class="app-badge" />}
+      <WebMarkChip app={app} />
     </span>
   );
+}
+
+/** The .pow web apps by launcher key: what their icon's mark says ([WebMark]), looked up per icon without a scan. */
+const webApps = computed(() => {
+  const m = new Map<string, App>();
+  for (const a of apps.value) if (a.kind === "web") m.set(a.key, a);
+  return m;
+});
+
+/**
+ * What a .pow web app is (the user 11-23: "some indicator of whether its pwa or whatever"), as a small mark on its
+ * icon's lower corner and a line in its menu: an installable PWA, a plain web page, a sleeping service (wakes on open,
+ * the first open takes longer), or - over all three - not reachable right now (off the home network/VPN).
+ */
+const WEB_MARKS: Record<WebMark, { icon: IconName; says: string }> = {
+  pwa: { icon: "apps", says: "Web app" },
+  page: { icon: "web", says: "Web page" },
+  sleeps: { icon: "moonWaningCrescent", says: "Sleeping service: wakes when opened, the first open takes longer" },
+  offline: { icon: "wifiOff", says: "Not reachable right now: off your home network or VPN" },
+};
+type WebMark = "pwa" | "page" | "sleeps" | "offline";
+
+const webMark = (a: App): WebMark => (a.offline ? "offline" : a.web ?? "page");
+
+/** [app] (a launcher key) is a web app whose catalog didn't answer on the last try. */
+const offlineWeb = (app?: string) => !!app && !!webApps.value.get(app)?.offline;
+
+/** The mark on a web app's icon (nothing for any other app). */
+function WebMarkChip({ app }: { app?: string }) {
+  const web = app ? webApps.value.get(app) : undefined;
+  if (!web) return null;
+  const mark = webMark(web);
+  return (
+    <span class={`app-web-mark web-${mark}`}>
+      <Icon name={WEB_MARKS[mark].icon} />
+    </span>
+  );
+}
+
+/** A web app's menu line: what kind it is, where it lives (its host), its category when it has one. */
+export function webInfo(a: App): string {
+  const host = a.key.slice(2);
+  return [WEB_MARKS[webMark(a)].says, host, a.webCategory].filter(Boolean).join(" · ");
 }
 
 /** The face's classes: placed by its measure, on the plate when it needs one (ui/iconshape.ts). */
@@ -224,6 +303,9 @@ function newWindowItem(app: App): Item[] {
 /** What the app menu offers for [app]. */
 function menuItems(app: App): Item[] {
   const docked = dock.value.includes(app.key);
+  const home: Item = ["add to home", () => shownHomePage().then((p) => addToHome(app.key, p))];
+  // The Pow folder: where it sits, nothing else (it isn't an app to close, window or remove).
+  if (app.key === POW_FOLDER) return [[docked ? "unpin from dock" : "pin to dock", () => setDocked(app.key, !docked)], home];
   const quick = inLaunchers(app.key);
   const android = app.kind === "android";
   return [
@@ -233,12 +315,13 @@ function menuItems(app: App): Item[] {
     // The control center's quick-launch row, at its end (launchers.tsx: the row's own add/remove).
     [quick ? "remove from quick launch" : "add to quick launch", () => void toggleLauncher(app.key)],
     // On the page home shows (also from the launcher overlay's own page: state.ts shownHomePage), in its first free cell.
-    // Not a web app yet: home's grid pins Android/Linux shortcuts only (ShellHome.add); the dock and quick launch take it.
-    ...(app.kind === "web" ? [] : ([["add to home", () => shownHomePage().then((p) => powos.home.add(app.key, p))]] as Item[])),
+    // A web app as its shell tile (powtiles.ts: ShellHome pins Android/Linux shortcuts only).
+    home,
     ...(android ? ([["app info", () => powos.apps.info(app.key)]] as Item[]) : []),
     ...(android && !app.system ? ([["uninstall", () => powos.apps.uninstall(app.key)]] as Item[]) : []),
-    // A .pow web app from PowApps (issue #8): only its launcher entry goes; the service itself is untouched.
-    ...(app.kind === "web" ? ([["uninstall", () => powos.apps.uninstall(app.key)]] as Item[]) : []),
+    // A .pow web app (issue #8): only its launcher entry goes, and the catalog sync leaves it out from then on (PowApps
+    // installs it again); the service itself is untouched.
+    ...(app.kind === "web" ? ([["remove from launcher", () => powos.apps.uninstall(app.key)]] as Item[]) : []),
   ];
 }
 
@@ -268,6 +351,7 @@ export function AppMenu() {
       {!leaving && <div class="menu-scrim" onPointerDown={close} />}
       <div class={`menu tile sheet pop${leaving ? " leaving" : ""}`} inert={leaving || undefined} style={{ left: `${left}px`, ...(below ? { top: `${at.bottom + 4}px` } : { bottom: `${innerHeight - at.top + 4}px` }) }}>
         <div class="menu-title">{app.label}</div>
+        {app.kind === "web" && <div class="menu-sub">{webInfo(app)}</div>}
         {items.map(([label, run]) => (
           <button
             class="menu-item"

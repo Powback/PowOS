@@ -209,6 +209,8 @@ manager_run() {
             -h|--help) python3 "$MANAGER_SERVER" --help; return ;;
             # How it's signed in, Claude Code's login, the native fleet sign-in, its logout (_manager_auth_cmd).
             --auth|--install|--signin|--fleet-login|--signout) _manager_auth_cmd "$@"; return ;;
+            # The chat's stop button: the turn running against this store ends now (manager.py --stop; stopped / idle).
+            --stop) python3 "$MANAGER_SERVER" --session-store "$store" --stop; return ;;
             *) passthru+=("$1") ;;
         esac
         shift

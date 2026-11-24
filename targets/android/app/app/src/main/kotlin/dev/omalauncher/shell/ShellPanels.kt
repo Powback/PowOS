@@ -8,7 +8,8 @@ import org.json.JSONObject
 
 /**
  * Home items the shell draws itself, kind "panel" (shell/types.ts HomeItem): the Agents widget (shell/ui/agents.tsx),
- * the recent apps (shell/ui/recentwidget.tsx).
+ * the recent apps (shell/ui/recentwidget.tsx), and the launcher's Pow folder ("pow") and single .pow web apps ("w:<host>")
+ * pinned on home (shell/ui/powtiles.ts: app cells the page draws - ShellHome pins Android/Linux shortcuts only).
  * Not an OWL widget - its data is the shell's already (AgentsSpool), and an OWL tree would be sent again on every
  * change. Each is a name and a page, kept here; its cell is the home layout's, as other apps' Android widgets' are
  * (AppWidgets), and the home's own placement steps around it. Keys "panel:<name>", one of each.
@@ -32,15 +33,16 @@ class ShellPanels private constructor(
         val items = snapshot.getJSONArray("items")
         val pages = snapshot.getJSONArray("pages").let { a -> (0 until a.length()).map { a.getInt(it) } }.toMutableSet()
         for ((name, page) in entries) {
-            val (w, h) = SIZES[name] ?: (4 to 2)
+            val cell = isCell(name)
+            val (w, h) = if (cell) (1 to 1) else SIZES[name] ?: (4 to 2)
             items.put(
                 JSONObject()
                     .put("key", key(name))
                     .put("kind", "panel")
                     .put("name", name)
                     .put("page", page)
-                    .put("resizable", true)
-                    .put("minSize", JSONArray(listOf(MIN[name]?.first ?: 2, MIN[name]?.second ?: 1)))
+                    .put("resizable", !cell)
+                    .put("minSize", JSONArray(if (cell) listOf(1, 1) else listOf(MIN[name]?.first ?: 2, MIN[name]?.second ?: 1)))
                     .put("size", JSONArray(listOf(w, h)))
                     .putOpt("cell", layout.cell(key(name))?.let { JSONObject().put("x", it.x).put("y", it.y).put("w", it.w).put("h", it.h) }),
             )
@@ -57,7 +59,7 @@ class ShellPanels private constructor(
         page: Int,
         cell: JSONObject,
     ): String {
-        require(name in SIZES || ISLAND.matches(name)) { "no panel $name" }
+        require(name in SIZES || ISLAND.matches(name) || isCell(name)) { "no panel $name" }
         entries[name] = page
         save()
         layout.set(key(name), cell(cell))
@@ -100,6 +102,15 @@ class ShellPanels private constructor(
          * from the registry (`powos app install`). Its size is the cell the page placed it in.
          */
         private val ISLAND = Regex("app:[a-z0-9.-]{1,64}/[a-z0-9.-]{1,64}")
+
+        /** A .pow web app's launcher key (WebApps.kt "w:<host>") pinned on home as an app cell. */
+        private val WEB = Regex("w:[a-z0-9.-]{1,120}\\.pow")
+
+        /** The launcher's Pow folder (shell/ui/launcherview.ts POW_FOLDER) pinned on home. */
+        private const val POW = "pow"
+
+        /** An app cell, not a widget: 1x1, not resizable. */
+        fun isCell(name: String) = name == POW || WEB.matches(name)
 
         /**
          * The panels there are, and the size each starts at; the smallest each may be made. "recents": the recent apps

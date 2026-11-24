@@ -1,0 +1,15 @@
+#!/bin/bash
+# rm-act APP STATE SECS [PAGEKIND]: (comp, as u) generate SECS seconds of STATE input on sway's focused window.
+#   idle: nothing | typing: a letter every 200 ms | scroll: Firefox+page.js F8 (12 px/frame), other Firefox pages:
+#   Down held (repeat 60/s), Kate/Dolphin: Page_Down held
+export XDG_RUNTIME_DIR=/tmp/xdg WAYLAND_DISPLAY=wayland-1
+app=$1 st=$2 secs=$3 kind=${4:-wiki}
+ms=$((secs * 1000))
+case $st in
+  idle) sleep "$secs" ;;
+  typing) n=$((ms / 200)); args=(); for i in $(seq $n); do args+=(x -s 200); done; wtype -k Shift_L -s 150 "${args[@]}" ;;
+  scroll)
+    if [ "$app" = firefox ] && [ "$kind" = wiki ]; then wtype -k Shift_L -s 150 -k F8; sleep "$secs"; wtype -k Shift_L -s 150 -k F9
+    elif [ "$app" = firefox ]; then wtype -k Shift_L -s 150 -P Down -s $ms -p Down
+    else wtype -k Shift_L -s 150 -P Page_Down -s $ms -p Page_Down; fi ;;
+esac

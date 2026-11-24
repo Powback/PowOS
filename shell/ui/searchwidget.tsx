@@ -7,10 +7,12 @@
  * pill as it is - same size, width, glass and place, the edit bar below it (the user, 2026-10-30: "The search bar turns
  * weird"); it no longer turns into a grid tile there. It goes on the grid from the widget picker.
  */
-import { signal } from "@preact/signals";
-import { byKey, carry, dock, dockAim, dockMode, dockPosition, home, searchInDock, searchPlacement, searchSpot, selected, stored, type Carry } from "../state.ts";
+import { effect, signal } from "@preact/signals";
+import { byKey, carry, dock, dockAim, dockMode, dockPosition, editing, home, sideDockAlign, searchInDock, searchPlacement, searchSpot, selected, stored, type Carry } from "../state.ts";
+import { stackKeysFor } from "./stacks.tsx";
 import type { Cell, HomeItem } from "../types.ts";
 import { wideHome } from "../hosts/wide.ts";
+import { searchGapSlot } from "./dockalign.ts";
 import { powos } from "../bridge.ts";
 import { tick } from "./haptics.ts";
 import { Bar } from "./bar.tsx";
@@ -26,8 +28,9 @@ const onHome = () => home.value.items.some((i) => i.key === SEARCH_KEY);
 export const SEARCH_KEY = "panel:search";
 
 /** A tile moved or resized: placed as it is. */
-export function placeItem(key: string, cell: Cell, page: number): Promise<unknown> {
-  return powos.home.place(key, cell, page);
+export async function placeItem(key: string, cell: Cell, page: number): Promise<void> {
+  // A widget stack's tile moves/resizes the whole stack: every member into the slot (ui/stacks.tsx).
+  for (const k of stackKeysFor(key)) await powos.home.place(k, cell, page);
 }
 
 /**
@@ -100,7 +103,7 @@ export const carryingSearch = () => carry.value?.item?.key === SEARCH_KEY;
 export function aimSearch(c: Carry, x: number, y: number) {
   if (c.item?.key !== SEARCH_KEY || footAimAt(SEARCH_KEY, x, y) !== "dock") return null;
   const n = dock.value.filter((k) => byKey.value.has(k)).length;
-  return { key: SEARCH_KEY, slot: dockPosition.value !== "bottom" ? n : Math.floor((n + 1) / 2), swap: false };
+  return { key: SEARCH_KEY, slot: searchGapSlot(dockPosition.value, sideDockAlign.value, n), swap: false };
 }
 
 /** [el]'s box grown by [reach] px on every side contains [x], [y]. */
@@ -193,15 +196,20 @@ export function SearchPanel() {
 
 /**
  * The search's own menu (the user, 2026-11-03 11:49: "Where is that setting? I couldn't find it in a setting."): the
- * bar / dock-button choice on the thing itself - a long press on home's bar, or in edit mode a tap on the bar or the
- * dock's button (a hold on the button stays its dictation: docksearch.tsx DS2). The same setter as Settings › style ›
- * home's "folded search" / "unfolded search" ([pickSearchSpot]), for the screen in use.
+ * bar / dock-button choice on the thing itself - in edit mode only (SE1, the user 11-23: "don't edit it on long-press;
+ * require edit mode" - the "show as dock button" option never shows outside it): a tap or long press on the bar or the
+ * dock's button there (a hold on the button outside edit mode stays its dictation: docksearch.tsx DS2). Leaving edit
+ * mode closes it. The same setter as Settings › style › home's "folded search" / "unfolded search" ([pickSearchSpot]).
  */
 type SpotAt = { left: number; top: number; bottom: number; width: number };
 export const spotMenu = signal<SpotAt | null>(null);
+effect(() => {
+  if (!editing.value) spotMenu.value = null;
+});
 
-/** Opens the search's menu by [el] (the bar's pill or the dock's button); false off folded/unfolded (the desktop's). */
+/** Opens the search's menu by [el] (the bar's pill or the dock's button); false outside edit mode or off folded/unfolded (the desktop's). */
 export function openSpotMenu(el: Element): boolean {
+  if (!editing.value) return false;
   if (dockMode.value !== "mobile" && dockMode.value !== "unfolded") return false;
   const r = el.getBoundingClientRect();
   tick();

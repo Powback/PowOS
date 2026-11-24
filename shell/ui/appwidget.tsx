@@ -21,10 +21,14 @@ import { powos } from "../bridge.ts";
 import { apps, carry, editing, selected } from "../state.ts";
 import { drawerDrag, pageDrag } from "./gesture.ts";
 import { takeTap } from "./taps.ts";
+import { registerNative, type NativeScroller } from "./scrollown.ts";
 import type { AppWidgetProvider, HomeItem } from "../types.ts";
 
-/** Each widget's latest frame (a URL) and whether it has a list to scroll, by its id. */
-type Frame = { url: string | null; scrolls: boolean };
+/**
+ * Each widget's latest frame (a URL), whether it has a list to scroll, and every view in it that scrolls with the room
+ * it has left each way ([scrollers], AppWidgets.kt; an older host sends none), by its id.
+ */
+type Frame = { url: string | null; scrolls: boolean; scrollers?: NativeScroller[] };
 const frames = new Map<number, Signal<Frame | null>>();
 const frameOf = (id: number) => {
   if (!frames.has(id)) frames.set(id, signal<Frame | null>(null));
@@ -137,6 +141,12 @@ export function AppWidgetFace({ item }: { item: HomeItem }) {
       }),
     [id],
   );
+
+  // A native scroller in the widget (a sideways row, a list) owns a drag along its axis until its edge, as a DOM one
+  // does (scrollown.ts): gesture.ts and the stack ask this face for the latest frame's list at the claim.
+  useEffect(() => {
+    if (el.current) registerNative(el.current, () => frameOf(id).peek()?.scrollers);
+  }, [id]);
 
   return (
     <div

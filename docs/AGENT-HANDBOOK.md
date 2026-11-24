@@ -443,6 +443,20 @@ widened first; out of scope here. `tools/emu/emu.sh` otherwise needed no change 
   push of every shell file origin's tip has differently from the APK's own assets/shell; then every page (home, shade,
   assist: window.__powosAlive) must boot within 2 min, else the WHOLE snapshot is restored (overrides off, previous APK
   `install -r -d`, its overrides back) and coder told (exit 6); prints versionCode + any crash. `--now` skips the wait: only with `--direct`, when the user asked for an immediate install.
+- **OnePlus offline (11-23)**: the pull phones (S25, razr: docs/PHONE-UPDATES.md) don't wait for it. When the OnePlus is
+  off the VPN (ship.sh phone_offline), the service runs `ship-apk.sh --publish-only` for the tip: the device-free gate
+  on HEAD (tsc + every page booted headless, the same gate as any APK) and the build, whose build-app.sh publishes
+  powos.apk/.ver, the shell bundle and powos-core to PowApps; exit 9, a copy kept in `<queue>/published/`. Its requests
+  get `published=<tip>` and STAY pending (`ship.sh status`: "APK on PowApps: ..." + "[APK published to PowApps; OnePlus
+  install pending]" per request); once the phone is back the normal install runs from that same APK (no rebuild, no
+  second version code) with all its device checks (module first, ship-guard boot + rollback, window-render, shell
+  check), and only then are the requests done. Decision, explicitly: no device check gates the PowApps publish, and
+  none ever did - build-app.sh has always published at build time, before the install, ship-guard and window-render
+  (those judge the OnePlus install; a FAIL there is fixed forward on origin and reaches PowApps with the next build).
+  The emulator lane can't stand in for window-render (window-render.sh is `lanes: phone`: OnePlus freeform + KWin), so
+  publish-only adds no emulator step. A gate/build failure while offline is a fault of the tip (failed-apk, mailed),
+  never "waits for the phone". Pause, the one ship lock and one-APK-at-a-time hold for it as for any APK ship;
+  `SHIP_PUBLISH_OFFLINE=0` turns it off. Test: tools/phone/ship-queue-test.sh (16b, 16c).
 - Those newer shell files are gated BEFORE the install, at origin's tip (`push.sh --pre-gate`; fails = no install, exit 3), and pushed seconds after the install with `--pre-gated=<stamp>` (only that file set at that tree); a different set (origin moved) is gated after (tools/phone/ship-order-test.sh).
 - The build is warm: build-app.sh builds in `powos-gradle-warm` (targets/android/tools/warm-builder.sh, unit
   units/mac/gradle-warm-mac.json), a long-lived builder whose Gradle daemon stays up, building every worktree from one

@@ -251,6 +251,50 @@ def validate_access(name, service, config, errors, warnings):
             errors.append(f"{name}/{route['router']}: authenticate before waking")
 
 
+APP_KEYS = {"name", "icon", "category", "host", "path"}
+CATEGORY = re.compile(r"^[a-z][a-z0-9-]{0,31}$")
+
+
+def validate_app(name, service, config, errors):
+    """x-pow.services.<svc>.app: how its `.pow` site shows as a PowOS launcher app (PowStation's GET /v1/apps catalog,
+    PowOS issue #8). Optional name/icon/category/path, preferred over what the catalog reads off the page; it never
+    hides a site. Returns the unit record's platform.app ({hosts, ...}) or None when the service declares none."""
+    app = config.get("app")
+    if app is None:
+        return None
+    if not isinstance(app, dict):
+        errors.append(f"{name}: x-pow app must be a mapping")
+        return None
+    for key in sorted(set(app) - APP_KEYS):
+        errors.append(f"{name}: unknown x-pow app field {key}")
+    hosts = sorted({h for r in routes(mapping(service.get("labels"))) for h in r["hosts"] if h.endswith(".pow")})
+    if not hosts:
+        errors.append(f"{name}: x-pow app needs a Traefik Host(`<name>.pow`) route (apps are .pow sites only)")
+    out = {"hosts": hosts}
+    if app.get("host") is not None:
+        if app["host"] not in hosts:
+            errors.append(f"{name}: x-pow app host {app['host']} is not one of its .pow routes ({', '.join(hosts) or 'none'})")
+        out["hosts"] = [app["host"]]
+    for key, limit in (("name", 60), ("icon", 512), ("path", 256)):
+        value = app.get(key)
+        if value is None:
+            continue
+        if not isinstance(value, str) or not value.strip() or len(value) > limit:
+            errors.append(f"{name}: x-pow app {key} must be a non-empty string of at most {limit} characters")
+            continue
+        out[key] = value.strip()
+    if "icon" in out and not (out["icon"].startswith("/") or re.match(r"^https?://[a-z0-9.-]+\.pow(/|$)", out["icon"])):
+        errors.append(f"{name}: x-pow app icon is a path on its site (/icon.png) or an http(s) .pow URL")
+    if "path" in out and not out["path"].startswith("/"):
+        errors.append(f"{name}: x-pow app path starts with /")
+    if app.get("category") is not None:
+        if not isinstance(app["category"], str) or not CATEGORY.fullmatch(app["category"]):
+            errors.append(f"{name}: x-pow app category is a short lowercase word (infrastructure, media, ...)")
+        else:
+            out["category"] = app["category"]
+    return out
+
+
 def validate_placement(model, policy, errors):
     """A project pinned to another host: nothing from the hub's filesystem and no data moves with it."""
     host = policy.get("host")
@@ -369,13 +413,14 @@ def inspect_model(model):
         ids.add(unit)
         validate_lifecycle(name, service, config, {**policy, "project": model.get("name")}, errors)
         validate_access(name, service, config, errors, warnings)
+        app = validate_app(name, service, config, errors)
         if labels.get("powcdn.enable") == "true":
             errors.append(f"{name}: PowCDN is not implemented; do not enable a non-existent controller")
         services.append({"service": name, "unit": unit, "container": service.get("container_name"),
                          "role": config["role"], "lifecycle": config.get("lifecycle", {}),
                          "access": config.get("access", {}), "routes": routes(labels),
                          "mounts": mount_rows(service), "ports": service.get("ports", []),
-                         "dependencies": config.get("dependencies", [])})
+                         "dependencies": config.get("dependencies", []), "app": app})
     groups = {s["lifecycle"].get("group") for s in services if s["lifecycle"].get("policy") == "http-idle"}
     for service in services:
         if service["lifecycle"].get("policy") == "follow-group" and service["lifecycle"].get("group") not in groups:
@@ -419,6 +464,8 @@ def unit_manifests(model, report, flags):
                     "autosleep": "never" if life["policy"] in {"always", "job", "application-managed"} else {"idle": life.get("idle", "15m"), "mode": "pause"},
                     "platform": {"schema": SCHEMA, "project": report["project"], "service": name, "lifecycleAuthority": report["lifecycleAuthority"], "lifecycle": life, "access": row["access"]},
                     "remove": {"stop": [shlex.join(engine(context) + persistent_flags + ["stop", name])], "keep": [m["source"] for m in row["mounts"] if m["source"]]}}
+        if row.get("app"):
+            manifest["platform"]["app"] = row["app"]
         limits = {out: service[key] for key, out in {"mem_limit": "memory", "memswap_limit": "memory_swap", "cpus": "cpus", "pids_limit": "pids"}.items() if service.get(key) is not None}
         if limits:
             manifest["limits"] = limits

@@ -15,7 +15,8 @@
 import { useEffect, useLayoutEffect, useRef, useState } from "preact/hooks";
 import { powos } from "../bridge.ts";
 import { ago, useMinuteClock } from "./time.ts";
-import type { NotificationList } from "../types.ts";
+import type { Battery, NotificationList } from "../types.ts";
+import { chargeLine } from "./charge.ts";
 import { NotifGlyph, notifIconSrc, type GroupedNotification } from "./notifications.tsx";
 import { arrive, leave } from "./notifmotion.ts";
 
@@ -58,10 +59,7 @@ function lift(p: number, settling: boolean) {
 export function Lock() {
   // On the minute's turn, nothing while the face is hidden (it was every 10 s, put away or not).
   const now = useMinuteClock();
-  const [battery, setBattery] = useState<{
-    level: number | null;
-    charging: boolean;
-  }>({ level: null, charging: false });
+  const [battery, setBattery] = useState<Battery>({ level: null, charging: false });
   const [list, setList] = useState<NotificationList>({
     available: true,
     items: [],
@@ -112,8 +110,12 @@ export function Lock() {
     refresh();
     const offShown = powos.on("lock.shown", refresh);
     const offList = powos.on("notifications.changed", setList);
-    return () => (offShown(), offList());
+    // Plugged in, unplugged, the level or the time until full changed while the face is up (PowosLockActivity).
+    const offBattery = powos.on("battery.changed", setBattery);
+    return () => (offShown(), offList(), offBattery());
   }, []);
+
+  const charge = chargeLine(battery);
 
   const end = (e: PointerEvent, cancelled = false) => {
     const d = drag.current;
@@ -186,7 +188,11 @@ export function Lock() {
           </div>
         ))}
       </div>
-      <div class="lock-hint muted">swipe up to unlock</div>
+      {/* How it charges, as the stock lock screen says it: "Super fast charging · 1 h until full" (charge.ts). */}
+      <div class="lock-foot">
+        {charge && <div class="lock-charge">{charge}</div>}
+        <div class="lock-hint muted">swipe up to unlock</div>
+      </div>
     </div>
   );
 }

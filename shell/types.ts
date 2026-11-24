@@ -39,7 +39,7 @@ export interface AppWidget {
 export interface App {
   /**
    * Stable id: "a:<package/activity[@profile]>" (Android), "l:<desktop id>" (Linux / PowOS), "p:<app id>" (a PowOS app),
-   * "w:<host>" (a .pow web app installed from PowApps, opened in a web window on its site; issue #8).
+   * "w:<host>" (a .pow site, every one an app - synced with PowStation's catalog, opened in a web window; issue #8).
    */
   key: string;
   label: string;
@@ -48,6 +48,15 @@ export interface App {
   kind: "android" | "linux" | "powos" | "web";
   /** A web app's site (kind "web"). */
   url?: string;
+  /**
+   * A web app's kind (kind "web"; WebApps.kt, PowStation's catalog): an installable PWA (it has a manifest), a plain
+   * page, or a sleeping service (it wakes on open, so the first open takes longer). Drawn as a mark on its icon.
+   */
+  web?: "pwa" | "page" | "sleeps";
+  /** A web app's catalog category ("infrastructure", ...), from its compose's x-pow app declaration. */
+  webCategory?: string | null;
+  /** A web app whose catalog didn't answer on the last try (off the LAN/VPN): kept, shown unreachable. */
+  offline?: boolean;
   /** A work-profile app, a clone, or the system's own (not uninstallable). */
   work?: boolean;
   clone?: boolean;
@@ -103,6 +112,8 @@ export interface HomeItem {
   appWidget?: AppWidgetRef;
   /** A placeholder the shell drew at once while the real tile is on its way (e.g. "Adding..."); gone with home.changed. */
   pending?: string;
+  /** Shell-only (ui/stacks.tsx homeView): this tile is the top of widget stack [stack], drawn in the stack's slot. */
+  stack?: string;
 }
 
 /**
@@ -347,6 +358,22 @@ export interface BackgroundApp {
 }
 
 /** Android's split screen as the pair entity (ui/splitpair.ts): its tasks and their apps, left / top first. */
+/** tasks.canvasDock's answer: [ok], or why not (shown to the user as is). */
+export interface CanvasDockResult {
+  ok: boolean;
+  reason?: string;
+}
+
+/**
+ * Open Canvas as FlexibleWindowManager reads it without a permission: in it, the "pick a second app" state, each
+ * task's region (task id -> [left, top, right, bottom], screen px).
+ */
+export interface CanvasState {
+  inCanvas: boolean;
+  minimized: boolean;
+  regions: Record<string, number[]>;
+}
+
 export interface SplitPair {
   ids: number[];
   keys: string[];
@@ -432,6 +459,10 @@ export interface Chat {
    * host that doesn't queue (an older APK): the page queues itself (assistant.ts).
    */
   queued?: { id: number; text: string }[];
+  /** This host can stop a turn (ai.stop: the pill's send turns into stop while one runs). Absent: an older APK. */
+  stoppable?: boolean;
+  /** A stop was asked (ai.stop) and the turn hasn't ended yet. */
+  stopping?: boolean;
   /**
    * How PowOS AI is signed in (`powos manager --auth`): "endpoint" the machine's fleet endpoint (the owner's devices),
    * "login" Claude Code's own login in the image (the user's own Claude account), "signin" neither - the page shows
@@ -477,6 +508,24 @@ export type NativePerf = { thresholdMs: number; blocks: NativeBlock[]; frameGaps
   chromeTrace?: string };
 /** The PowOS window in front (a game): its surface's presents since its consumer started; `at` = host epoch ms. */
 export type FrontPresents = { id: number; presented: number; undrawn: number; at: number };
+
+/**
+ * The battery (host: system/Charging.kt). An older host sends only level + charging: every other field is optional.
+ * speed is the charger's class by its power (W): slow < 5, normal, fast >= 7.5, superfast >= 20 (Charging.kt's header).
+ */
+export type Battery = {
+  level: number | null;
+  charging: boolean;
+  plugged?: "ac" | "usb" | "wireless" | "dock" | null;
+  full?: boolean;
+  /** Plugged in but not charging (battery protection holding it). */
+  held?: boolean;
+  speed?: "slow" | "normal" | "fast" | "superfast" | null;
+  watts?: number | null;
+  wattsFrom?: "charger" | "measured" | null;
+  /** ms until full: Android's own estimate, null when it can't tell. */
+  fullInMs?: number | null;
+};
 
 /** Visible system chrome is shared web UI; hosts supply state and perform scoped actions. */
 export interface ChromeState {
@@ -619,6 +668,14 @@ export interface Bridge {
   usage: {
     /** Keys, last opened first. */
     recent(limit: number): Promise<string[]>;
+    /** Keys, most used first (decayed launch counts): the launcher's "Suggested". The phone's only (older APK: rejects). */
+    frequent?(limit: number): Promise<string[]>;
+  };
+  /** The launcher's "Quick launch" folders (FilePlaces.kt): only those that open on this host. The phone's only. */
+  files?: {
+    places(): Promise<FilePlace[]>;
+    /** False: it couldn't be opened. */
+    open(id: string): Promise<boolean>;
   };
   /** The shell's own data files (data/*.json), kept by the host. */
   store: {
@@ -718,6 +775,8 @@ export interface Bridge {
     send(text: string, recents?: boolean): Promise<void>;
     /** Takes a queued message back before its turn: it's never sent (?: hosts from before the queue). */
     unqueue?(id: number): Promise<void>;
+    /** Stops the turn under way (the pill's stop button): what it said so far stays, then "stopped" (?: older hosts). */
+    stop?(): Promise<void>;
     /**
      * "Test now": the verify queue (tools/phone/verify/queue.sh, on the Mac) runs [task]'s queued phone checks at once
      * ("all": every queued one), not waiting for the phone to sit idle. ?: hosts from before it.
@@ -1033,6 +1092,11 @@ export interface Bridge {
      * each list that scrolls), [exclude] being only the dock's - for an older host, which reads that one rect.
      */
     homePull(on: boolean, exclude?: PageRect, mainPage?: boolean, regions?: PageRect[]): Promise<boolean>;
+    /**
+     * Home's page took the finger under way sideways (a scroller's drag, a page swipe, a stack's): the host's pull from
+     * home's body never starts for it (ui/gesture.ts claimFromHost). An older host has none.
+     */
+    homeClaim?(): Promise<void>;
     /** The shade down, not following a finger (home without the host's gesture input). */
     open(): Promise<void>;
   };
@@ -1134,6 +1198,25 @@ export interface Bridge {
     screenshot(id: number): Promise<string | null>;
     /** Host-optional: a web window's full-screen app back into its window. */
     toWindow?(id: number): Promise<boolean>;
+    /**
+     * Host-optional (feature-detect): OxygenOS's Open Canvas (com.oplus.pscanvas, the native split view) can take a
+     * docked card now - unfolded inner screen, feature oplus.software.pocketstudio.support, PowOS the default home.
+     */
+    canvas?(): Promise<boolean>;
+    /**
+     * Host-optional: task [id]'s app docked into Open Canvas on [side], task [other]'s app on the other side (the
+     * switcher's drag up and toward a side, ui/carddock.ts). OxygenOS's app-pair shortcut (docs/research/pscanvas.md
+     * entry A): started by intent, so whether each app comes back in its own state is OxygenOS's (logged by the host).
+     */
+    canvasDock?(id: number, side: "left" | "right", other: number): Promise<CanvasDockResult>;
+    /** Host-optional: Open Canvas as it stands (the no-permission reads), or null where there's none. For checks. */
+    canvasState?(): Promise<CanvasState | null>;
+    /**
+     * Host-optional: the recent task ids that can be a side of Open Canvas now - Android apps OxygenOS lets into split
+     * view (its blocklist: Settings isn't), never PowOS's own tasks. The switcher picks the dock's partner from these and
+     * tells the user when the dragged app isn't one.
+     */
+    canvasSides?(): Promise<number[]>;
   };
   /**
    * The floating app windows (unfolded home), top-most first, for the dock; "windows.changed" (AppWindow[]) after.
@@ -1336,8 +1419,8 @@ export interface Bridge {
     insets(): Promise<Insets>;
     /** The display the host shows on now (dp), pushed as "system.display" on every fold/display change and on resume. An older host or the web shell has none: check. */
     display?(): Promise<{ widthDp: number; heightDp: number; displayId: number; rotation: number; folded: boolean }>;
-    /** The battery: level 0-100 (null when unknown) and whether it's charging. */
-    battery(): Promise<{ level: number | null; charging: boolean }>;
+    /** The battery: level 0-100 (null when unknown), whether it's charging and how (Battery; "battery.changed" while the lock face is up). */
+    battery(): Promise<Battery>;
     /** Pulls Android's notification shade down ([open], the default) or puts it away. */
     notifications(open?: boolean): Promise<boolean>;
     /**
@@ -1349,7 +1432,7 @@ export interface Bridge {
     glass(): Promise<GlassSource>;
   };
   /**
-   * Events: "apps.changed", "home.changed", "widget.tree", "system.back" (Android's Back), "system.home" (Home pressed while home shows), "keyboard.inset" (px, every frame of its slide), "system.insets", "system.display" (widthDp, heightDp, displayId, rotation, folded), "ai.changed" (a Chat), "ai.mail" (AgentMail[]), "assist.context" (AssistScreen), "shade.drag" ({ q }), "shade.panel" ({ panel: "notifications" | "control" }), "media.changed" (MediaState), "qs.changed" (QuickState), "qs.collapse" (a tile opened something: the panel goes), "lock.shown" (the face shown again), "shade.settle" ({ open }), "shade.peek" (PhoneNotification | null), "qt.drag" ({ side, y, q }) / "qt.settle" ({ open }) (Quick Tools), "home.panel" ({ kind }: home with its pull-up panel up), "home.panel.begin" / ".drag" ({ p }) / ".end" ({ open }) (the host's corner swipe over home: its launcher in place, gesture.ts), "recents.begin" / "recents.drag" / "recents.end" / "recents.show" / "recents.hide" / "recents.tasks" (Bridge.recents), "switcher.toggle", "ai.sessions" (AgentSession[]), "verify.state" (VerifyState), "widget.screen" (a WidgetScreen), "speech.state" / "speech.done" / "speech.permission", "theme.changed" (ThemeColors), "system.glass" (GlassSource), "notifications.changed" (NotificationList),
+   * Events: "apps.changed", "home.changed", "widget.tree", "system.back" (Android's Back), "system.home" (Home pressed while home shows), "keyboard.inset" (px, every frame of its slide), "system.insets", "system.display" (widthDp, heightDp, displayId, rotation, folded), "ai.changed" (a Chat), "ai.mail" (AgentMail[]), "assist.context" (AssistScreen), "shade.drag" ({ q }), "shade.panel" ({ panel: "notifications" | "control" }), "media.changed" (MediaState), "qs.changed" (QuickState), "qs.collapse" (a tile opened something: the panel goes), "lock.shown" (the face shown again), "battery.changed" (Battery, to the lock face), "shade.settle" ({ open }), "shade.peek" (PhoneNotification | null), "qt.drag" ({ side, y, q }) / "qt.settle" ({ open }) (Quick Tools), "home.panel" ({ kind }: home with its pull-up panel up), "home.panel.begin" / ".drag" ({ p }) / ".end" ({ open }) (the host's corner swipe over home: its launcher in place, gesture.ts), "recents.begin" / "recents.drag" / "recents.end" / "recents.show" / "recents.hide" / "recents.tasks" (Bridge.recents), "switcher.toggle", "ai.sessions" (AgentSession[]), "verify.state" (VerifyState), "widget.screen" (a WidgetScreen), "speech.state" / "speech.done" / "speech.permission", "theme.changed" (ThemeColors), "system.glass" (GlassSource), "notifications.changed" (NotificationList),
    * "appwidgets.frame" ({ id, url, scrolls }), "appwidgets.failed" ({ provider }), "files.changed" ({ path }, for hot reload), "windows.changed" (DesktopWindow[]), "agents.delta" (AgentsDelta), "agents.open" (the agents' notification tapped). Returns an unsubscribe function.
    */
   on(event: string, handler: (data: any) => void): () => void;
@@ -1651,4 +1734,10 @@ export interface BarInput {
   hearing: boolean;
   gen: number;
   seq: number;
+}
+
+/** A folder the launcher can open (types.ts Powos.files). */
+export interface FilePlace {
+  id: string;
+  label: string;
 }

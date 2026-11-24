@@ -1,22 +1,27 @@
 /**
- * The drawer: every app A to Z in one grid, no headings or breaks between letters, with an A-Z bar to tap or slide along
- * (as PowOS's start menu; its "#", for names that don't start with a letter, only when there are any), and under it, by
- * the search pill (thumb reach), a fixed row of the apps opened lately. Typing in the bar narrows it to matches, best first. It's the top of the launcher panel, which grows out of
- * the recent apps bar (home.tsx); always mounted, so it follows the finger without rebuilding.
+ * The drawer: opened, the launcher's sections (ui/launcherview.ts) - Recent, Suggested, Quick launch - with an A-Z bar to
+ * tap or slide along (its "#", for names that don't start with a letter, only when there are any): a letter shows every
+ * app under it, A to Z, and stays after the finger lifts until its chip is tapped or the launcher opens again; "All", at
+ * the bar's top and foot, shows every app under its letter's heading the same way. Typing in
+ * the bar narrows it to matches, best first. It's the top of the launcher panel, which grows out of the recent apps bar
+ * (home.tsx); always mounted, so it follows the finger without rebuilding.
  */
 import { useEffect, useLayoutEffect, useRef, useState } from "preact/hooks";
-import { computed, effect } from "@preact/signals";
+import { computed, effect, signal } from "@preact/signals";
 import { memo } from "./memo.ts";
 import { alignOf } from "./align.ts";
-import { AppCell, AppIcon } from "./apps.tsx";
+import { AppCell, AppIcon, dragHome, usePress } from "./apps.tsx";
 import { ChatView } from "./chat.tsx";
 import { drawerOpen, eventTime, pageDecision, sampleVx } from "./gesture.ts";
 import { PageDots, paintDots } from "./pagedots.tsx";
-import { apps, byKey, chatting, launch, query, recent, stored } from "../state.ts";
+import { apps, byKey, chatting, closeDrawer, launch, menu, powFolder, query, recent, stored } from "../state.ts";
 import { library } from "./library.tsx";
 import { pendingApp } from "./appbuild.tsx";
 import { PendingDetailSheet, PendingIconBadge } from "./pending.tsx";
-import type { App } from "../types.ts";
+import type { App, FilePlace } from "../types.ts";
+import { powos } from "../bridge.ts";
+import { Icon, type IconName } from "./icons.tsx";
+import { ALL, ALPHABET, appsOfLetter, launcherApps, launcherView, nextLetter, POW, POW_FOLDER, powGroups, resolveLetter, sortApps, type Group, type LetterEvent, type Sorted } from "./launcherview.ts";
 
 import { searchResults, searchSections, searchPending, openSearchResult, type SearchResult } from "../search.ts";
 import { springFast } from "./spring.ts";
@@ -24,25 +29,17 @@ import { arrive } from "./notifmotion.ts";
 import { tick } from "./haptics.ts";
 import { usePresence } from "./reveal.tsx";
 
-const ALPHABET = ["#", ..."ABCDEFGHIJKLMNOPQRSTUVWXYZ"];
 const collator = new Intl.Collator(undefined, { sensitivity: "base", numeric: true });
 
-/** "Ö" is under O; names that don't start with a letter under "#". */
-function heading(label: string) {
-  const first = label.trim().normalize("NFD")[0]?.toUpperCase() ?? "";
-  return first >= "A" && first <= "Z" ? first : "#";
-}
-
-/** Every app A to Z, and where each letter's first app is in that list. */
-const sorted = computed(() => {
-  const list = [...apps.value].sort((a, b) => collator.compare(a.label, b.label));
-  const first = new Map<string, number>();
-  list.forEach((app, i) => {
-    const h = heading(app.label);
-    if (!first.has(h)) first.set(h, i);
-  });
-  return { list, first };
-});
+/**
+ * The launcher's apps A to Z, and where each letter's first app is in that list: the .pow web apps as one Pow folder
+ * (launcherview.ts launcherApps). [plain]: every app loose, for the plain A-Z lists (the "+ app" picker, the desktop
+ * panel), which place or open apps one by one.
+ */
+const sorted = computed(() => sortApps(launcherApps(apps.value, powFolder.value), collator.compare));
+const plain = computed(() => sortApps(apps.value, collator.compare));
+/** The Pow folder's apps by category, as the launcher shows it open (launcherview.ts powGroups). */
+const powView = computed(() => powGroups(apps.value, collator.compare));
 
 /** Matches for what's typed: names starting with it first, then words starting with it, then anywhere in them. */
 export const matches = computed(() => findApps(query.value));
@@ -75,7 +72,8 @@ export function findApps(typed: string) {
 export const drawerRecents = stored("drawer.recents", "");
 
 function RecentRow() {
-  if (drawerRecents.value !== "on") return null;
+  // The launcher's own Recent section shows them already, but for while a letter is shown.
+  if (drawerRecents.value !== "on" || launcherLetter.value == null) return null;
   const shown = recent.value
     .map((k) => byKey.value.get(k))
     .filter((a) => a != null)
@@ -101,26 +99,33 @@ function highlight(grid: Element | null | undefined, letter: string | null) {
   lit = [];
   if (!grid || letter == null) return grid?.removeAttribute("data-scrub");
   grid.setAttribute("data-scrub", "");
-  const { list, first } = sorted.value;
+  const { list, first } = plain.value;
   const start = first.get(letter) ?? list.length;
   const end = Math.min(...[...first.values(), list.length].filter((i) => i > start));
   lit = [...grid.children].slice(start, end);
   for (const el of lit) el.setAttribute("data-lit", "");
 }
 
-/** [letter]'s apps' letter: its own, else the next letter's, else the last letter's (null: no apps at all). */
-function resolve(letter: string | null) {
-  const { first } = sorted.value;
-  const i = letter == null ? -1 : ALPHABET.indexOf(letter);
-  return i < 0 ? null : (ALPHABET.slice(i).find((x) => first.has(x)) ?? ALPHABET.findLast((x) => first.has(x)) ?? null);
-}
+/** [letter]'s apps' letter in list [s]: its own, else the next letter's, else the last letter's (null: no apps at all). */
+const resolve = (letter: string | null, s: Sorted<App> = sorted.value) => resolveLetter(s.first, letter);
 
-/** The apps under [letter] (after [resolve]), A to Z. */
-function appsOf(letter: string | null) {
-  const { list, first } = sorted.value;
-  if (letter == null || !first.has(letter)) return [];
-  const start = first.get(letter)!;
-  return list.slice(start, Math.min(...[...first.values(), list.length].filter((i) => i > start)));
+/** The apps under [letter] (after [resolve]) in list [s], A to Z. */
+const appsOf = (letter: string | null, s: Sorted<App> = sorted.value) => appsOfLetter(s, letter);
+
+/** The launcher's letter (ui/launcherview.ts): null shows its sections; set by the A-Z bar, kept after the lift. */
+export const launcherLetter = signal<string | null>(null);
+// Peeked, not read: called from an effect (useOpensAtStart) it would subscribe that effect to the app list, and any
+// change to it (an icon in, the .pow sync) reset the launcher to its sections under the user's finger.
+const letterEvent = (e: LetterEvent) => void (launcherLetter.value = nextLetter(sorted.peek().first, launcherLetter.peek(), e));
+
+/** The apps used most (the host's decayed launch counts): Suggested. Empty (no data, an older APK): hidden. */
+const frequent = signal<string[]>([]);
+/** The quick launch folders the host can open (FilePlaces.kt). None (another host, an older APK): hidden. */
+const places = signal<FilePlace[]>([]);
+/** Each open asks again; what's on screen stays until the answer (no blank in between). */
+function refreshSections() {
+  powos.usage.frequent?.(16).then((v) => void (frequent.value = Array.isArray(v) ? v : [])).catch(() => {});
+  powos.files?.places().then((v) => void (places.value = Array.isArray(v) ? v : [])).catch(() => {});
 }
 
 /**
@@ -135,7 +140,7 @@ export const azList = stored("drawer.azList", "");
  * The letter's apps, centred over the drawer (not by the bar). [row]: the one at the finger's height once it slid off
  * the bar into the list, lit. A new letter fades its rows in (keyed); it fades in and out itself (usePresence, §6).
  */
-function AzOverlay({ letter, row, rows }: { letter: string | null; row: number; rows: { current: HTMLDivElement | null } }) {
+function AzOverlay({ letter, row, rows, list }: { letter: string | null; row: number; rows: { current: HTMLDivElement | null }; list: Sorted<App> }) {
   const { on, leaving } = usePresence(letter != null);
   const last = useRef(letter);
   if (letter != null) last.current = letter;
@@ -145,7 +150,7 @@ function AzOverlay({ letter, row, rows }: { letter: string | null; row: number; 
     <div class={`az-list${leaving ? " leaving" : ""}`} aria-hidden="true">
       <div class="az-list-card tile sheet">
         <div class="az-list-rows" key={l} ref={rows}>
-          {appsOf(l).map((app, i) => (
+          {appsOf(l, list).map((app, i) => (
             <div key={app.key} class={`az-list-row${i === row ? " on" : ""}`} data-key={app.key}>
               <AppIcon src={app.icon} label={app.label} app={app.key} />
               <span class="az-list-name">{app.label}</span>
@@ -187,9 +192,13 @@ function useRowPick(active: boolean) {
  * on, the letter's apps show centred (AzOverlay); sliding left off the bar lights the row at the finger's height, and
  * lifting there opens that app ([onOpen]); lifting anywhere else leaves the grid at the letter, as before.
  */
-function LetterBar({ onPick, onOpen }: { onPick: (letter: string | null) => void; onOpen: (app: App) => void }) {
+function LetterBar({ onPick, onOpen, ends = false }: { onPick: (letter: string | null) => void; onOpen: (app: App) => void; ends?: boolean }) {
+  // The launcher's list ([ends]) or the plain A-Z.
+  const list = ends ? sorted.value : plain.value;
   // "#" only when some name doesn't start with a letter: a "#" with nothing under it would do nothing.
-  const letters = sorted.value.first.has("#") ? ALPHABET : ALPHABET.slice(1);
+  const az = list.first.has("#") ? ALPHABET : ALPHABET.slice(1);
+  // [ends] (the launcher): "All" above the first letter and below Z, in reach from either end of the bar.
+  const letters = ends ? [ALL, ...az, ALL] : az;
   const [current, setCurrent] = useState<string | null>(null);
   const bar = useRef<HTMLDivElement>(null);
   const listOn = azList.value === "on";
@@ -201,13 +210,13 @@ function LetterBar({ onPick, onOpen }: { onPick: (letter: string | null) => void
     tick();
     onPick(letters[i]);
   };
-  const rows = useRowPick(listOn && current != null);
+  const rows = useRowPick(listOn && current != null && current !== ALL);
   const move = (x: number, y: number) => {
     // Off the bar (left of it) with the list showing: the letter holds, the finger picks a row by its height.
     if (!rows.at(x < bar.current!.getBoundingClientRect().left, y)) pick(y);
   };
   const end = (open: boolean) => {
-    const app = open && rows.row >= 0 ? appsOf(resolve(current))[rows.row] : null;
+    const app = open && rows.row >= 0 ? appsOf(resolve(current, list), list)[rows.row] : null;
     setCurrent(null);
     rows.clear();
     onPick(null);
@@ -229,11 +238,11 @@ function LetterBar({ onPick, onOpen }: { onPick: (letter: string | null) => void
         onPointerCancel={() => end(false)}
       >
         {letters.map((l) => (
-          <span class={l === current ? "on" : ""}>{l}</span>
+          <span class={`${l === current ? "on" : ""}${l === ALL ? " all" : ""}`}>{l}</span>
         ))}
-        {current && <div class="letter-bubble">{current}</div>}
+        {current && <div class={`letter-bubble${current === ALL ? " all" : ""}`}>{current}</div>}
       </div>
-      {listOn && <AzOverlay letter={resolve(current)} row={rows.row} rows={rows.ref} />}
+      {listOn && <AzOverlay letter={resolve(current, list)} row={rows.row} rows={rows.ref} list={list} />}
     </>
   );
 }
@@ -245,48 +254,199 @@ const openApp = (app: App) => void launch(app.key);
  * The drawer's list: every app A to Z with its A-Z bar, or [found] (what's typed matched), best by the pill. The drawer's
  * and the edit bar's "+ app" picker's (ui/editsheet.tsx AppPicker: [onTap] places the app instead of opening it).
  */
-export function AppList({ found, onTap }: { found: App[] | null; onTap?: (app: App) => void }) {
+export function AppList({ found, onTap, sections = false }: { found: App[] | null; onTap?: (app: App) => void; sections?: boolean }) {
   const list = useRef<HTMLDivElement>(null);
+  // The launcher (sections): the bar picks what shows - the letter's apps, from the top - and the lift keeps it.
+  const show = (letter: string | null) => {
+    letterEvent(letter == null ? { type: "release" } : { type: "scrub", letter });
+    if (list.current) list.current.scrollTop = 0;
+  };
   const jump = (letter: string | null) => {
     // Its first app, else the next letter's, else the last letter's. At once: a smooth scroll restarted for every
     // letter a sliding finger crosses lagged behind it.
-    const { first } = sorted.value;
-    const l = resolve(letter);
+    const { first } = plain.value;
+    const l = resolve(letter, plain.value);
     highlight(list.current?.querySelector(".az"), l);
     const el = l != null ? list.current?.querySelector<HTMLElement>(`.az > :nth-child(${first.get(l)! + 1})`) : null;
     if (el) list.current!.scrollTop += el.getBoundingClientRect().top - list.current!.getBoundingClientRect().top;
   };
-  // Every open starts at the list's start - the first section (A) in view - whatever the alignment (ui/align.ts). Bottom
-  // alignment places a grid shorter than the panel at its foot (shell.css "Alignment"), near the thumb; it never means
-  // scrolled to the last app - opening at Z every time was the bug (the user, 11-01: "Why is the launcher always
-  // scrolled to bottom when I open it?"). Search results keep their own bottom-up start (Results below).
-  // Watched, not read in render: a read re-rendered the list (and its every cell's comparison) on each drag's start - the
-  // drawer shows (drawerOpen) at the first touchmove (device 11-02 18:13: that move 107 ms of script).
+  useOpensAtStart(list, found, sections);
+  // The Pow folder's cell (the launcher's only) opens it in place.
+  const cell = (app: App) => <AppCell key={app.key} app={app} draggable={!onTap} onTap={app.key === POW_FOLDER ? openPow : onTap} />;
+  return (
+    <>
+      {/* Searching: by the bar, bottom-up - the best match nearest to it (shell.css .results). */}
+      <div class={`drawer-list ${found ? "results" : ""}`} ref={list}>
+        <ListBody found={found} sections={sections} cell={cell} />
+      </div>
+      {!found && <LetterBar onPick={sections ? show : jump} onOpen={onTap ?? openApp} ends={sections} />}
+    </>
+  );
+}
+
+/**
+ * Every open starts at the list's start - the first section in view - whatever the alignment (ui/align.ts). Bottom
+ * alignment places a grid shorter than the panel at its foot (shell.css "Alignment"), near the thumb; it never means
+ * scrolled to the last app - opening at Z every time was the bug (the user, 11-01: "Why is the launcher always
+ * scrolled to bottom when I open it?"). Search results keep their own bottom-up start (Results below). The launcher
+ * ([sections]) also goes back to its sections and asks for fresh suggestions and places on each open.
+ * Watched, not read in render: a read re-rendered the list (and its every cell's comparison) on each drag's start - the
+ * drawer shows (drawerOpen) at the first touchmove (device 11-02 18:13: that move 107 ms of script).
+ */
+function useOpensAtStart(list: { current: HTMLDivElement | null }, found: App[] | null, sections: boolean) {
   const showsAll = useRef(!found);
   showsAll.current = !found;
   useEffect(
     () =>
       effect(() => {
-        if (drawerOpen.value && showsAll.current && list.current) list.current.scrollTop = 0;
+        if (!drawerOpen.value) return;
+        if (sections) {
+          letterEvent({ type: "open" });
+          refreshSections();
+        }
+        if (showsAll.current && list.current) list.current.scrollTop = 0;
       }),
     [],
   );
   useLayoutEffect(() => {
     if (drawerOpen.peek() && !found && list.current) list.current.scrollTop = 0;
   }, [!found]);
-  const cell = (app: App) => <AppCell key={app.key} app={app} draggable={!onTap} onTap={onTap} />;
+}
+
+/** The list's content: [found], the launcher's sections, or every app A to Z - after a new app being built, if any. */
+function ListBody({ found, sections, cell }: { found: App[] | null; sections: boolean; cell: (app: App) => preact.JSX.Element }) {
+  if (found) return <div class="grid">{found.map(cell)}</div>;
   return (
     <>
-      {/* Searching: by the bar, bottom-up - the best match nearest to it (shell.css .results). */}
-      <div class={`drawer-list ${found ? "results" : ""}`} ref={list}>
-        {/* A new app being built (ui/appbuild.tsx pendingApp): shown at once, gone the moment it's ready - by then the
-            real app is already in [apps] (installedApps -> powosApps -> apps, state.ts), so there's no separate
-            "new app" tile to remove, only this one to stop drawing. */}
-        {!found && pendingApp.value && pendingApp.value.status !== "done" && <PendingAppCell />}
-        <div class={found ? "grid" : "grid az"}>{(found ?? sorted.value.list).map(cell)}</div>
-      </div>
-      {!found && <LetterBar onPick={jump} onOpen={onTap ?? openApp} />}
+      {/* A new app being built (ui/appbuild.tsx pendingApp): shown at once, gone the moment it's ready - by then the
+          real app is already in [apps] (installedApps -> powosApps -> apps, state.ts), so there's no separate
+          "new app" tile to remove, only this one to stop drawing. */}
+      {pendingApp.value && pendingApp.value.status !== "done" && <PendingAppCell />}
+      {sections ? <Sections cell={cell} /> : <div class="grid az">{plain.value.list.map(cell)}</div>}
     </>
+  );
+}
+
+/** The Pow folder's cell tapped: its apps in the launcher, under a "Pow" chip as a letter's, from the top. */
+function openPow() {
+  launcherLetter.value = POW;
+  tick();
+  const list = document.querySelector(".drawer-page .drawer-list");
+  if (list) list.scrollTop = 0;
+}
+
+/** The chip over a letter's (or All's) apps: a tap goes back to the sections. */
+function LetterChip({ label }: { label: string }) {
+  return (
+    <button type="button" class="launcher-chip" aria-label="Back to recent apps" onClick={() => letterEvent({ type: "clear" })}>
+      <span class="launcher-chip-letter">{label}</span>
+      <Icon name="close" size={14} />
+    </button>
+  );
+}
+
+/**
+ * The launcher's content (ui/launcherview.ts launcherView): the letter's apps under its chip (tap: back to the
+ * sections), or Recent / Suggested / Quick launch - each hidden when empty - or every app under its letter's heading
+ * (All picked on the bar, under its chip; or neither recent nor suggested apps). The grids keep `.grid.az`: the A-Z
+ * jump, the align and geometry checks find them.
+ */
+function Sections({ cell }: { cell: (app: App) => preact.JSX.Element }) {
+  const v = launcherView({ searching: false, letter: launcherLetter.value, sorted: sorted.value, byKey: byKey.value, recent: recent.value, frequent: frequent.value, pow: powView.value });
+  if (v.kind === "folder") return <PowSection groups={v.groups} cell={cell} />;
+  if (v.kind === "letter") {
+    return (
+      <section class="launcher-section" data-view="letter" data-letter={v.letter}>
+        <LetterChip label={v.letter} />
+        <div class="grid az" key={v.letter}>{v.apps.map(cell)}</div>
+      </section>
+    );
+  }
+  if (v.kind === "all") {
+    return (
+      <div class="launcher-sections" data-view="all" data-letter={v.picked ? ALL : undefined}>
+        {v.picked && <LetterChip label={ALL} />}
+        {v.groups.map((g) => (
+          <section class="launcher-section" key={g.letter} data-group={g.letter}>
+            <h3 class="heading">{g.letter}</h3>
+            <div class="grid az">{g.apps.map(cell)}</div>
+          </section>
+        ))}
+      </div>
+    );
+  }
+  if (v.kind !== "sections") return null;
+  return (
+    <div class="launcher-sections" data-view="sections">
+      <section class="launcher-section" data-section="recent">
+        <h3 class="heading">Recent</h3>
+        <div class="grid az">{v.recent.map(cell)}</div>
+      </section>
+      {v.suggested.length > 0 && (
+        <section class="launcher-section" data-section="suggested">
+          <h3 class="heading">Suggested</h3>
+          <div class="grid">{v.suggested.map(cell)}</div>
+        </section>
+      )}
+      <QuickLaunch />
+    </div>
+  );
+}
+
+/**
+ * The Pow folder open in the launcher: its apps under their categories (the user-facing ones first, "infrastructure"
+ * last; one category alone: no heading), each with its kind mark (apps.tsx WebMark), under the "Pow" chip.
+ */
+function PowSection({ groups, cell }: { groups: Group<App>[]; cell: (app: App) => preact.JSX.Element }) {
+  const headed = groups.length > 1;
+  return (
+    <div class="launcher-sections" data-view="folder" data-folder={POW_FOLDER}>
+      <LetterChip label={POW} />
+      {groups.map((g) => (
+        <section class="launcher-section" key={g.letter} data-group={g.letter}>
+          {headed && <h3 class="heading">{g.letter}</h3>}
+          <div class="grid az">{g.apps.map(cell)}</div>
+        </section>
+      ))}
+    </div>
+  );
+}
+
+/** Each place's icon (ui/icons.tsx); a place it doesn't know: a folder. */
+const PLACE_ICONS: Record<string, IconName> = {
+  downloads: "trayArrowDown",
+  documents: "fileDocumentOutline",
+  camera: "cameraOutline",
+  pictures: "imageOutline",
+  music: "musicNote",
+  linux: "penguin",
+};
+
+/**
+ * Quick launch: the phone's folders (Downloads, Documents, Camera, Pictures, Music) in its Files app and the Linux home
+ * folder in PowOS's - only those the host says open here (FilePlaces.kt). A tap closes the launcher as an app's does; one
+ * that didn't open after all leaves the list.
+ */
+function QuickLaunch() {
+  if (!places.value.length) return null;
+  const open = (p: FilePlace) => {
+    closeDrawer(true);
+    powos.files?.open(p.id).then((ok) => void (ok || (places.value = places.value.filter((x) => x.id !== p.id)))).catch(() => {});
+  };
+  return (
+    <section class="launcher-section" data-section="places">
+      <h3 class="heading">Quick launch</h3>
+      <div class="grid">
+        {places.value.map((p) => (
+          <div class="app place" key={p.id} data-place={p.id} role="button" onClick={() => open(p)}>
+            <div class="app-icon place-icon" aria-hidden="true">
+              <Icon name={PLACE_ICONS[p.id] ?? "folderOutline"} size={26} />
+            </div>
+            <div class="app-label">{p.label}</div>
+          </div>
+        ))}
+      </div>
+    </section>
   );
 }
 
@@ -392,7 +552,7 @@ const Pages = memo(function Pages() {
     <>
       <div class="drawer-pages" data-view={view} onTouchStart={start} onTouchMove={move} onTouchEnd={end} onTouchCancel={end}>
         <div class="drawer-track" ref={track}>
-          <div class="drawer-page"><AppList found={null} /></div>
+          <div class="drawer-page"><AppList found={null} sections /></div>
           {last > 0 && <div class="drawer-page"><FolderView /></div>}
         </div>
       </div>
@@ -467,7 +627,7 @@ function SearchResults({ sections, pending }: { sections: typeof searchSections.
     arrive(bottomUp ? fresh.reverse() : fresh);
     for (const g of list.current?.querySelectorAll(".search-group") ?? []) g.setAttribute("data-seen", "");
   });
-  const appTiles = sections.apps.map((result) => <button type="button" class="scr-row" key={result.id} data-search-result={result.id} onClick={() => openSearchResult(result)}><SearchIcon icon={result.icon} label={result.label} /><span class="scr-row-text">{result.label}<span class="scr-sub muted">{result.source}</span></span></button>);
+  const appTiles = sections.apps.map((result) => <AppResultRow key={result.id} result={result} />);
   // Settings and app actions: a list under the app each comes from, each name whole (the user, 2026-10-30: "I should
   // be able to see the whole line like hey this app has these controls").
   const groups = (bottomUp ? [...sections.groups].reverse() : sections.groups).map((group) => <section class="search-group" key={group.id} data-search-group={group.id}>
@@ -479,6 +639,32 @@ function SearchResults({ sections, pending }: { sections: typeof searchSections.
     <div class="drawer-list results" ref={list} data-order={bottomUp ? "bottom-up" : "top-down"}><div class="launcher-search-results">
       {bottomUp ? <>{note}{groups}{appTiles}</> : <>{appTiles}{groups}{note}</>}
     </div></div>
+  );
+}
+
+/**
+ * An app among the search results: a tap opens it; held, its menu; held and moved, the launcher's one drag (apps.tsx
+ * dragHome - onto home, or over an app into a window, as every launcher tile). Rows that aren't an installed app: a tap.
+ */
+function AppResultRow({ result }: { result: SearchResult }) {
+  const app = result.id.startsWith("app:") ? byKey.value.get(result.id.slice(4)) : undefined;
+  // The click opens it (a tap, Enter, a check's .click()); not the click that ends a hold - that one was the menu's.
+  const held = useRef(false);
+  const press = usePress(
+    () => {},
+    (el) => {
+      held.current = true;
+      if (app) menu.value = { app, at: el.getBoundingClientRect() };
+    },
+    app ? (e) => dragHome(app.key, e) : null,
+  );
+  const down = press.onPointerDown;
+  const open = () => (held.current ? void (held.current = false) : openSearchResult(result));
+  return (
+    <button type="button" class="scr-row" data-search-result={result.id} data-key={app?.key} {...press} onPointerDown={(e) => ((held.current = false), down(e))} onClick={open}>
+      <SearchIcon icon={result.icon} label={result.label} />
+      <span class="scr-row-text">{result.label}<span class="scr-sub muted">{result.source}</span></span>
+    </button>
   );
 }
 

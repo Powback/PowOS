@@ -23,6 +23,13 @@
     "access": {
       "authentication": "application",
       "exposure": "lan"
+    },
+    "app": {
+      "hosts": [
+        "nomad.pow"
+      ],
+      "name": "Nomad",
+      "category": "infrastructure"
     }
   },
   "remove": {

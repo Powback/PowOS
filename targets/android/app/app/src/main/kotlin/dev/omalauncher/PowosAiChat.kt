@@ -24,6 +24,8 @@ object PowosAiChat {
 
     /** `powos manager`'s status when it isn't signed in (lib/ai/manager/manager.sh). */
     private const val SIGNIN_EXIT = 4
+    /** How long a stop waits for `powos manager --stop` to end the turn before the turn's process is destroyed. */
+    private const val STOP_GRACE_MS = 5000L
 
     sealed class Item {
         abstract fun json(): JSONObject
@@ -71,6 +73,16 @@ object PowosAiChat {
     private var queuedId = 0L
     var busy by mutableStateOf(false)
         private set
+
+    /**
+     * The stop button was tapped (the pill's send turns into it while a turn runs: shell bar.tsx): `powos manager --stop`
+     * is ending the turn under way. Cleared when the turn ends, which then says "stopped" (not an error).
+     */
+    var stopping by mutableStateOf(false)
+        private set
+
+    /** The turn under way's process (the guest's `su`/engine wrapper): destroyed if `--stop` didn't end it in time. */
+    @Volatile private var turnProcess: Process? = null
 
     /**
      * How the manager's claude is signed in (`powos manager --auth`): "endpoint" (the owner's devices: the machine's
@@ -297,6 +309,23 @@ object PowosAiChat {
         Thread({ turn(prompt) }, "powos-ai").start()
     }
 
+    /**
+     * Stops the turn under way (the chat's stop button): `powos manager --stop` in PowOS, which ends claude and what it
+     * started; what it answered so far stays, a "stopped" line follows. Not ended within [STOP_GRACE_MS] (an old
+     * PowOS without --stop, a wedged broker): the turn's process is destroyed. Queued messages still go after it.
+     */
+    fun stop() {
+        if (!busy || stopping) return
+        stopping = true
+        Thread({
+            val said = StringBuilder()
+            val rc = runCatching { Guest.run("powos manager --stop") { said.appendLine(it) } }.getOrElse { -1 }
+            Log.i(TAG, "stop: rc=$rc ${said.toString().trim()}")
+            java.lang.Thread.sleep(STOP_GRACE_MS)
+            if (stopping) turnProcess?.let { Log.w(TAG, "stop: turn still running, destroying it"); it.destroyForcibly() }
+        }, "powos-ai-stop").start()
+    }
+
     /** Takes a queued message back before its turn starts: it's never sent. */
     fun unqueue(id: Long) {
         queued.removeAll { it.id == id }
@@ -356,6 +385,7 @@ object PowosAiChat {
                 // The open thread's own directory (a fresh one, a fresh manager session), else home's.
                 val cd = thread?.dir?.let { "mkdir -p ~/$it && cd ~/$it" } ?: "cd ~"
                 val process = Guest.process("$cd && exec powos manager $mode --json-events", mergeErrors = false).start()
+                turnProcess = process
                 Thread({
                     process.errorStream.bufferedReader().forEachLine {
                         synchronized(errors) {
@@ -389,24 +419,58 @@ object PowosAiChat {
                 Log.w(TAG, "manager turn failed", it)
                 -1
             }
-        post {
-            // The inbox's turn with nothing waiting (already read): nothing to say.
-            // Not signed in (status 4, its "signin" event): the page shows Sign in to Claude, not an error line.
-            val quiet = (prompt == null && exit == 0 && !answered) || exit == SIGNIN_EXIT
-            if (exit == SIGNIN_EXIT && auth !in NOT_READY) authIs("signin")
-            // A turn that failed otherwise (claude's 401 / "run /login" when the login lapsed mid-session): asked again.
-            if (exit != 0 && exit != SIGNIN_EXIT) checkAuth()
-            if (!quiet && (exit != 0 || !answered)) {
-                val why = synchronized(errors) { errors.lastOrNull { it.isNotBlank() } }
-                add(Item.Note("PowOS AI didn't answer" + (why?.let { ": $it" } ?: " (exit $exit)"), error = true))
-            }
-            busy = false
-            if (sendQueued()) return@post
-            if (inboxWaiting) {
-                inboxWaiting = false
-                appContext?.let(::inboxArrived)
-            }
+        turnProcess = null
+        post { turnEnded(prompt, exit, answered, errors) }
+    }
+
+    /** On main, after a turn: what it ended with (stopped, an error, nothing), then the next turn waiting, if any. */
+    private fun turnEnded(
+        prompt: String?,
+        exit: Int,
+        answered: Boolean,
+        errors: ArrayDeque<String>,
+    ) {
+        if (stopping) stopped() else said(prompt, exit, answered, errors)
+        busy = false
+        if (sendQueued()) return
+        if (inboxWaiting) {
+            inboxWaiting = false
+            appContext?.let(::inboxArrived)
         }
+    }
+
+    /** A turn that ran to its end: an error line when it failed or said nothing (unless that's expected). */
+    private fun said(
+        prompt: String?,
+        exit: Int,
+        answered: Boolean,
+        errors: ArrayDeque<String>,
+    ) {
+        if (exit == SIGNIN_EXIT && auth !in NOT_READY) authIs("signin")
+        // A turn that failed otherwise (claude's 401 / "run /login" when the login lapsed mid-session): asked again.
+        if (exit != 0 && exit != SIGNIN_EXIT) checkAuth()
+        if (!quiet(prompt, exit, answered) && (exit != 0 || !answered)) {
+            val why = synchronized(errors) { errors.lastOrNull { it.isNotBlank() } }
+            add(Item.Note("PowOS AI didn't answer" + (why?.let { ": $it" } ?: " (exit $exit)"), error = true))
+        }
+    }
+
+    /**
+     * Nothing to say about how it ended: the inbox's turn with nothing waiting (already read), or not signed in (status
+     * 4, its "signin" event: the page shows Sign in to Claude, not an error line).
+     */
+    private fun quiet(
+        prompt: String?,
+        exit: Int,
+        answered: Boolean,
+    ) = (prompt == null && exit == 0 && !answered) || exit == SIGNIN_EXIT
+
+    /** Stopped by the user (the stop button): what it said so far stays, then a quiet "stopped" - never an error. */
+    private fun stopped() {
+        stopping = false
+        // A step it was in the middle of never finishes: marked as not done, not left running.
+        items.forEachIndexed { i, it -> if (it is Item.Tool && it.ok == null) items[i] = it.copy(ok = false, out = "stopped") }
+        add(Item.Note("stopped"))
     }
 
     /**

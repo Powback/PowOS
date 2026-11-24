@@ -17,6 +17,7 @@ import type { HostWebWindow, HostWebWindowsSnapshot, WebWindowRect } from "../ty
 import { Mark } from "./chrome.tsx";
 import { forgetQuickReturn, QuickBar, quickGone, quickIconKeys, quickPlace, quickShown, QUICK, type QuickInfo, type QuickRect } from "./quickpage.tsx";
 import { memo } from "./memo.ts";
+import { fitAboveKeyboard, keyboardTop } from "./kbfit.ts";
 import { barReveal, edgeDown, edgeEnd, edgeMove, holdReveal, releaseReveal, revealGone, revealKept } from "./barreveal.ts";
 import { usePresence } from "./reveal.tsx";
 import { confirm as hapticConfirm, tick as hapticTick } from "./haptics.ts";
@@ -500,7 +501,8 @@ function popOut(win: WebWin) {
 /** A quick page's card: a scrim (a tap outside closes), the card on the backdrop glass with its small bar and the page. */
 function QuickEl({ win, z }: { win: WebWin; z: number }) {
   const body = useRef<HTMLDivElement>(null);
-  const frame = { position: "absolute", left: `${win.x}px`, top: `${win.y}px`, width: `${win.w}px`, height: `${win.h}px`, zIndex: 20 + z, display: "flex", flexDirection: "column", transformOrigin: win.quick?.origin } as const;
+  const fit = fitted(win);
+  const frame = { position: "absolute", left: `${fit.x}px`, top: `${fit.y}px`, width: `${fit.w}px`, height: `${fit.h}px`, zIndex: 20 + z, display: "flex", flexDirection: "column", transformOrigin: win.quick?.origin } as const;
   return (
     <>
       <div class="quickpage-scrim" style={{ zIndex: 19 + z }} onPointerDown={(e) => (e.stopPropagation(), close(win.id))} />
@@ -1200,7 +1202,8 @@ function cutAll(box: HTMLElement | null, here: WebWin[]) {
   here.forEach((w, i) => {
     const above = here.slice(i + 1).filter(holed);
     const frame = box.querySelector<HTMLElement>(`.webwindow[data-wwid="${w.id}"]`);
-    if (frame && !w.quick) setMask(frame, holes(above, { x: w.x, y: w.y, s: w.scale ?? 1 }));
+    const f = fitted(w);
+    if (frame && !w.quick) setMask(frame, holes(above, { x: f.x, y: f.y, s: w.scale ?? 1 }));
     const shadow = box.querySelector<HTMLElement>(`.ww-shadow[data-wwid="${w.id}"]`);
     const b = frameBox(w);
     if (shadow) setMask(shadow, holes(above, { x: b.x - SHADOW_PAD, y: b.y - SHADOW_PAD, s: 1 }));
@@ -2604,6 +2607,7 @@ const resizing = new Map<number, Resizing>();
 
 /** A resize grab on window [id] began: its app's size paced from now ([pace]) until [resizeEnd]. */
 function resizeStart(id: number) {
+  unslice(id, webWins.peek().find((v) => v.id === id)); // SH1: never a slice left from an earlier drag
   resizing.set(id, { cw: -1, ch: -1, frame: 0, last: -Infinity, lastAt: -Infinity, steps: 0, reqs: 0 });
   liftStart(id);
   glassDrags.add(id);
@@ -3657,7 +3661,12 @@ function resizeBy(id: number, s: Grab & { side: string; k: number }, e: PointerE
   if (pacing) pacing.steps++;
   showSnap(id, r, k, a);
   const next = { x: Math.round(r.x), y: Math.round(r.y), w: Math.round(r.w), h: Math.round(r.h) };
-  if (!resizeLive(id, next)) update(id, { ...next, restore: undefined });
+  if (resizeLive(id, next)) return;
+  update(id, { ...next, restore: undefined });
+  // SH1: a move that renders still moves a sliced shadow's pieces (its render keeps the slice's box: [WindowShadow]).
+  const w = webWins.peek().find((v) => v.id === id);
+  const shadow = document.querySelector<HTMLElement>(`.ww-shadow[data-wwid="${id}"]`);
+  if (w && shadow && sliced.has(id)) sliceShadow(shadow, id, shadowBox(w));
 }
 
 /**
@@ -3687,10 +3696,10 @@ const liveable = (w: WebWin, next: Partial<WebWin>) => resizing.has(w.id) && !w.
 
 /** [w]'s frame [frame], its shadow and its size outline as its render would write them (RS5c: [resizeLive]). */
 function writeFrame(frame: HTMLElement, w: WebWin) {
-  setBox(frame, w);
+  setBox(frame, fitted(w));
   const shadow = frame.parentElement?.querySelector<HTMLElement>(`.ww-shadow[data-wwid="${w.id}"]`);
   const b = frameBox(w);
-  if (shadow) sliceShadow(shadow, w.id, { x: b.x - SHADOW_PAD, y: b.y - SHADOW_PAD, w: b.w + 2 * SHADOW_PAD, h: b.h + 2 * SHADOW_PAD });
+  if (shadow) sliceShadow(shadow, w.id, shadowBox(w));
   const size = frame.querySelector(".ww-outline-size");
   // Its text nodes' data (the size, " × ", the size): Preact keeps these nodes and diffs their text on its next render.
   if (size?.firstChild instanceof Text && size.lastChild instanceof Text) {
@@ -3715,17 +3724,21 @@ const S9_PIECES = [
 const S9 = () => SHADOW_PAD + S9_IN;
 type Slice = { el: HTMLElement; x: number; y: number; w: number; h: number; pieces: HTMLElement[] };
 const sliced = new Map<number, Slice>();
+/** A shadow box [b] the 9-slice's corners fit in. */
+const s9Fits = (b: Box) => b.w > 2 * S9() && b.h > 2 * S9();
 function sliceShadow(shadow: HTMLElement, id: number, box: Box) {
   let s = sliced.get(id);
+  // SH1: a slice of an element that is gone (the window maximised and back: [WindowShadow] remounted), or a box too
+  // small for the corners: the whole shadow at [box] (re-sliced from there on a later move).
+  if (s && (s.el !== shadow || !s9Fits(box))) (unslice(id, undefined), (s = undefined));
   if (!s) {
     const st = shadow.style;
     const r = { x: parseFloat(st.left), y: parseFloat(st.top), w: parseFloat(st.width), h: parseFloat(st.height) };
-    if (st.maskImage || !(r.w > 2 * S9() && r.h > 2 * S9() && box.w > 2 * S9() && box.h > 2 * S9())) return setBox(shadow, box);
+    if (st.maskImage || !s9Fits(r) || !s9Fits(box)) return (shadow.classList.remove("sliced"), setBox(shadow, box));
     s = { el: shadow, ...r, pieces: S9_PIECES.map(([, i, j]) => slicePiece(shadow, r, i, j)) };
     shadow.classList.add("sliced");
     sliced.set(id, s);
   }
-  if (box.w <= 2 * S9() || box.h <= 2 * S9()) return; // MIN_W/MIN_H keep a frame past this; the last good place stays
   const dx = box.x - s.x, dy = box.y - s.y, ew = box.w - s.w, eh = box.h - s.h;
   const sx = (box.w - 2 * S9()) / (s.w - 2 * S9()), sy = (box.h - 2 * S9()) / (s.h - 2 * S9());
   S9_PIECES.forEach(([, i, j], k) => {
@@ -3755,9 +3768,12 @@ function unslice(id: number, w: WebWin | undefined) {
   sliced.delete(id);
   s.pieces.forEach((p) => p.remove());
   s.el.classList.remove("sliced");
-  if (!w) return;
+  if (w) setBox(s.el, shadowBox(w));
+}
+/** Window [w]'s shadow element's box: its frame's and [SHADOW_PAD] round it. */
+function shadowBox(w: WebWin): Box {
   const b = frameBox(w);
-  setBox(s.el, { x: b.x - SHADOW_PAD, y: b.y - SHADOW_PAD, w: b.w + 2 * SHADOW_PAD, h: b.h + 2 * SHADOW_PAD });
+  return { x: b.x - SHADOW_PAD, y: b.y - SHADOW_PAD, w: b.w + 2 * SHADOW_PAD, h: b.h + 2 * SHADOW_PAD };
 }
 
 /** Windows resized live ([resizeLive]) since their drag began: [resizeEnd] commits them. */
@@ -4008,17 +4024,22 @@ function ResizeOutline({ win, leaving }: { win: WebWin; leaving: boolean }) {
  */
 function WindowShadow({ win, z, focused }: { win: WebWin; z: number; focused: boolean }) {
   if (win.restore) return null;
-  const b = frameBox(win);
+  // SH1 (the user, 11-23: "The shadow is not positioned correctly when I'm resizing a window"): while it is a 9-slice
+  // (RS6), a render mid-drag (a snap, the grips' fade, a move near a system strip) keeps the slice's box and class -
+  // its pieces are placed from that box, so writing the live box here moved them all by the drag so far (and a class
+  // write dropped "sliced": the whole shadow showed at the render's box beside the pieces).
+  const s = sliced.get(win.id);
+  const b = s ?? shadowBox(win);
   const style = {
-    left: `${b.x - SHADOW_PAD}px`,
-    top: `${b.y - SHADOW_PAD}px`,
-    width: `${b.w + 2 * SHADOW_PAD}px`,
-    height: `${b.h + 2 * SHADOW_PAD}px`,
+    left: `${b.x}px`,
+    top: `${b.y}px`,
+    width: `${b.w}px`,
+    height: `${b.h}px`,
     zIndex: 20 + z,
     // Its mask (the windows above it): WebWindowsOn's cutAll, after the render.
   };
   return (
-    <div class={`ww-shadow ${focused ? "focused" : ""} ${reflowing.value === win.page ? "ww-reflow" : ""}`} data-wwid={win.id} style={style}>
+    <div class={`ww-shadow ${focused ? "focused" : ""} ${reflowing.value === win.page ? "ww-reflow" : ""} ${s ? "sliced" : ""}`} data-wwid={win.id} style={style}>
       <div style={{ inset: `${SHADOW_PAD}px` }} />
     </div>
   );
@@ -4050,7 +4071,7 @@ function Body({ win, body }: { win: WebWin; body: { current: HTMLDivElement | nu
     if (barAutoHidden(win) && body.current) edgeDown(win.id, e, body.current.getBoundingClientRect().top, rootTokens().inset);
     // A new touch: fingers whose up this body never saw end first (the app's gesture never keeps a stale finger).
     if (e.isPrimary && p.size) (p.clear(), toApp(e, "cancel"));
-    if (!p.size) raise(win.id);
+    if (!p.size) (raise(win.id), blurHomeField());
     try {
       body.current?.setPointerCapture(e.pointerId);
     } catch {}
@@ -4182,12 +4203,14 @@ function AppWindowEl({ win, z, focused }: { win: WebWin; z: number; focused: boo
   const pinch = usePinch(win);
   // SC1: a pinch's scale zooms the whole frame (bar and body); the app keeps its size (sizeOf sends the layout size).
   const s = win.scale ?? 1;
+  // KB1: above the keyboard while it types into this window (the app's size follows the body's).
+  const fit = fitted(win);
   const frame = {
     position: "absolute",
-    left: `${win.x}px`,
-    top: `${win.y}px`,
-    width: `${win.w}px`,
-    height: `${win.h}px`,
+    left: `${fit.x}px`,
+    top: `${fit.y}px`,
+    width: `${fit.w}px`,
+    height: `${fit.h}px`,
     transform: s === 1 ? undefined : `scale(${s})`,
     transformOrigin: "0 0",
     zIndex: 20 + z,
@@ -4236,7 +4259,52 @@ function frameClass(win: WebWin, focused: boolean, sizing: boolean, auto: boolea
 /** A window's whole frame (bar and body) in its page's px (the model; scaled about its top left). */
 export function frameBox(w: WebWin): Box {
   const s = w.scale ?? 1;
-  return { x: w.x, y: w.y, w: w.w * s, h: w.h * s };
+  const f = fitted(w);
+  return { x: f.x, y: f.y, w: f.w * s, h: f.h * s };
+}
+
+// ---- KB1: the window being typed into ends at the keyboard's top (ui/kbfit.ts says why) ----------------------------
+
+/** The keyboard's top (viewport CSS px; Infinity: none), from home's insets - the keyboard shows over home's window. */
+export const kbTop = signal(Infinity);
+powos.on("system.insets", (i: { keyboard?: number } | null) => {
+  const top = keyboardTop(i?.keyboard, innerHeight);
+  if (top !== kbTop.peek()) console.info(`[kb] keyboard ${Number.isFinite(top) ? `top at ${Math.round(top)} of ${innerHeight}` : "down"}`);
+  kbTop.value = top;
+});
+
+/**
+ * The window the keyboard types into, or null: home's own field has it (a focused editable outside every window), or
+ * no keyboard. A field in a window's DOM (a quick page) names that window; otherwise the top window of the page on
+ * screen - a press on a body raises its window, and that press is what gave its app the keyboard (WebWindows.homeIme).
+ * Full-screen and PiP windows are Android's own windows on the phone's screen: the keyboard insets them natively.
+ */
+function typingWindow(): number | null {
+  if (!Number.isFinite(kbTop.value)) return null;
+  const el = document.activeElement as HTMLElement | null;
+  if (el && document.hasFocus() && el.matches?.("input, textarea, [contenteditable]:not([contenteditable=false])")) {
+    const own = el.closest<HTMLElement>(".webwindow[data-wwid]");
+    return own ? Number(own.dataset.wwid) : null;
+  }
+  const page = shownPage();
+  const top = webWins.value.findLast((w) => w.page === page && !w.minimised && !w.pip && !w.pending && !hiddenTab(w.id));
+  return top && !top.full ? top.id : null;
+}
+
+/**
+ * A press on a window's body takes typing away from home's own field (the app gets the keyboard: WebWindows.homeIme),
+ * so [typingWindow] never reads a stale home field as home typing and leaves the app under the keyboard.
+ */
+function blurHomeField() {
+  const el = document.activeElement as HTMLElement | null;
+  if (el?.matches?.("input, textarea, [contenteditable]") && !el.closest(".webwindow")) el.blur();
+}
+
+/** [w]'s frame as shown: its own, or (KB1) fitted above the keyboard while it is the window being typed into. */
+export function fitted(w: WebWin): { x: number; y: number; w: number; h: number } {
+  if (!Number.isFinite(kbTop.value) || w.full || typingWindow() !== w.id) return w;
+  const top = parseFloat(getComputedStyle(document.documentElement).getPropertyValue("--inset-top")) || 0;
+  return fitAboveKeyboard(w, w.scale ?? 1, { kbTop: kbTop.value, originY: renderLayout().origin.y, topLimit: top, minH: MIN_H });
 }
 
 /**

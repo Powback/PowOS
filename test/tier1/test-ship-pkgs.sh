@@ -24,6 +24,9 @@ T=$(mktemp -d "${TMPDIR:-/tmp}/ship-pkgs-test.XXXXXX")
 export HOME=$T/home LOG=$T/log GIT_CONFIG_GLOBAL=$T/gitconfig SHIP_DIR=$T/home/.cache/powos-ship-queue
 export SHIP_QUIET_S=3 SHIP_QUIET_SHELL_S=1 SHIP_POLL_S=1
 export SHIP_GATE_FIRST=1   # these tests cover the gate-then-push mode; deploy-first is the default
+# The rooted deploy's inputs (ship.sh rooted_inputs): derived from the real rooted.sh/powos-deploy.sh, which this
+# harness replaces with a stub - so name them (test/tier1/test-rooted-inputs.py covers the derivation itself).
+export SHIP_ROOTED_INPUTS="targets/android/rooted targets/android/pkgs"
 # The phone's VPN link (ship.sh phone_offline): $HOME/phone-offline = adb.sh --vpn-state's rc 69 (handshake stale).
 export SHIP_PHONE_STATE=$T/bin/phone-state SHIP_OFFLINE_POLL_S=1
 unset POWOS_SHIP_SERVICE SHIP_AGENT

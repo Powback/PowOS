@@ -7,13 +7,18 @@
  */
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
+/** A side column aligned to the bottom (ui/dockalign.ts): pinned at the foot, the recents above, the button between. */
+const endAligned = () => !!document.querySelector(".home.dock-end");
+
 function centred(position) {
   const btn = document.querySelector(".home > .dock .dock-search");
   if (!btn) return "no search button in the dock";
   const row = btn.parentElement;
   const cells = [...row.children].filter((c) => c.matches(".app"));
   const i = cells.indexOf(btn);
-  // A side column: the button is the separator, after the pinned apps (separated checks the recent ones after it).
+  // A side column: the button is the separator, after the pinned apps (separated checks the recent ones after it) - before
+  // them when the column is bottom-aligned (ui/dockalign.ts, the default: the recents above).
+  if (position !== "bottom" && endAligned()) return i === 0 ? "" : `button at cell ${i} of ${cells.length}, not before the pinned apps (bottom-aligned)`;
   if (position !== "bottom") return i === cells.length - 1 ? "" : `button at cell ${i} of ${cells.length}, not after the pinned apps`;
   if (i !== Math.floor(cells.length / 2)) return `button at cell ${i} of ${cells.length}, not the centre`;
   const b = btn.getBoundingClientRect();
@@ -306,6 +311,7 @@ function separated(row) {
   if (document.querySelector(".home > .dock .dock-sep")) fails.push("a .dock-sep line beside the button");
   const btn = buttons[0];
   const cells = [...row.children].filter((c) => c.matches(".app"));
+  if (endAligned()) return [...fails, ...separatedEnd(btn, cells, row.nextElementSibling)];
   if (!btn || cells.at(-1) !== btn) return [...fails, "the button isn't after the last pinned app"];
   return [...fails, ...between(btn, cells.at(-2), row.nextElementSibling)];
 }
@@ -318,6 +324,18 @@ function between(btn, above, recent) {
   const fails = [];
   if (above && above.getBoundingClientRect().bottom > b.top + 1) fails.push("the button isn't below the last pinned app");
   if (b.bottom > first.getBoundingClientRect().top + 1) fails.push("the button isn't above the first recent app");
+  return fails;
+}
+
+/** Bottom-aligned: the button first in the pinned group, under the newest recent app and over the first pinned one. */
+function separatedEnd(btn, cells, recent) {
+  if (!btn || cells[0] !== btn) return ["the button isn't before the first pinned app (bottom-aligned)"];
+  const newest = recent?.matches(".dock-recent") && recent.querySelector(".app");
+  if (!newest) return ["no recent app right above the pinned group"];
+  const b = btn.getBoundingClientRect();
+  const fails = [];
+  if (cells[1] && cells[1].getBoundingClientRect().top < b.bottom - 1) fails.push("the button isn't above the first pinned app");
+  if (newest.getBoundingClientRect().bottom > b.top + 1) fails.push("the button isn't below the newest recent app");
   return fails;
 }
 
@@ -445,9 +463,13 @@ function pinnedCells() {
   return row ? [...row.children].filter((c) => c.matches(".app")) : [];
 }
 
-/** Cell [i] of [n] is the dock's separator (dockdrop.ts buttonSlot): a side column's end, a bottom row's middle. */
+/**
+ * Cell [i] of [n] is the dock's separator (dockdrop.ts buttonSlot): a bottom row's middle; a side column's end, or its
+ * start when the column is bottom-aligned (ui/dockalign.ts: the recents above, the default).
+ */
 function atSeparator(what, { i, n }, vertical) {
-  const want = vertical ? n - 1 : Math.floor((n - 1) / 2);
+  const end = document.querySelector(".home.dock-end");
+  const want = vertical ? (end ? 0 : n - 1) : Math.floor((n - 1) / 2);
   if (i < 0) return [`no ${what}`];
   return i === want ? [] : [`${what} at cell ${i} of ${n}, not the separator ${want}`];
 }
@@ -934,12 +956,13 @@ export async function searchFindable() {
   fails.push(...(await sfOpens("home")));
   await W.pickSearchSpot(mode, "bar");
   await sleep(400);
-  // A long press on home's bar (the WebView's contextmenu).
-  const pill = () => document.querySelector(".home > .bar .bar-pill");
-  fails.push(...(await sfMenuFlips(() => pill()?.dispatchEvent(new MouseEvent("contextmenu", { bubbles: true, cancelable: true })), "dock", "long press on the bar")));
-  // Edit mode's tap on the dock's button (its hold outside edit mode stays dictation).
+  // SE1 (the user 11-23: "don't edit it on long-press; require edit mode"): the menu is edit mode's - a long press on
+  // home's bar there (the WebView's contextmenu); outside it nothing (dev/searchbar-check.js editOnly).
   S.editing.value = true;
   await sleep(400);
+  const pill = () => document.querySelector(".home > .bar .bar-pill");
+  fails.push(...(await sfMenuFlips(() => pill()?.dispatchEvent(new MouseEvent("contextmenu", { bubbles: true, cancelable: true })), "dock", "edit mode long press on the bar")));
+  // Edit mode's tap on the dock's button (its hold outside edit mode stays dictation).
   const btn = document.querySelector(".home .dock .dock-search");
   fails.push(...(await sfMenuFlips(() => btn && (fire(btn, "pointerdown"), fire(btn, "pointerup")), "bar", "edit mode tap on the dock button")));
   S.editing.value = false;

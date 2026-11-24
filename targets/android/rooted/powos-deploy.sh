@@ -378,6 +378,15 @@ if [ -d $A ]; then
     mkdir -p $R/usr/lib/powos/devices && install -m 755 $A/devices/powos-deviced $R/usr/lib/powos/devices/powos-deviced
     pkill -f 'python3 /usr/lib/powos/devices/powos-deviced serve' 2>/dev/null && echo "deviced: restarted onto the new file"
   fi
+  # Dolphin's places (unit dolphin-places): the phone's storage and the owner's devices in the sidebar, started by the
+  # session's autostart (a running one moves onto the new file at the next login).
+  if [ -f $A/devices/powos-places ]; then
+    install -m 755 $A/devices/powos-places $R/usr/lib/powos/devices/powos-places
+    install -m 644 $A/devices/powos-places.desktop $R/etc/xdg/autostart/powos-places.desktop
+    # The places now, without waiting for the next login (only the user's places file changes; Dolphin reloads it).
+    chroot $R /usr/bin/env -i PATH=/usr/bin:/usr/sbin /usr/bin/setpriv --reuid=powos --regid=powos --init-groups -- \
+      /usr/bin/env HOME=/home/powos timeout 30 /usr/lib/powos/devices/powos-places apply || true
+  fi
   # `powos app new`'s templates (lib/apps/templates).
   if [ -d $A/templates ]; then rm -rf $L/templates && cp -r $A/templates $L/templates && chmod -R a+rX $L/templates; fi
   [ -f $A/registry.wasm ] && install -m 644 $A/registry.wasm $L/registry/module.wasm

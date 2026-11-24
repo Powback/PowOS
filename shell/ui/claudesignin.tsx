@@ -13,6 +13,7 @@ import { useEffect, useState } from "preact/hooks";
 import { signal } from "@preact/signals";
 import { powos } from "../bridge.ts";
 import { chat } from "../state.ts";
+import { openScreen } from "../screens.ts";
 import type { ClaudeSignInState } from "../types.ts";
 import { Icon } from "./icons.tsx";
 
@@ -126,6 +127,13 @@ function Intro({ s, phase, onLogin }: { s: ClaudeSignInState; phase: Phase; onLo
       {s.canLogin && (
         <button type="button" class="signin-go" onClick={onLogin}>
           Login
+        </button>
+      )}
+      {!s.canLogin && s.mode === "authority" && (
+        // This device's Claude comes from the PowStation (its own device token): the fix is the Pow account sign-in
+        // (or an approver), on the PowStation screen - docs/DEVICES.md "Sign in to your Pow account".
+        <button type="button" class="signin-go" data-signin-powstation onClick={() => openScreen("join")}>
+          Sign in to PowStation
         </button>
       )}
     </>

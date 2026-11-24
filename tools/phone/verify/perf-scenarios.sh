@@ -12,7 +12,7 @@
 # (the shade is its own page, the meter takes only its renders), so the shade page's own rAF deltas are recorded beside
 # it with the list's scroll events, and the frames the list moved in are gated: FAIL when their fps p5 < 55 or any is
 # > 33 ms, or when the list didn't scroll (too few notifications). Long frames between the swipes are listed only.
-#   perf-scenarios.sh [--round R] [--only swipe|launcher|shade|shade-scroll|trace] [--reps N] [--ab NAME=VALUE ...]
+#   perf-scenarios.sh [--round R] [--only swipe|launcher|shade|shade-scroll|idle|trace] [--reps N] [--ab NAME=VALUE ...]
 # --only trace: one launcher open/shut recorded and its fields asserted (sc_trace; never part of the default run).
 # --ab (shade-scroll's A/B arms, repeatable): data-NAME="VALUE" on the shade page's root for the recording only, removed
 # after - scroll-fade=static|off (the list's scroll-driven edge mask: fixed / none), overscroll=none (no stretch).
@@ -45,7 +45,13 @@ case $METER0 in null|\{*) ;; *) METER0= ;; esac
 log "perf.meter at start: ${METER0:-unreadable}"
 
 # rec_on / rec_off <scenario>: the meter's record button, clicked on the status bar's page.
-rec_on() { BEFORE=$(newest); ev "(window.__perfSource='verify',document.querySelector('.fps-meter').click(),'ok')" statusbar >/dev/null; sleep 0.8; }
+# The meter arms the trace first (fpsmeter.tsx armTrace: V8's sampler start, up to 1.5 s, not counted): the gesture
+# starts once it records (its .rec class), so no rep falls in the warm-up.
+rec_on() {
+  BEFORE=$(newest); ev "(window.__perfSource='verify',document.querySelector('.fps-meter').click(),'ok')" statusbar >/dev/null
+  local i; for i in 1 2 3 4 5 6 7 8 9 10; do sleep 0.4; [ "$(ev "document.querySelector('.fps-meter').classList.contains('rec')" statusbar)" = true ] && break; done
+  sleep 0.4
+}
 rec_off() {
   ev "(document.querySelector('.fps-meter').click(),'ok')" statusbar >/dev/null
   local f= i; for i in $(seq 1 20); do sleep 1; f=$(newest); [ -n "$f" ] && [ "$f" != "$BEFORE" ] && break; f=; done
@@ -245,7 +251,29 @@ print("%s shade page while scrolling: %d frames in %d scroll bursts, fps p50 %.1
   log "$r"
   case $r in OK*) pass "${r#OK }" ;; *) fail "${r#BAD } (want p5 >= 55 fps, no frame > 33 ms while the list moves, the list scrolled)" ;; esac
 }
-for s in swipe launcher shade shade-scroll trace; do
+# idle (the user, 11-23: "everything keeps redrawing"): home left alone. First every page's frames/paints/rAF per second
+# from one devtools trace (cdp.sh idle: read-only, its own tracing session - before the meter's, never during it), then
+# a recording of IDLE_S seconds with no input: home's commits and renders from the render scan. Budget: an idle home
+# draws and commits nothing (paints/s and commits/s ~0; the meter's own page excluded - it draws while it records).
+IDLE_S=${IDLE_S:-10}
+sc_idle() {
+  chk idle
+  "$T/cdp.sh" idle "$IDLE_S" > "$OUT/idle-cdp.json" 2>"$OUT/idle-cdp.err" || note "idle: cdp.sh idle failed: $(tail -1 "$OUT/idle-cdp.err")"
+  local pages; pages=$(python3 -I -c 'import json,sys
+d=json.load(open(sys.argv[1]))
+print("; ".join("%s%s %s" % (p["page"], " hidden" if p.get("hidden") else "", " ".join("%s=%s" % kv for kv in (p.get("perSec") or {}).items())) for p in d.get("pages", [])))' "$OUT/idle-cdp.json" 2>/dev/null)
+  log "idle pages per second: ${pages:-unreadable}"
+  rec_on
+  sleep "$IDLE_S"
+  rec_off idle
+  local r; r=$(python3 -I -c 'import json,sys
+d=json.load(open(sys.argv[1])); r=d.get("renders") or {}; s=max(1,(r.get("durationMs") or 1)/1000)
+print("%d commits (%.1f/s), %d renders, %d needless in %.0f s; top %s" % (r.get("commits",0), r.get("commits",0)/s, r.get("renders",0), r.get("needlessRenders",0), s, ", ".join("%s %d" % (x["name"], x["renders"]) for x in (r.get("byCount") or [])[:6])))' "$OUT/idle.json" 2>/dev/null)
+  log "idle home: ${r:-no renders section}"
+  step idle "home left alone ${IDLE_S} s: commits and paints"
+  pass "${r:-?} | pages: ${pages:-?}"
+}
+for s in swipe launcher shade shade-scroll idle trace; do
   if [ -z "$ONLY" ]; then [ $s = trace ] && continue; else [ "$ONLY" = $s ] || continue; fi
   "sc_${s//-/_}"; hemit system.home null
 done

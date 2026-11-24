@@ -23,6 +23,10 @@ class AdoptGateTest {
         assertEquals("adopted once already", AdoptGate.skip(own = false, adopted = true, windowed = false, buttonFull = false))
         assertNotNull(AdoptGate.skip(own = false, adopted = false, windowed = true, buttonFull = false))
         assertNotNull(AdoptGate.skip(own = false, adopted = false, windowed = false, buttonFull = true))
+        // 11-23 17:58:36: adopt moved Open Canvas's container (task 3940, com.oplus.pscanvas) into a web window; every
+        // later dock went into that off-screen canvas ("it's like hiding the app").
+        assertEquals("OxygenOS's Open Canvas (split view)", AdoptGate.CANVAS)
+        assertEquals(true, CanvasDock.isCanvas("com.oplus.pscanvas"))
     }
 
     /** The desktop width from display 0's live size: inner screen 2268 px at 442 dpi = 821 dp, the cover 1116 px = 404 dp. */

@@ -113,6 +113,25 @@ class SteamLaunches(unittest.TestCase):
         self.assertEqual(json.loads(self.out.read_text())["launches"]["384190"]["state"], "asking")
         self.assertEqual(self.write(LAUNCH[4])["384190"]["state"], "launching")
 
+    def test_preparing_until_the_game_process(self):
+        """A launch Steam prepares (its steps before the game's process) keeps a frozen-out-of-sight Steam awake
+        (powos-sleep-gui consider / pulse_end): 557340 11-18 21:52 ran 1.5 s per keepalive pulse, launch 134 s."""
+        self.assertEqual(self.s.preparing(), [])
+        with self.log.open("a") as f:  # written, not yet read: preparing() reads the log itself
+            f.write(LAUNCH[0] + "\n")
+        self.assertEqual(self.s.preparing(), ["384190 (Getting ready)"])
+        self.write(*LAUNCH[1:4])
+        TIMERS[-1][1](*TIMERS[-1][2])  # a question left waiting: still preparing
+        self.assertEqual(self.s.preparing(), ["384190 (Steam is asking something)"])
+        self.write(LAUNCH[4], LAUNCH[5], ADDED)
+        self.assertEqual(self.s.preparing(), [], "the game's process runs: the game rules take over")
+
+    def test_preparing_forgets_a_stuck_launch(self):
+        self.write(LAUNCH[0])
+        since = self.s.launches["384190"]["since"]
+        self.assertEqual(len(self.s.preparing(now=since + GUI.LAUNCH_PREP_S - 1)), 1)
+        self.assertEqual(self.s.preparing(now=since + GUI.LAUNCH_PREP_S + 1), [])
+
     def test_closed_before_its_window(self):
         self.write(*LAUNCH, ADDED)
         l = self.write(REMOVED)["384190"]

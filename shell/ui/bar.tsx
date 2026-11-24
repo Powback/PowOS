@@ -7,7 +7,7 @@
  * to deciding which it is.
  */
 import { memo, sameContent } from "./memo.ts";
-import { useEffect, useLayoutEffect, useRef, useState } from "preact/hooks";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "preact/hooks";
 import { computed } from "@preact/signals";
 import type { Ref } from "preact";
 import { GrowField } from "./grow.tsx";
@@ -17,7 +17,7 @@ import { followOpenness, pageDragging } from "./gesture.ts";
 import { chatting, drawer, homePage, launcherIsOverlay, openPanel, page, pullKind, pullPage, query, sharesBar } from "../state.ts";
 import { powos } from "../bridge.ts";
 import { tick } from "./haptics.ts";
-import { askQueued, pillTarget, sending, takeOver } from "./assistant.ts";
+import { answering, askQueued, pillTarget, sending, stopAnswer, takeOver } from "./assistant.ts";
 import { dictate, drop, finish, finishing, forget, hearing, listen, listeningFor, makeHold, micOn, release, settle, speech, stopTap, type MicTarget } from "./dictation.ts";
 import { remoteHearing, startBarSync } from "./barsync.ts";
 
@@ -31,8 +31,13 @@ export const barRole = computed<BarRole>(() => {
   if (drawer.value > 0 || pullPage) return pullKind.value === "ai" ? "ai" : "apps";
   return homePage && page.value === -1 ? "ai" : "search";
 });
-/** What the role says in the empty field (home's says nothing: the prompt glyph alone, as it always had). */
-const ROLE_HINT: Record<BarRole, string | undefined> = { search: undefined, apps: "Search apps", ai: "Message the manager" };
+/**
+ * What the role says in the empty field (home's says nothing: the prompt glyph alone, as it always had). SP1 (the user,
+ * 11-23: going from home to the search the bar "re-initializes with an animation instead of reusing the existing bar"):
+ * the launcher's bar is home's exactly - same glyph, no hint, no fade; only its results are the launcher's. PowOS AI's
+ * page (another page, a swipe away) keeps its own hint and glyph.
+ */
+const ROLE_HINT: Record<BarRole, string | undefined> = { search: undefined, apps: undefined, ai: "Message the manager" };
 /**
  * HF1 (the coordinator, 11-03: "the hint is clipped mid-word"): each hint's shorter forms, longest first - the pill shows
  * the longest that fits its field's width (useFittedHint), never a word cut off.
@@ -55,7 +60,7 @@ function roleProps(role: BarRole) {
   const sendKey = role === "ai" || (query.value.trim() && !searchResults.value.length && !searchPending.value);
   return {
     hint: ROLE_HINT[role],
-    icon: role === "apps" ? ("apps" as const) : role === "ai" ? ("robotOutline" as const) : undefined,
+    icon: role === "ai" ? ("robotOutline" as const) : undefined,
     "aria-label": ROLE_LABEL[role],
     enterKeyHint: sendKey ? "send" : "go",
   };
@@ -183,6 +188,27 @@ const Send = memo(function Send({ shown, waiting }: { shown: boolean; waiting: b
 }, sameContent);
 
 /**
+ * Send's place while PowOS AI answers and the field is empty (PillSend): Stop (the user, 11-23: "pretty natively like
+ * the way the send button works") - the same 40 px button, a square in the arrow's place; its tap ends the turn
+ * (assistant.ts stopAnswer) and it's send again at once. Typing turns it back into send (a message queues behind).
+ */
+function Stop() {
+  return (
+    <button
+      type="button"
+      class="send stop"
+      aria-label="stop answering"
+      title="Stop"
+      // The field keeps its focus (and the keyboard stays as it was); the form's onClick (open, focus) isn't run.
+      onPointerDown={(e) => e.preventDefault()}
+      onClick={(e) => (e.stopPropagation(), stopAnswer())}
+    >
+      <Icon name="stop" size={20} />
+    </button>
+  );
+}
+
+/**
  * SB3: a submit of [form] (the send button, Enter) while one of [targets] dictates first ends the dictation and waits
  * for its final words (dictation.ts finish, ~3 s at most), then submits again - the form's own onSubmit then sends the
  * whole text, as Enter does, the mic off. A capture listener on the form runs before its (bubble) onSubmit.
@@ -214,14 +240,20 @@ function useSubmitFinishes(box: { current: HTMLDivElement | null }, targets: Mic
 
 /** The pill's send: shown while there's text, or while one of [targets] dictates - before its first words land too
  *  (the field is empty until then) - and spinning while a send waits for a dictation's final words. */
-// Not memo'd: it reads the dictation's state (listeningFor) that no prop or signal carries - the pill's render is its
-// cue. Its Send is memo'd, so these renders end here (render scan 11-06: Send 94 of 95 needless).
-function PillSend({ targets, value }: { targets: MicTarget[]; value: string }) {
+// Memo'd, with [targets] the pill's one array: it renders on its own when a dictation starts or ends - listeningFor
+// reads dictation.ts's pending, which changes with speech.value, read here so this subscribes to it (render scan
+// 11-23: PillSend 115 of 116 needless, "targets~" a new array on every pill render). [stop]: the pill asks PowOS AI -
+// while it answers (assistant.ts answering, a signal read here) and nothing is to be sent, Stop takes Send's place.
+const PillSend = memo(function PillSend({ targets, value, stop }: { targets: MicTarget[]; value: string; stop: boolean }) {
+  void speech.value;
   const waiting = !!finishing.value && targets.includes(finishing.value);
   // SI1: the shared bar's text written by another window's dictation (home's, under the launcher): its send shows here.
   const elsewhere = targets.includes(barMic) && remoteHearing.value;
-  return <Send shown={!!value.trim() || waiting || elsewhere || targets.some(listeningFor)} waiting={waiting} />;
-}
+  const shown = !!value.trim() || waiting || elsewhere || targets.some(listeningFor);
+  // Something to send wins: a message typed mid-answer queues behind it (assistant.ts askQueued).
+  if (stop && !shown && answering.value) return <Stop />;
+  return <Send shown={shown} waiting={waiting} />;
+});
 
 /**
  * SB5 (the user, 2026-10-31 02:46: "we should have an x to clear on the left side of the inputs"): the pill's leading
@@ -229,7 +261,8 @@ function PillSend({ targets, value }: { targets: MicTarget[]; value: string }) {
  * the shared bar (barsync.ts) empties the other window's too - and ends a dictation into it without writing its words
  * back (dictation.ts drop). One 40 px slot either way (shell.css .pill .lead): the text never moves as it turns.
  */
-function Lead({ empty, filled, clear, icon }: { empty: boolean; filled: boolean; clear: () => void; icon?: "apps" | "robotOutline" }) {
+// Memo'd with a [clear] that lives as long as the pill (render scan 11-23: Lead 116 renders, "clear" new each time).
+const Lead = memo(function Lead({ empty, filled, clear, icon }: { empty: boolean; filled: boolean; clear: () => void; icon?: "apps" | "robotOutline" }) {
   return (
     <button
       type="button"
@@ -242,23 +275,25 @@ function Lead({ empty, filled, clear, icon }: { empty: boolean; filled: boolean;
       onPointerDown={(e) => e.preventDefault()}
       onClick={(e) => (e.stopPropagation(), filled && clear())}
     >
-      {icon ? (
-        <span class={`prompt role-icon ${empty ? "" : "off"}`} aria-hidden="true">
-          <Icon name={icon} size={18} />
-        </span>
-      ) : (
-        <span class={`prompt ${empty ? "" : "off"}`} aria-hidden="true">&gt;</span>
-      )}
+      {/* SP1: one glyph element for the pill's life - a role's icon swaps its content, never the element. */}
+      <span class={`prompt ${icon ? "role-icon" : ""} ${empty ? "" : "off"}`} aria-hidden="true">
+        {icon ? <Icon name={icon} size={18} /> : ">"}
+      </span>
       <Icon name="close" size={20} class="x" />
     </button>
   );
-}
+});
+
+/** GrowField re-rendered only when its props change: the bar's handlers live as long as the bar (stableHandlers). */
+const Field = memo(GrowField);
+const NO_HEARS: MicTarget[] = [];
 
 export function Pill({
   target,
-  hears = [],
+  hears = NO_HEARS,
   sending = false,
   send = false,
+  stop,
   hint,
   icon,
   class: cls = "",
@@ -272,6 +307,8 @@ export function Pill({
   sending?: boolean;
   /** A send button right of the mic while there's text (the bar's pill): submits the pill's form, as Enter does. */
   send?: boolean;
+  /** This pill asks PowOS AI: while it answers (and the field is empty) its send is a stop button (Send). */
+  stop?: boolean;
   /** OB1: the role's hint - a placeholder that keeps the leading glyph (the role's [icon]) beside it. */
   hint?: string;
   icon?: "apps" | "robotOutline";
@@ -282,17 +319,41 @@ export function Pill({
   // Empty and no status to say (listening, an error): the prompt glyph stands in for a placeholder (shell.css .prompt).
   const empty = !field.value && !field.placeholder;
   const box = useRef<HTMLDivElement>(null);
-  const targets = [target, ...hears];
+  // One array while the targets are the same (PillSend is memo'd on it), one clear for the pill's life (Lead is too).
+  const targets = useMemo(() => [target, ...hears], [target, ...hears]);
   useSubmitFinishes(box, targets);
   const fitted = useFittedHint(box, hint);
+  const latest = useRef({ targets, onInput: field.onInput as (v: string) => void });
+  latest.current = { targets, onInput: field.onInput };
+  const clear = useCallback(() => (drop(...latest.current.targets), latest.current.onInput("")), []);
   return (
     <div ref={box} class={`${cls} pill tile ${sending ? "sending" : ""} ${empty ? "empty" : ""}`}>
-      <Lead empty={empty} filled={!!field.value} icon={icon} clear={() => (drop(...targets), field.onInput(""))} />
-      <GrowField {...(field as { value: string; onInput: (v: string) => void })} placeholder={field.placeholder ?? fitted} />
+      <Lead empty={empty} filled={!!field.value} icon={icon} clear={clear} />
+      <Field {...(field as { value: string; onInput: (v: string) => void })} placeholder={field.placeholder ?? fitted} />
       <Mic target={target} />
-      {send && <PillSend targets={targets} value={field.value} />}
+      {send && <PillSend targets={targets} value={field.value} stop={stop === true} />}
     </div>
   );
+}
+
+/** Text widths per font for [useFittedHint] (an element-less context; a few hint forms per font, kept). */
+const hintWidths = new Map<string, Map<string, number>>();
+let hintCtx: OffscreenCanvasRenderingContext2D | CanvasRenderingContext2D | null | undefined;
+function hintWidth(font: string): (text: string) => number {
+  if (hintCtx === undefined)
+    hintCtx = typeof OffscreenCanvas === "function" ? new OffscreenCanvas(1, 1).getContext("2d") : document.createElement("canvas").getContext("2d");
+  let m = hintWidths.get(font);
+  if (!m) hintWidths.set(font, (m = new Map()));
+  const widths = m;
+  return (text) => {
+    let w = widths.get(text);
+    if (w === undefined) {
+      if (!hintCtx) return 0;
+      hintCtx.font = font;
+      widths.set(text, (w = hintCtx.measureText(text).width));
+    }
+    return w;
+  };
 }
 
 /** HF1: the longest of [hint]'s forms (HINT_FORMS) whose text fits the pill's field, re-picked as the field resizes. */
@@ -302,22 +363,27 @@ function useFittedHint(box: { current: HTMLElement | null }, hint: string | unde
     const field = box.current?.querySelector("textarea");
     if (!field || !hint) return setFit(hint);
     const forms = HINT_FORMS[hint] ?? [hint];
-    const ctx = document.createElement("canvas").getContext("2d");
-    const pick = () => {
+    // Picked only in the ResizeObserver's callback (it fires once on observe, after layout and before paint): its
+    // content box is the room (no clientWidth/padding read), and the style is fresh there. A pick in the layout effect
+    // itself forced a layout of the page inside the touchend that swiped pages - "DIV.ontouchend 27 ms, forced 21 ms
+    // < pick (ui/bar.tsx)" in 3 of the long frames of perf-1795459755191. The text measured with no element (a
+    // DOM canvas's measureText brings the page's style up to date first), each form's width kept per font.
+    const pick = (room: number) => {
+      if (room <= 0) return setFit(forms[forms.length - 1]);
       const cs = getComputedStyle(field);
-      const room = field.clientWidth - (parseFloat(cs.paddingLeft) || 0) - (parseFloat(cs.paddingRight) || 0);
-      if (!ctx || room <= 0) return setFit(forms[forms.length - 1]);
-      ctx.font = `${cs.fontWeight} ${cs.fontSize} ${cs.fontFamily}`;
-      setFit(forms.find((f) => ctx.measureText(f).width <= room) ?? forms[forms.length - 1]);
+      const width = hintWidth(`${cs.fontWeight} ${cs.fontSize} ${cs.fontFamily}`);
+      setFit(forms.find((f) => width(f) <= room) ?? forms[forms.length - 1]);
     };
-    pick();
-    const ro = new ResizeObserver(pick);
+    const ro = new ResizeObserver((es) => pick(es[es.length - 1].contentRect.width));
     ro.observe(field);
     return () => ro.disconnect();
   }, [hint]);
   return fit;
 }
 
+/** The bar's other listener (the assistant's dictation writes into it too): one array, so the pill's stay the same. */
+let barHears: MicTarget[] | null = null;
+const BAR_HEARS = () => (barHears ??= [pillTarget]);
 /** The bar's field: a held mic asks PowOS AI, a tap dictates into the search; the drawer comes up to show either. */
 const barMic: MicTarget = {
   typed: () => query.value,
@@ -379,6 +445,9 @@ function useOwnPress(onClick: () => void) {
   };
   return { onPointerDown, onClick: click };
 }
+
+/** The bar's send; it asks PowOS AI (its page's role, or a chat under way): then its send is stop while it answers. */
+const askProps = (role: BarRole, proxy: boolean) => ({ send: true, stop: !proxy && (role === "ai" || chatting.value) });
 
 /** The bar's send (Enter, the send button) in [role]: the manager's chat, a search hit, or asking PowOS AI. */
 function submit(role: BarRole) {
@@ -495,11 +564,20 @@ function useAiSeat(proxy: boolean) {
     if (!proxy) followOpenness(el);
     if (el && !proxy) startCountered(el);
   }).current;
-  const at = homePage && !proxy ? page.value : 0;
-  const dragging = homePage && !proxy && pageDragging.value;
+  return { formRef, form };
+}
+
+/**
+ * The seat's own render (nothing drawn): it reads the page and the finger on it, so a page swipe re-renders this - not
+ * the bar and its whole pill three times (finger down, page set, finger up: 116 pill renders in the user's 27 s of
+ * swipes, perf-1795459755191). Its layout effect runs in the same commit as the pages', as the bar's own did.
+ */
+function BarSeat({ form }: { form: { current: HTMLFormElement | null } }) {
+  const at = page.value;
+  const dragging = pageDragging.value;
   useLayoutEffect(() => {
     const el = form.current;
-    if (!el || !homePage || proxy) return;
+    if (!el) return;
     el.classList.toggle("sliding", dragging);
     seatOnAi(el);
     if (at !== -1) return;
@@ -519,7 +597,7 @@ function useAiSeat(proxy: boolean) {
     const off = powos.on("system.insets", () => requestAnimationFrame(() => seatOnAi(el)));
     return () => (ro.disconnect(), off());
   }, [at, dragging]);
-  return formRef;
+  return null;
 }
 
 /**
@@ -537,7 +615,27 @@ export function Bar({ proxy = false }: { proxy?: boolean }) {
   const shown = hearing(barMic) ?? hearing(pillTarget) ?? query.value;
   const active = focused || !!shown || s.listening;
   const role = proxy ? "search" : barRole.value;
-  const formRef = useAiSeat(proxy);
+  const { formRef, form } = useAiSeat(proxy);
+  // One set of the field's handlers for the bar's life (they read only signals and refs): new ones each render
+  // re-rendered the pill's field on every bar render (render scan 11-23: "onInput onFocus onBlur" changed 93x).
+  const handlers = useRef({
+    onInput: (v: string) => {
+      // Typing over a dictation: it stops, what it heard stays (and nothing sends by itself).
+      takeOver();
+      query.value = v;
+    },
+    // Logged (console -> logcat): desktop mode's launcher search lost its keyboard as the user typed (2026-10-28);
+    // the blur's relatedTarget says who took the focus.
+    onFocus: (e: FocusEvent) => {
+      console.info(`search focus drawer=${drawer.peek()}`);
+      // Home's pill types nowhere: the overlay's pill does (openHere, from the click). The desktop's own launcher
+      // (an APK without the overlay forward: state.ts openPanel) is open by the time its pill is focused.
+      if (launcherIsOverlay && drawer.peek() === 0 && barRole.peek() !== "ai") return void (e.target as HTMLElement | null)?.blur();
+      takeOver();
+      setFocused(true);
+    },
+    onBlur: (e: FocusEvent) => (logBlur(e, input.current), setFocused(false)),
+  }).current;
   return (
     <form
       class={`bar ${active ? "active" : ""} role-${role}`}
@@ -560,29 +658,15 @@ export function Bar({ proxy = false }: { proxy?: boolean }) {
           height (home's layout) never changes. */}
       <Pill
         target={barMic}
-        hears={[pillTarget]}
-        send
+        hears={BAR_HEARS()}
+        {...askProps(role, proxy)}
         sending={sending.value}
         inputRef={input}
         value={shown}
-        onInput={(v: string) => {
-          // Typing over a dictation: it stops, what it heard stays (and nothing sends by itself).
-          takeOver();
-          query.value = v;
-        }}
-        // Logged (console -> logcat): desktop mode's launcher search lost its keyboard as the user typed (2026-10-28);
-        // the blur's relatedTarget says who took the focus.
-        onFocus={(e: FocusEvent) => {
-          console.info(`search focus drawer=${drawer.value}`);
-          // Home's pill types nowhere: the overlay's pill does (openHere, from the click). The desktop's own launcher
-          // (an APK without the overlay forward: state.ts openPanel) is open by the time its pill is focused.
-          if (launcherIsOverlay && drawer.value === 0 && barRole.peek() !== "ai") return void (e.target as HTMLElement | null)?.blur();
-          takeOver();
-          setFocused(true);
-        }}
-        onBlur={(e: FocusEvent) => (logBlur(e, input.current), setFocused(false))}
+        {...handlers}
         placeholder={s.listening ? "listening…" : (s.error ?? undefined)}
-        // The form's role-* class: the hint fades in anew as the page changes the role (shell.css bar-role-*).
+        // The form's role-* class: PowOS AI's hint fades in as the page becomes it (shell.css bar-role-ai); home's and
+        // the launcher's are one face (SP1), nothing fades between them.
         class="bar-pill"
         {...roleProps(role)}
         autocomplete="off"
@@ -591,6 +675,7 @@ export function Bar({ proxy = false }: { proxy?: boolean }) {
         readOnly={proxy}
         tabIndex={proxy ? -1 : undefined}
       />
+      {homePage && !proxy && <BarSeat form={form} />}
     </form>
   );
 }

@@ -12,6 +12,7 @@
  * panel) keeps the chat centred at reading width, Progress a glass sheet over its side.
  */
 import { useEffect, useLayoutEffect, useRef, useState } from "preact/hooks";
+import { computed } from "@preact/signals";
 import { powos } from "../bridge.ts";
 import { aiDraft, aiScreen, chat, page } from "../state.ts";
 import { onManagerSend, type MicTarget } from "./bar.tsx";
@@ -25,8 +26,8 @@ import { WorkFeed } from "./aiboard.tsx";
 import { aiAgent } from "../agents.ts";
 import { fleet, workingNow } from "../fleet.ts";
 import { untried } from "./trycard.tsx";
-import { AiSegs, FleetPane, useAgentsInPane } from "./aipanes.tsx";
-import { AiStatus, noteAsked, openChat, OtherProjectsItem, otherProjectsCount } from "./aistatus.tsx";
+import { AiSegs, FleetPane, TabHead, useAgentsInPane } from "./aipanes.tsx";
+import { AiStatus, noteAsked, openChat, OtherProjectsItem, otherProjectsCount, whileShown } from "./aistatus.tsx";
 import { Icon } from "./icons.tsx";
 import { SignInSheet } from "./claudesignin.tsx";
 import { InstallClaude } from "./claudeinstall.tsx";
@@ -441,8 +442,13 @@ function ChatScroll({ shown, cls = "" }: { shown: boolean; cls?: string }) {
   );
 }
 
-/** The segmented row's screens: shown in the right column with no header of their own (the row names them). */
+/**
+ * The segmented row's screens: in the right column (folded: the page) under one tab header - back, the tab's name, a
+ * glance (aipanes.tsx TabHead; Agents' is AgentsView's own) - never the menu's AiHeader.
+ */
 const SEGMENTED = new Set<AiScreen>(["chat", "fleet", "agents", "progress", "devices"]);
+/** A tab screen's name as its tab says it ("agents", the strip's way in, is the Agents tab too). */
+const tabName = (s: AiScreen) => (s === "agents" ? "Agents" : nameOf(s));
 
 /**
  * The right column: what the segmented row picked, the row itself at the column's foot (the user, 11-01 16:43: "move the
@@ -467,6 +473,7 @@ function RightBody({ s, shown, beside = false }: { s: AiScreen; shown: boolean; 
   return (
     <>
       {!SEGMENTED.has(s) && <AiHeader sub={s} />}
+      {SEGMENTED.has(s) && s !== "chat" && <TabHead s={s} title={tabName(s)} shown={shown} />}
       <AiBody sub={s === "chat" ? null : s} shown={shown} beside={beside} />
       {foot}
     </>
@@ -546,7 +553,8 @@ function StatusColumn({ shown, beside = false }: { shown: boolean; beside?: bool
   const [menu, setMenu] = useState(false);
   const pop = usePresence(menu);
   // Friction, and folded "Open chat" / unfolded "Other projects (N)" while other projects' agents work.
-  const n = menuScreens(true).length + (beside ? Number(otherProjectsCount() > 0) : 1);
+  // Off screen its reads aren't tracked (aistatus.tsx whileShown): an agents delta doesn't re-render the page away.
+  const n = menuScreens(true).length + (beside ? Number(whileShown(shown, otherProjectsCount) > 0) : 1);
   const more = <More n={n} menu={menu} setMenu={setMenu} />;
   return (
     <>
@@ -597,8 +605,11 @@ function AiColumn({ shown, wide, pill }: { shown: boolean; wide: boolean; pill: 
 }
 
 /** Its page, to the left of home. */
+// Its own computed: the page re-renders when it comes or goes, not on every change between home's pages (render scan
+// 11-23: PowAiPage rendered on each of the user's page swipes).
+const aiShown = computed(() => page.value === -1);
 export function PowAiPage() {
-  const shown = page.value === -1;
+  const shown = aiShown.value;
   // Tells the host the page is up (types.ts pageShown: hosts since 11-02 open the assist overlay over it all the same).
   useEffect(() => void powos.ai.pageShown?.(shown).catch(() => {}), [shown]);
   return <AiView shown={shown} cls={`ai-screen ${shown ? "shown" : ""}`} panes />;

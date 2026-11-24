@@ -290,6 +290,15 @@ frame of drag latency; measure it before turning it on for drags (animations fir
   Renders a move 16 -> 0 (a snap change still renders the window: its outline class); gate trace
   at 4x CPU: AsyncTask Run (Preact's render task) 50.8 -> 10.9 ms, restyled elements 20 -> 6 a move. Maximised frames
   and zone heights near the system strips take the old path (a render).
+  SH1 (11-23, the user: "The shadow is not positioned correctly when I'm resizing a window"): RS6's 9-slice pieces are
+  placed from the shadow element's box at the drag's start, but any render mid-drag (a snap, the grips' fade, and every
+  move whose zone heights change near a system strip, which takes the render path) wrote the LIVE box onto that element
+  (pieces shifted by the drag so far on an n/w drag, for the rest of the drag) and a rendering move never moved the
+  pieces at all (the shadow stayed where it was, e.g. the bottom row a strip-reach below the frame). Now WindowShadow
+  renders the slice's box and "sliced" class while sliced, a rendering move moves the pieces too, a remounted element
+  or a box too small for the corners gets the whole shadow, and a drag's start drops any stale slice. Gate
+  `ww-shadow-track`: real touches on all 8 zones, out / into a strip's reach / in to the smallest window / out, with
+  forced renders mid-drag; every move each piece's box and its caster's edges against the frame (1 px).
 - [ ] **N5 - games**: windowed games are Linux windows (N1-N4 apply); full screen stays the direct-scanout task. Check:
   a windowed Proton game's menu (untyped override-redirect) shows (0062), fps x/120 unchanged by N1.
 
@@ -493,8 +502,16 @@ user's window: the one last pressed or opened, or the newest open window while h
 This was added on 11-03 after e2e round 213. Broforce (Proton) re-asserted full screen in the background when Kate
 opened, covered the screen, and took the dock taps.
 
-Keyboard cover: when the IME's inset covers the focused body, the page lifts that window above the inset, and the
-lift is ordinary geometry in `w.f`. Plasma does not do this, but on a phone it is needed.
+Keyboard cover (KB1, built 11-23, `shell/ui/kbfit.ts`): an Android app on its virtual display never gets IME insets
+(the keyboard is on display 0 through the FALLBACK policy, and Android insets a window only on the IME's display), so
+its adjustResize did nothing and its field stayed under the keyboard - the user, 11-23: "it doesn't resize the
+content so I don't see where I'm typing". Home's own insets (`system.insets` keyboard) do see it, so while the keyboard
+shows, the window it types into (a focused field in a window's DOM names that window; else the top window of the page
+on screen, which a body press raised; never while home's own field types, never a full-screen/PiP window) is shown
+ending at the keyboard's top (`fitted()` in webwindows.tsx: the frame, its shadow, masks; a low floating window moves
+up to keep MIN_H). The body is the app's size in `w.f`, so the host resizes the virtual display / KWin window to the
+room left and the app relayouts there. The stored frame is untouched: keyboard down, the old size is back. Gate
+`ww-keyboard-fit`, device check `tools/phone/verify/ww-keyboard.sh` (emu: tools/emu/testwin's Chat).
 
 ### 3.2 Child surfaces: popups, menus, tooltips, transients (Z3)
 
@@ -1232,20 +1249,38 @@ With the APK installed, unfolded, `powos_web_windows` = 1 and the user idle: ope
 
 ## `.pow` web apps in web windows (issue #8, 2026-11-09)
 
-The fleet's `.pow` services the user installs from PowApps open as PowOS apps in web windows. Nothing is added on
-pairing (owner 11-09): pairing makes them available, the user picks them.
+The fleet's `.pow` services open as PowOS apps in web windows. **Every `.pow` site is an app, automatically (the user,
+2026-11-23):** "I want all .pow stuff as apps automatically even when new ones gets added or removed maybe with some
+indicator of whether its pwa or whatever". This reverses the owner decision of 11-09 ("Nothing is added on pairing:
+only what the user installs").
+
+- **Sync** (`WebApps.kt`, pure rules in `WebAppSync.kt`, `WebAppSyncTest`): at app start, on every default-network
+  change (Wi-Fi, mobile, a VPN coming up or going) and every 15 min, the launcher fetches the catalog from the joined
+  realm (else `powstation.pow`; nothing on a device set up standalone). New hosts are added, hosts the catalog no
+  longer lists are removed - only after a successful, non-empty fetch; a failed fetch changes nothing. Ids stay
+  `w:<host>`, so dock/quick-launch places, the icon PNG and the site's WebView data survive syncs; an icon is read
+  again only when its URL changed or its file is missing, never a sleeping service's favicon before it was opened.
+  An app the user removes ("remove from launcher", PowApps' Remove) stays out (`files/webapps-removed.json`) until
+  PowApps installs it again.
+- **Indicator**: `apps.list` gives each web app `web` (`pwa` = has a manifest, `page`, `sleeps` = behind autosleep:
+  wakes on open, the first open is slower), `webCategory` and `offline` (the catalog didn't answer on the last try:
+  off the LAN/VPN; the apps stay). The shell draws a small chip on the icon's lower right (apps.tsx WebMark: grid,
+  globe, moon, wifi-off; the icon fades when offline) and a line under the name in the app menu. Gate shots
+  `web-app-marks`, `web-app-menu`.
 
 - **Catalog**: PowStation `GET http://powstation.pow/v1/apps` (powos-enroll, read-only, LAN/VPN, no token): every
   whole-site `*.pow` Traefik router, probed through Traefik for its web app manifest (name, `start_url`, icons, theme)
   or `<title>`/icon. API-only routes are left out. A route behind `autosleep@file` is listed but never fetched (no wake).
-- **Store**: PowApps' "Pow web apps" section lists it; Install / Remove call the launcher's `WebAppInstallActivity`
+  A site that doesn't answer once (timeout, 5xx) keeps its last good entry. A compose's `x-pow.services.<svc>.app`
+  (name/icon/category/path; docs/PLATFORM.md "Launcher apps") is preferred over the page; nothing can hide a site.
+- **Store**: PowApps' "Pow web apps" section lists it (now mostly redundant: everything is installed); Install / Remove call the launcher's `WebAppInstallActivity`
   (`dev.omalauncher.action.INSTALL_WEB_APP` / `UNINSTALL_WEB_APP`, startActivityForResult; only `com.powapps` may call
   it, only http(s) `.pow` URLs are taken).
-- **Launcher**: `shell/WebApps.kt` keeps them (`files/webapps.json`, icons `files/webapps/<host>.png` read at install
-  from the manifest icon or `/favicon.ico`); `apps.list` gives each as `w:<host>`, kind `web`. A tap opens
+- **Launcher**: `shell/WebApps.kt` keeps them (`files/webapps.json`, icons `files/webapps/<host>.png` read when an app
+  arrives, from the manifest icon or `/favicon.ico`); `apps.list` gives each as `w:<host>`, kind `web`. A tap opens
   `WebWindows.openWeb`: `WebAppActivity` (one WebView on the site; other hosts go to the browser) on the window's own
   display, one window per site. Without web windows (folded, setting off) it opens as its own document task.
-- **Not yet**: live state (running/asleep) on the icon and tap-to-wake, pinning to the home grid (ShellHome pins
+- **Not yet**: live running/asleep state on the icon (the mark is the catalog's static `sleeps`), pinning to the home grid (ShellHome pins
   Android/Linux shortcuts only; dock and quick launch take it), SVG/data: icons (the letter icon shows), PowApps
   reading the launcher's installed list (it keeps its own).
 

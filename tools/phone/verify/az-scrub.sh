@@ -1,9 +1,13 @@
 #!/bin/bash
 # lanes: emu phone
-# A-Z scrub highlight (board "A-Z scrub highlights the letter's apps", drawer.tsx highlight) on the phone, in a free
-# window (run by queue.sh with LOCK_HELD=1): goes home, opens the drawer with a swipe, holds an injected finger on the A-Z bar at M,
-# reads which cells are lit / how dim the rest are, screencaps, lifts the finger, checks everything eased back, then
-# Back closes the drawer. Nothing persistent changes.
+# The launcher's A-Z scrub (ui/launcherview.ts; the user, 11-23: "show the recent apps by default and then if you use
+# the sorter thing it shifts to show all apps filtered to the letter you are using") on the phone, in a free window (run
+# by queue.sh with LOCK_HELD=1): goes home, opens the drawer with a swipe - it must show its sections (Recent first) -,
+# holds an injected finger on the A-Z bar at M (every shown app starts with M), screencaps, lifts the finger (still M,
+# under its chip), taps the chip (sections again), then taps the bar's bottom "All" (every app under letter headings,
+# under an "All" chip; the user, 11-23: "the launcher sorter should have an option to show all on the top and bottom of the
+# sorter"; the top one must be there too), taps its chip (sections again), then Back closes the drawer. Nothing
+# persistent changes.
 set -u
 cd "$(dirname "$0")/../../.." || exit 1
 p=tools/phone
@@ -13,8 +17,8 @@ p=tools/phone
 $p/adb.sh shell "input keyevent 3; sleep 1; input keyevent 4" >/dev/null 2>&1; sleep 1
 fg=$($p/adb.sh shell "dumpsys activity activities | grep -m1 topResumedActivity")
 [[ "$fg" == *HomeShell* ]] || { echo "az-scrub: home isn't in front"; exit 3; }
-$p/cdp.sh eval home 'fetch("ui/drawer.tsx").then(r=>r.text()).then(t=>t.includes("data-lit"))' | grep -q true ||
-  { echo "FAIL az-scrub: the phone serves a drawer.tsx without the highlight"; exit 1; }
+$p/cdp.sh eval home 'fetch("ui/drawer.tsx").then(r=>r.text()).then(t=>t.includes("launcherLetter"))' | grep -q true ||
+  { echo "FAIL az-scrub: the phone serves a drawer.tsx without the launcher's sections"; exit 1; }
 # AZ_LIST=1: the experimental list mode (Settings > style > experimental, drawer.azList; 14b92ebb): the letter's apps
 # as a centred card of whole names over the grid. The setting is read first, switched on for this run, and put back
 # on exit, so nothing persistent changes here either.
@@ -33,7 +37,8 @@ $p/adb.sh shell input swipe $((W * 3 / 4)) $((H * 85 / 100)) $((W * 3 / 4)) $((H
 sleep 1
 read -r X Y < <($p/cdp.sh eval home '(() => { const m = [...document.querySelectorAll(".letter-bar span")].find((s) => s.textContent === "M"); if (!m) return "0 0"; const r = m.getBoundingClientRect(), d = devicePixelRatio; return Math.round((r.x + r.width / 2) * d) + " " + Math.round((r.y + r.height / 2) * d); })()' | tr -d '"')
 [ "${X:-0}" -gt 0 ] || { $p/adb.sh shell input keyevent 4; echo "FAIL az-scrub: no A-Z bar after opening the drawer"; exit 1; }
-probe='JSON.stringify({scrub: !!document.querySelector(".az[data-scrub]"), lit: [...document.querySelectorAll(".az [data-lit] .app-label")].map((e) => e.textContent), dim: getComputedStyle(document.querySelector(".az .app:not([data-lit])") || document.body).opacity})'
+probe='JSON.stringify((() => { const p = document.querySelector(".drawer-page .drawer-list"), v = p && p.querySelector("[data-view]"), ends = [...document.querySelectorAll(".drawer-page .letter-bar span")].map((s) => s.textContent), heads = [...(p ? p.querySelectorAll("[data-view=all] [data-group] > .heading") : [])].length, n = [...(p ? p.querySelectorAll("[data-view=letter] .grid.az .app-label") : [])].map((e) => (e.textContent || "").trim()); return { view: v ? v.dataset.view : null, letter: v ? v.dataset.letter || null : null, names: n, allM: n.length > 0 && n.every((t) => t.toUpperCase().startsWith("M")), recent: !!(p && p.querySelector("[data-section=recent] .app")), allEnds: ends[0] === "All" && ends.at(-1) === "All", heads, chip: !!document.querySelector(".drawer-page .launcher-chip") }; })())'
+opened=$($p/cdp.sh eval home "$probe" | tr -d '\\')
 [ "$LIST" = 1 ] && probe='JSON.stringify((() => { const l = document.querySelector(".az-list:not(.leaving)"), c = l && l.querySelector(".az-list-card"), r = c && c.getBoundingClientRect(), n = [...document.querySelectorAll(".az-list:not(.leaving) .az-list-name")]; return { list: !!l, names: n.map((e) => e.textContent), allM: n.length > 0 && n.every((e) => (e.textContent || "").trim().toUpperCase().startsWith("M")), cut: n.filter((e) => e.scrollWidth > e.clientWidth + 1).length, centred: !!r && (() => { const b = l.getBoundingClientRect(), cs = getComputedStyle(l), pl = parseFloat(cs.paddingLeft), pr = parseFloat(cs.paddingRight); return Math.abs(r.x + r.width / 2 - (b.x + pl + (b.width - pl - pr) / 2)) <= 4; })() }; })())'
 $p/adb.sh shell input motionevent DOWN "$X" "$Y"
 sleep 0.5
@@ -44,8 +49,23 @@ $p/shot.sh "$shot" >/dev/null 2>&1 || shot="(no screencap)"
 $p/adb.sh shell input motionevent UP "$X" "$Y"
 sleep 0.5
 after=$($p/cdp.sh eval home "$probe" | tr -d '\\')
+back='(none)' alls='(none)' allback='(none)'
+if [ "$LIST" != 1 ]; then
+  read -r CX CY < <($p/cdp.sh eval home '(() => { const c = document.querySelector(".launcher-chip"); if (!c) return "0 0"; const r = c.getBoundingClientRect(), d = devicePixelRatio; return Math.round((r.x + r.width / 2) * d) + " " + Math.round((r.y + r.height / 2) * d); })()' | tr -d '"')
+  [ "${CX:-0}" -gt 0 ] && $p/adb.sh shell input tap "$CX" "$CY" && sleep 0.5
+  back=$($p/cdp.sh eval home "$probe" | tr -d '\\')
+  # The bar's bottom "All": tapped (DOWN+UP at it), every app under its letter headings, kept, under its chip.
+  read -r AX AY < <($p/cdp.sh eval home '(() => { const a = [...document.querySelectorAll(".drawer-page .letter-bar span.all")].at(-1); if (!a) return "0 0"; const r = a.getBoundingClientRect(), d = devicePixelRatio; return Math.round((r.x + r.width / 2) * d) + " " + Math.round((r.y + r.height / 2) * d); })()' | tr -d '"')
+  if [ "${AX:-0}" -gt 0 ]; then
+    $p/adb.sh shell input tap "$AX" "$AY" && sleep 0.5
+    alls=$($p/cdp.sh eval home "$probe" | tr -d '\\')
+    read -r CX CY < <($p/cdp.sh eval home '(() => { const c = document.querySelector(".drawer-page .launcher-chip"); if (!c) return "0 0"; const r = c.getBoundingClientRect(), d = devicePixelRatio; return Math.round((r.x + r.width / 2) * d) + " " + Math.round((r.y + r.height / 2) * d); })()' | tr -d '"')
+    [ "${CX:-0}" -gt 0 ] && $p/adb.sh shell input tap "$CX" "$CY" && sleep 0.5
+    allback=$($p/cdp.sh eval home "$probe" | tr -d '\\')
+  fi
+fi
 $p/adb.sh shell input keyevent 4
-echo "az-scrub: held=$held after=$after shot=$shot"
+echo "az-scrub: opened=$opened held=$held after=$after back=$back all=$alls allback=$allback shot=$shot"
 if [ "$LIST" = 1 ]; then
   if grep -q '"list":true' <<<"$held" && grep -q '"allM":true' <<<"$held" && grep -q '"cut":0' <<<"$held" &&
     grep -q '"centred":true' <<<"$held" && grep -q '"list":false' <<<"$after"; then
@@ -53,9 +73,11 @@ if [ "$LIST" = 1 ]; then
   else
     echo "FAIL az-scrub list: held=$held after=$after"
   fi
-elif grep -q '"scrub":true' <<<"$held" && grep -q '"lit":\["' <<<"$held" && grep -q '"dim":"0.4"' <<<"$held" &&
-  grep -q '"scrub":false' <<<"$after"; then
-  echo "PASS az-scrub: the letter's apps lit, the rest at 0.4, cleared on release"
+elif grep -qE '"view":"(sections|all)"' <<<"$opened" && grep -q '"view":"letter"' <<<"$held" && grep -q '"allM":true' <<<"$held" &&
+  grep -q '"view":"letter"' <<<"$after" && grep -q '"allM":true' <<<"$after" && grep -qE '"view":"(sections|all)"' <<<"$back" &&
+  grep -q '"allEnds":true' <<<"$opened" && grep -q '"view":"all"' <<<"$alls" && grep -q '"chip":true' <<<"$alls" &&
+  ! grep -q '"heads":0' <<<"$alls" && grep -qE '"view":"(sections|all)"' <<<"$allback" && grep -q '"chip":false' <<<"$allback"; then
+  echo "PASS az-scrub: opens on its sections, M shows only the M apps, kept on release, the chip goes back; All at both ends shows every app under headings, its chip goes back"
 else
-  echo "FAIL az-scrub: held=$held after=$after"
+  echo "FAIL az-scrub: opened=$opened held=$held after=$after back=$back all=$alls allback=$allback"
 fi

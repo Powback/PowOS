@@ -1,0 +1,33 @@
+#!/bin/bash
+# criu-src WORKLOAD ITER (criu-a, root): start WORKLOAD in tmux, type into it continuously, pre-dump ITER times with
+# soft-dirty tracking (each iteration's image dir streamed to criu-b right away), then the final dump (the app freezes
+# here and is killed on the source) streamed the same way; criu-dst restores it. ITER=0 = plain stop-and-copy.
+#   WORKLOAD = vim-small (vim on the 1 MB Wikipedia HTML) | vim-big (vim on a 256 MB text file)
+wl=$1 n=$2
+ms() { date +%s%3N; }
+send() { tar -C /ck -cf - "$1" | socat -u - TCP:criu-b:2800,retry=50,interval=0.05; }
+pkill -f '^tmux'; pkill -x vim; pkill -f typer; rm -rf /ck; mkdir -p /ck; : > /ck/src.log
+case $wl in
+  vim-small) f=/srv/page/raw.html ;;
+  vim-big) f=/tmp/big.txt; [ -f $f ] || { while [ $(stat -c %s $f 2>/dev/null || echo 0) -lt 268435456 ]; do cat /srv/page/raw.html >> $f; done; } ;;
+esac
+tmux new-session -d -s w -x 160 -y 48 "vim -n $f"
+sleep $([ $wl = vim-big ] && echo 8 || echo 2)
+tmux send-keys -t w i
+# typer: ~20 chars/s into vim's insert mode (a separate process, outside the dumped tree)
+( exec -a typer bash -c 'while :; do tmux send-keys -t w -l "x"; sleep 0.05; done' ) &
+sleep 2
+P=$(pgrep -o '^tmux')
+rss=$(ps -o rss= --ppid $P | awk '{s+=$1} END {print s}')
+echo "pid $P rss_kb_vim $rss" >> /ck/src.log
+t0=$(ms); prev=""
+for i in $(seq 1 $n); do
+  mkdir -p /ck/$i; a=$(ms); criu pre-dump --unprivileged -t $P -D /ck/$i $prev --track-mem -v2 -o /tmp/criu-pre$i.log
+  b=$(ms); bytes=$(du -sb /ck/$i | cut -f1); send $i; c=$(ms)
+  echo "pre $i dump_ms $((b-a)) send_ms $((c-b)) bytes $bytes" >> /ck/src.log
+  prev="--prev-images-dir ../$i"; sleep 1
+done
+pkill -f typer; sleep 0.2
+mkdir -p /ck/f; tf=$(ms); criu dump --unprivileged -t $P -D /ck/f $prev --track-mem -v2 -o /tmp/criu-dump.log; rc=$?
+b=$(ms); bytes=$(du -sb /ck/f | cut -f1); send f; c=$(ms)
+echo "final rc=$rc t0 $t0 freeze_start $tf dump_ms $((b-tf)) send_ms $((c-b)) bytes $bytes sent_at $c" >> /ck/src.log

@@ -237,7 +237,7 @@
   },
   "ui/grid.tsx": {
     "complexity": {
-      "count": 3
+      "count": 2
     },
     "max-depth": {
       "count": 2
@@ -463,7 +463,7 @@
       "count": 1
     },
     "sonarjs/cognitive-complexity": {
-      "count": 2
+      "count": 1
     }
   },
   "ui/terminal.tsx": {

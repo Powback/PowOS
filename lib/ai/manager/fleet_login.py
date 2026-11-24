@@ -120,7 +120,13 @@ def status(url: str, token: str) -> dict:
         return out
     code_t, tenants = call(url, token, "GET", "/tenants", timeout=4)
     rows = tenants.get("tenants") if isinstance(tenants.get("tenants"), list) else []
-    if code == 200 and check.get("tenant"):
+    device = check.get("device") if isinstance(check.get("device"), dict) else None
+    if code == 200 and check.get("tenant") and device:
+        # This device's own token (PowStation's realm gave it to the device, claude-rate-limiter 8a2e251): its tenant is
+        # named, but only a tenant secret may drive /oauth - a lapsed subscription is re-signed on the PowStation.
+        out["tenant"], out["device"] = str(check["tenant"]), str(device.get("name") or "")
+        out["why"] = "this device uses " + out["tenant"] + "'s Claude from your PowStation"
+    elif code == 200 and check.get("tenant"):
         name = str(check["tenant"])
         out["tenant"], out["canLogin"] = name, True
     elif code == 200:
@@ -128,15 +134,26 @@ def status(url: str, token: str) -> dict:
         # pick from here, the admin signs in on the authority.
         out["why"] = "this claude-auth doesn't say whose account this is (older than ab1c334): sign in at " + url + "/manage"
         return out
+    elif device and device.get("refused"):
+        # A device token the PowStation issued but gives no subscription now (revoked, or never given one): AI is off
+        # for this device until the owner signs in to PowStation on it (Pow account) or an approver gives it Claude.
+        out["state"] = "missing"
+        out["why"] = "this device has no Claude from your PowStation yet: sign in to PowStation (your Pow account) or ask an approver"
+        return out
     else:
         # Not a tenant secret: the proxy routes it to the default subscription, which only the admin can re-login.
         name = next((r.get("name") for r in rows if r.get("isDefault")), None)
         out["tenant"] = name
-        out["why"] = "this machine's token can't sign in by itself: sign in at " + url + "/manage"
+        out["why"] = "this machine's token can't sign in by itself: sign in to PowStation (your Pow account) on it"
     row = next((r for r in rows if r.get("name") == out["tenant"]), None)
     state, why = classify(row)
     out["state"] = state
-    if not out["canLogin"] and state in ("missing", "refresh"):
+    if device and state in ("missing", "refresh"):
+        out["why"] = out["tenant"] + "'s Claude login on your PowStation needs the owner: " + (why or "sign in again") + \
+            " - or sign in to PowStation here to move this device to the owner's subscription"
+    elif device:
+        pass
+    elif not out["canLogin"] and state in ("missing", "refresh"):
         out["why"] = (why + " - " if why else "") + out["why"]
     elif why:
         out["why"] = why

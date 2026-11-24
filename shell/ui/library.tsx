@@ -16,6 +16,7 @@ import { AppIcon } from "./apps.tsx";
 import { folderName, morphing } from "./folders.tsx";
 import type { App } from "../types.ts";
 import { Icon } from "./icons.tsx";
+import { isPowApp, POW, POW_FOLDER, powGroups } from "./launcherview.ts";
 import { PackBar, packAction, packCancellable, packDownload, packStatus, usePacks } from "./packs.tsx";
 
 /** ApplicationInfo.CATEGORY_* (0..8) -> the library's category. */
@@ -86,6 +87,15 @@ export type LibraryFolder = { key: string; name: string; apps: { key: string; la
 const entry = (a: App) => ({ key: a.key, label: a.label, app: a.key });
 const byLabel = (a: { label: string }, b: { label: string }) => a.label.localeCompare(b.label);
 
+/**
+ * The Pow folder (launcherview.ts POW_FOLDER): every .pow web app the user hasn't put in a folder of their own, in its
+ * catalog categories' order ("infrastructure" last), A to Z in each. None: null (no empty folder).
+ */
+function powFolderOf(list: App[], inOwn: Set<string>): LibraryFolder | null {
+  const order = powGroups(list.filter((a) => !inOwn.has(a.key)), (a, b) => a.localeCompare(b)).flatMap((g) => g.apps);
+  return order.length ? { key: POW_FOLDER, name: POW, apps: order.map(entry), own: false } : null;
+}
+
 /** The library's folders: the user's own first (as they are), then a category's for every other app, "Other" last. */
 export const library = computed<LibraryFolder[]>(() => {
   const own = home.value.items.filter((i) => i.kind === "folder");
@@ -95,13 +105,15 @@ export const library = computed<LibraryFolder[]>(() => {
   const seen = new Set<string>();
   for (const a of apps.value) {
     const name = a.label.trim().toLowerCase();
-    if (inOwn.has(a.key) || seen.has(name)) continue;
+    if (inOwn.has(a.key) || isPowApp(a) || seen.has(name)) continue;
     seen.add(name);
     const c = categoryOf(a);
     groups.set(c, [...(groups.get(c) ?? []), a]);
   }
+  const pow = powFolderOf(apps.value, inOwn);
   const cats = [...groups.entries()]
-    .map(([c, list]) => ({ key: `lib:${c}`, name: NAMES[c] ?? c, apps: list.map(entry).sort(byLabel), own: false }))
+    .map(([c, list]): LibraryFolder => ({ key: `lib:${c}`, name: NAMES[c] ?? c, apps: list.map(entry).sort(byLabel), own: false }))
+    .concat(pow ? [pow] : [])
     .sort((a, b) => (a.key === "lib:other" ? 1 : b.key === "lib:other" ? -1 : a.name.localeCompare(b.name)));
   return [...own.map((f) => ({ key: f.key, name: folderName(f.key), apps: f.apps!, own: true })), ...cats];
 });

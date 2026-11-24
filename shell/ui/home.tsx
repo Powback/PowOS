@@ -14,10 +14,12 @@ import type { App, PageRect } from "../types.ts";
 import { AppCell, AppMenu } from "./apps.tsx";
 import { Bar } from "./bar.tsx";
 import { DockSearchButton, buttonMorph, dockButton, grabPill, useButtonMorph } from "./docksearch.tsx";
+import { nativeRects, NATIVE_FACE } from "./scrollown.ts";
 import { chromeWay, drawerDragging, drawerOpen, followOpenness, homeGestures, launcherTakesHome, pageDrag, shadeTakesHome, widthOf, windowGestureActive } from "./gesture.ts";
 import { tick } from "./haptics.ts";
 import { PageDots } from "./pagedots.tsx";
 import { Carried, Folders, Pages, startCarry } from "./grid.tsx";
+import { StackSheet } from "./stacks.tsx";
 import { DockOutGhost } from "./dockout.tsx";
 import { buttonSlot, carriedApp, shownLess, slotPast } from "./dockdrop.ts";
 import { ScreenPanel } from "./screen.tsx";
@@ -40,7 +42,7 @@ import { overWindows } from "./panellift.ts";
 import { SearchSpotMenu, openSpotMenu, pillBelow, searchClasses } from "./searchwidget.tsx";
 import { wideHome } from "../hosts/wide.ts";
 import { webWins, windowFrame } from "./webwindows.tsx";
-import { byKey, carry, dock, dockPosition, dockAim, dockDrag, drawer, editing, folder, menu, page, pageCount, pullKind, pullPanels, recent, screen, selected, sessionView, setDock, windows } from "../state.ts";
+import { byKey, carry, dock, dockPosition, homeDockClasses, dockAim, dockDrag, drawer, editing, folder, menu, page, pageCount, pullKind, pullPanels, recent, screen, selected, sessionView, setDock, windows } from "../state.ts";
 import { screens } from "../screens.ts";
 import { appView } from "../apps/pages.ts";
 import { remoteOpen } from "../remote.ts";
@@ -84,8 +86,25 @@ export function fullScreenAppRegion(): PageRect {
   return { left: 0, top, width: view.w, height: Math.max(0, view.h - top - bottom) };
 }
 
-function pageRect(r: DOMRect): PageRect {
-  return { left: r.left, top: r.top, width: r.width, height: r.height };
+function pageRect(r: DOMRect, shift = 0): PageRect {
+  return { left: r.left - shift, top: r.top, width: r.width, height: r.height };
+}
+
+/**
+ * How far (px) home and its page track still are from where they rest: a page swipe's settle (or the slide back from
+ * PowOS AI's page) still in flight when the regions are read. The report runs right after the finger lets go, while
+ * the track eases ~200 ms to its page - the rects read then were off by the rest of the slide, and stayed so until the
+ * next report: a strip on home (the recent apps) wasn't where the host thought, so a drag on it was the shade's pull
+ * (the user, 11-23: "scrolling the recent-apps bar on home SOMETIMES activates the notification screen"). Rects are
+ * reported where they rest: [home] home's own slide, [track] its track's on top (for what's on the pages).
+ */
+function settleShift(): { home: number; track: number } {
+  const home = document.querySelector(".home")?.getBoundingClientRect().left ?? 0;
+  const track = document.querySelector(".page-track");
+  const pages = document.querySelector(".pages");
+  if (!track || !pages || page.value < 0) return { home, track: home };
+  const p = pages.getBoundingClientRect();
+  return { home, track: track.getBoundingClientRect().left - p.left + page.value * p.width + home };
 }
 
 /** [el]'s scroll axes by its style (overflow auto / scroll): y, x, or none. A style read only, never a layout one. */
@@ -123,8 +142,21 @@ function reshapes(m: MutationRecord): boolean {
 }
 const shapeChanged = (ms: MutationRecord[]) => ms.some(reshapes);
 const homeShape = new MutationObserver((ms) => {
-  if (scrollers && shapeChanged(ms)) scrollers = null;
+  if (!scrollers || !shapeChanged(ms)) return;
+  scrollers = null;
+  reshaped();
 });
+/**
+ * Home's scrollers may have changed (a recent app added, a widget's list grown): the host's regions are reported again
+ * (at most every [RESHAPE_MS]) - before, only a page change or a resize did, and a strip that had just begun to scroll
+ * was the shade's until then.
+ */
+const RESHAPE_MS = 300;
+let reshapeTimer = 0;
+function reshaped() {
+  if (reshapeTimer) return;
+  reshapeTimer = setTimeout(() => ((reshapeTimer = 0), reportRegions?.(true)), RESHAPE_MS) as unknown as number;
+}
 let watched: Element | null = null;
 
 function homeScrollers(home: Element) {
@@ -161,22 +193,39 @@ function claimFree(dockNode: HTMLElement | null): PageRect[] {
   return [...claimStatic(dockNode), ...claimWindows()];
 }
 
+/** The settle's shift for [el]'s rect: the track's for what's on the pages, else home's own. */
+const shiftOf = (el: Element, shift: { home: number; track: number }) => (el.closest(".page-track") ? shift.track : shift.home);
+
+/** Home's scrollers (DOM ones with more to show, outside the dock) and its Android widgets' native ones, with their rects. */
+function homeScrollRects(home: Element, dockNode: HTMLElement | null): [DOMRect, Element][] {
+  const dom = homeScrollers(home)
+    .filter(({ el, axes }) => el.isConnected && !dockNode?.contains(el) && hasMore(el, axes))
+    .map(({ el }) => [el.getBoundingClientRect(), el] as [DOMRect, Element]);
+  return [...dom, ...nativeScrollRects(home)];
+}
+
 /** The dock's and home's scrollers (the costly walk). */
 function claimStatic(dockNode: HTMLElement | null): PageRect[] {
   const out: PageRect[] = [];
   const view = viewport();
   const big = view.w * view.h * 0.5;
-  const add = (el: Element) => {
-    const r = el.getBoundingClientRect();
-    if (r.width > 0 && r.height > 0 && r.width * r.height < big) out.push(pageRect(r));
+  const shift = settleShift();
+  const put = (r: DOMRect, el: Element) => {
+    if (r.width > 0 && r.height > 0 && r.width * r.height < big) out.push(pageRect(r, shiftOf(el, shift)));
   };
+  const add = (el: Element) => put(el.getBoundingClientRect(), el);
   if (dockNode) {
     add(dockNode);
     dockNode.querySelectorAll(".dock-pages, .dock-recent").forEach(add);
   }
   const home = document.querySelector(".home");
-  if (home) for (const { el, axes } of homeScrollers(home)) if (el.isConnected && !dockNode?.contains(el) && hasMore(el, axes)) add(el);
+  if (home) for (const [r, el] of homeScrollRects(home, dockNode)) put(r, el);
   return out;
+}
+
+/** An Android widget's own scrollers (a sideways row, a list: AppWidgets.kt sends them with each frame), as the DOM's. */
+function nativeScrollRects(home: Element): [DOMRect, Element][] {
+  return [...home.querySelectorAll(NATIVE_FACE)].flatMap((face) => [...nativeRects(face, "x"), ...nativeRects(face, "y")].map((r) => [r, face] as [DOMRect, Element]));
 }
 
 /** Every web window shown, with its resize zones (cheap: one rect per window). */
@@ -246,7 +295,7 @@ if (!new URLSearchParams(location.search).get("mode")) effect(() => {
   const dockNode = dockElement.value;
   const report = (full: boolean) => {
     const r = dockNode?.getBoundingClientRect();
-    const exclude = r ? pageRect(r) : undefined;
+    const exclude = r ? pageRect(r, settleShift().home) : undefined;
     if (full) staticRegions = claimStatic(dockNode);
     const regions = [...staticRegions, ...claimWindows()];
     powos.shade.homePull(on, exclude, mainPage, regions).then(
@@ -439,7 +488,10 @@ function DockRecents({ count }: { count: number }) {
         e.pair ? (
           <PairCell key={entryKey(e)} pair={e.pair} />
         ) : (
-          <AppCell key={e.app.key} app={e.app} labels={false} class={markClass(e.app.key)} draggable onTap={tapDock} />
+          // The pinned cells' lift-out too (liftOut: a move away from the dock carries it as a window's drag; along the
+          // dock it stays the row's scroll) - recent ones had only the hold's drag onto home (the user, 11-23: "the drag
+          // to open as window works for the docked icons but not the recent ones").
+          <AppCell key={e.app.key} app={e.app} labels={false} class={markClass(e.app.key)} draggable onMove={liftOut} onTap={tapDock} />
         ),
       )}
     </>
@@ -492,7 +544,7 @@ function DockWindows({ pinned }: { pinned: string[] }) {
       ))}
       {shown.map(([k, state]) => {
         const app = byKey.value.get(k);
-        return app && <AppCell key={`w ${k}`} app={app} labels={false} class={`windowed ${state} ${markClass(k)}`} onTap={tapDock} />;
+        return app && <AppCell key={`w ${k}`} app={app} labels={false} class={`windowed ${state} ${markClass(k)}`} onMove={liftOut} onTap={tapDock} />;
       })}
     </>
   );
@@ -590,7 +642,8 @@ export function Dock() {
   });
   if (gap >= 0) cells.splice(gap, 0, <div key=" gap" class="app dock-gap" />);
   // The centre slot: as many apps left of it as right, an odd one more on the right (the user, 01:26: "3 | 3"); a side
-  // column's end, right before its recent apps: the separator between the two (buttonSlot).
+  // column's end, right before its recent apps - its start when bottom-aligned, the recents above: the separator
+  // between the two (buttonSlot, ui/dockalign.ts).
   if (button) cells.splice(buttonSlot(cells.length), 0, <DockSearchButton key=" search" />);
   const r = aim?.swap && el.current?.getBoundingClientRect();
   return (
@@ -711,12 +764,17 @@ function HomeLauncher() {
 /** Home's search as the dock's button (docksearch.tsx). */
 const searchDockClasses = () => `${dockButton.value ? "search-dock" : ""} ${buttonMorph.value ? "button-morph" : ""}`;
 
-/** A long press on home's own bar (not its mic: hold to talk): the search's menu - bar | dock button (searchwidget.tsx). */
+/**
+ * A long press on home's own bar (not its mic: hold to talk), in edit mode only: the search's menu - bar | dock button
+ * (searchwidget.tsx openSpotMenu refuses it outside edit mode: SE1). Outside it the press is the bar's own (no menu).
+ */
 function pillMenu(e: MouseEvent) {
   const t = e.target as HTMLElement;
   const pill = t.closest?.(".home > .bar");
-  if (!pill || t.closest(".mic") || !openSpotMenu(pill)) return;
-  e.preventDefault();
+  if (!pill || t.closest(".mic")) return;
+  // Outside edit mode an unfocused bar's long press does nothing (no menu, no text selection); a focused field keeps
+  // its own (paste, select).
+  if (openSpotMenu(pill) || !pill.contains(document.activeElement)) e.preventDefault();
 }
 
 /**
@@ -729,7 +787,7 @@ function HomeFrame({ children }: { children: preact.ComponentChildren }) {
     <div
       onPointerDownCapture={grabPill}
       onContextMenu={pillMenu}
-      class={`home adopts dock-${dockPosition.value} ${wideHome.value ? "wide" : ""} ${pillBelow() ? "pill-below" : ""} ${searchClasses()} ${drawerDragging.value ? "dragging" : ""} ${drawerOpen.value ? "open" : ""} ${editing.value ? "editing" : ""} ${overWindows.value ? "over-windows" : ""} ${carriedApp(carry.value) ? "carry-app" : ""} ${searchDockClasses()}`}
+      class={`home adopts ${homeDockClasses.value} ${wideHome.value ? "wide" : ""} ${pillBelow() ? "pill-below" : ""} ${searchClasses()} ${drawerDragging.value ? "dragging" : ""} ${drawerOpen.value ? "open" : ""} ${editing.value ? "editing" : ""} ${overWindows.value ? "over-windows" : ""} ${carriedApp(carry.value) ? "carry-app" : ""} ${searchDockClasses()}`}
     >
       {children}
     </div>
@@ -781,6 +839,8 @@ export function Home() {
       {/* A tile or app carried by a finger, over everything it can be dropped on (the pages, the dock). */}
       {/* An open folder: the tile grows into it, over everything (ui/folderview.tsx). */}
       <Folders />
+      {/* A widget stack's edit sheet (ui/stacks.tsx): reorder, take out, add, unstack. */}
+      <StackSheet />
       <Carried />
       <DockOutGhost />
     </>

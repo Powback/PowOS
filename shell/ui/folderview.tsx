@@ -11,10 +11,12 @@
  *   blurs what's under the window, never home's tiles in it, so they fade rather than blur.
  * - Transforms and opacity only, inline only while it moves: at rest nothing is left to draw.
  */
+import { scrollOwner } from "./scrollown.ts";
 import { useEffect, useLayoutEffect, useRef, useState } from "preact/hooks";
 import { folder, home } from "../state.ts";
 import { AppPress, folderNames, morphing, nameFolder, type DragOut } from "./folders.tsx";
 import { library } from "./library.tsx";
+import { POW_FOLDER } from "./launcherview.ts";
 import { geometry } from "./grid.tsx";
 import { spring, springFast } from "./spring.ts";
 
@@ -33,12 +35,26 @@ function shownOf(key: string | null): Shown | null {
   return l ? { key, name: l.name, apps: l.apps, own: l.own } : null;
 }
 
-/** The tile the folder opens from (its face on home, its card in the library). */
-const tileOf = (key: string) =>
-  document.querySelector<HTMLElement>(`.home-tile[data-key="${CSS.escape(key)}"] .folder-face, .lib-card[data-key="${CSS.escape(key)}"]`);
+/**
+ * The tile the folder opens from (its face on home, its card in the library) - the Pow folder's: its icon on the dock or
+ * a home tile (apps.tsx PowFolderIcon), or its library card. The one on screen: the library's cards are laid out
+ * beside home when it's on another page, and the launcher's cell is under its fade once it's closed.
+ */
+function tileOf(key: string) {
+  const k = CSS.escape(key);
+  const pow = key === POW_FOLDER ? ", .pow-face:not(.drawer .pow-face)" : "";
+  const all = [...document.querySelectorAll<HTMLElement>(`.home-tile[data-key="${k}"] .folder-face, .lib-card[data-key="${k}"]${pow}`)];
+  return all.find(onScreen) ?? all[0] ?? null;
+}
+
+const onScreen = (el: HTMLElement) => {
+  const r = el.getBoundingClientRect();
+  return r.width > 0 && r.right > 0 && r.left < innerWidth && r.bottom > 0 && r.top < innerHeight;
+};
 
 /** Its mini icons, in order. */
-const minisOf = (tile: HTMLElement | null) => (tile ? [...tile.querySelectorAll<HTMLElement>(".folder-face > img, .folder-face > span, .lib-icons > .app-icon")] : []);
+const minisOf = (tile: HTMLElement | null) =>
+  tile ? [...tile.querySelectorAll<HTMLElement>(".folder-face > img, .folder-face > span, .lib-icons > .app-icon, .pow-face > img")] : [];
 
 /** [a] -> [b] as a transform from the top left (b's box drawn at a's). */
 function from(a: DOMRect, b: DOMRect) {
@@ -175,7 +191,8 @@ function Sheet({ s, closing, onHold, done }: { s: Shown; closing: boolean; onHol
       data-key={s.key}
       style={{ "--fcell-w": `${g.cellW || 76}px`, "--fcell-h": `${Math.max(g.cellH, g.cellW) || 86}px`, "--fcols": cols }}
       onClick={close}
-      onPointerDown={(e) => (swipe.current = e.clientY)}
+      // A list in the folder scrolled down owns a drag down (scrollown.ts): it scrolls back first; at its top the sheet's.
+      onPointerDown={(e) => (swipe.current = scrollOwner(e.target as Element, { x: e.clientX, y: e.clientY, axis: "y", d: 1, stop: root.current }) ? null : e.clientY)}
       onPointerMove={(e) => {
         // The sheet follows a swipe down under the finger; a few px of slop leave a tap a tap.
         if (closing || swipe.current == null) return;

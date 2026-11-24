@@ -43,6 +43,11 @@ class Fake(BaseHTTPRequestHandler):
 
     def do_GET(self):
         if self.path == "/auth/check":
+            tok = self.headers.get("Authorization", "")[7:]
+            if tok == "powdev-s25":  # a PowOS device's own token (the realm's), on the empty default tenant
+                return self.reply(200, {"ok": True, "admin": False, "tenant": "default", "device": {"id": "d", "name": "S25"}})
+            if tok == "powdev-revoked":
+                return self.reply(401, {"ok": False, "admin": False, "tenant": None, "device": {"refused": True}})
             if not self.mine():
                 return self.reply(401, {"ok": False, "admin": False})
             body = {"ok": True, "admin": False}
@@ -50,7 +55,7 @@ class Fake(BaseHTTPRequestHandler):
                 body["tenant"] = "powback"
             return self.reply(200, body)
         if self.path == "/tenants":
-            return self.reply(200, {"tenants": [row("default", {"ok": True, "hasCreds": True}, True), row("powback", STATE["auth"])]})
+            return self.reply(200, {"tenants": [row("default", STATE.get("default", {"ok": True, "hasCreds": True}), True), row("powback", STATE["auth"])]})
         self.reply(404, {})
 
     def do_POST(self):
@@ -130,7 +135,23 @@ check(s["tenant"] is None and s["state"] == "unknown" and not s["canLogin"] and 
 STATE["name_tenant"] = True
 
 s = status(other)
-check(s["tenant"] == "default" and not s["canLogin"] and "/manage" in s["why"], "a non-tenant secret: the default, sign in at /manage")
+check(s["tenant"] == "default" and not s["canLogin"] and "sign in to PowStation" in s["why"], "a non-tenant secret: the default, sign in to PowStation")
+
+# A PowOS device's own token (docs/DEVICES.md "Sign in to your Pow account"): tenant named, no /oauth from here.
+def conf_with(tok):
+    pth = os.path.join(work, tok + ".conf")
+    with open(pth, "w") as f:
+        f.write(f"ANTHROPIC_BASE_URL={URL}\nANTHROPIC_AUTH_TOKEN={tok}\n")
+    return pth
+STATE["default"] = {"ok": False, "mode": "authority", "hasCreds": False}
+s = status(conf_with("powdev-s25"))
+check(s["tenant"] == "default" and s["device"] == "S25" and s["state"] == "missing" and not s["canLogin"]
+      and "sign in to PowStation" in s["why"], f"device token on an empty tenant: missing, sign in to PowStation ({s})")
+STATE["default"] = {"ok": True, "hasCreds": True}
+s = status(conf_with("powdev-s25"))
+check(s["state"] == "ok" and not s["canLogin"], "device token on a working tenant: ok")
+s = status(conf_with("powdev-revoked"))
+check(s["state"] == "missing" and not s["canLogin"] and "sign in to PowStation" in s["why"], "refused device token: missing, sign in")
 
 
 dead = os.path.join(work, "dead.conf")

@@ -3,11 +3,13 @@
  * recent strip, home's grid, or out of the dock itself - pins where it's let go over the dock. While it hovers there
  * the dock makes room for it (home.tsx Dock reads [dockAim]); a full dock offers to swap the app under the finger.
  */
-import { byKey, dock, dockPosition, dockAim, editing, homePage, searchInDock, selected, setDock, type Carry } from "../state.ts";
+import { byKey, dock, dockPosition, dockAim, editing, homePage, searchInDock, selected, setDock, sideDockAlign, type Carry } from "../state.ts";
+import { searchButtonIndex } from "./dockalign.ts";
 import { tick } from "./haptics.ts";
 import { powos } from "../bridge.ts";
 import { wideHome } from "../hosts/wide.ts";
 import { aimSearch } from "./searchwidget.tsx";
+import { addToHome } from "./powtiles.ts";
 
 /** The most apps the dock holds; a full one swaps instead of growing. */
 export const DOCK_MAX = 6;
@@ -48,10 +50,10 @@ function overDock(r: DOMRect, x: number, y: number, vertical: boolean) {
 
 /**
  * The search button's index among [cells] dock cells (docksearch.tsx): a bottom dock's middle, an odd extra app on the
- * right; a side column's end - the button is the separator between its pinned apps and its recent ones (the user,
- * 2026-10-31 13:31), never also mid-column.
+ * right; a side column's end (its start when bottom-aligned, ui/dockalign.ts) - the button is the separator between
+ * its pinned apps and its recent ones (the user, 2026-10-31 13:31), never also mid-column.
  */
-export const buttonSlot = (cells: number) => (dockPosition.value !== "bottom" ? cells : Math.floor(cells / 2));
+export const buttonSlot = (cells: number) => searchButtonIndex(dockPosition.value, sideDockAlign.value, cells);
 
 /** The app slot (of [n]) for the dock's rendered cell [cell], which counts the search button when it's there. */
 export function slotPast(cell: number, n: number) {
@@ -114,7 +116,7 @@ export function dropOnDock(c: Carry, x: number, y: number): boolean {
 /** Pins [app] on home at [cell] of [page]; false when the host can't (see the HACK). */
 export async function addHome(app: string, page: number, cell?: { x: number; y: number; w: number; h: number }) {
   try {
-    await powos.home.add(app, page, cell);
+    await addToHome(app, page, cell);
     return true;
   } catch {
     // HACK: the Android host's home (ShellHome.add) only knows a:/l: keys and refuses a PowOS app's p: key, so a

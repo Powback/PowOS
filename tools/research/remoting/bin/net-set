@@ -1,0 +1,10 @@
+#!/bin/bash
+# net-set NET (as root): emulate the phone's Wi-Fi leg on this container's eth0 egress (both containers get it, so
+# the delay applies once per direction). NET = none | D,J,L (delay ms, uniform jitter ms, loss %). With jitter,
+# `rate 400mbit` (~50 MB/s, the Open's realistic Wi-Fi goodput) keeps packets in order (netem only reorders without
+# a rate); the same cap is applied to every emulated case.
+dev=eth0; tc qdisc del dev $dev root 2>/dev/null
+[ "$1" = none ] && { echo "net none"; exit 0; }
+IFS=, read d j l <<<"$1"
+tc qdisc add dev $dev root netem delay ${d}ms ${j}ms loss ${l}% rate 400mbit
+tc qdisc show dev $dev

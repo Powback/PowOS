@@ -10,6 +10,10 @@
 #   frozen    as steam, but Steam frozen (powos-sleep-gui sleep steam) FROZEN_S (100) s before the tap: the user's path
 #             after a while in PowOS - its CM server drops a silent client 79 s into a freeze, and the tap then waited
 #             Steam's 11 s reconnect backoff (2026-11-05: handoff 12.7 s) unless unified sleep kept the link (link_watch)
+#   pulse     as steam, frozen, then the tap lands in a link keepalive pulse (powos-sleep-gui link_watch thaws a frozen
+#             Steam 1.5 s every ~50 s from its freeze; the tap waits up to 75 s for one): 557340 11-18 21:52, a tap 1 s after a pulse, Steam
+#             was refrozen at the pulse's end and ran the launch 1.5 s per pulse - CheckShaderDepotManifest 55 s,
+#             SynchronizingCloud 54 s, launch 134 s. "steam steps" says how long each of Steam's launch steps took.
 #   fexcache  as steam, with FEX's code cache on for the game (FEX_ENABLECODECACHINGWIP=1 through PowOS's Proton
 #             user_settings.py: ~/.config/powos/proton-settings.json, removed after; a Proton without ours: its own
 #             user_settings.py, removed after) and FEXOfflineCompiler process-all between two such runs; lists the files FEX wrote
@@ -137,6 +141,15 @@ exported() {
   echo "   KWin: $(tail -n +"$(($2 + 1))" "$HYPR" 2>/dev/null | grep -a -E 'has its surface|full-screen window|opened as a task|window task [0-9]+ live|new windows as tasks' | sed 's/kwin_backend_anland: //' | tail -6 | cut -c1-160 | tr '\n' '|')"
   echo "   X: $(xwininfo -id "$3" 2>/dev/null | awk '/Map State|Override Redirect|Width|Height/ {$1=$1; printf "%s; ", $0}')$(xprop -id "$3" _NET_WM_STATE _NET_WM_WINDOW_TYPE WM_TRANSIENT_FOR 2>/dev/null | tr '\n' ' ')"
 }
+# cs_steam_steps <console_log byte offset> <tap time>: the launch's steps as Steam logged them (GameAction "changed task
+# to"), each with its start in s from the tap - where a slow launch waited before its process (CheckShaderDepotManifest,
+# SynchronizingCloud, ...).
+cs_steam_steps() {
+  local t0s=${2%.*} l ts
+  tail -c +"$(($1 + 1))" "$S/logs/console_log.txt" 2>/dev/null | grep -a "GameAction \[AppID $APP," | grep -a "changed task to" \
+    | while IFS= read -r l; do ts=$(date -d "${l:1:19}" +%s 2>/dev/null) || continue
+        printf '%s@%s ' "$(sed -E 's/.*changed task to ([A-Za-z]+).*/\1/' <<< "$l")" "$((ts - t0s))"; done
+}
 # cs_ready_steam <variant>: get Steam into the state the variant needs before the tap (closed for cold, left
 # running and asleep for the warm variants). Split out of run() to keep it under the length budget
 # (test-complexity.sh) - same steps, same messages.
@@ -147,10 +160,16 @@ cs_ready_steam() {
        # A -silent Steam has no window, so unified sleep never freezes it (seen 2026-10-23: resident Steam awake 20 min
        # after its start); a Steam the user had on screen is frozen 15 s after it went out of sight. 25 s at most.
        pill "waiting for Steam to sleep (out of sight)"; for _ in $(seq 25); do [ -n "$(cg)" ] && break; touched; sleep 1; done
+       [ "$1" = pulse ] && { [ -n "$(cg)" ] || powos-sleep-gui sleep steam >/dev/null 2>&1; }  # its pulses count from the freeze
        if [ "$1" = frozen ]; then
          [ -n "$(cg)" ] || powos-sleep-gui sleep steam >/dev/null 2>&1
          pill "Steam frozen ${FROZEN_S:-100} s before the tap"; for _ in $(seq "${FROZEN_S:-100}"); do touched; sleep 1; done
          echo "   frozen ${FROZEN_S:-100} s: cgroup '$(cg)', CM link $(steam_cm_state)"
+       fi
+       if [ "$1" = pulse ]; then  # the tap in a keepalive pulse: Steam out of its sleep cgroup while still counted frozen
+         pill "waiting for a link keepalive pulse"; local w=0
+         while [ -n "$(cg)" ] && [ $w -lt 300 ]; do touched; sleep 0.25; w=$((w + 1)); done
+         echo "   pulse: $([ -z "$(cg)" ] && echo "Steam thawed by a pulse after $((w / 4)) s, tap now" || echo "none in 75 s (tap frozen)")"
        fi ;;
   esac
 }
@@ -347,6 +366,7 @@ run() {  # run <variant> <n>
   sort -t$'\t' -k2,2n "$T/timeline" 2>/dev/null | awk -F'\t' '!p[$1]++ && !a[$3]++ {printf "%6s %s\n", $2, $3}' \
     | sed -E 's|/home/powos/.local/share/Steam/|~S/|g' | head -45 | sed 's/^/     /'
   rm -f "$T/timeline"
+  echo "   steam steps (s from the tap, Steam's 1 s clock): $(cs_steam_steps "$cb" "$t0")"
   echo "   tool: $($CFG get $APP); renderer: $(renderer)"
   echo "   after: $(sizes); evaluator: $(tail -1 "$CD/powos-iscript.log" 2>/dev/null | cut -c1-160)"
   RES_="$RES_ $v#$2 window ${seen[window]:--} frame ${seen[frame]:--};"

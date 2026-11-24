@@ -210,7 +210,7 @@ WindowBlur.kt, WallpaperBackdrop.kt, LiquidGlass.kt; page side shell/ui/nativegl
   wide launcher above the bar (start menu, bar stays tappable); scroll edge fades (drawer, AI panes, shade, chat);
   over-pull unfolds notification stacks; "tests" stop/resume control in v3 Tools (ui/tests.ts, bridge verify.stop -
   needs the new APK, hidden until its dry probe answers).
-- Gate: wideLauncherBar (wide-home), scroll-fade (404x560 so the mock list scrolls), stacks in overpullExpand/Fold,
+- Gate: wideLauncherBar (wide-home), scroll-fade (404x440 so the launcher's sections scroll), stacks in overpullExpand/Fold,
   overpullTests. Stillness helpers must ignore scroll-timeline animations (see Scrollbars note above).
 - Open: no device check yet - queue one per change after the ship (wide drawer + bar, edge fades in drawer and PowOS
   AI, over-pull stacks, tests control after the APK). No board task was claimed (board unreachable at the time).
@@ -256,10 +256,35 @@ WindowBlur.kt, WallpaperBackdrop.kt, LiquidGlass.kt; page side shell/ui/nativegl
   bounds, ui/desktops.ts inWindow) it is the app's by design; left half with pull-up corners on = PowOS AI's panel.
   CDP elementFromPoint can't see Android windows. List end in a check: tap the A-Z bar's last letter, not flings (a
   fling starting at the end IS the over-pull: search + keyboard).
+- Launcher content (11-23, ui/launcherview.ts pure + shell/test/launcherview.test.ts; drawer.tsx Sections/QuickLaunch,
+  only with `AppList sections` - the drawer's Pages; the "+ app" picker and the desktop panel keep the plain A-Z): opens
+  on sections Recent (8, `recent`) / Suggested (4, `usage.frequent` minus Recent; hidden without data) / Quick launch
+  (`files.places`/`files.open`, FilePlaces.kt: DocumentsUI folders + Linux home; only places that resolve). A-Z bar =
+  `launcherLetter` signal: the letter's apps under `.launcher-chip` (tap = back), kept on release, reset on every open.
+  "All" (launcherview ALL) at the bar's top AND foot (LetterBar `ends`, only the launcher's bar; `span.all`): every app
+  under its letter's heading (`[data-group]`), under an "All" chip, kept on release; sliding on to a letter = that
+  letter. No recents + no suggested: the same headed A-Z, no chip. Probe: `[data-view=sections|letter|all]`
+  (`data-letter=All` when picked), `[data-section=recent|suggested|places]`. Shots: drawer, drawer-scrub (held),
+  drawer-letter (released), drawer-all-held (foot All), drawer-all. Device: az-scrub.sh checks open/held/kept/chip + All.
+  Checks that want the list's last letter use `.letter-bar span:not(.all)` (pullup-stage2).
+- Pow folder (11-23, "the pow apps should be in a pow folder"): every .pow web app ("w:<host>") lives in ONE launcher
+  folder "Pow" (launcherview.ts POW/POW_FOLDER "lib:pow", launcherApps/powGroups; never loose in A-Z/letter/All). It is
+  a synthetic entry in state.ts byKey (powFolder; NOT in apps, so search/usage/switcher never see it), drawn by
+  apps.tsx AppIcon -> PowFolderIcon (4 minis on --icon-plate + powos.svg mark). Launcher tap = launcherLetter "Pow"
+  (in-place view by category, infrastructure last, `[data-view=folder]`); dock/home tap = state.ts launch -> folder
+  "lib:pow" (folderview via library.tsx's lib:pow). Home: ShellHome pins only a:/l:, so the folder and single .pow
+  apps are ShellPanels "pow"/"w:<host>" (1x1 cells) mapped to app items in stacks.tsx homeView (ui/powtiles.ts
+  withAppTiles; hidden, never deleted, while the app is gone); every home add goes through powtiles.ts addToHome.
+  Gate pow-folder-{folded,unfolded,unfolded-right,empty} (dev/pow-folder-check.js); shots pow-folder(-open,-dock).
+- One drag for app tiles (11-23, "drag to open as window works for the docked icons but not the recent ones"): launcher
+  tiles + search's app rows (drawer.tsx AppResultRow) = apps.tsx dragHome, carry `toWindow` (dockout.tsx aimOut: over an
+  app / a window page it opens as window or half, as the dock's); dock recents + DockWindows cells get the pinned cells'
+  `onMove={liftOut}` (no-hold lift-out; along the row stays scroll). Root cause was DockRecents' AppCell without onMove.
+  Gate LD1 launcher-drag(-unfolded) (dev/launcher-drag-check.js); device: board-look-windows.sh recent-drag.
 - Drawer: A-Z `.grid.az` in `.drawer-list` (padding-right --letter-bar). RecentRow (`.drawer-recents`) is OFF by
   default: `drawerRecents = stored("drawer.recents")`, "on" shows it; Settings > style > home > "recent apps in the
   drawer". The check is inside RecentRow (Drawer itself is at the cyclomatic limit).
-- A-Z scrub highlight (drawer.tsx highlight()): per LETTER change (not pointermove) `.grid.az[data-scrub]` + the
+- A-Z scrub highlight (drawer.tsx highlight(); now only the plain-A-Z lists - the "+ app" picker, the desktop panel): per LETTER change (not pointermove) `.grid.az[data-scrub]` + the
   letter's cells `[data-lit]` (range first.get(l)..next letter's first); shell.css dims others to 0.4, lit get
   scale 1.05 + translate -2px, 180 ms transitions; release clears. Data attributes on purpose: nativeglass/glass
   MutationObservers watch only style/class, and Preact doesn't own them. Shots scene "drawer-scrub" (synthetic
@@ -291,6 +316,16 @@ WindowBlur.kt, WallpaperBackdrop.kt, LiquidGlass.kt; page side shell/ui/nativegl
   slot: measure the bar with `.home.wide > .bar .bar-pill`, never the first `.bar-pill` (that's the widget's tile).
 - Pinned dock never fades (the user): `.dock.paged:not(.dock-tray)` runs dock-fade-pinned (right fade 0 at rest,
   grows only scrolling into the recents); the wide DockTray keeps dock-fade. Gate dock-no-fade.
+- Side dock alignment (ui/dockalign.ts, state.ts dockAlign key "dock.align", unset = bottom; Settings > style > home >
+  "side dock alignment"; 11-23 the user: docked icons "so far up"): bottom = `.home.dock-end` - .dock-pages
+  column-reverse, pinned page flex none at the foot, .dock-recent its own column-reverse scroller (newest nearest the
+  pinned, scroll-fade mask) above; the search button starts the pinned group (buttonSlot 0). top = the old column.
+  Checks set dockAlignTry (page-only). Gate dock-align-*; shots dock-align-*; device verify/side-dock-align.sh.
+- Side dock reserve (11-23, "launcher is not full width if the docking is on the right"): the launcher's .drawer-clip
+  (apps, PowOS AI, the chat) keeps clear of a side dock ONLY while that dock is shown beside it (shell.css
+  `--dock-reserve`: `.adopts.wide` without the AI panel, or `.pull-screen:has(> .dock)`); folded home's launcher slides
+  the dock out, so no reserve on either side. It used to pad by --side-dock always (64 px empty column). Gate
+  side-dock-width-*; shots side-{left,right}-{drawer,ai,chat}; device verify/side-dock-width.sh.
 
 ## Themed icons (board theme-recolor-icons)
 - Slice 1 (8f5c995): ui/icontint.ts. `iconTint = stored("icons.tint")`: "" (apps' own) | "mono". Settings > style >
@@ -317,6 +352,11 @@ WindowBlur.kt, WallpaperBackdrop.kt, LiquidGlass.kt; page side shell/ui/nativegl
   `.app-icon::after` (running bar) stays outside the clip. Failed/cross-origin: shown as is.
 - Kotlin: ui/IconMask.kt drawShapedIcon draws adaptive icons' own layers in the same 22% rounded square (not the
   system mask), AndroidApps uses it - so Android icons arrive already in the one shape.
+  A tile inside a tile (ui/IconFrame.kt: an adaptive icon whose foreground is a whole rounded-square legacy icon on a
+  plain background layer - how a system wraps legacy icons, One UI yes, OxygenOS no -, or a plain picture with a second
+  tile inside its plain rim) draws only the inner tile, filling the shape (S25 "double border", 2026-11-23). Generic,
+  no vendor check; JVM tests IconFrameTest (tools/agents/jvm-offload.sh :app:testDebugUnitTest --tests '*IconFrame*').
+  The S25 has no adb from the Mac (VPN peer 10.13.13.2, no wireless-debugging pairing): it gets APKs via PowApps pull.
 - Sizes per context: --icon (grid/drawer), --strip-icon (dock/strip), 58% of a tile/folder cell, library 2x2.
 
 ## Running bar (board running-indicator)
@@ -492,6 +532,40 @@ strip only - not the cause when a drag in a tile fails.
 - Fill checks skip .island-offline.alone and .ag-idle-line (sparse by request); clipping still applies.
 - Monospace sizing: budget 0.62 em/char (phone font ~0.575, preview 0.5), line height 1.4.
 
+## Scroll ownership (ui/scrollown.ts; the user 11-23: widget scrollers paged home, the recents bar opened the shade)
+- One rule: a drag along an axis an element under the finger scrolls, with room left that way, is that element's -
+  home's page swipe (gesture.ts claimSideways), vertical home swipes, a stack's swipe (stackSwipeAt) and the folder
+  sheet's swipe down keep off. At its edge a FRESH drag passes on (decided at the claim, as stacks). Native widgets:
+  AppWidgets.kt sends `scrollers` (rect fractions + room per way, canScrollHorizontally/Vertically) with each frame;
+  appwidget.tsx registers them (registerNative); home.tsx also reports them as host regions.
+- The host's shade pull from home's body uses the page's axis lock (HomePullAxis.kt: decides at 10 dp, pull only when
+  dy > 1.4 x |dx|, locked after) - the old 45 deg / 8 dp rule pulled on diagonal strip drags. Any sideways decision on
+  home (and any non-"home" chrome way) calls shade.homeClaim: the host's pull never starts for that finger.
+- Region reports correct for a settle in flight (settleShift: track/home offset) and re-run 300 ms after home's
+  scroller set changes (homeShape). Gate: home-scroll-own (CDP touches, hasTouch viewport). Unit: HomePullAxisTest.
+  Device: tools/phone/verify/scroll-own.sh (diagonal dock drags never show the shade; a widget scroller scrolls).
+
+## Widget stacks (ui/stacks.tsx + ui/stackmodel.ts; the user 11-23 "stack widgets and swipe ... like samsung")
+- Model is pure (stackmodel.ts, test/stackmodel.test.ts, tier1 test-home-stacks.sh). Store "home.stacks" =
+  {v:1, stacks:{id:{keys, shown, anchor}}}; shell-only, every member stays the host's own item (config/state untouched).
+  No store / garbage = no stacks (old layouts load unchanged). The ANCHOR's cell+page is the slot; members are placed
+  there too, but the anchor decides (wide vs folded cells may differ). Keys that leave home are pruned (only between two
+  loaded homes - never against the empty default before load()).
+- homeView (computed: one item per stack, the top member in the slot, `stack: id`) feeds grid.tsx itemsOn, so overlap,
+  joins, glass, drops all see the stack as its one tile. placeItem (searchwidget.tsx) moves/resizes every member.
+- Create: edit mode, a widget carried onto a stackable widget whose slot holds its minimum -> Aim {stack} (drop-spot
+  .stack-aim) -> dropOnStack (optimistic). Or the tile's "add to stack": picker opens, the next stackable widget that
+  appears on home joins (addingTo; cleared when edit mode ends). Stacks hold <= 7. Apps/folders/search never stack.
+- Swipe: StackFaces mounts ONLY the top member at rest; on a claimed swipe the neighbours mount, the track follows by
+  style (no render per move), settle 260 ms, then the neighbour unmounts. Gesture rule (one function, stackSwipeAt):
+  sideways (gesture.ts VERTICAL_RATIO) and a widget that way = the stack's; at the first/last widget the swipe is HOME's
+  page swipe (gesture.ts claimSideways asks the same) - hand-off, no rubber band. Vertical on a stack = home's as ever.
+  Not in edit mode (no data-swipe). A claim sends the content a synthetic pointercancel (an Android widget's touch ends).
+- Edit: "edit stack" action -> StackSheet (reorder up/down, take out = free spot, remove, + widget, unstack all).
+- Faces: `.stack-page > .tile` is named beside `.home-tile > .tile` in every glass rule (shell.css). Gate: home-stack-
+  folded/-unfolded (stackMake/Swipe/UnstackCheck). Shots: home-stack, home-stack-swipe, edit-stack. Device:
+  tools/phone/verify/home-stack.sh.
+
 ## Home grid: merges, relayout
 - grid.tsx joins: a side covered WHOLE by neighbours extends half a gutter (--jX 1); a partially touched side stays at
   its normal inset; seams() adds .tile.seam pieces - a bridge filling the gutter along the shared span and a fillet
@@ -517,6 +591,11 @@ strip only - not the cause when a drag in a tile fails.
   tile's "put back in bar", "+ widget" > search bar, or a drop on the edit sheet (kept while the search is carried)
   = putBackInBar(); a drop on the dock row folded = back in the foot under the dock (footBelow "1"). gesture.ts
   tableOf keys on search-parked too. Gate: search-launcher-folded/-unfolded.
+- One search bar, no re-init (SP1, the user 11-23: home -> search "re-initializes with an animation"): the launcher's bar
+  is home's node AND face - role "apps" has no hint and no icon (bar.tsx ROLE_HINT), Lead keeps ONE .prompt span, only
+  bar-role-ai fades (shell.css). The search's menu (bar | "show as dock button") is edit mode only (SE1: openSpotMenu
+  refuses outside it, home.tsx pillMenu, closed when edit mode ends). Gate searchbar-persists/-edit-only-*
+  (dev/searchbar-check.js, also run on the device by tools/phone/verify/searchbar.sh); shots search-open, search-spot-edit.
 - "+ app" (editsheet.tsx AppPicker): drawer.tsx AppList (the drawer's A-Z list/results + letter bar, onTap instead of
   launch) + bar.tsx Pill with a local query (findApps = the drawer's ranking). A tap = placeNewCells(1,1) (page in
   view, first free cell; wide page too) + powos.home.add, serialized, home re-read before the next; stays open for

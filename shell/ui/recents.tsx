@@ -5,7 +5,9 @@
  * (its card grows to the screen, then the app is there), a swipe up removes it, "clear all" removes all but the pinned
  * ones, a tap beside the cards or Back goes back to the app it was opened over (over home: closes it), the home swipe
  * closes it to home (the host's "recents.end" to: home - the same collapse). A card's icon (or a long press) opens its
- * menu: split screen (then pick the second app), floating window, screenshot, app info, pin.
+ * menu: split screen (then pick the second app), floating window, screenshot, app info, pin. Unfolded with OxygenOS's
+ * Open Canvas, a card pushed up AND toward a side docks into that native split view on that side, beside the newest
+ * other app (ui/carddock.ts; the host's tasks.canvasDock) - the target half lit while the finger is there.
  *
  * A swipe up over an app builds it under the finger (system/Switcher.kt, the native side): home comes up behind the
  * app ("recents.begin"), the app's window shrinks onto the first card's slot - where that slot is, the page tells the
@@ -33,6 +35,7 @@ import { frontWindow, tileApps, webWindowsOn } from "./webwindows.tsx";
 import { spring } from "./spring.ts";
 import { dropKeyboard } from "./keyboard.ts";
 import { appView, closeApp, forgetOpened, mergeTasks, openApp, taskApp } from "../apps/pages.ts";
+import { dockPick, type DockSide } from "./carddock.ts";
 
 type Phase = "closed" | "drag" | "shown";
 
@@ -88,6 +91,12 @@ const opening = signal<{ id: number; rect: Rect; src: string; radius: string; to
 const pinned = signal<Set<string>>(new Set());
 /** The cards' snapshots are in the page (the switcher up, or on its way up or down); off at rest. */
 const loaded = signal(false);
+/** OxygenOS's Open Canvas can take a docked card now (unfolded, supported: the host's tasks.canvas, asked at each open). */
+const canvas = signal(false);
+/** The cards OxygenOS lets into Open Canvas (the host's tasks.canvasSides, asked at each open); null: not told (older APK). */
+let canvasSides: Set<number> | null = null;
+/** The half a card being dragged would dock to (lit under the cards), or null. */
+const dockHover = signal<DockSide | null>(null);
 /** A short note (a screenshot saved). */
 const note = signal<string | null>(null);
 /** Apps running with no card (the host's apps.background), as last asked; those with a card are left out on render. */
@@ -275,6 +284,80 @@ function begin(e: { from: number | null; tasks: RecentTask[] }) {
   toStart();
   frame(0);
   askBackground();
+  askCanvas();
+}
+
+/**
+ * Whether a card can dock into Open Canvas now (the fold may have changed since the last open), and which cards can be a
+ * side of it (OxygenOS's blocklist: Settings can't); an older APK: never.
+ */
+function askCanvas() {
+  dockHover.value = null;
+  canvasSides = null;
+  const ask = powos.tasks.canvas;
+  if (!ask) return void (canvas.value = false);
+  ask().then((on) => (canvas.value = !!on), () => (canvas.value = false));
+  powos.tasks.canvasSides?.().then(
+    (ids) => (canvasSides = Array.isArray(ids) ? new Set(ids) : null),
+    () => (canvasSides = null),
+  );
+}
+
+/** A dragged card entered / left a dock zone: the half it targets lit (null: none). One handler for every card (TaskCard is memoised). */
+function dockHoverCard(side: DockSide | null) {
+  if (side) console.info(`[canvas] card over the ${side} dock zone`);
+  dockHover.value = side;
+}
+
+/** A card's name for a note ("Settings"). */
+const cardName = (id: number) => tasks.value.find((t) => t.id === id)?.label || "This app";
+
+/**
+ * Card [id] let go in the [side] dock zone: Open Canvas with it on that side and the newest other app that can be in it
+ * on the other (the host's tasks.canvasDock: OxygenOS's app-pair shortcut). Never silent (the user, 11-23: "it does play
+ * like a click ... but it doesnt activate splitview"): the dragged app not allowed in split view, no other app that is,
+ * or the host refusing it - the card springs back and a note says why. The switcher itself goes when home stops under
+ * the canvas (recents.hide), as for any launch.
+ */
+function dockCard(id: number, side: DockSide): boolean {
+  const dock = powos.tasks.canvasDock;
+  if (!dock) return refuse(id, "Not supported by this build yet");
+  const pick = dockPick(tasks.value, id, canvasSides);
+  if ("why" in pick)
+    return refuse(id, pick.why === "dragged" ? `${cardName(id)} can't be used in split view` : "Open another app that works in split view first");
+  console.info(`[canvas] dock task ${id} ${side}, beside ${pick.other}`);
+  dock(id, side, pick.other).then(
+    (r) => (r?.ok ? console.info(`[canvas] dock of task ${id} started`) : undocked(id, r?.reason)),
+    (e) => undocked(id, `Split view didn't open (${e?.message ?? e})`),
+  );
+  return true;
+}
+
+/** A dock refused before it started: the reason logged and shown; false = the card springs back. */
+function refuse(id: number, reason: string): false {
+  console.warn(`[canvas] dock of task ${id} refused: ${reason}`);
+  showNote(reason);
+  return false;
+}
+
+/** A dock the host refused: the card back where it was (its fly-off undone), with the reason. */
+function undocked(id: number, reason?: string) {
+  console.warn(`[canvas] dock of task ${id} refused by the host: ${reason ?? "no reason"}`);
+  row?.querySelector<HTMLElement>(`.task[data-task="${id}"]`)?.getAnimations().forEach((a) => a.cancel());
+  showNote(reason || "Split view didn't open");
+}
+
+/** The half a dragged card docks to: Open Canvas's side, lit under the cards; it fades in and out on the spring (§6). */
+function DockTarget({ side }: { side: DockSide | null }) {
+  const pop = usePresence(side != null);
+  const last = useRef(side);
+  if (side) last.current = side;
+  if (!pop.on || !last.current) return null;
+  return (
+    <div class={`recents-dock ${last.current} ${pop.leaving ? "leaving" : ""}`} aria-hidden="true">
+      Split view · {last.current}
+    </div>
+  );
 }
 
 /** Shown without a swipe (the overview button, up and hold over home): it comes up over home. */
@@ -297,6 +380,7 @@ async function show(e: { from: number | null; tasks: RecentTask[] }) {
   toStart();
   frame(0);
   askBackground();
+  askCanvas();
   await nextFrame();
   settle(true);
   frame(1);
@@ -975,6 +1059,7 @@ export function Recents() {
     >
       <div class="recents-scrim" />
       <SplitBanner picking={first != null} />
+      <DockTarget side={dockHover.value} />
       <div class="task-row" ref={rowEl} onClick={(e) => e.target === e.currentTarget && beside()}>
         {list.length ? (
           list.map((t, i) => (
@@ -989,6 +1074,9 @@ export function Recents() {
               onOpen={openCard}
               onRemove={remove}
               onMenu={menuCard}
+              canDock={canvas.value && first == null && !t.split && nativeSide(t.id)}
+              onDockHover={dockHoverCard}
+              onDock={dockCard}
             />
           ))
         ) : (

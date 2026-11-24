@@ -38,6 +38,41 @@ description: Use when working on PowOS window tasks - floating Android windows (
 - Other events: recents.show/hide/tasks/update, switcher.toggle. Home's stop emits recents.tasks (cards laid out ahead).
 - recents.tsx frame(p, x, y, home): CSS vars on the layer + an inline transform/opacity on `.screens` (home + AI page).
 
+## Dock a card into Open Canvas (11-23, the user: "drag a window up and to the side ... the split view native thing")
+- Unfolded, a switcher card pushed up AND toward a side (shell/ui/carddock.ts dockSide: up >= 18% of the card, sideways
+  >= 14% of the screen, >= ~27 degrees off vertical, finger in the outer 36% on that side) docks it into OxygenOS's Open
+  Canvas (com.oplus.pscanvas) on that side, the newest other single Android app on the other (dockPartner). Mostly
+  vertical = the old removal/spring-back (cardRelease; JS test shell/test/carddock.test.ts via
+  test/tier1/test-switcher-carddock.sh). Live: the card follows the finger sideways, `.recents-dock` lights the half.
+- Host: system/CanvasDock.kt (docs/research/pscanvas.md path A: app-pair dynamic shortcut + LauncherApps.startShortcut,
+  no Oplus permission). NOT PowOS's desktop split, NOT WM Shell split. Folded / unsupported: tasks.canvas false, the
+  drag is the old one. Started by intent (a marked workaround) - task reuse logged per dock (`logcat -s PowosCanvasDock`).
+- Partner + blocklist (11-23 fix): the host's `tasks.canvasSides` (CanvasDock.sides: recent tasks whose TaskInfo
+  supportsPocketStudioMultiWindow / supportsSplitScreenMultiWindow aren't false - OxygenOS's split blocklist lands
+  there: Settings - and not PowOS's own package: lock face, home, Linux windows are com.powos.app tasks) is the truth
+  for the partner (carddock.ts dockPick). Never silent: dragged app blocked -> "<App> can't be used in split view";
+  no partner / host refusal -> a note; every host refusal logs `PowosCanvasDock ... refused: <reason>`, the page logs
+  `[canvas] ...`. Card keys are "a:pkg/act" (Android), "l:app" (Linux), null (PowOS lock/home): never match on a raw
+  package prefix. A refused card's fly-off is cancelled -> its `gone` flag must clear on cancel too (it didn't: the
+  card ignored every later touch).
+- Never lost (11-23 night, the user: "When I activate it, it's like hiding the app"): WindowFrames' adopt had taken
+  Open Canvas's container (com.oplus.pscanvas, a full-screen standard task on display 0) into a web window at 17:58;
+  every later dock reused that off-screen container. Now CanvasDock.owns (pscanvas package or a task in the canvas
+  regions) keeps adopt (AdoptGate.CANVAS) and SystemFloat's hand-over off it, and CanvasDock.checkBack reads the dock
+  back at 2.5/4 s: dragged app not in a region -> its task brought back + a toast "Split view didn't open - X is back".
+  Side verdicts use a task's split flags only when it has live activities (TaskInfo.numActivities > 0): a cached
+  task reads false for all of them (Discord 3936) - Discord is on no inner-screen blocklist (sys_wms_split_app_ps.xml
+  `com.discord type="1:0:0"` = bar phone/cover only).
+- Check: `tools/phone/verify/switcher-canvas-dock.sh` (phone only; REAL injected drag of Chrome's card beside
+  Calculator, regions + side read back; then Settings' card -> the note, no canvas). Gate: `switcher-canvas-drag`
+  (CDP touch drag in Chromium: reaches tasks.canvasDock with the right partner; refusal note; Settings blocked).
+
+## Keyboard over a web window (KB1, 11-23)
+- An Android app on its VD gets NO IME insets (IME on display 0 via FALLBACK policy; insets are per display): its
+  adjustResize never fires. Fix lives in the page: shell/ui/kbfit.ts + webwindows.tsx `fitted()` - the window typed
+  into ends at home's `system.insets` keyboard top, so `w.f`'s app size shrinks and the host resizes the VD/KWin window.
+  Gate `ww-keyboard-fit`; check `verify/ww-keyboard.sh` (emu: testwin Chat activity logs `PowosTestChat field ...`).
+
 ## Page after going home (manager decision 2026-10-21, launcher standard)
 - From an app: page kept (home launched with Switcher.EXTRA_RECENTS: no "system.home"). Home while home shows:
   "system.home" -> state.ts goHome() -> page 0 (closes drawer/menus too).

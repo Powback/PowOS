@@ -17,7 +17,8 @@ const shownPart = (r, clip) => ({ top: Math.max(r.top, clip.top), bottom: Math.m
 /** The launcher's app grid (what shows of it in the list), the list's box less its padding, and its A-Z bar. */
 function launcherBoxes() {
   const list = [...document.querySelectorAll(".drawer.shown .drawer-page > .drawer-list:not(.drawer-folders):not(.results)")].at(-1);
-  const grid = list?.querySelector(".grid.az");
+  // The launcher's content: its sections (or a letter's apps) as one block (ui/launcherview.ts), else the A-Z grid.
+  const grid = list?.querySelector(":scope > [data-view]") ?? list?.querySelector(".grid.az");
   if (!grid) return null;
   const l = list.getBoundingClientRect();
   const area = { top: l.top + pad(list, "Top"), bottom: l.bottom - pad(list, "Bottom") };

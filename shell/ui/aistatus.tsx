@@ -16,7 +16,7 @@
  */
 import { memo, sameContent } from "./memo.ts";
 import { useEffect, useRef, useState } from "preact/hooks";
-import { computed, signal } from "@preact/signals";
+import { computed, signal, untracked } from "@preact/signals";
 import { useAgents, type BoardCheck } from "../agents.ts";
 import { fleet, isPowOS, otherProjects, projectOf, workingNow, type Worker } from "../fleet.ts";
 import { aiScreen, chat, openPanel, page } from "../state.ts";
@@ -36,6 +36,19 @@ import { Reveal } from "./reveal.tsx";
 const RECENT_MS = 3 * 24 * 3_600_000;
 /** How long the reply bubble stays after the reply is complete (longer for more words, as the pet's). */
 const replyMs = (text: string) => Math.min(14_000, 5_000 + text.length * 40);
+
+/**
+ * [f]'s signal reads, tracked only while the page is [shown]: off screen the status page renders from what's there
+ * and no agent, board or chat change re-renders it (idle home, 11-23: StatusColumn/StatusPage/Hero/WorkingNow
+ * re-rendered on every agents delta while the page was away); shown again ([shown] flips) it reads them afresh.
+ */
+export const whileShown = <T,>(shown: boolean, f: () => T): T => (shown ? f() : untracked(f));
+
+/** What the status page shows: what needs the user, the fleet and its working agents, recently done, up next. */
+const statusData = () => {
+  const f = fleet();
+  return { needs: needsYou(), f, working: workingNow(f), done: recentlyDone(), next: upNext() };
+};
 
 /** "3 working · 1 needs you", or "All quiet". */
 function statusLine(working: number, asks: number, busy: boolean) {
@@ -113,7 +126,7 @@ const LiveBar = memo(function LiveBar({ done, total }: { done: number; total: nu
  */
 // Memo by content: StatusPage rebuilds its lists/rows each render, equal (render scan 11-06/11-07: needless renders).
 const WorkRowLive = memo(function WorkRowLive({ x, beside }: { x: Worker; beside: boolean }) {
-  const now = x.now || (isPowOS(x.a) ? "Working" : projectOf(x.a));
+  const now = x.now;
   return (
     <li class="ais-work">
       <button type="button" class="ais-work-row" onClick={() => ((aiAgent.value = x.a.id), (aiScreen.value = "fleet"))}>
@@ -139,8 +152,9 @@ const WorkRowLive = memo(function WorkRowLive({ x, beside }: { x: Worker; beside
  */
 export { otherProjects };
 // Memo by content: StatusPage rebuilds its lists/rows each render, equal (render scan 11-06/11-07: needless renders).
-const WorkingNow = memo(function WorkingNow({ working }: { working: Worker[] }) {
-  const shown = working.map((x) => (isPowOS(x.a) ? x : { ...x, now: x.now ? `${projectOf(x.a)} · ${x.now}` : projectOf(x.a) }));
+// Each row's line resolved here (projectOf reads the parents' agent signals), untracked while the page is away.
+const WorkingNow = memo(function WorkingNow({ working, shown: on }: { working: Worker[]; shown: boolean }) {
+  const shown = whileShown(on, () => working.map((x) => (isPowOS(x.a) ? { ...x, now: x.now || "Working" } : { ...x, now: x.now ? `${projectOf(x.a)} · ${x.now}` : projectOf(x.a) })));
   if (!shown.length) return null;
   return (
     <section class="ais-sec" data-sec="working" aria-label="Working now">
@@ -341,9 +355,11 @@ const REST = ":rest";
  * to check but which one???"): the tasks behind each count - what to check, its Try it, "Open task" - and a way to
  * Progress (the area's whole list). A single task needing the user or waiting for a check is named in the row itself.
  */
-function ByArea() {
-  const you = needIds(needsYou());
-  const open = areaStats(board.value, Date.now(), you).filter((a) => a.open.length > 0);
+function ByArea({ shown }: { shown: boolean }) {
+  const { you, open } = whileShown(shown, () => {
+    const you = needIds(needsYou());
+    return { you, open: areaStats(board.value, Date.now(), you).filter((a) => a.open.length > 0) };
+  });
   // Areas where nothing moves (every task idle) don't get a line each: one calm last line counts them.
   const stats = open.filter((a) => areaDot(a, you) !== "stalled");
   const rest = open.filter((a) => areaDot(a, you) === "stalled");
@@ -572,15 +588,15 @@ const managerBusy = computed(() => chat.value.busy);
 const heroTitle = (r: { pct: number; label: string }) => (/this month/i.test(r.label) ? `${r.pct}% this month` : `${r.label} ${r.pct}%`);
 
 /** The hero: the daily driver's ring and two lines - its name and share, then what's going on. [onTap]: folded, the strip's tap. */
-function Hero({ needs, working, more, onTap }: { needs: number; working: number; more: preact.ComponentChildren; onTap?: () => void }) {
-  const ring = heroRing.value;
+function Hero({ shown, needs, working, more, onTap }: { shown: boolean; needs: number; working: number; more: preact.ComponentChildren; onTap?: () => void }) {
+  const { ring, line } = whileShown(shown, () => ({ ring: heroRing.value, line: statusLine(working, needs, managerBusy.value) }));
   const tap = onTap && ((e: MouseEvent) => !(e.target as Element).closest(".ai-more") && onTap());
   return (
     <header class={`ais-top ${onTap ? "ais-strip" : ""}`} onClick={tap}>
       {ring && <HeroRing pct={ring.pct} label={ring.label} />}
       <span class="ais-status">
         <span class="ais-title">{ring ? heroTitle(ring) : "PowOS AI"}</span>
-        <span class="ais-line">{statusLine(working, needs, managerBusy.value)}</span>
+        <span class="ais-line">{line}</span>
       </span>
       {more}
     </header>
@@ -601,21 +617,18 @@ export function AiStatus(props: { shown: boolean; more: preact.ComponentChildren
 /** The status page alone (unfolded's left column; folded without a chat below it): hero, sections, foot. */
 function StatusPage(props: { shown: boolean; more: preact.ComponentChildren; compose?: preact.ComponentChildren; mic: MicTarget; beside?: boolean }) {
   const { shown, more } = props;
-  const needs = needsYou();
-  const f = fleet();
-  const done = recentlyDone();
-  const next = upNext();
-  const quiet = !needs.length && !workingNow(f).length && !done.length && !next.length;
+  const { needs, f, working, done, next } = whileShown(shown, statusData);
+  const quiet = !needs.length && !working.length && !done.length && !next.length;
   return (
     <>
       {shown && <WorkFeed />}
-      <Hero needs={needs.length} working={workingNow(f).length} more={more} />
+      <Hero shown={shown} needs={needs.length} working={working.length} more={more} />
       <div class="ai-scroll ais">
         <NeedStack needs={needs} />
         {props.beside && <NeedsAttention stuck={f.attention} />}
-        {props.beside && <ByArea />}
-        <WorkingNow working={workingNow(f)} />
-        <UpNext rows={next} busy={busyPage(needs.length, workingNow(f).length)} />
+        {props.beside && <ByArea shown={shown} />}
+        <WorkingNow working={working} shown={shown} />
+        <UpNext rows={next} busy={busyPage(needs.length, working.length)} />
         <RecentlyDone rows={done} />
         {quiet && <div class="ais-empty">Nothing waits on you and no agent is working right now.</div>}
       </div>
@@ -720,24 +733,21 @@ function Stacked(props: { shown: boolean; more: preact.ComponentChildren; compos
   const { shown, more } = props;
   const wrap = useRef<HTMLDivElement>(null);
   useCollapse(wrap);
-  const needs = needsYou();
-  const f = fleet();
-  const done = recentlyDone();
-  const next = upNext();
+  const { needs, working, done, next } = whileShown(shown, statusData);
   const open = foldOpen.value;
-  const any = workingNow(f).length + done.length + next.length > 0;
+  const any = working.length + done.length + next.length > 0;
   return (
     <>
       {shown && <WorkFeed />}
-      <Hero needs={needs.length} working={workingNow(f).length} more={more} onTap={stripTap} />
+      <Hero shown={shown} needs={needs.length} working={working.length} more={more} onTap={stripTap} />
       <div class={`ais-fold ${foldShrunk.value ? "shrunk" : ""}`} inert={foldShrunk.value}>
         <div class="ai-scroll ais">
           <NeedStack needs={needs} />
-          {any && <FoldSummary working={workingNow(f).length} done={done} next={next.length} />}
+          {any && <FoldSummary working={working.length} done={done} next={next.length} />}
           <div class={`ais-sum-body ${open ? "open" : ""}`} inert={!open}>
             <div class="ais-sum-in">
-              <WorkingNow working={workingNow(f)} />
-              <UpNext rows={next} busy={busyPage(needs.length, workingNow(f).length)} />
+              <WorkingNow working={working} shown={shown} />
+              <UpNext rows={next} busy={busyPage(needs.length, working.length)} />
               <RecentlyDone rows={done} />
             </div>
           </div>

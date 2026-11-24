@@ -52,6 +52,11 @@
 #                 there - a drop opens a window, never unpins); home turned to that page by code; Chrome's dock icon
 #                 held and dragged to the page's middle (input motionevent) -> TWO Chrome windows, one per page, one
 #                 more Chrome task (a second instance, not the first window moved).
+#   recent-drag   (launcher-recents-first; the user, 11-23: "the drag to open as window works for the docked icons but not
+#                 the recent ones"): Calculator as a web window on the page shown (the dock is a taskbar there); then
+#                 REAL injected drags, each of an app with no window yet: the dock tray's first recent app moved up to
+#                 the page's middle with no hold (the pinned icons' lift-out), and the launcher's Recent, Suggested and
+#                 letter-list tiles held 0.9 s and dragged to the middle -> each opens as a web window of its own.
 #   calc-density  (calculator-mis-lays-out-at-certain-window-sizes, ask 1a1a369a6fa): Calculator as a web window (by
 #                 code) at its default size, then resized smaller (by code): its activity's reported configuration is
 #                 at the screen's density (WindowDpi.SCREEN_DENSITY_APPS: at 294 it sized its text by display 0's 442,
@@ -61,8 +66,8 @@ set -uo pipefail
 here=$(cd "$(dirname "$0")" && pwd)
 . "$here/e2e-lib.sh"
 CASE=${1:-}; shift || true
-case "$CASE" in tiled-bars|max-bar|switcher-linux|switcher-centre|split-pair|pair-entity|split-lr|term-fill|window-page|chrome-size|relaunch|snap-fill|multi-instance|calc-density) ;;
-  *) echo "usage: board-look-windows.sh tiled-bars|max-bar|switcher-linux|switcher-centre|split-pair|pair-entity|split-lr|term-fill|window-page|chrome-size|relaunch|snap-fill|multi-instance|calc-density [--round R]"; exit 2 ;; esac
+case "$CASE" in tiled-bars|max-bar|switcher-linux|switcher-centre|split-pair|pair-entity|split-lr|term-fill|window-page|chrome-size|relaunch|snap-fill|multi-instance|calc-density|recent-drag) ;;
+  *) echo "usage: board-look-windows.sh tiled-bars|max-bar|switcher-linux|switcher-centre|split-pair|pair-entity|split-lr|term-fill|window-page|chrome-size|relaunch|snap-fill|multi-instance|calc-density|recent-drag [--round R]"; exit 2 ;; esac
 e2e_args "$@"
 e2e_init "lookw-$CASE"
 CALC=${TEST_APP:-com.oneplus.calculator} CHROME=com.android.chrome
@@ -514,6 +519,36 @@ if [ "$CASE" = multi-instance ]; then
       [ "$pg" = "$want" ] && [ "$n1" -gt "$n0" ] && pass "two Chrome windows (pages $pg), $n1 Chrome tasks (had $n0): a second instance" ||
         fail "after the drag-out: Chrome windows on pages '$pg' (want '$want'), Chrome tasks $n1 (had $n0)" ;;
     esac
+  fi
+fi
+
+# --- recent-drag -----------------------------------------------------------------------------------------------
+# rdfree <selector>: the first app cell under it with no web window (and not Calculator), "key x y" or "none".
+rdfree() { ev "$WW.then(m=>{const have=new Set(m.webWins.value.map(w=>w.key));const e=[...document.querySelectorAll('$1 .app[data-key]')].find(a=>!have.has(a.dataset.key)&&!a.dataset.key.startsWith('a:$CALC/'));if(!e)return 'none';const r=e.getBoundingClientRect(),d=devicePixelRatio;return e.dataset.key+' '+Math.round((r.x+r.width/2)*d)+' '+Math.round((r.y+r.height/2)*d)})"; }
+# rddrag <what> <selector> <hold s> [setup JS]: drags that cell to the page's middle; a web window of its app must open.
+rddrag() {
+  [ -n "${4:-}" ] && { ev "$4" >/dev/null; sleep 1.2; }
+  local c; c=$(rdfree "$2"); [ "$c" = none ] && { fail "$1: no app without a window under $2"; return; }
+  set -- "$1" "$2" "$3" $c; local key=$4 X=$5 Y=$6 MX MY
+  # Its task closed on exit with the others this case opened (e2e-lib: only tasks that weren't there before).
+  local pkg=${key#a:}; pkg=${pkg%%/*}; E2E_APPS="$E2E_APPS|$pkg"
+  MX=$(ev 'String(Math.round(innerWidth*devicePixelRatio/2))'); MY=$(ev 'String(Math.round(innerHeight*devicePixelRatio/2))')
+  local m="input motionevent DOWN $X $Y; sleep $3; "; for i in 1 2 3 4 5 6 7 8; do m+="input motionevent MOVE $((X + (MX - X) * i / 8)) $((Y + (MY - Y) * i / 8)); "; done
+  log "$1: drag $key $X,$Y -> $MX,$MY (held $3 s)"; sh_ "$m sleep 0.5; input motionevent UP $MX $MY"; sleep 4; chk "$1"
+  step "$1" "$key dragged from $1 to the page's middle"
+  local pg; pg=$(wwpages "$key")
+  [ -n "$pg" ] && [ "$pg" != none ] && pass "$1: $key opened as a web window (page $pg)" || fail "$1: dragging $key out opened no window"
+}
+if [ "$CASE" = recent-drag ]; then
+  A1=$(wwopen "$CALC"); sleep 3; chk open
+  if [ "$A1" = none ]; then fail "setup: no web window for Calculator"
+  else
+    step setup "Calculator's window $A1 on the page shown: the dock is a taskbar"
+    OPEN='importShim("./state.ts").then(s=>{s.drawer.value=1;return "ok"})'
+    rddrag dock-recent ".home .dock-tray .dock-recent" 0
+    rddrag launcher-recent ".drawer-page [data-section=recent]" 0.9 "$OPEN"
+    rddrag launcher-suggested ".drawer-page [data-section=suggested]" 0.9 "$OPEN"
+    rddrag launcher-letter ".drawer-page [data-view=letter]" 0.9 "$OPEN.then(()=>new Promise(r=>setTimeout(r,500))).then(()=>importShim('./ui/drawer.tsx')).then(d=>{d.launcherLetter.value='C';return 'ok'})"
   fi
 fi
 

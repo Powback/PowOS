@@ -551,7 +551,9 @@ class WindowFrames(
         val full = FreeformTasks.fullScreen(context, misses = misses)
         misses.filter { skipLogged.add("miss $it") }.forEach { dev.omalauncher.shell.WindowLog.i(TAG, "visible task not a full-screen app here: $it") }
         full.forEach { (id, pkg) ->
-            val why = AdoptGate.skip(pkg == null || pkg == context.packageName, id in adopted, id in windowed, dev.omalauncher.shell.WebWindowDisplays.fullScreenWindow(id) != null)
+            val why =
+                if (CanvasDock.owns(id, pkg)) AdoptGate.CANVAS
+                else AdoptGate.skip(pkg == null || pkg == context.packageName, id in adopted, id in windowed, dev.omalauncher.shell.WebWindowDisplays.fullScreenWindow(id) != null)
             if (why != null && skipLogged.add("$id $why")) dev.omalauncher.shell.WindowLog.i(TAG, "task $id ($pkg) full screen, not adopted: $why")
         }
         return full
@@ -571,7 +573,8 @@ class WindowFrames(
             fullBefore[id] = lastBounds[id] ?: Rect()
             Log.i(TAG, "task $id ($pkg) went full screen by itself (was ${lastBounds[id]?.toShortString()})")
         }
-        val stray = full.filter { (id, pkg) -> pkg != null && pkg != context.packageName && strayFull(id) && !launchedFull(id, pkg) }
+        // Open Canvas (its container, its sides) is OxygenOS's split view, never a stray: CanvasDock.owns.
+        val stray = full.filter { (id, pkg) -> pkg != null && pkg != context.packageName && strayFull(id) && !CanvasDock.owns(id, pkg) && !launchedFull(id, pkg) }
         // Web windows on: the stray becomes a web window (ShellBridge.toWebWindow, its task moved onto a new display),
         // never an Android freeform window under the old frame.
         stray.forEach { (id, pkg) -> floatStray(id, pkg) }

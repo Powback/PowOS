@@ -147,6 +147,11 @@ export interface JoinState {
   error: string;
   /** What PowOS's Linux said when it took the enrollment. */
   linux: string;
+  /** The Pow account sign-in / AI fix (PowStation.kt): "" none, signing, checking, done, asked (an approver), error. */
+  signin?: "" | "signing" | "checking" | "done" | "asked" | "error";
+  signinNote?: string;
+  /** PowOS AI's state (ok / missing / refresh / unknown; "" not read yet): joined but not ok offers the fix. */
+  ai?: string;
 }
 
 /** "Part of Mats's PowOS" / "Part of your PowOS". */

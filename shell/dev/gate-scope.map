@@ -22,6 +22,7 @@ dev/join-check.js       ^join-.*$
 dev/updates-check.js    ^updates-.*$
 ui/assist.*             ^(assist-draw-.*|send-dictation-assist-.*)$
 dev/assist-draw-check.js  ^assist-draw-.*$
+dev/ai-tab-head-check.js  ^ai-tab-head-.*$
 ui/pet.*                ^pet$
 ui/pet/*                ^pet$
 ui/desktop.css          ^(desktops|dock-position-desktop-.*)$

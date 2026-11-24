@@ -553,7 +553,10 @@ class AppWidgets private constructor(
             }
         }
         updateShown(id)
-        return JSONObject().put("url", frameUrl(id) ?: JSONObject.NULL).put("scrolls", renderers[id]?.let { hasCollection(it.view) } == true)
+        return JSONObject()
+            .put("url", frameUrl(id) ?: JSONObject.NULL)
+            .put("scrolls", renderers[id]?.let { hasCollection(it.view) } == true)
+            .put("scrollers", renderers[id]?.let { scrollers(it.view) } ?: JSONArray())
     }
 
     fun unwatch(
@@ -681,7 +684,8 @@ class AppWidgets private constructor(
     /** A new frame of [id] (main thread): the pages showing it fetch it. */
     private fun frame(id: Int) {
         val r = renderers[id] ?: return
-        val payload = JSONObject().put("id", id).put("url", frameUrl(id)).put("scrolls", hasCollection(r.view))
+        val payload =
+            JSONObject().put("id", id).put("url", frameUrl(id)).put("scrolls", hasCollection(r.view)).put("scrollers", scrollers(r.view))
         for ((events, shown) in listeners.entries.toList()) if (id in shown) events("appwidgets.frame", payload)
     }
 
@@ -775,6 +779,41 @@ class AppWidgets private constructor(
             dev.omalauncher.system.AppWindows.launch(context, pkg, options) { context.startIntentSender(pendingIntent.intentSender, launch?.first, 0, 0, 0, it ?: options.toBundle()) }
             true
         }.onFailure { Log.w(TAG, "widget click failed", it) }.getOrDefault(false)
+    }
+
+    /**
+     * Every view in the widget that scrolls (a list, a sideways row, a pager), with the room it has left each way - the
+     * page's gesture rule (shell ui/scrollown.ts): a drag on a scroller that can still move that way is the widget's, and
+     * only at its edge home's (a page swipe, the shade). [{ l, t, w, h } as fractions of the widget, x: [left, right],
+     * y: [up, down]}] (room: the content can still move that way). Sent with each frame, so the edge is as last drawn.
+     */
+    private fun scrollers(root: View): JSONArray {
+        val out = JSONArray()
+        val w = root.width.takeIf { it > 0 } ?: return out
+        val h = root.height.takeIf { it > 0 } ?: return out
+        val at = IntArray(2)
+        val origin = IntArray(2)
+        root.getLocationInWindow(origin)
+        fun walk(v: View) {
+            if (v.visibility != View.VISIBLE) return
+            val x = booleanArrayOf(v.canScrollHorizontally(-1), v.canScrollHorizontally(1))
+            val y = booleanArrayOf(v.canScrollVertically(-1), v.canScrollVertically(1))
+            if (x.any { it } || y.any { it }) {
+                v.getLocationInWindow(at)
+                out.put(
+                    JSONObject()
+                        .put("l", (at[0] - origin[0]).toDouble() / w)
+                        .put("t", (at[1] - origin[1]).toDouble() / h)
+                        .put("w", v.width.toDouble() / w)
+                        .put("h", v.height.toDouble() / h)
+                        .put("x", JSONArray().put(x[0]).put(x[1]))
+                        .put("y", JSONArray().put(y[0]).put(y[1])),
+                )
+            }
+            if (v is ViewGroup) for (i in 0 until v.childCount) walk(v.getChildAt(i))
+        }
+        walk(root)
+        return out
     }
 
     private fun hasCollection(v: View): Boolean =

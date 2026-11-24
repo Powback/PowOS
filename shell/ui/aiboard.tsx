@@ -143,20 +143,28 @@ const ASKS_QUERY = "SELECT * FROM user_ask";
 const CHECKS_QUERY = "SELECT * FROM work_check";
 const FRICTION_QUERY = "SELECT * FROM friction";
 
+/**
+ * [rows] into [into] once delivered: equal rows keep its value (stableRows). An empty list is taken only when it is
+ * still empty a while later - the subscription's first rows come a moment after the feed mounts, and the feed mounts
+ * on every visit to the page: writing that first [] wiped the checks, friction and asks, and the rows coming back made
+ * them new again - two re-renders of the whole status page per visit (render scan 11-23: StatusPage 43, ByArea 21,
+ * NeedStack/SevChip/NextRow on each of the user's swipes to the page).
+ */
+function useFeed<T>(into: { value: T[] }, rows: T[], connected: boolean) {
+  useEffect(() => {
+    if (!connected) return;
+    if (rows.length) return void (into.value = stableRows(into.value, rows, true));
+    const t = window.setTimeout(() => (into.value = stableRows(into.value, rows, true)), 1500);
+    return () => clearTimeout(t);
+  }, [rows, connected]);
+}
+
 /** The checks and friction while the board shows (no table on an older module: no rows, nothing breaks). */
 function FactsFeed({ db }: { db: ReturnType<typeof useDb> }) {
-  const cs = useRows<BoardCheck>(db, "work_check", CHECKS_QUERY);
-  const fr = useRows<FrictionRow>(db, "friction", FRICTION_QUERY);
-  const as = useRows<UserAsk>(db, "user_ask", ASKS_QUERY);
-  useEffect(() => {
-    if (db.status === "connected") checks.value = stableRows(checks.value, cs);
-  }, [cs, db.status]);
-  useEffect(() => {
-    if (db.status === "connected") friction.value = stableRows(friction.value, fr);
-  }, [fr, db.status]);
-  useEffect(() => {
-    if (db.status === "connected") userAsks.value = stableRows(userAsks.value, as);
-  }, [as, db.status]);
+  const connected = db.status === "connected";
+  useFeed(checks, useRows<BoardCheck>(db, "work_check", CHECKS_QUERY), connected);
+  useFeed(friction, useRows<FrictionRow>(db, "friction", FRICTION_QUERY), connected);
+  useFeed(userAsks, useRows<UserAsk>(db, "user_ask", ASKS_QUERY), connected);
   return null;
 }
 
@@ -171,7 +179,7 @@ export function WorkFeed() {
     if (rows.length) {
       // Every show subscribes afresh (the feed mounts with the page): equal rows keep the board as it was, so coming
       // back re-renders nothing that didn't change (GitHub Powback/PowOS#5).
-      board.value = stableRows(board.value, rows);
+      board.value = stableRows(board.value, rows, true);
       boardSeen.value = true;
       return;
     }

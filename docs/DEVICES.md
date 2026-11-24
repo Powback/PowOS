@@ -8,8 +8,9 @@ describes what is deployed (owner 2026-11-07: keep the current setup, don't exte
 
 1. **To control a device, pair it in the Devices app**: Add a device, pick it (mDNS or its address), type the 6-digit
    code the target shows. Then lock, unlock (desktop, owner-marked peers only), screen on/off, sleep, wake, ring.
-2. **Enroll only if you want it to approve other devices**: `powos devices enroll` on it (LAN/VPN, `enroll.pow`);
-   the first device is approved on the server, later ones from an approver (below). Enrolling gives no AI access.
+2. **Join** (the phone: Settings > powstation; Linux: `powos devices enroll`), LAN/VPN: **sign in with your Pow
+   account** on the device (owner only), or approve its code from a joined approver. A joined device gets its own AI
+   token on the owner's subscription (below).
 
 ## The pieces
 
@@ -18,9 +19,82 @@ describes what is deployed (owner 2026-11-07: keep the current setup, don't exte
 | device agent | `lib/devices/powos-deviced` (Linux: desktop, rooted phone's system tier); `DeviceAgentHost.kt` (phone without root, served by the PowOS app) | HTTPS :3416, its own pinned key; `GET /v1/info` (open), `/v1/status`, `/v1/action` (paired token only). Actions by capability: `lock`, `screen_off`, `screen_on`, `sleep` (refused while services/GPU jobs run unless forced), `wake` (Wake-on-LAN for another device), `ring` |
 | pairing | the agent | the controller asks, the **target shows a 6-digit code** (notification / `powos devices codes`), the person types it on the controller; per-peer token, stored hashed; revoke from any paired device. Works offline, no hub needed |
 | enrollment | `powos devices enroll` + PowStation `enroll/powos-enroll.py` (`enroll.pow` only, LAN/VPN; no public route) | the device's identity in the realm, approved by an already-enrolled approver device or by the owner on the server; returns the device's own realm token and the endpoints bundle |
-| AI per device | not deployed, not planned now | AI stays on the existing subscription secret (claude-auth); `src/enrolled-devices.ts` is not in the deployed claude-rate-limiter, so the authority knows no device tokens |
+| AI per device | the realm issues each device its own AI token (hashes only); claude-auth asks the realm whose it is (`/internal/ai/introspect`) and routes it to that tenant (owner devices: `powback`) | revoke the device = its AI stops within 30 s; no tenant secret or Claude login on any device |
 | registry | `~/.config/powos/units.d/powos-device.json` on the device (`powos units`), the realm's `registry.json` on PowStation (`powos devices registry`) | which devices exist, their caps and agent address, who approved them, what they hold |
 | Devices app | `apps/devices` (bundled, every surface) | paired devices with live status and actions; on an approver, new devices asking to join (Approve / Deny) and Revoke per device |
+
+## Sign in to your Pow account: how a device is provisioned (design, 2026-11-23)
+
+The user (11-23): "I guess we need to signin to auth.pow or something? ... the whole onboarding process needs to be
+streamlined and work properly", "signing in to your pow account is the best option to grab like idk backups and themes
+and settings and tokens and wireguard and whatever", "auth.powback.com is public but not the .pow routes". Sized for
+the owner's ~4 devices: no MDM, no policies, one owner.
+
+**The one step is the Pow account sign-in.** PowAuth (`powauth:latest`, the Authelia fork behind every public
+route) is reachable at `https://auth.powback.com` from anywhere with a publicly trusted certificate; every `*.pow`
+route is LAN/VPN-only plain HTTP. So:
+
+1. **Identity (PowAuth).** PowOS opens the device's browser at `https://auth.powback.com` - OIDC authorization code +
+   PKCE, public client `powos-device`, redirect to the device's own loopback (`http://127.0.0.1:<port>/callback`,
+   RFC 8252; PowAuth matches any port). The owner signs in with the owner account (2FA as PowAuth's policy says).
+   That sign-in **is** the approval: nobody else has to press anything. PowOS gets a 1 h PowAuth access token and
+   nothing else (no refresh token is asked for).
+2. **WireGuard (off the LAN only, first).** A device that can't reach `powstation.pow` needs its tunnel before
+   anything else. NOT BUILT: it needs a path on `auth.powback.com` that PowAuth itself serves (below); on the LAN this
+   step is skipped. WireGuard stays keypair-based; PowAuth only authorizes provisioning: the device makes its keypair
+   itself (the private key never leaves it) and sends only its public key + device id; only an identity in an
+   explicit VPN group may provision (the owner's `admins`, or a new `vpn` group in `users_database.yml`) - guest
+   accounts (group `users`, e.g. `david`) get 403 and keep only their public routes. The server adds one peer per
+   device (its own tunnel IP, optional preshared key, AllowedIPs per policy) and answers endpoint, server public key,
+   tunnel address, DNS (Pi-hole `172.30.0.100` as today) and AllowedIPs; the device builds the profile. Removing the
+   device, or the user's VPN group, removes its peer. The hand-made peers (phone, laptop, tablet, macback) stay as
+   they are.
+3. **Claude, and the device's own credential (realm, `powstation.pow`).** PowOS hands the access token to the realm
+   with its pending join code (`POST /v1/device/signin {device_code, access_token}`) - or, already joined, with its
+   device token (`POST /v1/device/ai {access_token}`). The realm asks PowAuth whose token it is (`/api/oidc/userinfo`
+   over the Docker network), requires the owner group (`ENROLL_OWNER_GROUP`, `admins`), and issues/updates **this
+   device's own revocable credentials**: the realm device token and an AI token routed to the owner's tenant
+   (`ENROLL_SIGNIN_TENANT`, `powback`). Tokens are returned once; the realm keeps SHA-256 only. claude-auth never
+   sees a PowAuth token or a device list: for a bearer that isn't a tenant secret it asks the realm
+   (`GET http://powos-enroll:8080/internal/ai/introspect`, Docker network only - Traefik routes `/v1/` and
+   `/healthz` only) and caches the answer 30 s. `/auth/check` names the tenant and the device, so PowOS's AI page
+   says whose account the device uses instead of "can't sign in by itself".
+4. **Service tokens.** Each service that a device needs mints its own per-device token, from the realm identity,
+   revocable with the device; no shared secret is ever copied to a device. (Claude above is the first; others when
+   a device actually needs one.)
+5. **Settings and themes.** The owner profile (theme, home/dock, PowOS settings) syncs owner -> device; device-specific
+   overrides stay local. Reuses the existing import (`homeimport.ts`, "Import a home and dock" below) and theme store.
+   Not built yet.
+6. **Backups.** Opt-in on setup: restore from the owner's latest backup of this device (or another one). Reuses the
+   existing app-data backup (`docs/APP-DATA-BACKUP.md`, `powos-appdata.sh`) once those copies live on the NAS. Not
+   built yet.
+
+**Without the owner's password on hand**, the old path stays: the code shown big, approved from an already-joined
+approver (the Devices app's card, or the join notification on the owner's phone via agent-gateway -> Discord).
+
+**A joined device whose AI doesn't work recovers in place** (the S25 Ultra, enrolled 11-23 with the empty `default`
+tenant): PowOS sees it is joined and the AI check isn't `ok`, and offers **Sign in to PowStation** (step 1 + 3 with
+its device token: its AI token moves to `powback`) or **Ask an approver** (`POST /v1/device/ai/request`; an approver
+sees "wants Claude" on the Devices card and gives a tenant, `POST /v1/devices/ai {id, tenant}`). No re-join, no
+server command.
+
+| what | owner | issued | revoked | on the device |
+|---|---|---|---|---|
+| owner identity | PowAuth | browser sign-in at auth.powback.com | PowAuth (password/2FA change, session revoke) | a 1 h access token, used once, not stored |
+| device identity | realm (`enroll/powos-enroll.py`) | on sign-in or approver approval | Devices app Revoke / Leave / `powos-enroll revoke` | `devices/enrollment.json` (0600) |
+| Claude access | realm token -> claude-auth tenant | same moment, tenant `powback` for the owner | with the device (introspection, <= 30 s) | the AI token in `/etc/powos/ai/endpoint.conf` |
+| WireGuard peer | PowStation `wireguard` | not built (needs a PowAuth path, below) | with the device | its wg config |
+| settings/themes | PowOS owner profile | not built | - | local copy + overrides |
+| backups | NAS copy of app data | not built | - | restored data |
+
+**What off-LAN WireGuard provisioning would need (not added, the owner decides):** an endpoint reachable without the
+VPN. `auth.powback.com` is PowAuth's own route; serving a peer config there means a new handler **inside PowAuth**
+(e.g. `POST /api/powos/wireguard`, session- or OIDC-token-authenticated, owner group only) plus a way for PowAuth to
+create a peer in the `wireguard` container (linuxserver/wireguard adds peers via `PEERS` + a container restart, which
+drops every tunnel for a few seconds; a `wg set` + `wg0.conf` append helper avoids that). Today's deployed
+`powauth:latest` is a 2026-05-10 build; this is a PowAuth rebuild + redeploy, a new public API surface on
+auth.powback.com, and a privileged helper - so it waits for the owner's yes. The on-LAN alternative (a realm
+`POST /v1/device/wireguard` over `.pow`) needs none of that and comes first.
 
 ## The owner config: standalone until enrolled (issue #1)
 
@@ -201,8 +275,26 @@ curl -H 'Host: enroll.pow' http://192.168.50.100/healthz                       #
   deployed authority; `--apply-ai` / `ai-apply` are not available), PowAuth device principals / forwardAuth (those
   branches are superseded, unmerged) and OpenBao.
 
+## Devices in Dolphin's sidebar (`powos-places`)
+
+Dolphin (and every KDE file dialog) shows this device's storage and the owner's other devices in its Places panel
+(the user, 11-23). `lib/devices/powos-places watch` runs from the session's autostart (`powos-places.desktop`,
+phone unit `dolphin-places`; the x86 image ships both) and rewrites only its own bookmarks in
+`~/.local/share/user-places.xbel` (tagged `<PowOSPlace>`); the user's places and their order stay.
+
+- Phone: "Phone" (the whole shared storage) and the launcher's Quick launch folders (`FilePlaces.kt`; the test keeps
+  both lists equal), plus removable storage (`/storage/<uuid>`) while it is mounted. KDE lists them under Places.
+- Fleet, under KDE's Remote group, as KIO URLs (never kernel mounts): the realm's enrolled devices whose agent address
+  answers SSH (a rooted PowOS phone's sshd on 2222 -> `sftp://powos@<addr>:2222/mnt/sdcard`, a desktop's on 22),
+  and the owner's hosts from the owner config's `POWOS_FILE_PLACES` (JSON `[{"name","url","kind"}]`, e.g. the hub,
+  gpu-195, the NAS share; it comes with the realm's owner bundle like every other `POWOS_*`). This device is left out.
+- A device that doesn't answer is written hidden and "(offline)" (Dolphin: Show Hidden Places), never a live entry
+  that hangs; it comes back when it answers. Polling (HACK row in REMOTE-POWOS.md): local state 5 s, reachability
+  60 s, registry 10 min. A missing places file is left for KDE to create (KDE writes its defaults only into a new one).
+- `powos-places list` shows what it would write; `apply` writes once. Test: `test/tier1/test-places.py`.
+
 Tests: `test/tier1/test-deviced.py` (agent + enroll client), `test/tier1/test-deviced-unlock.py` (unlock: desktop
 only, owner/approver only, fake loginctl), `test/tier1/test-deviced-approve.py` (pending/approve/
 revoke CLI and `/v1/enroll/*`, approver-only, same-device-only), the gate's `app local.devices` (`dvUnlock`, `dvJoin`,
 `dvJoinDeny`, `dvMember`), `DeviceAgentCoreTest` + `LockActionsTest` (the no-root agent),
-PowStation `enroll/test_powos_enroll.py` (the realm side).
+PowStation `enroll/test_powos_enroll.py` (the realm side), `test/tier1/test-places.py` (Dolphin's places).

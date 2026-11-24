@@ -14,13 +14,22 @@ import { stableRows } from "./apps/stable.ts";
 import { appView, closeApp, initPowosApps, mergeRecent, noteHostRecent, openApp, powosApps, PREFIX } from "./apps/pages.ts";
 import type { App, AppWindow, Chat, Home, HomeItem, WebWindowRect, WidgetScreen } from "./types.ts";
 import { sidewaysHome, wideHome } from "./hosts/wide.ts";
+import { dockClasses, validDockAlign } from "./ui/dockalign.ts";
 import { forgetQuickReturn } from "./ui/quickpage.tsx";
+import { isPowApp, POW, POW_FOLDER } from "./ui/launcherview.ts";
 import { adoptWebWindow, onWebWindowPage, openWebWindow, setIconOf, setPageBeside, setShownPage } from "./ui/webwindows.tsx";
 
 /** The host's apps (Android's, Linux's); with the installed PowOS apps that have a page (apps/pages.ts), [apps]. */
 const hostApps = signal<App[]>([]);
 export const apps = computed(() => [...hostApps.value, ...powosApps.value]);
-export const byKey = computed(() => new Map(apps.value.map((a) => [a.key, a])));
+/**
+ * The Pow folder (ui/launcherview.ts POW_FOLDER: every .pow web app in one folder, the user 11-23) as a launcher entry:
+ * there while any .pow app is. Not in [apps] (search, the switcher, usage never see it); in [byKey], so the dock, home
+ * and the launcher draw and carry it as any app's cell (apps.tsx AppIcon draws its face, [launch] opens it).
+ */
+const POW_ENTRY: App = { key: POW_FOLDER, label: POW, icon: "./icons/powos.svg", kind: "powos" };
+export const powFolder = computed<App | null>(() => (apps.value.some(isPowApp) ? POW_ENTRY : null));
+export const byKey = computed(() => new Map([...apps.value, ...(powFolder.value ? [powFolder.value] : [])].map((a) => [a.key, a])));
 /** How many recent apps the strip has (six to a width, scrolling sideways); pinned ones are left out (the dock has them). */
 const RECENT_FETCH = 24;
 const hostRecent = signal<string[]>([]);
@@ -60,6 +69,12 @@ export interface Carry {
   fromDock?: boolean;
   /** Lifted out of the dock with no hold (home.tsx liftOut): a window's drag - its drop zones (dockout.tsx) on home too. */
   lifted?: boolean;
+  /**
+   * A launcher app held and moved (apps.tsx dragHome: every launcher tile - Recent, Suggested, a letter's apps, search's
+   * app rows): over an app (or a window on unfolded home) it opens there on a half or as a window, the same drop zones
+   * as a dock app's (dockout.tsx aimOut); over home's grid it's placed there, as before.
+   */
+  toWindow?: boolean;
   /** Taken out of this folder (its key): let go off it, it's out of the folder - on home where it's let go. */
   fromFolder?: string;
   x: number;
@@ -262,6 +277,23 @@ export function validDockPosition(value: string, fallback: string): string {
  */
 export const dockTry = signal("");
 export const dockPosition = computed(() => validDockPosition(dockTry.value || sidewaysDock(dockPlacement.value), dockMode.value === "desktop" ? "left" : "bottom"));
+/**
+ * A side dock's alignment along its column (ui/dockalign.ts): "bottom" (the default - the pinned apps at the foot within
+ * thumb reach, the recents above them) or "top" (the pinned apps from the top, as before). One choice for home's side
+ * dock folded and unfolded and the launcher's (Settings > style > home > "side dock alignment"); the desktop shell's
+ * column keeps its own layout. [dockAlignTry]: a check's choice for this page only, never stored (as dockTry).
+ */
+// Unset = the coded default (bottom) - never written, so a later default can still change it.
+export const dockAlign = stored("dock.align", "");
+// A pick in Settings (home's page): the launcher over an app (the overlay's page) follows at once, no reload.
+addEventListener("storage", (e) => {
+  if (e.key === "powos.dock.align") dockAlign.value = e.newValue ?? "";
+});
+export const dockAlignTry = signal("");
+/** The alignment in use: the check's, else the user's. */
+export const sideDockAlign = computed(() => validDockAlign(dockAlignTry.value || dockAlign.value));
+/** Home's (and the launcher's) dock classes: dock-<position>, plus dock-end for a bottom-aligned side dock. */
+export const homeDockClasses = computed(() => dockClasses(dockPosition.value, sideDockAlign.value));
 /**
  * Home's search per mode: where its widget is, folded and unfolded each their own (the user, 2026-10-31 15:34: "grab
  * the search as a widget and put it into the sidebar"). "dock": the round button between the dock's pinned apps and its
@@ -654,6 +686,12 @@ export async function launch(key: string, { fullScreen = false }: { fullScreen?:
   recentsLaunched();
   // Opened alone: its recent pair ends (ui/splitpair.ts) - unless that split still stands (it comes back as the split).
   forgetPairOf(key);
+  // The Pow folder on the dock or home (the launcher opens it in place, drawer.tsx): it opens as a folder does.
+  if (key === POW_FOLDER) {
+    closeDrawer(true);
+    folder.value = key;
+    return;
+  }
   // A PowOS app: its page, full screen in this one (ui/appscreen.tsx).
   if (key.startsWith(PREFIX)) {
     openApp(key.slice(PREFIX.length));

@@ -80,6 +80,7 @@ class ShellBridge(
     private val clips = ClipHistory.of(context)
     private val clipChanged = ClipboardManager.OnPrimaryClipChangedListener { clips.add(ClipHistory.primaryText(context, clipboard())) }
     private val media = ShellMedia(context, runtime, scope, ::emit)
+    private val places by lazy { FilePlaces(context, runtime) }
     /** Android apps as home elements (on unless Settings.Global powos_web_windows = 0; home's activity only). */
     private val webWindows by lazy { WebWindows(context, web, ::emit) }
 
@@ -526,6 +527,7 @@ class ShellBridge(
                 // An installed .pow web app (WebApps, issue #8): WebAppActivity on its site, a window of its own.
                 else if (a.getString(0).startsWith("w:")) WebApps.get(context, a.getString(0).removePrefix("w:"))?.let { app ->
                     runtime.usage.record(a.getString(0))
+                    WebApps.opened(context, app.id)
                     webWindows.also { webWindowsMade = true }.openWeb(app.url, a.getJSONObject(1))
                 } ?: -1
                 else android(a.getString(0))?.let { app ->
@@ -571,6 +573,11 @@ class ShellBridge(
             // App API's "+ add app": the deep links an app opens, read from its manifest - nothing fired (AppLinks.kt).
             "apps.links" -> AppLinks.read(context, a.getString(0))
             "usage.recent" -> JSONArray(installed(runtime.usage.recent).take(a.optInt(0, 5)))
+            // The launcher's "Suggested" (shell/ui/drawer.tsx): most used first, by the same decayed launch counts.
+            "usage.frequent" -> JSONArray(installed(runtime.usage.frequent()).take(a.optInt(0, 8)))
+            // The launcher's "Quick launch" folders (FilePlaces.kt): only those that open here, and opening one.
+            "files.places" -> places.list()
+            "files.open" -> places.open(a.getString(0))
             "store.get" -> store(a.getString(0)).takeIf { it.isFile }?.readText()?.let { RawJson(it) }
             "store.set" -> {
                 store(a.getString(0)).writeText(a.get(1).let { if (it is String) JSONObject.quote(it) else it.toString() })
@@ -641,6 +648,8 @@ class ShellBridge(
                 if (a.optBoolean(1, true)) PowosAiActivity.keepInRecents(context) else Unit
             }
             "ai.unqueue" -> PowosAiChat.unqueue(a.getLong(0))
+            // The pill's stop button (it is the send button while a turn runs): ends the turn under way.
+            "ai.stop" -> PowosAiChat.stop()
             // How it's signed in, asked again (after the sign-in terminal ends); Settings > AI's Sign out.
             "ai.auth" -> PowosAiChat.checkAuth()
             "ai.signOut" -> PowosAiChat.signOut()
@@ -702,6 +711,8 @@ class ShellBridge(
             "shade.behind" -> shade?.behind(a.getDouble(0).toFloat())
             // Home's page: whether a pull down on it is the shade's now. True: PowOS's shade takes it (on the gesture input).
             "shade.homePull" -> homePull(a.getBoolean(0), a, a.optBoolean(2, false))
+            // Home's page took the finger under way sideways (a scroller's, the pages'): the host's pull never starts on it.
+            "shade.homeClaim" -> dev.omalauncher.system.ShadeHost.current?.homeClaim()
             // Home without the gesture input: the shade down, not following the finger.
             "shade.open" -> dev.omalauncher.system.ShadeHost.current?.let { s -> main.post { s.openPanel(control = false) } } ?: notifications(true)
             "overlay.closed", "pull.closed" -> overlay?.closed()
@@ -745,6 +756,11 @@ class ShellBridge(
             "tasks.toWindow" -> toWebWindow(a.getInt(0)).also { if (it) dev.omalauncher.system.Switcher.hide() }
             "tasks.info" -> dev.omalauncher.system.Tasks.info(context, a.getInt(0))
             "tasks.screenshot" -> dev.omalauncher.system.Tasks.screenshot(context, a.getInt(0))
+            // The switcher's drag up and toward a side: OxygenOS's Open Canvas (system/CanvasDock.kt, ui/carddock.ts).
+            "tasks.canvas" -> dev.omalauncher.system.CanvasDock.available(context)
+            "tasks.canvasDock" -> canvasDock(a.getInt(0), a.getString(1), a.getInt(2))
+            "tasks.canvasState" -> dev.omalauncher.system.CanvasDock.state() ?: JSONObject.NULL
+            "tasks.canvasSides" -> JSONArray(dev.omalauncher.system.CanvasDock.sides(context))
             // Home's switcher layer (shell/ui/recents.tsx, system/Switcher.kt).
             "recents.slot" -> a.optJSONObject(0)?.let { dev.omalauncher.system.Switcher.slot(this, screenRect(it), it.optDouble("radius", 0.0).toFloat() * density()) }
             "recents.ready" -> dev.omalauncher.system.Switcher.ready(this)
@@ -904,7 +920,9 @@ class ShellBridge(
                     .putOpt("category", app.category.takeIf { it >= 0 }),
             )
         }
-        // The .pow web apps the user installed from PowApps (WebApps): opened in a web window on their site.
+        // Every .pow site (WebApps, synced with PowStation's catalog): opened in a web window on its site. "web" is the
+        // kind of app it is (pwa / page / sleeps), "offline" the catalog didn't answer on the last try (off the LAN/VPN).
+        val webOffline = WebApps.reachable == false
         for (app in WebApps.list(context)) {
             list.put(
                 JSONObject()
@@ -912,7 +930,10 @@ class ShellBridge(
                     .put("label", app.name)
                     .put("icon", icon("w:${app.id}"))
                     .put("kind", "web")
-                    .put("url", app.url),
+                    .put("url", app.url)
+                    .put("web", app.web)
+                    .putOpt("webCategory", app.category.ifEmpty { null })
+                    .apply { if (webOffline) put("offline", true) },
             )
         }
         for (app in runtime.linuxApps) {
@@ -1210,6 +1231,17 @@ class ShellBridge(
             .put("layout", dev.omalauncher.system.SplitDrawer.layout(context))
     }
 
+    /** Task [id] docked into Open Canvas on [side] ("left" / "right") beside task [other]: { ok, reason? } (CanvasDock.dock). */
+    private fun canvasDock(
+        id: Int,
+        side: String,
+        other: Int,
+    ): JSONObject {
+        val s = if (side == "left") dev.omalauncher.system.CanvasDock.Side.LEFT else dev.omalauncher.system.CanvasDock.Side.RIGHT
+        val r = dev.omalauncher.system.CanvasDock.dock(context, id, s, other)
+        return JSONObject().put("ok", r.ok).apply { r.reason?.let { put("reason", it) } }
+    }
+
     /**
      * The pair entity's launch (a recent pair's tap, ui/pairs.tsx): apps [first] (left / top) and [second] split
      * together. Still split: the split back ([openSplit]). Both with a task and WM Shell's ISplitScreen PowOS's (the
@@ -1485,14 +1517,8 @@ class ShellBridge(
     }
 
     /** The battery: its level (0-100) and whether it's charging, from Android's sticky battery broadcast. */
-    private fun battery(): JSONObject {
-        val b = context.registerReceiver(null, android.content.IntentFilter(android.content.Intent.ACTION_BATTERY_CHANGED))
-        val level = b?.getIntExtra(android.os.BatteryManager.EXTRA_LEVEL, -1) ?: -1
-        val scale = b?.getIntExtra(android.os.BatteryManager.EXTRA_SCALE, 100) ?: 100
-        val status = b?.getIntExtra(android.os.BatteryManager.EXTRA_STATUS, -1) ?: -1
-        val charging = status == android.os.BatteryManager.BATTERY_STATUS_CHARGING || status == android.os.BatteryManager.BATTERY_STATUS_FULL
-        return JSONObject().put("level", if (level < 0) JSONObject.NULL else level * 100 / scale).put("charging", charging)
-    }
+    /** The battery with how it charges (system/Charging.kt): the lock face's charging line reads it. */
+    private fun battery(): JSONObject = dev.omalauncher.system.Charging.read(context).json()
 
     /** The colors in use: the launcher's palette as CSS (what the page's tokens follow), and the theme's own by name. */
     private fun theme(): JSONObject {
@@ -1664,6 +1690,9 @@ class ShellBridge(
     private fun aiChat() =
         JSONObject()
             .put("busy", PowosAiChat.busy)
+            // The stop button: this host can stop a turn (ai.stop), and is stopping one now.
+            .put("stoppable", true)
+            .put("stopping", PowosAiChat.stopping)
             .put("items", JSONArray(PowosAiChat.items.map { it.json() }))
             .put("thread", PowosAiChat.thread?.json() ?: JSONObject.NULL)
             .put("queued", JSONArray(PowosAiChat.queued.map { it.json() }))
@@ -1851,6 +1880,7 @@ class ShellBridge(
     /** A .pow web app [key] without web windows (folded, the setting off): its site's own task, full screen. */
     private fun launchWeb(key: String) {
         val app = WebApps.get(context, key.removePrefix("w:")) ?: return
+        WebApps.opened(context, app.id)
         runCatching { context.startActivity(WebAppActivity.intent(context, app.url)) }.onFailure { Log.w(TAG, "launch $key: ${it.message}") }
     }
 
