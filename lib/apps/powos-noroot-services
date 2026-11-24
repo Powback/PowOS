@@ -271,8 +271,30 @@ def agents():
     return out + ["agentsd: started"]
 
 
+def account_sync(bundled):
+    """The account sync agent (lib/apps/powos-account-sync, the APK's copy beside this file), started when it isn't
+    running: apps' account-scoped tables on every device of the owner (docs/REMOTE-POWOS.md section 2.5). It reads the
+    bundled apps' manifests EngineServices writes to powos-bundled-manifests/ beside [bundled] (no `powos app install`
+    registers them here)."""
+    me = os.path.join(os.path.dirname(os.path.abspath(__file__)), "powos-account-sync")
+    if not os.path.exists(me):
+        return ["account-sync: not in this APK"]
+    try:
+        if subprocess.run(["pgrep", "-f", "powos-account-sync run"], capture_output=True).returncode == 0:
+            return []
+    except OSError:
+        pass
+    os.makedirs(LOGS, exist_ok=True)
+    log = open(os.path.join(LOGS, "account-sync.log"), "ab")
+    manifests = os.path.join(os.path.dirname(os.path.abspath(bundled)), "powos-bundled-manifests") if bundled else ""
+    args = ["python3", me, "run"] + (["--manifests", manifests] if manifests else [])
+    subprocess.Popen(args, stdin=subprocess.DEVNULL, stdout=log, stderr=log, start_new_session=True)
+    return ["account-sync: started"]
+
+
 def main():
-    for line in [start(s) for s in WANTED] + agents() + publish(sys.argv[1] if len(sys.argv) > 1 else ""):
+    bundled = sys.argv[1] if len(sys.argv) > 1 else ""
+    for line in [start(s) for s in WANTED] + agents() + publish(bundled) + account_sync(bundled):
         print(line, flush=True)
 
 

@@ -91,11 +91,30 @@ object EngineServices {
         val want = dev.omalauncher.shell.LocalApps.modules(ctx)
         bundled.listFiles()?.filter { it.name.removeSuffix(".wasm") !in want }?.forEach { it.delete() }
         for ((db, asset) in want) ctx.assets.open(asset).use { i -> File(bundled, "$db.wasm").outputStream().use { i.copyTo(it) } }
+        accountSync(ctx)
         val script = File(andro.marchy.SessionService.runDir(ctx), "powos-noroot-services")
         ctx.assets.open("powos-noroot-services").use { i -> script.outputStream().use { i.copyTo(it) } }
         val p = Guest.process("PATH=/usr/bin:/usr/sbin:/bin exec /usr/bin/python3 '${script.path}' '${bundled.path}'").start()
         val out = p.inputStream.bufferedReader().readText()
         Log.i(TAG, "services (rc ${p.waitFor()}): ${out.trim().replace('\n', ';')}")
+    }
+
+    /**
+     * What the starter's account sync agent (lib/apps/powos-account-sync: apps' account-scoped tables on every device
+     * of the owner) needs: its script beside the starter, and the bundled apps' manifests in powos-bundled-manifests/
+     * beside powos-bundled/ - it reads which tables each app syncs from these (no `powos app install` registers them
+     * here).
+     */
+    private fun accountSync(ctx: Context) {
+        val run = andro.marchy.SessionService.runDir(ctx)
+        val dir = File(run, "powos-bundled-manifests").apply { mkdirs() }
+        dir.listFiles()?.forEach { it.delete() }
+        for (id in dev.omalauncher.shell.LocalApps.bundled(ctx)) {
+            dev.omalauncher.shell.LocalApps.manifest(ctx, id)?.first?.let { File(dir, "$id.json").writeText(it) }
+        }
+        runCatching {
+            ctx.assets.open("powos-account-sync").use { i -> File(run, "powos-account-sync").outputStream().use { i.copyTo(it) } }
+        }
     }
 
     /** A file of the image, a symlink too (its target is absolute inside the image: not resolvable from here). */

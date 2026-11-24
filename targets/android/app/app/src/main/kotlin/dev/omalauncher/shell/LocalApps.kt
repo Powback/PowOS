@@ -44,7 +44,8 @@ object LocalApps {
         return runCatching { ctx.assets.open("$ASSETS/$id/ui/$name") }.getOrNull()
     }
 
-    private fun manifest(
+    /** [id]'s manifest text (an installed copy wins over the APK's) and its version suffix; also linux/EngineServices. */
+    fun manifest(
         ctx: Context,
         id: String,
     ): Pair<String, String>? {

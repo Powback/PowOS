@@ -372,6 +372,11 @@ if [ -d $A ]; then
   install -m 755 $A/powos-glasses $L/powos-glasses
   # `powos pet` (the pet on home, the local.pet app): speaks through the app's module.
   install -m 755 $A/powos-pet $L/powos-pet
+  # Account sync (unit powos-account-sync; its manifest comes with the services below, so the supervisor starts it):
+  # apps' account-scoped tables on every device of the owner (docs/REMOTE-POWOS.md section 2.5). A running one is
+  # restarted onto the new file.
+  install -m 755 $A/powos-account-sync $L/powos-account-sync
+  pkill -f 'python3 /usr/lib/powos/apps/powos-account-sync run' 2>/dev/null && echo "account-sync: restarted onto the new file"
   # `powos terms` (the AI page's terminals: every linked host's tmux sessions, view-first) and `powos transcribe` (speech
   # to text on stt.pow). bin/powos runs both from here; test-powos-dispatch.py fails on a subcommand whose file no
   # deploy installs (2026-11-01: `powos terms list` failed on the phone, so the page showed only its own tmux).

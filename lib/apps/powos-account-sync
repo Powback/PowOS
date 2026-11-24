@@ -1,0 +1,476 @@
+#!/usr/bin/env python3
+"""powos-account-sync - an app's account-scoped tables follow the owner to every device (docs/REMOTE-POWOS.md §2.5, M7).
+
+The user (11-24): "i paired lights on one phone I dont want to go through the pairing process again ... Im using the
+same acc I should have the same apps with the same config so I can control the lights from any of my devices".
+
+An app opts in in its powos-app.json, nothing else:  "sync": {"tables": ["pref", "home_bridge"], "peers": "realm"}
+One agent per device (this file; unit powos-account-sync) replicates those tables' rows between the owner's enrolled
+devices through the account store on PowStation (the realm, PowStation enroll/powos-enroll.py /v1/account/rows),
+authenticated by this device's own realm token (powos-deviced's enrollment.json). Hub-and-spoke, not §2.5's mesh: the
+hub is always on and the owner has ~4 devices; a device off the LAN syncs when it is back (or over the VPN).
+
+Each round (every INTERVAL s, sooner after a change is pushed):
+  1. pull: the account's rows after this device's cursor; a row newer than what this device has - last writer wins
+     per row by (hlc, origin), origin = the device that wrote it - is written into the app's own table here (SQL
+     INSERT/UPDATE/DELETE as the device owner's identity, the one that published the app's module: the app's own
+     database, nobody else's tables);
+  2. push: every synced row that changed here since the last round (a content hash per row, kept in this agent's
+     state), stamped with a hybrid logical clock (48 bits ms + 16 bits counter, §2.5.3) and this device's id; a row
+     gone here goes up as a tombstone.
+No app code is needed: the app's tables stay as they are; the bookkeeping (hashes, stamps, the cursor) lives here.
+Pull runs first, so a new device takes the account's rows instead of overwriting them with its empty defaults.
+Columns: String, Bool, integers and floats (what SQL literals can write). A table with any other column type (a
+Timestamp, an Option, a struct) is refused and reported (`status`) - keep synced tables to plain columns.
+A column the sender's row lacks (an additive schema change) keeps this device's value or the type's zero; a column
+this device lacks is dropped.
+
+"Same apps": the device's installed apps go up too (app "powos", table "installed"); `status` lists the ones the
+owner's other devices have and this one doesn't. Apps bundled in the APK are on every phone already.
+
+Secrets (a Hue bridge's key) never travel in rows: the PowOS app keeps them per app and stores them in the account
+(/v1/account/secret, encrypted there; ShellNet.kt), so a revoked device loses them with its token.
+
+  powos-account-sync run [--interval S] [--manifests DIR]   the agent (exits quietly while the device isn't enrolled
+                                                            only with --once; otherwise waits for an enrollment)
+  powos-account-sync once [--manifests DIR]                 one round, its summary as JSON
+  powos-account-sync status                                 the last round: per app/table, apps missing here
+  powos-account-sync reset                                  forget the cursor and the row stamps (a full resync)
+
+Env: POWOS_DEVICED_DIR (the enrollment), POWOS_STDB (http://127.0.0.1:3410), POWOS_STDB_TOKEN (else the spacetime
+CLI's identity, ~/.config/spacetime/cli.toml), POWOS_APPS_DIR (~/.local/share/powos/apps), POWOS_ACCOUNT_SYNC_DIR
+(state, ~/.local/state/powos/account-sync), POWOS_SYNC_MANIFESTS (extra manifests: <anything>.json each, e.g. the
+APK's bundled apps on a phone without root).
+"""
+import glob
+import hashlib
+import json
+import os
+import sys
+import time
+import urllib.error
+import urllib.parse
+import urllib.request
+
+STDB = os.environ.get("POWOS_STDB", "http://127.0.0.1:3410").rstrip("/")
+DEVICED = os.environ.get("POWOS_DEVICED_DIR") or os.path.expanduser("~/.local/state/powos/deviced")
+APPS = os.path.expanduser(os.environ.get("POWOS_APPS_DIR", "~/.local/share/powos/apps"))
+STATE_DIR = os.environ.get("POWOS_ACCOUNT_SYNC_DIR") or os.path.expanduser("~/.local/state/powos/account-sync")
+REGISTRY = "powos-registry"
+INTERVAL = 30
+BACKOFF = 120  # the realm isn't reachable (away from home without the VPN)
+BATCH = 500
+SCALARS = {"String", "Bool", "U8", "U16", "U32", "U64", "U128", "I8", "I16", "I32", "I64", "I128", "F32", "F64"}
+INSTALLED = ("powos", "installed")  # the device's installed apps, as one more account table
+
+
+def now_ms():
+    return int(time.time() * 1000)
+
+
+def load(path, default):
+    try:
+        with open(path) as f:
+            return json.load(f)
+    except (OSError, ValueError):
+        return default
+
+
+def save(path, data):
+    os.makedirs(os.path.dirname(path), mode=0o700, exist_ok=True)
+    tmp = f"{path}.{os.getpid()}.tmp"
+    fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+    with os.fdopen(fd, "w") as f:
+        json.dump(data, f, separators=(",", ":"))
+    os.replace(tmp, path)
+
+
+def stdb_token():
+    if os.environ.get("POWOS_STDB_TOKEN"):
+        return os.environ["POWOS_STDB_TOKEN"]
+    try:  # powos_py.common.token(), inlined: on a phone without root this file runs on its own from the APK
+        with open(os.path.expanduser("~/.config/spacetime/cli.toml")) as f:
+            for line in f:
+                k, _, v = line.partition("=")
+                if k.strip() == "spacetimedb_token":
+                    return v.strip().strip('"')
+    except OSError:
+        pass
+    return None
+
+
+class Unreachable(Exception):
+    pass
+
+
+class Revoked(Exception):
+    pass
+
+
+def http(url, body=None, token=None, method=None, raw=None, timeout=15):
+    data = raw if raw is not None else (json.dumps(body).encode() if body is not None else None)
+    req = urllib.request.Request(url, data=data, method=method or ("POST" if data is not None else "GET"))
+    if body is not None:
+        req.add_header("Content-Type", "application/json")
+    if token:
+        req.add_header("Authorization", f"Bearer {token}")
+    try:
+        with urllib.request.urlopen(req, timeout=timeout) as r:
+            return r.status, r.read()
+    except urllib.error.HTTPError as e:
+        return e.code, e.read()
+    except (urllib.error.URLError, OSError) as e:
+        raise Unreachable(str(getattr(e, "reason", e)))
+
+
+# ── this device's SpacetimeDB ─────────────────────────────────────────────────────────────────────────────────────
+
+
+def sql(db, q, token):
+    st, b = http(f"{STDB}/v1/database/{urllib.parse.quote(db)}/sql", raw=q.encode(), token=token)
+    if st != 200:
+        raise RuntimeError(f"{db}: {b.decode(errors='replace').strip()[:300]}")
+    return json.loads(b or b"[]")
+
+
+def schema(db):
+    st, b = http(f"{STDB}/v1/database/{urllib.parse.quote(db)}/schema?version=9")
+    if st != 200:
+        return None
+    s = json.loads(b)
+    types = s.get("typespace", {}).get("types", [])
+    out = {}
+    for t in s.get("tables", []):
+        elems = (types[t["product_type_ref"]].get("Product") or {}).get("elements", [])
+        cols = [((e.get("name") or {}).get("some") or "", e.get("algebraic_type") or {}) for e in elems]
+        out[t["name"]] = {"cols": cols, "pk": list(t.get("primary_key") or [])}
+    return out
+
+
+def kind(algebraic):
+    return next(iter(algebraic), "") if isinstance(algebraic, dict) and len(algebraic) == 1 else ""
+
+
+def table_problem(t):
+    """Why this table can't sync ("" = it can)."""
+    if len(t["pk"]) != 1:
+        return "needs exactly one primary key column"
+    bad = [n for n, a in t["cols"] if kind(a) not in SCALARS]
+    return f"columns {', '.join(bad)} aren't String/Bool/number (SQL can't write them)" if bad else ""
+
+
+def lit(v, k):
+    if k == "String":
+        return "'" + str(v).replace("'", "''") + "'"
+    if k == "Bool":
+        return "true" if v else "false"
+    if k in ("F32", "F64"):
+        f = float(v)
+        if f != f or f in (float("inf"), float("-inf")):
+            raise ValueError("not a finite number")
+        return repr(f)
+    return str(int(v))
+
+
+def zero(k):
+    return "" if k == "String" else False if k == "Bool" else 0.0 if k in ("F32", "F64") else 0
+
+
+def q(name):
+    return '"' + name.replace('"', '""') + '"'
+
+
+def read_rows(db, table, t, token):
+    res = sql(db, f"SELECT * FROM {q(table)}", token)
+    names = [n for n, _ in t["cols"]]
+    if res and res[0].get("schema", {}).get("elements"):
+        names = [(e.get("name") or {}).get("some") or "" for e in res[0]["schema"]["elements"]]
+    pk = t["cols"][t["pk"][0]][0]
+    out = {}
+    for r in (res[0]["rows"] if res else []):
+        d = dict(zip(names, r))
+        out[str(d[pk])] = d
+    return out
+
+
+def write_row(db, table, t, data, have, token):
+    """The account's row into the local table: UPDATE when the key is there, else INSERT (every local column)."""
+    pk = t["cols"][t["pk"][0]][0]
+    kinds = {n: kind(a) for n, a in t["cols"]}
+    row = {n: (data[n] if n in data else have[n] if have and n in have else zero(kinds[n])) for n, _ in t["cols"]}
+    key = lit(row[pk], kinds[pk])
+    if have is not None:
+        sets = ", ".join(f"{q(n)} = {lit(row[n], kinds[n])}" for n, _ in t["cols"] if n != pk)
+        if sets:
+            sql(db, f"UPDATE {q(table)} SET {sets} WHERE {q(pk)} = {key}", token)
+    else:
+        cols = ", ".join(q(n) for n, _ in t["cols"])
+        vals = ", ".join(lit(row[n], kinds[n]) for n, _ in t["cols"])
+        sql(db, f"INSERT INTO {q(table)} ({cols}) VALUES ({vals})", token)
+    return row
+
+
+def delete_row(db, table, t, pkval, token):
+    pk, a = t["cols"][t["pk"][0]]
+    sql(db, f"DELETE FROM {q(table)} WHERE {q(pk)} = {lit(pkval, kind(a))}", token)
+
+
+def digest(d):
+    return hashlib.sha256(json.dumps(d, sort_keys=True, separators=(",", ":")).encode()).hexdigest()[:32]
+
+
+# ── which apps sync what ───────────────────────────────────────────────────────────────────────────────────────
+
+
+def manifests(extra_dirs, token):
+    """{app id: manifest} of every app on this device: installed (APPS/<id>/current), registered (powos-registry's
+    app rows), and extra manifest files (the APK's bundled apps without root)."""
+    found = {}
+
+    def take(m):
+        if isinstance(m, dict) and m.get("id") and m["id"] not in found:
+            found[m["id"]] = m
+
+    for p in sorted(glob.glob(os.path.join(APPS, "*", "current", "powos-app.json"))):
+        take(load(p, None))
+    try:
+        res = sql(REGISTRY, "SELECT id, manifest FROM app", token)
+        for _id, text in (res[0]["rows"] if res else []):
+            try:
+                take(json.loads(text))
+            except ValueError:
+                pass
+    except (RuntimeError, Unreachable, ValueError, KeyError):
+        pass
+    for d in extra_dirs:
+        for p in sorted(glob.glob(os.path.join(d, "*.json"))):
+            take(load(p, None))
+    return found
+
+
+def synced(apps):
+    """[(app id, database, [tables])] for the apps that declare "sync"."""
+    out = []
+    for aid, m in sorted(apps.items()):
+        tables = ((m.get("sync") or {}).get("tables")) or []
+        db = (m.get("module") or {}).get("database") or ""
+        if db and isinstance(tables, list) and tables:
+            out.append((aid, db, [str(t) for t in tables]))
+    return out
+
+
+# ── one round ──────────────────────────────────────────────────────────────────────────────────────────────────
+
+
+class Agent:
+    def __init__(self, extra_dirs=()):
+        self.extra = [d for d in extra_dirs if d]
+        self.path = os.path.join(STATE_DIR, "state.json")
+        self.st = load(self.path, {})
+        self.st.setdefault("cursor", 0)
+        self.st.setdefault("hlc", 0)
+        self.st.setdefault("rows", {})  # "<app>|<table>|<pk>" -> [hash ("" = deleted), hlc, origin]
+        self.st.setdefault("tables", [])  # "<app>|<table>" seen before (a new one pulls everything again)
+
+    def tick(self, seen=0):
+        self.st["hlc"] = max(now_ms() << 16, self.st["hlc"] + 1, seen)
+        return self.st["hlc"]
+
+    def enrollment(self):
+        e = load(os.path.join(DEVICED, "enrollment.json"), None) or {}
+        if not (e.get("device_token") and e.get("realm") and (e.get("device") or {}).get("id")):
+            return None
+        return e
+
+    def account(self, e, path, body=None):
+        st, b = http(e["realm"].rstrip("/") + path, body=body, token=e["device_token"])
+        if st == 401:
+            raise Revoked("this device isn't in the account any more (revoked or left): sign in again to sync")
+        if st != 200:
+            raise RuntimeError(f"account {path.split('?')[0]}: {st} {b.decode(errors='replace')[:200]}")
+        return json.loads(b)
+
+    def round(self):
+        e = self.enrollment()
+        out = {"at": int(time.time()), "ok": False, "tables": {}, "pushed": 0, "pulled": 0, "missing": []}
+        if not e:
+            out["why"] = "not enrolled: join your PowStation (Settings) to sync apps across your devices"
+            return self.finish(out)
+        me, token = e["device"]["id"], stdb_token()
+        apps = manifests(self.extra, token)
+        # Which tables sync here, and their local shape.
+        local = {}  # (app, table) -> (db, table schema)
+        for aid, db, tables in synced(apps):
+            sch = schema(db)
+            for t in tables:
+                k = f"{aid}|{t}"
+                if sch is None:
+                    out["tables"][k] = f"database {db} isn't on this device's SpacetimeDB"
+                elif t not in sch:
+                    out["tables"][k] = f"{db} has no table {t}"
+                elif table_problem(sch[t]):
+                    out["tables"][k] = table_problem(sch[t])
+                else:
+                    local[(aid, t)] = (db, sch[t])
+        known = {f"{a}|{t}" for a, t in local}
+        seen = set(self.st["tables"])
+        if known - seen:
+            self.st["cursor"] = 0  # a table new here: take the account's rows for it from the start
+        try:
+            # Edits made here since the last round are stamped BEFORE the pull, so a row pulled now with an older
+            # stamp doesn't overwrite them. A table syncing for the first time isn't: its rows were never in the
+            # account, so the account's copy of a row wins over this device's (a new device's defaults).
+            batch = []
+            for (aid, table), (db, t) in sorted(local.items()):
+                if f"{aid}|{table}" in seen:
+                    self.diff(aid, table, read_rows(db, table, t, token), me, set(), batch)
+            applied = self.pull(e, local, out)
+            batch = [r for r in batch if f"{r['app']}|{r['table']}|{r['pk']}" not in applied]
+            self.push(e, me, token, local, applied, apps, out, batch)
+        except Revoked as x:
+            out["why"] = str(x)
+            return self.finish(out)
+        except Unreachable as x:
+            out["why"], out["offline"] = f"PowStation not reachable ({x}): syncs when back on the LAN/VPN", True
+            return self.finish(out)
+        self.st["tables"] = sorted(known)
+        for k in known:
+            out["tables"].setdefault(k, "ok")
+        out["ok"] = True
+        return self.finish(out)
+
+    def pull(self, e, local, out):
+        token, applied = stdb_token(), set()
+        cache = {}
+        while True:
+            r = self.account(e, f"/v1/account/rows?since={self.st['cursor']}&limit={BATCH}")
+            if r.get("reset"):
+                self.st["cursor"], self.st["rows"] = 0, {}
+                continue
+            for row in r["rows"]:
+                stamp = (row["hlc"], row["origin"])
+                self.st["hlc"] = max(self.st["hlc"], row["hlc"])
+                k = f"{row['app']}|{row['table']}|{row['pk']}"
+                have = self.st["rows"].get(k)
+                if (row["app"], row["table"]) == INSTALLED:
+                    if not have or (have[1], have[2]) < stamp:
+                        self.st.setdefault("account_apps", {})[row["pk"]] = None if row["deleted"] else row["data"]
+                    continue
+                if (row["app"], row["table"]) not in local or (have and (have[1], have[2]) >= stamp):
+                    continue
+                db, t = local[(row["app"], row["table"])]
+                ck = (row["app"], row["table"])
+                if ck not in cache:
+                    cache[ck] = read_rows(db, row["table"], t, token)
+                rows = cache[ck]
+                try:
+                    if row["deleted"]:
+                        if row["pk"] in rows:
+                            delete_row(db, row["table"], t, rows[row["pk"]][t["cols"][t["pk"][0]][0]], token)
+                            rows.pop(row["pk"])
+                        self.st["rows"][k] = ["", row["hlc"], row["origin"]]
+                    else:
+                        data = row["data"] if isinstance(row["data"], dict) else {}
+                        rows[row["pk"]] = write_row(db, row["table"], t, data, rows.get(row["pk"]), token)
+                        self.st["rows"][k] = [digest(rows[row["pk"]]), row["hlc"], row["origin"]]
+                    applied.add(k)
+                    out["pulled"] += 1
+                except (RuntimeError, ValueError) as x:
+                    out["tables"][f"{row['app']}|{row['table']}"] = f"couldn't write a row here: {x}"
+            self.st["cursor"] = r["seq"]
+            if not r.get("more"):
+                return applied
+
+    def push(self, e, me, token, local, applied, apps, out, batch):
+        for (aid, table), (db, t) in sorted(local.items()):
+            rows = read_rows(db, table, t, token)
+            self.diff(aid, table, rows, me, applied, batch)
+        mine = {aid: {"id": aid, "name": m.get("name", aid), "version": m.get("version", ""),
+                      "database": (m.get("module") or {}).get("database") or ""} for aid, m in apps.items()}
+        self.diff(*INSTALLED, mine, me, set(), batch)
+        acc = self.st.setdefault("account_apps", {})
+        for aid in mine:
+            acc.pop(aid, None)
+        out["missing"] = sorted(a for a, d in acc.items() if d)
+        for i in range(0, len(batch), BATCH):
+            self.account(e, "/v1/account/rows", {"rows": batch[i:i + BATCH]})
+        out["pushed"] = len(batch)
+
+    def diff(self, aid, table, rows, me, applied, batch):
+        """Rows changed here since the last round -> batch (and their new stamps into the state)."""
+        pre = f"{aid}|{table}|"
+        for pk, d in rows.items():
+            k, h = pre + pk, digest(d)
+            have = self.st["rows"].get(k)
+            if k in applied:  # just written from the account: its read-back is the new baseline, not a change
+                self.st["rows"][k] = [h, have[1], have[2]]
+            elif not have or have[0] != h:
+                hlc = self.tick()
+                self.st["rows"][k] = [h, hlc, me]
+                batch.append({"app": aid, "table": table, "pk": pk, "data": d, "hlc": hlc})
+        for k, have in list(self.st["rows"].items()):
+            if k.startswith(pre) and have[0] and k[len(pre):] not in rows:
+                hlc = self.tick()
+                self.st["rows"][k] = ["", hlc, me]
+                batch.append({"app": aid, "table": table, "pk": k[len(pre):], "hlc": hlc, "deleted": True})
+
+    def finish(self, out):
+        save(self.path, self.st)
+        save(os.path.join(STATE_DIR, "status.json"), out)
+        return out
+
+
+def opt(argv, name, default=None):
+    return argv[argv.index(name) + 1] if name in argv and argv.index(name) + 1 < len(argv) else default
+
+
+def main(argv):
+    cmd = argv[0] if argv else "status"
+    extra = [opt(argv, "--manifests"), os.environ.get("POWOS_SYNC_MANIFESTS")]
+    if cmd == "once":
+        print(json.dumps(Agent(extra).round(), indent=1))
+        return 0
+    if cmd == "run":
+        interval = int(opt(argv, "--interval", INTERVAL))
+        import fcntl
+        os.makedirs(STATE_DIR, mode=0o700, exist_ok=True)
+        lock = open(os.path.join(STATE_DIR, "run.lock"), "w")
+        try:  # one agent per device (a starter without pgrep may start a second): the second one leaves
+            fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except OSError:
+            print("powos-account-sync: already running here", flush=True)
+            return 0
+        while True:
+            try:
+                out = Agent(extra).round()
+            except Exception as x:  # one bad round never ends the agent; the next one tries again
+                out = {"ok": False, "why": repr(x)}
+                print(f"{time.strftime('%F %T')} round failed: {x!r}", flush=True)
+            if out.get("pushed") or out.get("pulled") or not out.get("ok"):
+                print(f"{time.strftime('%F %T')} pushed {out.get('pushed', 0)} pulled {out.get('pulled', 0)}"
+                      f"{' - ' + out['why'] if out.get('why') else ''}", flush=True)
+            time.sleep(BACKOFF if out.get("offline") else interval)
+    if cmd == "status":
+        s = load(os.path.join(STATE_DIR, "status.json"), None)
+        if not s:
+            print("no round yet")
+            return 1
+        print(f"last round {time.strftime('%F %T', time.localtime(s['at']))}: "
+              f"{'ok' if s['ok'] else s.get('why', 'failed')}; pushed {s['pushed']}, pulled {s['pulled']}")
+        for k, v in sorted(s["tables"].items()):
+            print(f"  {k}: {v}")
+        if s.get("missing"):
+            print(f"  on your other devices, not here: {', '.join(s['missing'])}")
+        return 0 if s["ok"] else 1
+    if cmd == "reset":
+        p = os.path.join(STATE_DIR, "state.json")
+        if os.path.exists(p):
+            os.remove(p)
+        print("reset: the next round takes the account's rows again and re-sends this device's")
+        return 0
+    print(__doc__)
+    return 2
+
+
+if __name__ == "__main__":
+    sys.exit(main(sys.argv[1:]))

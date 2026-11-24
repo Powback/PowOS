@@ -513,6 +513,13 @@ object PowStation {
         }.getOrNull()
 
     /**
+     * This device's realm and its own device token, for the account calls this app makes itself ([AccountSecrets]: an
+     * app's secrets that follow the owner's account). null when not joined. Never handed to a page.
+     */
+    fun credentials(c: Context): Pair<String, String>? =
+        enrollment(c)?.let { e -> e.optString("realm").takeIf { it.isNotBlank() }?.let { it to e.optString("device_token") } }
+
+    /**
      * Where the launcher reads the fleet's web app catalog (WebApps, GET <base>/v1/apps): the joined realm, else the
      * hub's usual name on this LAN/VPN; null on a device set up standalone (the user chose PowOS on its own).
      */

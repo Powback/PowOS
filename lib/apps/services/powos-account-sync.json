@@ -1,0 +1,32 @@
+{
+  "id": "powos-account-sync",
+  "name": "Account sync",
+  "version": "1.0.0",
+  "description": "Apps' account-scoped tables (powos-app.json \"sync\") on every device of the owner: rows go up to and come down from the account store on PowStation (the realm's /v1/account/rows, this device's own realm token), last writer wins per row (lib/apps/powos-account-sync; docs/REMOTE-POWOS.md section 2.5). Idle until the device has joined. Outbound only, no port. Unit: units/phone/powos-account-sync.json.",
+  "backend": {
+    "user": "powos",
+    "env": {
+      "HOME": "/home/powos"
+    },
+    "exec": [
+      "/usr/bin/python3",
+      "/usr/lib/powos/apps/powos-account-sync",
+      "run"
+    ]
+  },
+  "needs": {
+    "network": "host",
+    "listen": []
+  },
+  "budget": {
+    "phone": {
+      "memMB": 40,
+      "cpuPct": 5,
+      "nice": 10
+    },
+    "desktop": {
+      "memMB": 64
+    }
+  },
+  "autosleep": "never"
+}

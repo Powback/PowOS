@@ -39,7 +39,7 @@ stage_app() {
 }
 if [ "${POWOS_SKIP_APPS:-}" != 1 ]; then
   rm -rf "$STAGE" && mkdir -p "$STAGE/apps"
-  cp "$ROOT/lib/apps/powos-noroot-services" "$STAGE/"
+  cp "$ROOT/lib/apps/powos-noroot-services" "$ROOT/lib/apps/powos-account-sync" "$STAGE/"
   for a in $(sed 's/#.*//' "$ROOT/apps/bundled.list"); do
     stage_app "$a" || { echo "prep-app: refusing - apps/build.sh $a failed (above): the APK would ship without it" >&2; exit 6; }
   done

@@ -193,6 +193,40 @@ Three kinds of data, three rules:
 8. **Garbage.** An outbox entry goes once every peer's cursor is past it; a tombstone after that plus 30 days. A peer
    offline longer than that gets a full resync of the table.
 
+**As built (M7, 2026-11-24): hub-and-spoke, no app code.** The user (11-24): "i paired lights on one phone I dont
+want to go through the pairing process again ... Im using the same acc I should have the same apps with the same
+config". Sized to the owner's ~4 devices, so the mesh above is not built; the hub is the one peer.
+
+- **Opt-in** as in 1.: `"sync": {"tables": [...], "peers": "realm"}` in powos-app.json, nothing else. Adopters: Lights
+  (`home_bridge`, `pref`; its own repo), Keyboard AI (`reply`, `profile`, `app_pref`, `day_stat`).
+- **Account store** = the realm on PowStation (`enroll/powos-enroll.py`, `/v1/account/rows`): one owner per realm,
+  so every enrolled, unrevoked device of it is the account; each call is authenticated by the device's own realm token
+  and a revoked device gets 401 at once. Rows `(app, table, pk) -> data, hlc, origin, deleted, seq` in SQLite; a push
+  is applied per row last-writer-wins by `(hlc, origin)`, origin = the caller's device id (a device stamps only as
+  itself), an hlc > 1 h ahead is refused; a pull returns what changed after the device's `seq` cursor.
+- **Sync agent** `lib/apps/powos-account-sync` (unit `powos-account-sync`; supervisor on rooted phones/desktops,
+  `powos-noroot-services` without root, the APK's copy). Instead of an `_outbox` in each module (items 2 and 4), the
+  agent keeps the bookkeeping: a content hash + HLC stamp per row in its own state, so an app needs no helper and no
+  extra columns. Each round (30 s): stamp rows changed here, pull (newer rows written into the app's own table by SQL
+  INSERT/UPDATE/DELETE as the device owner's identity, i.e. the app's own database), push. A table syncing for the
+  first time takes the account's rows over a new device's defaults. Columns must be String/Bool/numbers (SQL can't
+  write a Timestamp/Option/struct): another column type is refused and shown in `powos-account-sync status`. Off the
+  LAN it waits (120 s) and catches up over the VPN or back home. Not built: per-field merge, CRDT columns, schema
+  versions, tombstone GC (item 6-8): LWW per row covers the adopters.
+- **Secrets** never go in rows. An app's `host.net` secret (the Hue bridge's key) is an account secret: the PowOS
+  app keeps a captured one in the account (`/v1/account/secret`, AES-256-GCM at rest with the realm's key, answered only
+  to an enrolled, unrevoked device), a device without it takes the account's, one taken from the account is checked
+  again hourly and dropped when the account no longer has it or the device is revoked; `forget` drops it everywhere
+  (ShellNet.kt `secretOf`, AccountSecrets.kt). A key paired before this goes up on its first use (the migration).
+  Not built: the desktop host's `host.net` (sources/powos-shell/src/net.cpp) still keeps secrets per device only.
+- **Same apps**: the agent also syncs the device's installed-app list (`powos`/`installed`); `status` names the owner's
+  apps a device lacks. Apps bundled in the APK (Lights, Keyboard AI, ...) are on every phone already and the `.pow` web
+  apps come from the realm's `/v1/apps`; an app installed from a folder on one device has no store to fetch it from,
+  so it is listed, not installed.
+- Tests: `test/tier1/test-account-sync.py` (two devices both ways, LWW, tombstones, refused column types, revoked,
+  missing apps); PowStation `enroll/test_powos_enroll.py` (LWW, secrets readable only by the account's devices, a
+  revoked device denied, nothing plaintext at rest).
+
 ### 2.6 Remote actions: reducers, not signals or adb
 
 Every action on another host is a row written by a reducer on the **owning** host, executed by that host's own
@@ -303,7 +337,7 @@ Each step is shippable alone and removes a hack. Order matters: identity (M4) ga
 | **M4** | Realm issuer: host keys, pairing, realm JWKS, token minting in the shell and launchers; SpacetimeDB trusts the realm (verify §2.3 first); host listeners on WireGuard only | C15; `HACK:` at `shell/apps/stdb.ts:11` | One identity per user across hosts; per-app tokens; the interim M2 identity goes; a second hub-independent pair of hosts can talk |
 | **M5** | Discovery: `_powos._tcp` mDNS, the `powos-hosts` directory, `powos hosts`; scripts take `--host` | Hard-coded IPs (C4, C6, C13) | Hosts found by name on any network; LAN-direct paths when the hub is down |
 | **M6** | Comms federation: `powos-comms` module + bridge per host, `role@host`, `deliver`; the Mac gets `coder@mac` | C9; the mail and inbox-poll half of C4; the rest of C5 | Mail both ways without root or polling; store-and-forward while a host is away |
-| **M7** | Per-table sync (§2.5) in the module helper; first adopter: one small app (e.g. `apps/counter`) | — | User data on every host, offline-first |
+| **M7** | Per-table sync (§2.5) - built 2026-11-24 hub-and-spoke through the realm (`lib/apps/powos-account-sync`, "As built" in §2.5); adopters Lights and Keyboard AI | — | User data on every host, offline-first |
 | **M8** | Dev-channel cleanup: adb TCP off by default (`powos dev adb on/off`), remove or restrict the `powos-phone` key, `powos-vadb` as a compose service (or gone), signed pacman repo, signed/checksummed rootfs and bundles, installs via `request_install` | C6, C7, C8, C12; `HACK:` at `SessionService.java:216` | No root path between hosts at all; integrity of everything a host installs |
 
 ---
@@ -642,6 +676,7 @@ is not scanned. A marker in the code says *why* and *the real fix* where it stan
 | `lib/apps/powos-sleep-gui:405` | A game launch Steam runs (from its own UI as well as PowOS's tap) is read off Steam's console_log (GameAction / Game process lines) for the launch placeholder: Steam publishes no launch event to a client outside its UI. | A Steam UI plugin (SteamClient.Apps.RegisterForGameActionStart) or a launch wrapper reports game actions over the session bus. |
 | `tools/phone/verify/needs-me-reply.sh:74` | The reply check's test sender is posted a second time by a root broadcast when the shell's left nothing in Android's notification service: OxygenOS's OplusAppStartupManager may refuse a fresh third-party app's process start for a shell broadcast. | Keep only the caller the check's diagnosis shows OxygenOS lets through. |
 | `targets/android/app/app/src/main/kotlin/dev/omalauncher/devices/PowStation.kt:401` | "Join your PowStation" talks plain HTTP to powstation.pow (LAN/VPN only, like the realm serves it), and the AI token it hands PowOS's Linux is one the deployed claude-auth doesn't map yet, so the authority serves it as its default subscription. Real fix: the realm CA / a .pow certificate (device-ecosystem.md P4) and claude-rate-limiter's enrolled-devices map deployed |
+| `targets/android/app/app/src/main/kotlin/dev/omalauncher/devices/AccountSecrets.kt:68` | An app's account secret (the Hue key) goes to and comes from the realm over plain HTTP on the LAN/VPN, as every realm call does: it crosses that leg unencrypted. | The realm CA / a .pow certificate (device-ecosystem.md P4), same as the device tokens. |
 | `apps/powos-progress/ui/lib/progress.ts:55` | Progress sorts board tasks into lanes by status alone, not the AI page's full grouping (agent liveness, phone checks, the user's verdicts). | The grouping moved into a module both read, or the board publishing each task's lane as a column. |
 | `lib/apps/powos-progress-cli:272` | `powos progress` off the phone runs on the phone over powos-vadb: the Progress module lives on the phone only (C4/C7). | The hub's copy of the module and the M2 subscription. |
 | `test/tier1/test-publish-repo.sh:20` | The test's inner arm64 container runs as nobody: on an SELinux host (.58) repo-add's bsdtar archives each file's security.selinux into powos.db and, as root, fails to restore it on the next repo-add. | repo-merge.sh drops xattrs itself if publishing ever runs on an SELinux host. |

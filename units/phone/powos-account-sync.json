@@ -1,0 +1,38 @@
+{
+  "id": "powos-account-sync",
+  "name": "Account sync (apps' data and settings on every device of the owner)",
+  "kind": "service",
+  "host": "phone",
+  "owner": "system:devices",
+  "purpose": "replicates the tables an app declares account-scoped (powos-app.json \"sync\": Lights' bridge + room prefs, Keyboard AI's learning) between the owner's enrolled devices through the account store on PowStation (enroll/powos-enroll.py /v1/account/rows, authenticated by this device's own realm token); last writer wins per row by (hlc, device); a revoked device stops at once. Also lists the owner's apps this device lacks. Secrets never go through it (ShellNet.kt + AccountSecrets.kt). A system-tier service (lib/apps/services/powos-account-sync.json); without root powos-noroot-services starts it. docs/REMOTE-POWOS.md section 2.5",
+  "installedBy": "targets/android/rooted/powos-deploy.sh (lib/apps, staged by rooted.sh deploy); without root the APK's assets (prep-app.sh) via powos-noroot-services",
+  "ports": [],
+  "files": [
+    "/usr/lib/powos/apps/powos-account-sync",
+    "/usr/lib/powos/apps/services/powos-account-sync.json",
+    "/home/powos/.local/state/powos/account-sync (cursor, per-row stamps, last round's status; 0700)"
+  ],
+  "packages": [
+    "python3"
+  ],
+  "processes": [
+    {
+      "match": "^/usr/bin/python3 .*powos-account-sync run"
+    }
+  ],
+  "limits": {
+    "memory": "40m",
+    "cpus": 0.05,
+    "pids": 4
+  },
+  "autosleep": "never: sleeps 30 s between rounds (120 s while PowStation isn't reachable)",
+  "health": "python3 /usr/lib/powos/apps/powos-account-sync status",
+  "remove": {
+    "commands": [
+      "rm -f /usr/lib/powos/apps/powos-account-sync /usr/lib/powos/apps/services/powos-account-sync.json"
+    ],
+    "keep": [
+      "/home/powos/.local/state/powos/account-sync (delete it for a full resync)"
+    ]
+  }
+}

@@ -72,8 +72,8 @@ fi
 rm -f "$stamp"
 # Every staged app and the starter in the APK: a builder that couldn't see them shipped none, silently (11-10).
 if [ "${POWOS_SKIP_APPS:-}" != 1 ]; then
-  have=$(unzip -l "$AAD/output/powos.apk" 'assets/apps/*/powos-app.json' 'assets/powos-noroot-services' 2>/dev/null || true)
-  for want in powos-noroot-services $(cd "$STAGE/apps" && printf 'apps/%s/powos-app.json ' *); do
+  have=$(unzip -l "$AAD/output/powos.apk" 'assets/apps/*/powos-app.json' 'assets/powos-noroot-services' 'assets/powos-account-sync' 2>/dev/null || true)
+  for want in powos-noroot-services powos-account-sync $(cd "$STAGE/apps" && printf 'apps/%s/powos-app.json ' *); do
     case $have in *"assets/$want"*) ;; *) echo "build-app: the APK lacks assets/$want (app/app/bundled-apps not packed)" >&2; exit 7 ;; esac
   done
 fi

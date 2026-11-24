@@ -6,6 +6,7 @@ import android.net.nsd.NsdServiceInfo
 import android.os.Handler
 import android.os.HandlerThread
 import android.util.Log
+import dev.omalauncher.devices.AccountSecrets
 import org.json.JSONArray
 import org.json.JSONObject
 import java.io.BufferedReader
@@ -41,7 +42,9 @@ import javax.net.ssl.X509TrustManager
  * the same one or fail ("certificate changed" - `forget` resets it).
  *
  * Secrets: an app's keys (a bridge's application key) are kept here, per app, never handed back to the page:
- * `capture` takes one out of a response (and blanks it there), `${secret:name}` in a header puts it in.
+ * `capture` takes one out of a response (and blanks it there), `${secret:name}` in a header puts it in. They follow
+ * the owner's account (11-24, "i paired lights on one phone I dont want to go through the pairing process again"):
+ * a captured one is also kept in the account on PowStation, a device without it takes the account's (secretOf).
  *
  * Ops (n.req {"id", "op", "app", ...}):
  *   fetch  {url, method?, headers?, body?, capture?: {secret, path: "0.success.username"}}  -> {status, body}
@@ -66,6 +69,12 @@ class ShellNet(
     private val subs = ConcurrentHashMap<String, Stream>()
     private val pins = context.getSharedPreferences("powos-net-pins", Context.MODE_PRIVATE)
     private val secrets = context.getSharedPreferences("powos-net-secrets", Context.MODE_PRIVATE)
+
+    /** Per secret: "up" (kept in the account too) or "acct:<ms>" (taken from the account then); none = not up yet. */
+    private val origin = context.getSharedPreferences("powos-net-secret-origin", Context.MODE_PRIVATE)
+
+    /** key -> when the account was last asked and didn't answer (no retry within [ACCOUNT_RETRY_MS]). */
+    private val accountMiss = ConcurrentHashMap<String, Long>()
     private val factories = ConcurrentHashMap<String, SSLSocketFactory>()
 
     fun command(json: String) {
@@ -111,7 +120,7 @@ class ShellNet(
                 require("lan" in declared(app)) { "$app doesn't declare \"lan\" in its manifest's net" }
                 return ok.put("services", mdns(r.getString("type"), r.optLong("ms", 3000).coerceIn(500, 10_000)))
             }
-            "secret" -> return ok.put("has", secrets.contains(key(app, r.getString("name"))))
+            "secret" -> return ok.put("has", secretOf(app, r.getString("name")) != null)
             "pin" -> {
                 val hostPort = r.getString("host").lowercase() + ":" + r.optInt("port", 443)
                 return ok.put("sha256", pins.getString(key(app, hostPort), "") ?: "")
@@ -121,7 +130,12 @@ class ShellNet(
                     pins.edit().apply { pins.all.keys.filter { it.startsWith("$app\u0000$h:") }.forEach { remove(it) } }.apply()
                     factories.keys.filter { it.startsWith("$app\u0000$h:") }.forEach { factories.remove(it) }
                 }
-                r.optString("secret").takeIf { it.isNotEmpty() }?.let { secrets.edit().remove(key(app, it)).apply() }
+                r.optString("secret").takeIf { it.isNotEmpty() }?.let {
+                    secrets.edit().remove(key(app, it)).apply()
+                    origin.edit().remove(key(app, it)).apply()
+                    // Forgotten here = forgotten on the owner's other devices too (unpairing is account-wide).
+                    AccountSecrets.put(context, app, it, null)
+                }
             }
             else -> throw IllegalArgumentException("no such op: ${r.optString("op")}")
         }
@@ -176,10 +190,75 @@ class ShellNet(
         h?.keys()?.forEach { k ->
             out[k] =
                 SECRET_REF.replace(h.getString(k)) { m ->
-                    secrets.getString(key(app, m.groupValues[1]), null) ?: throw IllegalStateException("no secret ${m.groupValues[1]}")
+                    secretOf(app, m.groupValues[1]) ?: throw IllegalStateException("no secret ${m.groupValues[1]}")
                 }
         }
         return out
+    }
+
+    /**
+     * [app]'s secret [name], kept per app here and in the owner's account (AccountSecrets; docs/REMOTE-POWOS.md §2.5):
+     *  - one made here (captured) goes up once - also one captured before accounts existed (the migration: the
+     *    OnePlus's Hue key goes up on its next use);
+     *  - none here: the account's, if this device is in it (paired on another device: no pairing here);
+     *  - one taken from the account is checked again after [ACCOUNT_RECHECK_MS]: gone there (forgotten on another
+     *    device) or this device revoked -> gone here too. Unreachable (away from home) keeps it.
+     * Called off the main thread (the request pool).
+     */
+    private fun secretOf(
+        app: String,
+        name: String,
+    ): String? {
+        val k = key(app, name)
+        val here = secrets.getString(k, null)
+        val from = origin.getString(k, null)
+        val now = System.currentTimeMillis()
+        return when {
+            now - (accountMiss[k] ?: 0L) < ACCOUNT_RETRY_MS -> here
+            here != null && from == null -> here.also { up(app, name, it, now) }
+            here != null && fresh(from, now) -> here
+            else -> fromAccount(app, name, here, now)
+        }
+    }
+
+    /** Kept here, from here or taken from the account less than [ACCOUNT_RECHECK_MS] ago: no need to ask. */
+    private fun fresh(
+        from: String?,
+        now: Long,
+    ) = from == "up" || now - (from?.removePrefix("acct:")?.toLongOrNull() ?: 0L) < ACCOUNT_RECHECK_MS
+
+    /** A secret made here goes up to the account once (the other devices then need no pairing). */
+    private fun up(
+        app: String,
+        name: String,
+        value: String,
+        now: Long,
+    ) {
+        val k = key(app, name)
+        if (AccountSecrets.put(context, app, name, value)) origin.edit().putString(k, "up").apply() else accountMiss[k] = now
+    }
+
+    private fun fromAccount(
+        app: String,
+        name: String,
+        here: String?,
+        now: Long,
+    ): String? {
+        val k = key(app, name)
+        return when (val got = AccountSecrets.get(context, app, name)) {
+            is AccountSecrets.Got.Value -> {
+                secrets.edit().putString(k, got.value).apply()
+                origin.edit().putString(k, "acct:$now").apply()
+                got.value
+            }
+            AccountSecrets.Got.None, AccountSecrets.Got.Revoked -> {
+                if (here != null) Log.i(TAG, "$app's secret $name: gone from the account ($got), dropped here")
+                secrets.edit().remove(k).apply()
+                origin.edit().remove(k).apply()
+                null
+            }
+            AccountSecrets.Got.Unknown -> here.also { accountMiss[k] = now }
+        }
     }
 
     private fun open(
@@ -246,7 +325,11 @@ class ShellNet(
                 is JSONObject -> parent.opt(last)
                 else -> null
             } as? String ?: return body
-        secrets.edit().putString(key(app, cap.getString("secret")), value).apply()
+        val name = cap.getString("secret")
+        secrets.edit().putString(key(app, name), value).apply()
+        origin.edit().remove(key(app, name)).apply()
+        accountMiss.remove(key(app, name))
+        pool.execute { secretOf(app, name) } // up to the account now (the other devices need no pairing)
         when (parent) {
             is JSONArray -> parent.put(last.toInt(), "(kept)")
             is JSONObject -> parent.put(last, "(kept)")
@@ -445,6 +528,8 @@ class ShellNet(
         }
         private val APP_ID = Regex("^[a-z0-9][a-z0-9.-]{0,63}$")
         private val IP_LITERAL = Regex("^[0-9.]+$|^[0-9a-f:]+(%.*)?$")
+        private const val ACCOUNT_RECHECK_MS = 3_600_000L
+        private const val ACCOUNT_RETRY_MS = 60_000L
         private val SECRET_REF = Regex("""\$\{secret:([a-zA-Z0-9_.-]{1,64})\}""")
     }
 }

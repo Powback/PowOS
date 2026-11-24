@@ -84,6 +84,8 @@ server command.
 | device identity | realm (`enroll/powos-enroll.py`) | on sign-in or approver approval | Devices app Revoke / Leave / `powos-enroll revoke` | `devices/enrollment.json` (0600) |
 | Claude access | realm token -> claude-auth tenant | same moment, tenant `powback` for the owner | with the device (introspection, <= 30 s) | the AI token in `/etc/powos/ai/endpoint.conf` |
 | WireGuard peer | PowStation `wireguard` | not built (needs a PowAuth path, below) | with the device | its wg config |
+| apps' data + settings (tables an app marks `sync`: Lights' bridge + rooms, Keyboard AI) | the account store in the realm (`/v1/account/rows`) | on any change, by `powos-account-sync` (REMOTE-POWOS §2.5 "As built") | with the device (its realm token: 401) | the app's own tables |
+| apps' secrets (the Hue bridge key) | the realm, AES-GCM at rest (`/v1/account/secret`) | captured on one device, taken by the others on first use (ShellNet.kt) | with the device: dropped on its next check | the PowOS app's per-app secrets |
 | settings/themes | PowOS owner profile | not built | - | local copy + overrides |
 | backups | NAS copy of app data | not built | - | restored data |
 
