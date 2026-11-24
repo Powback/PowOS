@@ -8,15 +8,17 @@ check() { if eval "$2"; then echo "  ok   - $1"; pass=$((pass + 1)); else echo "
 T=$(mktemp -d); trap 'kill $(jobs -p) 2>/dev/null; rm -rf "$T"' EXIT
 command -v python3 >/dev/null || { echo "test-android-probe: 0 passed, 0 failed (no python3)"; exit 0; }
 
-# A fake adbd (answers STLS) and a decoy that answers something else, on free ports in the probed range.
+# A fake adbd (answers STLS) and a decoy that answers something else, on free ports in the probed range. Disjoint
+# ranges, decoy below adbd (the probe goes up, so it meets the decoy first): from one shared range, both bound the same
+# port under SO_REUSEADDR (Linux allows it until one listens), the second listen() failed and no adbd ever came up (CI).
 python3 - "$T" <<'PY' &
 import socket, sys, threading
-def serve(reply, name):
-    for port in range(41000, 49000):
+def serve(reply, name, lo, hi):
+    for port in range(lo, hi):
         s = socket.socket(); s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-        try: s.bind(("127.0.0.1", port)); break
+        try: s.bind(("127.0.0.1", port)); s.listen(8); break
         except OSError: s.close()
-    s.listen(8); open(f"{sys.argv[1]}/{name}", "w").write(str(port))
+    open(f"{sys.argv[1]}/{name}", "w").write(str(port))
     while True:
         c, _ = s.accept()
         try:  # the scan's plain connect-and-close must not end the server
@@ -25,16 +27,17 @@ def serve(reply, name):
             pass
         finally:
             c.close()
-threading.Thread(target=serve, args=(b"HTTP/1.1 400 Bad Request\r\n\r\n", "decoy"), daemon=True).start()
-serve(b"STLS" + b"\0" * 20, "adbd")
+threading.Thread(target=serve, args=(b"HTTP/1.1 400 Bad Request\r\n\r\n", "decoy", 41000, 45000), daemon=True).start()
+serve(b"STLS" + b"\0" * 20, "adbd", 45000, 49000)
 PY
 for _ in $(seq 50); do [[ -s "$T/adbd" && -s "$T/decoy" ]] && break; sleep 0.1; done
+[[ -s "$T/adbd" && -s "$T/decoy" ]] || { echo "  FAIL - the fake adbd and decoy didn't start"; exit 1; }
 
 # shellcheck source=/dev/null
 POWOS_LIB="$ROOT/lib" source "$ROOT/lib/android.sh" 2>/dev/null
 export XDG_CACHE_HOME="$T/cache"
 got=$(_android_probe)
-check "finds the port that answers STLS" '[[ "$got" == "$(cat "$T/adbd")" ]]'
+check "finds the port that answers STLS" '[[ -n "$got" && "$got" == "$(cat "$T/adbd")" ]]'
 check "not the decoy" '[[ "$got" != "$(cat "$T/decoy")" ]]'
 check "remembers it" '[[ -n "$got" && "$(cat "$T/cache/powos/adb-port")" == "$got" ]]'
 echo 1 > "$T/cache/powos/adb-port"
