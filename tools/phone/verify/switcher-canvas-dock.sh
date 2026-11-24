@@ -23,7 +23,7 @@ C=com.android.chrome K=com.oneplus.calculator S=com.android.settings
 MINE_T=""
 # tasks.list's id of [pkg]'s task (the newest), or "".
 tid() { hcall tasks.list "[]" "l=>(l.find(t=>(t.key||'').includes('$1'))||{}).id??''"; }
-canvas_task() { sh_ "dumpsys activity activities" | grep -E "Task\{.*com\.oplus\.pscanvas" | sed -nE 's/.*Task\{[0-9a-f]+ #([0-9]+).*/\1/p' | head -1; }
+canvas_task() { sh_ "dumpsys activity activities" | grep -E "Task\{.*com\.oplus\.pscanvas" | sed -nE 's/.*Task\{[0-9a-f]+ #([0-9]+).*/\1/p' | sed -n 1p; }
 close_canvas() { local c r
   sh_ "input keyevent KEYCODE_HOME" >/dev/null; sleep 1
   c=$(canvas_task)

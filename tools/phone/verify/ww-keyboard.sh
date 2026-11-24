@@ -20,7 +20,7 @@ set -uo pipefail
 NAME=ww-keyboard; . "$(dirname "$0")/wwc-lib.sh"
 if [ "${POWOS_DEVICE:-phone}" = emu ]; then
   APP=${KB_APP:-a:com.oneplus.calculator/com.oneplus.calculator.Chat}; TAP=${KB_TAP:-0.5 0.96}; PKG=com.oneplus.calculator
-  if ! "$A" shell dumpsys package com.oneplus.calculator 2>/dev/null | grep -q "versionName=emu-testwin-[2-9]"; then
+  if ! "$A" shell dumpsys package com.oneplus.calculator 2>/dev/null | awk '/versionName=emu-testwin-[2-9]/{f=1} END{exit !f}'; then
     apk=$("$T/../emu/testwin/build.sh") && "$A" install -r "$apk" >/dev/null && say "test window client installed (its chat)"; fi
 else
   APP=${KB_APP:-a:com.google.android.apps.messaging}; TAP=${KB_TAP:-0.5 0.08}; PKG=${APP#a:}; PKG=${PKG%%/*}
