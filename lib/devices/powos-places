@@ -38,6 +38,12 @@ import time
 import urllib.parse
 from xml.dom import minidom
 
+# The helpers PowOS's Python tools share (lib/powos_py/common.py; next to lib/apps, lib/devices, lib/ai/agents).
+_HERE = os.path.dirname(os.path.realpath(__file__))
+sys.path.append(next((d for d in (_HERE, os.path.dirname(_HERE), os.path.dirname(os.path.dirname(_HERE)))
+                      if os.path.isdir(os.path.join(d, "powos_py"))), "/usr/lib/powos"))
+from powos_py.common import owner_conf  # noqa: E402
+
 HERE = os.path.dirname(os.path.realpath(__file__))
 XBEL = os.environ.get("POWOS_PLACES_XBEL") or os.path.expanduser("~/.local/share/user-places.xbel")
 CACHE = os.environ.get("POWOS_PLACES_CACHE") or os.path.expanduser("~/.cache/powos/places")
@@ -107,17 +113,6 @@ def removable():
                 seen.add(n)
                 out.append((n, p))
     return out
-
-
-def owner_conf(key):
-    path = os.environ.get("POWOS_OWNER_CONF") or os.path.expanduser("~/.config/powos/owner.conf")
-    try:
-        for line in open(path):
-            if line.startswith(key + "="):
-                return line[len(key) + 1:].strip()
-    except OSError:
-        pass
-    return ""
 
 
 def owner_hosts():

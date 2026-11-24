@@ -1,8 +1,8 @@
 #!/bin/bash
 # test-window-bench-arm.sh - window-bench.sh's in-page tap timing (arm_js): the limit counts from the tap's pointerdown,
-# not from the arming. 11-10 p1: under Mac load the hops between arming and the tap took > 2 s, so every storm close read
-# "-", and close-host was timed on the Mac's clock (1.5-3 s for a host close that took 30 ms on the phone). Runs the
-# generated JS in node against a fake page: a tap 2.5 s after arming, the condition true 40 ms after the tap.
+# not from the arming. 11-10 p1: under Mac load the hops between arming and the tap took > 2 s, so every storm close
+# read "-", and close-host was timed on the Mac's clock (1.5-3 s for a host close that took 30 ms on the phone). Runs
+# the generated JS in node against a fake page: a tap 2.5 s after arming, the condition true 40 ms after the tap.
 set -u
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 B="$ROOT/tools/phone/verify/window-bench.sh"

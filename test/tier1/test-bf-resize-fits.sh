@@ -1,8 +1,8 @@
 #!/bin/bash
-# game-resize.sh's (bf-resize.sh's) G1/G3 test (board task games-resize-live-to-their-container-portrait-la): the game's X window must BE its
-# screen's size (within 1 % per side), not just its shape - the old aspect-only match passed a half-size window
-# (1134x1220 on the 2268x2440 inner screen) and a 314x208 Unity first map on a wide screen. Also: the start doesn't
-# wait out the 130 s sleep grace (GRACE_S=0), the wait that ran the 10-28 check out of its 300 s budget.
+# game-resize.sh's (bf-resize.sh's) G1/G3 test (board task games-resize-live-to-their-container-portrait-la): the game's
+# X window must BE its screen's size (within 1 % per side), not just its shape - the old aspect-only match passed a
+# half-size window (1134x1220 on the 2268x2440 inner screen) and a 314x208 Unity first map on a wide screen. Also: the
+# start doesn't wait out the 130 s sleep grace (GRACE_S=0), the wait that ran the 10-28 check out of its 300 s budget.
 set -uo pipefail
 ROOT=$(cd "$(dirname "$0")/../.." && pwd); V=$ROOT/tools/phone/verify
 pass=0 fail=0

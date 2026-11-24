@@ -1,5 +1,4 @@
 import concurrent.futures,http.client,json,time,sys,statistics
-from pathlib import Path
 label=sys.argv[1]
 prompts=['Write a detailed Python implementation of an LRU cache using OrderedDict, followed by example tests. Keep writing code until finished.','Write a detailed Python implementation of merging overlapping intervals, followed by example tests. Keep writing code until finished.']
 def request(prompt):

@@ -493,7 +493,8 @@ def generate(m, dest):
     copy_template(os.path.join(t, "ui"), os.path.join("ui", "lib", "app.ts"), dest, m)
     copy_template(os.path.join(t, "ui"), os.path.join("ui", "tsconfig.json"), dest, m)
     copy_template(os.path.join(t, "composed"), os.path.join("ui", "lib", "compose.ts"), dest, m)
-    # The show template's component is the widget's entry (widgets/main): status-list -> main.tsx, native-card -> native-card.tsx.
+    # The show template's component is the widget's entry (widgets/main): status-list -> main.tsx, native-card ->
+    # native-card.tsx.
     tpl = "native-card.tsx" if (m.get("show") or {}).get("template") == "native-card" else "main.tsx"
     with open(os.path.join(t, "composed", "ui", "widgets", tpl), encoding="utf-8") as f:
         write(os.path.join(dest, "ui", "widgets", "main.tsx"), subst(f.read(), m))

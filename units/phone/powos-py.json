@@ -1,0 +1,14 @@
+{
+  "id": "powos-py",
+  "name": "PowOS shared Python helpers",
+  "kind": "system",
+  "owner": "system:powos-deploy",
+  "purpose": "lib/powos_py: the helpers PowOS's own Python tools share (the owner config, the device's SpacetimeDB identity), imported by the tools in /usr/lib/powos/apps, devices and ai/agents (powos pet, terms, progress, agents, powos-rootsh, powos-places); a library, nothing running",
+  "installedBy": "targets/android/rooted/powos-deploy.sh (lib/powos_py)",
+  "files": [
+    "/usr/lib/powos/powos_py"
+  ],
+  "remove": {
+    "commands": []
+  }
+}

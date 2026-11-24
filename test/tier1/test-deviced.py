@@ -12,11 +12,9 @@ import importlib.util
 import json
 import os
 import shutil
-import ssl
 import sys
 import tempfile
 import threading
-import urllib.request
 
 REPO = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 SRC = os.path.join(REPO, "lib/devices/powos-deviced")
@@ -281,8 +279,8 @@ with contextlib.redirect_stdout(io.StringIO()):
     open(os.path.join(work, "b.json"), "w").write('{"POWOS_TERMS_LINKS": "mac=me@hub"}')
     d.main(["owner-apply", os.path.join(work, "b.json")])
 check(open(os.environ["POWOS_OWNER_CONF"]).read().endswith("POWOS_TERMS_LINKS=mac=me@hub\n"), "owner-apply FILE writes it")
-# The phone app's setup ("Join your PowStation", PowStation.kt) finished the device flow itself: adopt keeps it here too,
-# owner config and units.d record included, no secret printed; without AI it doesn't touch the endpoint.
+# The phone app's setup ("Join your PowStation", PowStation.kt) finished the device flow itself: adopt keeps it here
+# too, owner config and units.d record included, no secret printed; without AI it doesn't touch the endpoint.
 adopted = {"realm": "http://powstation.example", "device": {"id": "ph1", "name": "razr", "kind": "phone"},
            "device_token": "adopt-tok", "endpoints": {"owner": {"POWOS_VOICE_URL": "ws://voice.example/ws"}},
            "owner": "Mats", "junk": 1}

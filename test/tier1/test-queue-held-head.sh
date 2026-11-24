@@ -1,8 +1,9 @@
 #!/bin/bash
-# test-queue-held-head.sh: a held job at the head of the queue never ends a window it couldn't run in (11-07 22:51-00:14:
-# ww-glue backing off after its rc 3s sorted first, every woken window logged "queued to go first - re-picking the
-# window" and "woke the phone for 0 jobs" - 23 queued, one ran in 2 h). Drives queue.sh's own job_held / select_jobs /
-# first_waiting with three jobs: a backing-off head, a runnable one, a late runnable one that came in mid-window.
+# test-queue-held-head.sh: a held job at the head of the queue never ends a window it couldn't run in (11-07
+# 22:51-00:14: ww-glue backing off after its rc 3s sorted first, every woken window logged "queued to go first -
+# re-picking the window" and "woke the phone for 0 jobs" - 23 queued, one ran in 2 h). Drives queue.sh's own job_held /
+# select_jobs / first_waiting with three jobs: a backing-off head, a runnable one, a late runnable one that came in
+# mid-window.
 # Also: the runner restarts when window-lock.sh changes, not only queue.sh (the self-input fix sat unloaded all night).
 set -uo pipefail
 src=$(cd "$(dirname "$0")/../.." && pwd)/tools/phone/verify/queue.sh

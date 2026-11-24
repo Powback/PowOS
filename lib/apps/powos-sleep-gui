@@ -107,8 +107,8 @@ SCREEN_LOG = os.environ.get("POWOS_SLEEP_SCREEN_LOG", f"{RUN}/andromarchy.log")
 RUNNING_DIR = f"{RUN}/running"  # the PowOS app makes it (and watches it); none on the desktop, nothing written
 # Steam's console log: every game launch's steps as they happen (SteamLaunches)
 STEAM_LOG = os.environ.get("POWOS_STEAM_LOG", os.path.expanduser("~/.local/share/Steam/logs/console_log.txt"))
-# A game's Wine session booted ahead of the tap (pkgs/steam powos_preboot.py `early`, off unless its switch is on): asked
-# when PowOS comes on screen with a game launcher (Steam) running; the keeper decides and bounds the rest itself.
+# A game's Wine session booted ahead of the tap (pkgs/steam powos_preboot.py `early`, off unless its switch is on):
+# asked when PowOS comes on screen with a game launcher (Steam) running; the keeper decides and bounds the rest itself.
 PREBOOT = os.environ.get("POWOS_WINE_PREBOOT_PY", "/usr/lib/powos-steam/py/powos_preboot.py")
 
 
@@ -972,9 +972,9 @@ class Gui(dbus.service.Object):
         screen, or Android's home with the games widget: bf-coldstart frozen 15:06, PowOS off screen, handoff 17 s);
         screen off: keepalive pulses only, for LINK_DARK_S after it went dark (then nothing, battery); a link dropped
         while dark is found within LINK_S of the screen coming on. A link that is still live costs one /proc read."""
-        # HACK: a frozen Steam can't answer its CM server (dropped 79 s into a freeze, 2026-11-05 14:47), so it is thawed
-        # for LINK_PULSE_MS every LINK_PULSE_S while a display is lit (its overdue heartbeat goes out) and thawed to
-        # reconnect when the link died anyway. Real fix: Steam's client keeping its link from a small process of its
+        # HACK: a frozen Steam can't answer its CM server (dropped 79 s into a freeze, 2026-11-05 14:47), so it is
+        # thawed for LINK_PULSE_MS every LINK_PULSE_S while a display is lit (its overdue heartbeat goes out) and thawed
+        # to reconnect when the link died anyway. Real fix: Steam's client keeping its link from a small process of its
         # own (or a resume that skips the reconnect backoff), so the client could stay frozen.
         # Screen dark: pulses only (no reconnect: that is ~25 s awake) for LINK_DARK_S after it went dark, so a tap soon
         # after waking the phone finds the link live (bf-coldstart 11-11 23:28: dark 95 s, link dropped, handoff 9.6 s).

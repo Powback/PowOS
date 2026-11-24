@@ -597,8 +597,8 @@ self_push() {
     if ((${#paths[@]})); then
         git -C "$src" add -- "${paths[@]}" || { perr "git add failed."; return 1; }
     else
-        # Someone else's staged changes in the index: `add -A` + commit would ship them under this message. A tree
-        # several agents share must commit by path (status --porcelain's index column: diff --cached --quiet below is the post-add-A check, not this one).
+        # Someone else's staged changes: `add -A` + commit would ship them under this message. A shared tree commits
+        # by path (status --porcelain's index column; diff --cached --quiet below is the post-add-A check, not this).
         if git -C "$src" status --porcelain 2>/dev/null | grep -qE '^[^ ?]'; then
             perr "Other changes are already staged in $src (another agent or tool?):"
             git -C "$src" diff --cached --name-status 2>/dev/null | self_indent

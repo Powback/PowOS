@@ -681,7 +681,8 @@ class Handler(BaseHTTPRequestHandler):
             return {"revoked": revoke(path.rsplit("/", 1)[1])}
         if path.startswith("/v1/enroll/"):
             # Approving devices into the realm uses THIS device's enrollment: only for a person at this device (its
-            # own Devices app), never for a paired peer elsewhere - pairing grants control of this device, not the realm.
+            # own Devices app), never for a paired peer elsewhere - pairing grants control of this device, not the
+            # realm.
             if not self.here():
                 raise ActionError("approving devices is only for this device's own Devices app", "forbidden")
             sys.stderr.write(f"enroll {path.rsplit('/', 1)[1]} by {pid}\n")

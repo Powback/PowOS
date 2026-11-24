@@ -20,7 +20,6 @@ E2E_APPS="${TEST_APP:-com.oneplus.calculator}|PowosWindowActivity|com.android.ch
 e2e_init scroll
 e2e_setup inner
 
-wvis() { sh_ "dumpsys window windows" | awk -v p="$1}" '/^ *Window #/{f=(index($0,p)>0)} f' | grep -m1 -oE "isVisible=[a-z]+" | cut -d= -f2; }
 touched() { sh_ "dumpsys input" | sed -n '/TouchStatesByDisplay/,/CursorStatesByDisplay/p' | grep -oE "name='[^']*'|pilferingPointerIds=[^,]*" | sed -E "s/name='[0-9a-f]+ ?/'/" | tr '\n' ' ' | cut -c1-400; }
 # shut <what>: shade, pull-up panel and drawer all shut; anything open is closed again (and FAILs).
 shut() { local s p d v; v=$(sh_ "dumpsys window windows" | awk '/^ *Window #/{f=(index($0,"PowOS shade}")>0)?"s":(index($0,"PowOS pull-up panel}")>0)?"p":""} f && /isVisible=/{print f, $0}' | grep -oE "^[sp]|isVisible=[a-z]+" | paste - - | tr '\t' ' ')

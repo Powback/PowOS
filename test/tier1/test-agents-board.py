@@ -304,8 +304,8 @@ class BoardTest(unittest.TestCase):
         self.assertEqual([(p["a"], p["b"]) for p in pairs], [("broforce-a", "broforce-b")])
 
     def test_try_line_is_its_own_plain_field(self):
-        # 2026-10-30: Ready to try showed the coordinator's --step notes ("P0 fixed 18:23 (APK 46120ff9)..."). The card's
-        # line is its own field, set only by --try, never the step or the note.
+        # 2026-10-30: Ready to try showed the coordinator's --step notes ("P0 fixed 18:23 (APK 46120ff9)..."). The
+        # card's line is its own field, set only by --try, never the step or the note.
         self.cli("add", "Floating windows", "--id", "fw", "--step", "P0 fixed 18:23 (APK 46120ff9)")
         self.assertEqual(self.row("fw")["try_line"], "")
         self.cli("set", "fw", "--try", "Floating windows are back, try moving and resizing one", "--no-after", "the try line alone")

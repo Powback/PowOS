@@ -245,7 +245,7 @@ def main():
     fmt = lambda r, n: '' if r.get(n) is None else ('>' if r.get(n + '_open') else '') + f"{r[n]:g}"
     hm = lambda t: t.strftime('%H:%M') if t else '-'
     if a.md:
-        print(f"| asked | ask | agent start | first phone commit | kind | on phone | lag | code | ship | check | to phone |")
+        print("| asked | ask | agent start | first phone commit | kind | on phone | lag | code | ship | check | to phone |")
         print('|---|---|---|---|---|---|---|---|---|---|---|')
         for r in rows:
             print(f"| {hm(r['at'])} {r['prio']} | {r['ask'][:70].replace('|', '/')} | {hm(r.get('start'))} | "

@@ -14,8 +14,8 @@ n=$(printf '%s\n' "$map" | grep -c .)
 miss=$(printf '%s\n' "$map" | while read -r m src dest; do [ -f "$ROOT/targets/android/$src" ] || echo "$src"; case "$dest" in /*) ;; *) echo "relative $dest" ;; esac; done)
 [ -z "$miss" ] && ok "every mapped source exists, every destination is absolute" || bad "map: $miss"
 printf '%s\n' "$map" | grep -q '^755 session/powos-open-task /usr/local/bin/powos-open-task$' && ok "powos-open-task mapped" || bad "powos-open-task not mapped"
-# The Claude endpoint shell file and its unit (repo files outside targets/android) reach installed phones via powos-core,
-# not only a fresh base (11-11: the razr's base predates them and a new base is for fresh installs only).
+# The Claude endpoint shell file and its unit (repo files outside targets/android) reach installed phones via
+# powos-core, not only a fresh base (11-11: the razr's base predates them and a new base is for fresh installs only).
 printf '%s\n' "$map" | grep -q '^644 \.\./\.\./config/etc/profile.d/45-powos-claude-endpoint.sh /etc/profile.d/45-powos-claude-endpoint.sh$' \
   && ok "claude endpoint profile.d mapped" || bad "claude endpoint profile.d not in powos-core"
 printf '%s\n' "$map" | grep -q '^644 \.\./\.\./units/phone/claude-code.json /etc/powos/units.d/claude-code.json$' \

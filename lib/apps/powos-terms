@@ -26,6 +26,12 @@ import subprocess
 import sys
 import time
 
+# The helpers PowOS's Python tools share (lib/powos_py/common.py; next to lib/apps, lib/devices, lib/ai/agents).
+_HERE = os.path.dirname(os.path.realpath(__file__))
+sys.path.append(next((d for d in (_HERE, os.path.dirname(_HERE), os.path.dirname(os.path.dirname(_HERE)))
+                      if os.path.isdir(os.path.join(d, "powos_py"))), "/usr/lib/powos"))
+from powos_py.common import owner_conf  # noqa: E402
+
 FIELDS = ("session_name", "session_windows", "session_activity", "session_attached",
           "pane_title", "pane_current_path", "pane_current_command", "pane_pid")
 FORMAT = "\t".join("#{%s}" % f for f in FIELDS)
@@ -40,27 +46,6 @@ CACHE = os.path.expanduser(os.environ.get("POWOS_TERMS_CACHE", "~/.cache/powos/t
 # temporary suffix passes on a phone without root (the real path is under /data/user/0/<app>/files/rootfs).
 CONTROL_DIR = os.environ.get("POWOS_TERMS_CONTROL_DIR") or f"/tmp/pt-{os.getuid()}"
 HOSTS_CONF = os.path.expanduser(os.environ.get("POWOS_TERMS_HOSTS_CONF", "~/.config/powos/terms-hosts"))
-
-
-def owner_conf(key):
-    """$KEY, else KEY=value in the owner config ($POWOS_OWNER_CONF, else /etc/powos/owner.conf, else
-    ~/.config/powos/owner.conf: written when the device pairs with the owner's hub). "" = not configured."""
-    if os.environ.get(key):
-        return os.environ[key]
-    p = os.environ.get("POWOS_OWNER_CONF")
-    for path in [p] if p is not None else ["/etc/powos/owner.conf", os.path.expanduser("~/.config/powos/owner.conf")]:
-        try:
-            with open(path) as f:
-                lines = f.read().splitlines()
-        except OSError:
-            continue
-        val = ""
-        for line in lines:
-            k, sep, v = line.strip().partition("=")
-            if sep and k.strip() == key:
-                val = v.strip()
-        return val[1:-1] if len(val) > 1 and val[0] == val[-1] and val[0] in "\"'" else val
-    return ""
 
 
 # With no terms-hosts file: the links the owner config names (POWOS_TERMS_LINKS="host=user@address,...", the owner's

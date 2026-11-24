@@ -2,7 +2,8 @@
 # test-ship-window-wake.sh: the ship's device window check (tools/phone/verify/window-render.sh --hidden) on a dozing
 # phone (11-02: the ship service waited all night for an awake phone). The user idle >= WR_WAKE_IDLE_S (600) s ->
 # the check wakes the screen (as ship-guard.sh's boot check does), JUDGES, and puts it back to sleep; the user
-# active (idle 60 s) -> never woken, NOT JUDGED (exit 2). A fake adb.sh/idle.sh (WR_TOOLS) stands in for the phone. The user opening/closing a window during the check: NOT JUDGED too (11-03).
+# active (idle 60 s) -> never woken, NOT JUDGED (exit 2). A fake adb.sh/idle.sh (WR_TOOLS) stands in for the phone. The
+# user opening/closing a window during the check: NOT JUDGED too (11-03).
 set -u
 src=$(cd "$(dirname "$0")/../.." && pwd)
 T=$(mktemp -d "${TMPDIR:-/tmp}/ship-wake-test.XXXXXX")

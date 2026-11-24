@@ -203,7 +203,7 @@ def tool_waste(path, since=''):
         if (e.get('timestamp') or '') >= since and e.get('type') in ('assistant', 'user'):
             evs.append(e)
     uses, later_txt, offs, pos = {}, [], [], 0
-    seen_ids, order = set(), []   # order: (event index, call index)
+    seen_ids = set()
     ncalls = 0
     call_ctx = []
     for i, e in enumerate(evs):

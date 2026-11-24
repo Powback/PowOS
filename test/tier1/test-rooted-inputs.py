@@ -25,7 +25,7 @@ FAILS = []
 ANCHORS = ["lib/apps/powos-sleep-gui", "lib/apps/powos-sleep", "lib/apps/powos-units", "lib/apps/powos-terms",
            "bin/powos", "lib/config.sh", "lib/devices/powos-deviced", "targets/android/play/powos-steam",
            "targets/android/rooted/powos-deploy.sh", "targets/android/session/powos-android-app",
-           "lib/ai/agents/powos-agentsd", "tools/app-api/appcap_serve.py"]
+           "lib/ai/agents/powos-agentsd", "tools/app-api/appcap_serve.py", "lib/powos_py/common.py"]
 NEGATIVE = ["lib/apps/powos-noroot-services", "shell/index.html", "targets/android/app/build.gradle.kts",
             "lib/ai/sandbox/node_modules/x/index.js", "targets/android/pkgs/kwin/test/run.sh",
             "targets/android/rooted/app-frida.sh", "README.md"]

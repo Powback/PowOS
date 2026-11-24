@@ -352,6 +352,9 @@ if [ -d $A ]; then
   done
   L=$R/usr/lib/powos/apps
   mkdir -p $L/services $L/registry
+  # The helpers PowOS's Python tools share (lib/powos_py/common.py: owner config, SpacetimeDB identity). The tools in
+  # usr/lib/powos/apps, devices and ai/agents import it from usr/lib/powos/powos_py (as from lib/ on x86 and the Mac).
+  mkdir -p $R/usr/lib/powos/powos_py && install -m 644 $A/powos_py/*.py $R/usr/lib/powos/powos_py/
   # powos-container: containers with hard limits in Android's cgroups (docs/PHONE-KERNEL-CONTAINERS.md section 12;
   # `powos containers run`, the runtime's container mode). It installs its OCI hooks itself on first use.
   # powos-units: /data/powos/root/usr/lib/powos/apps/powos-runtime /data/powos/root/usr/lib/powos/apps/powos-supervisor /data/powos/root/usr/lib/powos/apps/powos-app /data/powos/root/usr/lib/powos/apps/powos-container /data/powos/root/usr/lib/powos/apps/powos-units /data/powos/root/usr/bin/powos-runtime /data/powos/root/usr/bin/powos-supervisor /data/powos/root/usr/bin/powos-app /data/powos/root/usr/bin/powos-container /data/powos/root/usr/bin/powos-units

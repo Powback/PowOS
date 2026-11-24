@@ -6,7 +6,8 @@
 #     A new violation fails; an entry no longer needed fails until pruned; an entry above HEAD's fails.
 #   Kotlin (targets/android/app): targets/android/lint-complexity.sh - detekt, the same limits, baseline
 #     targets/android/app/config/detekt-baseline.xml (one id per function).
-#   Rust (apps/*/module): tools/lint/rust-complexity.sh - clippy, the same limits, tools/lint/rust-complexity-baseline.txt.
+#   Rust (apps/*/module): tools/lint/rust-complexity.sh - clippy, the same limits,
+#     tools/lint/rust-complexity-baseline.txt.
 #   Shell scripts (every tracked *.sh + bin/): build/complexity.py --check-length - 60 lines per function, old debt
 #     in build/function-length-budget.txt (a ratchet).
 #   Bash (bin/, lib/, build/): build/complexity.py --check (the CC ratchet, build/complexity-budget.txt).

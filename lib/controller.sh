@@ -312,19 +312,6 @@ _ctrl_ensure_hotplug() {
 # Readouts used by `list`
 # ══════════════════════════════════════════════════════════════════
 
-# Currently-applied deadzone as a percentage, taken from the widest-range axis
-# (a stick). Prints e.g. "8.0" or "-" if unreadable.
-_ctrl_current_pct() {
-    _ctrl_axes "$1" | awk -F'|' '
-        { rng=$3-$2; if (rng>2 && rng>brng) { brng=rng; bflat=$4 } }
-        END { if (brng>0) printf "%.1f", bflat*200.0/brng; else printf "-" }'
-}
-
-# Quick idle-drift readout: max |value-center| across stick axes, % of half-range.
-_ctrl_idle_drift() {
-    _ctrl_axes "$1" | _ctrl_drift_awk
-}
-
 # ══════════════════════════════════════════════════════════════════
 # Subcommands
 # ══════════════════════════════════════════════════════════════════

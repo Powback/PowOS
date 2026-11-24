@@ -185,18 +185,3 @@ export function NeedsYouCard({ needs }: { needs: Need[] }) {
     </section>
   );
 }
-
-/** The folded status page's section of asks (aistatus.tsx): its heading and the same rows, no card; none: not drawn. */
-export function NeedSection({ title, sec, needs }: { title: string; sec: string; needs: Need[] }) {
-  const rows = useRows(needs);
-  if (!rows.length) return null;
-  return (
-    <section class="ais-sec" data-sec={sec} aria-label={title}>
-      <h3 class="ais-h">
-        {title}
-        {needs.length > 0 && <span class="ais-n">{needs.length}</span>}
-      </h3>
-      <NeedList rows={rows} />
-    </section>
-  );
-}

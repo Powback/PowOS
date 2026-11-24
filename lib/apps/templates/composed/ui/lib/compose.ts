@@ -288,7 +288,8 @@ export function useAndroidBlock(host: Host, use: AndroidUse, size: [number, numb
   useEffect(() => {
     if (!ah) return;
     let live = true;
-    // The id written into the composition can be stale (the widget was removed and added again): look it up by provider.
+    // The id written into the composition can be stale (the widget was removed and added again): look it up by
+    // provider.
     ah.idOf(use.provider).then((now) => {
       if (!live) return;
       if (now !== null) setId(now);

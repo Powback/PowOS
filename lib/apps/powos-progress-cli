@@ -25,6 +25,12 @@ import urllib.error
 import urllib.request
 import zlib
 
+# The helpers PowOS's Python tools share (lib/powos_py/common.py; next to lib/apps, lib/devices, lib/ai/agents).
+_HERE = os.path.dirname(os.path.realpath(__file__))
+sys.path.append(next((d for d in (_HERE, os.path.dirname(_HERE), os.path.dirname(os.path.dirname(_HERE)))
+                      if os.path.isdir(os.path.join(d, "powos_py"))), "/usr/lib/powos"))
+from powos_py.common import token  # noqa: E402
+
 DB = "local-powos-progress"
 SERVER = os.environ.get("POWOS_STDB", "http://127.0.0.1:3410")
 STATES = ("works", "partly", "broken", "untested")
@@ -38,18 +44,6 @@ class Down(Exception):
 def die(msg, code=1):
     print(f"powos progress: {msg}", file=sys.stderr)
     sys.exit(code)
-
-
-def token():
-    try:
-        with open(os.path.expanduser("~/.config/spacetime/cli.toml")) as f:
-            for line in f:
-                k, _, v = line.partition("=")
-                if k.strip() == "spacetimedb_token":
-                    return v.strip().strip('"')
-    except OSError:
-        pass
-    return None
 
 
 def http(path, body, ctype):

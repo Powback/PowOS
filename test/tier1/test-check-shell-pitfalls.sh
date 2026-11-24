@@ -1,8 +1,8 @@
 #!/bin/bash
 # test-check-shell-pitfalls.sh - tools/agents/shell-pitfalls.py: the lint over the phone checks' shell catches the
 # four pitfalls that produced false check FAILs on 11-10 (BSD-awk ternary redirect, SIGPIPE under pipefail, single
-# quotes nested in su -c '...', a tag twice in a logcat filterspec), stays quiet on their fixed forms, and the tree itself is clean.
-# No pipefail here on purpose (see test-base.sh): assertions use `grep -c` on captured output.
+# quotes nested in su -c '...', a tag twice in a logcat filterspec), stays quiet on their fixed forms, and the tree
+# itself is clean. No pipefail here on purpose (see test-base.sh): assertions use `grep -c` on captured output.
 set -u
 ROOT=$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)
 LINT="$ROOT/tools/agents/shell-pitfalls.py"

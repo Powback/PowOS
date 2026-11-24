@@ -471,7 +471,8 @@ class Manager:
             self._spawn_workers()
             self.pending.put((source, text))
             t0 = time.time()
-            # Done on the first turn that answered; two empty results in a row (a turn that truly said nothing) end it too.
+            # Done on the first turn that answered; two empty results in a row (a turn that truly said nothing) end it
+            # too.
             while (self.turns_done < 1 and self.empty_results < 2 and not self.stop.is_set()
                    and not self.stopped.is_set()):
                 if time.time() - t0 > timeout:

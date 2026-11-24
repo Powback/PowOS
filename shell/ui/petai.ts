@@ -12,7 +12,7 @@
  * hop ends anywhere but where it should (a rect moved or went, it missed), it replans from where it is - never a reset.
  * A goal it can't reach: as close as it can get (the surface nearest the goal it can reach).
  */
-import { DT, FLOOR, NO_INPUT, T, step, type Input, type Pet, type Rect, type World } from "./petphys.ts";
+import { clamp, DT, FLOOR, NO_INPUT, T, step, type Input, type Pet, type Rect, type World } from "./petphys.ts";
 
 export interface Goal {
   key: string;
@@ -45,7 +45,6 @@ function surface(world: World, key: string): Rect | null {
   return world.rects.find((r) => r.key === key) ?? null;
 }
 
-const clamp = (v: number, lo: number, hi: number) => Math.min(hi, Math.max(lo, v));
 const now = () => (typeof performance !== "undefined" ? performance.now() : Date.now());
 const inset = (p: Pet, r: Rect, x: number) => {
   const m = Math.min(p.hw * 0.5, (r.r - r.l) / 2);

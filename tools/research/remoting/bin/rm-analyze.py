@@ -8,7 +8,7 @@ net.txt (netsample.py of the app container, copied in; absent for MODE=local).
   fps         = damaged commits per second on the busiest surface in the phase; gaps between them; a stall = a gap
                 > 100 ms during scroll, or a key whose damage took > 100 ms
   bytes/s     = tcp_info bytes_acked (app->comp) and bytes_received (comp->app) of the waypipe link"""
-import json, re, sys, datetime, statistics, collections
+import json, re, sys, datetime, collections
 meta = dict(a.split('=', 1) for a in sys.argv[1:])
 ph = json.load(open('/tmp/run/phases.json'))
 day0 = datetime.datetime.fromtimestamp(ph['idle'][0] / 1000, datetime.timezone.utc).replace(hour=0, minute=0, second=0, microsecond=0).timestamp() * 1000

@@ -26,6 +26,11 @@ echo $$ > "$S/lock/pid"; trap 'rm -rf "$S/lock"' EXIT
 git -C "$R" fetch -q origin "$BASE" 2>/dev/null
 cli=$S/powos-agents-cli
 git -C "$R" show "origin/$BASE:lib/ai/agents/powos-agents-cli" > "$cli.tmp" 2>/dev/null && mv "$cli.tmp" "$cli" || cp "$R/lib/ai/agents/powos-agents-cli" "$cli"
+# And the shared helpers it imports (lib/powos_py), beside it where it looks for them; same source as the CLI.
+rm -rf "$S/powos_py.tmp" && mkdir -p "$S/powos_py.tmp" &&
+  git -C "$R" archive "origin/$BASE" lib/powos_py 2>/dev/null | tar -x -C "$S/powos_py.tmp" --strip-components=2 &&
+  [ -f "$S/powos_py.tmp/common.py" ] || { rm -rf "$S/powos_py.tmp" && cp -R "$R/lib/powos_py" "$S/powos_py.tmp"; }
+rm -rf "$S/powos_py" && mv "$S/powos_py.tmp" "$S/powos_py"
 # Dead agent worktrees (f3): fetch + run origin's current worktree.sh gc, same "fetch the latest copy, run that"
 # pattern as the CLI above - a fix there reaches every sweep without every worktree rebasing by hand. --dry-run
 # here follows this script's own (no real sweep's --dry-run run should delete anything either). Never fatal: a

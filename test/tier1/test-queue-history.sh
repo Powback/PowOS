@@ -16,7 +16,8 @@ T=$(mktemp -d "${TMPDIR:-/tmp}/qhist.XXXXXX"); trap 'rm -rf "$T"' EXIT
 fails=0; ok() { echo "PASS $1"; }; bad() { echo "FAIL $1${2:+ - $2}"; fails=$((fails + 1)); }
 eq() { [ "$2" = "$3" ] && ok "$1" || bad "$1" "got '$2', want '$3'"; }
 
-# A runner.log: fast.sh 6 runs of 30-50 s, long.sh 3 passes of 280-366 s + a timeout, bf-slow.sh (a game) passes of 290 s,
+# A runner.log: fast.sh 6 runs of 30-50 s, long.sh 3 passes of 280-366 s + a timeout,
+# bf-slow.sh (a game) passes of 290 s,
 # kwin-install.sh 6 quick runs, rare.sh 2 runs (too few), an rc 3 run (no verdict: not counted as a completion).
 L=$T/runner.log; : > "$L"; t=3600
 run() { local n=$1 s=$2 d=$3 v=$4

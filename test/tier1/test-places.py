@@ -214,5 +214,17 @@ text3 = open(xbel).read()
 check(not any(v["ours"] for v in by_title(text3).values()) and all(m in text3 for m in user_marks),
       "only the user's bookmarks left, unchanged")
 
+# The owner config is read the way every PowOS tool reads it (lib/powos_py/common.py owner_conf): $KEY over the file,
+# the file's last setting wins and its quotes go, as a shell sourcing it would. powos-places had its own copy that
+# skipped all three, so a POWOS_FILE_PLACES override (the Mac, gpu-195 and the NAS in the sidebar) was ignored.
+hosts = lambda: [h["name"] for h in P.owner_hosts()]
+with open(owner, "w") as f:
+    f.write("POWOS_FILE_PLACES=" + json.dumps([{"name": "Old", "url": "sftp://old.test/"}]) + "\n"
+            "POWOS_FILE_PLACES='" + json.dumps([{"name": "New", "url": "sftp://new.test/"}]) + "'\n")
+check(hosts() == ["New"], f"owner config: the last POWOS_FILE_PLACES wins, quotes stripped ({hosts()})")
+os.environ["POWOS_FILE_PLACES"] = json.dumps([{"name": "Override", "url": "smb://nas.test/cdn", "kind": "nas"}])
+check(hosts() == ["Override"], f"$POWOS_FILE_PLACES overrides the owner config's ({hosts()})")
+del os.environ["POWOS_FILE_PLACES"]
+
 print(f"\n== Results: {'all passed' if not fails else f'{fails} failed'} ==")
 sys.exit(1 if fails else 0)

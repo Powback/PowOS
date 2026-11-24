@@ -1,7 +1,7 @@
 #!/bin/bash
-# test-steam-locales.sh - Tier-1 tests for /usr/bin/steam's steam_locales (targets/android/pkgs/steam/steam): the session's
-# locales compiled once into a kept LOCPATH, so pressure-vessel's pv-locale-gen has nothing to generate at a game launch
-# (3.6 s of localedef under FEX every x86 Proton launch, 2026-11-05). Fake localedef + i18n tree.
+# test-steam-locales.sh - Tier-1 tests for /usr/bin/steam's steam_locales (targets/android/pkgs/steam/steam): the
+# session's locales compiled once into a kept LOCPATH, so pressure-vessel's pv-locale-gen has nothing to generate at a
+# game launch (3.6 s of localedef under FEX every x86 Proton launch, 2026-11-05). Fake localedef + i18n tree.
 set -u
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ST="$SCRIPT_DIR/../../targets/android/pkgs/steam/steam"

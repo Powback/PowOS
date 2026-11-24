@@ -1,9 +1,9 @@
 #!/bin/bash
 # test-steam-fakechroot.sh - Tier-1 tests for /usr/bin/steam (targets/android/pkgs/steam/steam) under the no-root
-# fakechroot engine (FAKECHROOT_BASE set). razr fold 11-14 "steam doesnt launch": the engine's LD_LIBRARY_PATH (rootfs lib
-# dirs by host path) outranked steamui.so's RUNPATH $ORIGIN, so it bound the rootfs's older libSDL3 ("undefined symbol:
-# SDL_TryLockJoysticks" -> "Failed to load steamui.so"), and LD_PRELOAD's rootfs paths never loaded. Control: rooted /
-# desktop (no FAKECHROOT_BASE) keeps its environment exactly as before.
+# fakechroot engine (FAKECHROOT_BASE set). razr fold 11-14 "steam doesnt launch": the engine's LD_LIBRARY_PATH (rootfs
+# lib dirs by host path) outranked steamui.so's RUNPATH $ORIGIN, so it bound the rootfs's older libSDL3 ("undefined
+# symbol: SDL_TryLockJoysticks" -> "Failed to load steamui.so"), and LD_PRELOAD's rootfs paths never loaded. Control:
+# rooted / desktop (no FAKECHROOT_BASE) keeps its environment exactly as before.
 set -u
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ST="$SCRIPT_DIR/../../targets/android/pkgs/steam/steam"

@@ -173,6 +173,8 @@ deploy)
   adb push -q "$HERE/../../../bin/powos" /data/local/tmp/powos-apps/powos
   adb push -q "$HERE/../../../bin/pow-compose" /data/local/tmp/powos-apps/pow-compose
   adb push -q "$HERE/../../../lib/config.sh" /data/local/tmp/powos-apps/config.sh
+  # The helpers PowOS's Python tools share (lib/powos_py: owner config, SpacetimeDB identity), next to those tools.
+  adb push -q "$HERE/../../../lib/powos_py" /data/local/tmp/powos-apps/powos_py
   # The device agent (lib/devices/powos-deviced: the Devices app's control channel, docs/DEVICES.md).
   adb push -q "$HERE/../../../lib/devices" /data/local/tmp/powos-apps/devices
   # Dolphin's places (lib/devices/powos-places, unit dolphin-places) and its session autostart.

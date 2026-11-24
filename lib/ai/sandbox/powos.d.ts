@@ -111,7 +111,8 @@ type SearchParams = {
     glob?: string[];
 
     /**
-     * What to return: 'content' returns matching lines with file:line prefixes; 'files_with_matches' returns only paths; 'count' returns per-file match counts. Defaults to 'content'.
+     * What to return: 'content' returns matching lines with file:line prefixes; 'files_with_matches' returns only
+     * paths; 'count' returns per-file match counts. Defaults to 'content'.
      */
     output_mode?: "content" | "files_with_matches" | "count";
 
@@ -121,7 +122,8 @@ type SearchParams = {
     context?: number;
 
     /**
-     * Cap on lines (content), files (files_with_matches), or entries (count). Defaults to 1000. Result reports whether it was truncated.
+     * Cap on lines (content), files (files_with_matches), or entries (count). Defaults to 1000. Result reports whether
+     * it was truncated.
      */
     max_results?: number;
 };

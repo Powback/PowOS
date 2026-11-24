@@ -674,7 +674,6 @@ class Spool:
             self.event(top, ts, "prompt", "", first_line(rec.get("prompt"), 60))
         elif ev == "PreToolUse":
             tool = str(rec.get("tool_name") or "")
-            hint = hint_of(tool, rec.get("tool_input"))
             if tool in ("Agent", "Task") and not sub:
                 ti = rec.get("tool_input") if isinstance(rec.get("tool_input"), dict) else {}
                 pr = ti.get("prompt")

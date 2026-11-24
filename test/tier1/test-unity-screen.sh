@@ -52,7 +52,8 @@ env -u DISPLAY LD_PRELOAD="$OV" POWOS_STEAM_OVERLAY=1 ENABLE_VK_LAYER_VALVE_stea
 env -u DISPLAY PATH="$T/bin:$PATH" sh "$US" "$T/game" -a > "$T/out" 2>/dev/null
 [ "$(args)" = "-a" ] && ok "no DISPLAY: starts unchanged" || bad "no-display args" "$(args)"
 
-# Unreal: an Engine/Binaries folder beside the exe (ABZU) or the exe under <Project>/Binaries/Win64 -> -windowed -ResX/-ResY.
+# Unreal: an Engine/Binaries folder beside the exe (ABZU) or the exe under <Project>/Binaries/Win64 -> -windowed
+# -ResX/-ResY.
 mkdir -p "$T/ue/Engine/Binaries" "$T/ue2/Proj/Binaries/Win64" "$T/un/G_Data"
 cp "$T/game" "$T/ue/AbzuGame.exe"; cp "$T/game" "$T/ue2/Proj/Binaries/Win64/Proj-Win64-Shipping.exe"; cp "$T/game" "$T/un/G.exe"
 PATH="$T/bin:$PATH" DISPLAY=:9 sh "$US" "$T/ue/AbzuGame.exe" > "$T/out" 2> "$T/err"

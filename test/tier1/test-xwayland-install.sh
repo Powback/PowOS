@@ -55,7 +55,8 @@ run() {   # run "<xw>" "<next xw>" [flag files]: -> rc, out
     perl -e "alarm 60; exec @ARGV" bash "$src/tools/phone/verify/xwayland-install.sh" 24.1.13-4 "$T/out" 2>&1); rc=$?
 }
 
-# 1. the 11-03 case: the replaced Xwayland, KWin (and so Xwayland) outlive the logout -> SIGTERM, the X client starts the new one
+# 1. the 11-03 case: the replaced Xwayland, KWin (and so Xwayland) outlive the logout -> SIGTERM, the X client starts
+# the new one
 run "500 ${F}_(deleted)" "501 $F"
 if [ $rc = 0 ] && grep -q '^PASS: xwayland-kgsl 24.1.13-4 installed, its Xwayland serves the session (xwayland=501 xwayland_new=1' <<<"$out" \
    && grep -q 'kill 500' "$T/adb.log" && grep -q 'session restarted: yes (759 -> 760)' <<<"$out"; then

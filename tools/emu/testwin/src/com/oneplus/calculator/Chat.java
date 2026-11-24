@@ -11,7 +11,8 @@ import android.widget.EditText;
 import android.widget.LinearLayout;
 import android.widget.TextView;
 
-/** tools/emu/testwin: a chat-shaped window - messages filling the top, a text field pinned to the bottom (adjustResize),
+/** tools/emu/testwin: a chat-shaped window - messages filling the top, a text field pinned to the bottom
+ * (adjustResize),
  *  as a messenger's. The keyboard checks (ww-keyboard.sh) tap the field and assert the field's bottom is above the
  *  keyboard's top; each layout logs "PowosTestChat field <x> <y> <w> <h> root <h> ime <px> display <id>" (window px on
  *  its display) so a check can read where the app put its field without a screenshot. */

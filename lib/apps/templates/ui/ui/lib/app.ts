@@ -14,7 +14,8 @@ import { DbConnection } from "../bindings";
 /** The database `powos app install` publishes the module to (powos-app.json: module.database). */
 export const DATABASE = "__DB__";
 
-/** The bindings' fingerprint (`powos app build` defines it): a new schema makes the host reconnect with new bindings. */
+/** The bindings' fingerprint (`powos app build` defines it): a new schema makes the host reconnect with new
+ * bindings. */
 declare const __POWOS_SCHEMA__: string;
 const SCHEMA = typeof __POWOS_SCHEMA__ === "string" ? __POWOS_SCHEMA__ : undefined;
 
