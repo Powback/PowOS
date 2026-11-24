@@ -12,11 +12,9 @@ import importlib.util
 import json
 import os
 import shutil
-import ssl
 import sys
 import tempfile
 import threading
-import urllib.request
 
 REPO = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 SRC = os.path.join(REPO, "lib/devices/powos-deviced")

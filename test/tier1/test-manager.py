@@ -118,7 +118,6 @@ class ManagerTests(unittest.TestCase):
 
     def test_session_persisted_per_dir(self):
         self._run(["hi"])
-        enc = os.getcwd  # not used; encode cwd like the broker does
         sess_dir = os.path.join(self.store, "sessions")
         files = os.listdir(sess_dir)
         self.assertEqual(len(files), 1)

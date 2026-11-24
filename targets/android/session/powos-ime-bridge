@@ -9,7 +9,6 @@
 # hides Android's keyboard. Typed text goes back as key events (KWin's InputMethod without text-input).
 #
 # Started by the session's autostart (/etc/xdg/autostart/ibus.desktop, ours). Log: $XDG_RUNTIME_DIR/powos-ime-bridge.log
-import os
 import signal
 import subprocess
 import sys

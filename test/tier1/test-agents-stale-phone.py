@@ -13,7 +13,6 @@ instead of passing the confusing parse error through, and that a non-stale phone
 __cli_version__) is left alone - no false positive.
 """
 
-import json
 import os
 import shutil
 import stat

@@ -35,8 +35,8 @@ import subprocess
 import tempfile
 from pathlib import Path
 from collections import OrderedDict
-from dataclasses import dataclass, field
-from typing import Optional, Dict, Set, List, Tuple
+from dataclasses import dataclass
+from typing import Optional, Dict, List, Tuple
 import logging
 
 try:
@@ -620,7 +620,7 @@ class PowOSCacheFS(Operations):
         )
         self.writeback.start()
 
-        log.info(f"CacheFS initialized")
+        log.info("CacheFS initialized")
         log.info(f"  Backing: {backing_path}")
         log.info(f"  Cache: {cache_dir} ({cache_size // (1024**3)}GB)")
         log.info(f"  Files indexed: {len(self.metadata)}")
@@ -1065,7 +1065,7 @@ def main():
 
     cache_size = parse_size(args.cache_size)
 
-    log.info(f"Starting PowOS CacheFS")
+    log.info("Starting PowOS CacheFS")
     log.info(f"  Backing store: {args.backing}")
     log.info(f"  Mount point: {args.mountpoint}")
     log.info(f"  Cache directory: {args.cache_dir}")

@@ -514,8 +514,8 @@ def setup(sess):
     # a player one, and case 5 (player one moves on pad 1, before any join) is
     # what makes the observation happen rather than merely asserting on it.
     sess.add_pads(sess.pad_count or 3)
-    sess.log(f"pad roles — 1: player one (reserved), 2: joins as player two, "
-             f"3: joins as player three")
+    sess.log("pad roles — 1: player one (reserved), 2: joins as player two, "
+             "3: joins as player three")
     time.sleep(1.5)
 
     if not st.get("saveLoaded"):

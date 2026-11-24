@@ -23,7 +23,6 @@ import os
 import socket
 import struct
 import sys
-import time
 import urllib.request
 
 DEFAULT = "localhost:8884"

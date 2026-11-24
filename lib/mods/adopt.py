@@ -15,7 +15,6 @@
 #                 <dry_run:True|False> <appid> [nexus_slug]
 import json, sys, os, hashlib, shutil, re
 from datetime import datetime, timezone
-from pathlib import Path
 
 game_dir = sys.argv[1]
 game = sys.argv[2]
@@ -189,11 +188,11 @@ print(f"  Classified mod files:     {sum(len(v) for v in modded.values())}")
 print(f"  Unclassified mod files:   {len(unclassified)}")
 
 if vortex_manifest:
-    print(f"  Vortex deployment found:  yes")
+    print("  Vortex deployment found:  yes")
 if has_nma:
-    print(f"  NMA managed mods found:   yes")
+    print("  NMA managed mods found:   yes")
 
-print(f"\n  Mod groups detected:")
+print("\n  Mod groups detected:")
 all_groups = {}
 for group, files in sorted(modded.items()):
     total_size = sum(f["size"] for f in files)
@@ -212,11 +211,11 @@ total_mod_size = sum(f["size"] for v in all_groups.values() for f in v) / 1024 /
 print(f"\n  Total: {total_mod_files} mod files ({total_mod_size:.1f} MB) in {len(all_groups)} groups")
 
 if dry_run:
-    print(f"\n  --dry-run: no changes made. Remove --dry-run to adopt into manifest.")
+    print("\n  --dry-run: no changes made. Remove --dry-run to adopt into manifest.")
     sys.exit(0)
 
 if total_mod_files == 0:
-    print(f"\n  No mod files detected — game directory appears clean.")
+    print("\n  No mod files detected — game directory appears clean.")
     sys.exit(0)
 
 # ── Step 8: Create staging dirs and manifest entries ────────────

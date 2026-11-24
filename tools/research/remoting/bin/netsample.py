@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # Every 100 ms: wall time (ms) and summed tcp_info counters of the waypipe TCP connection(s) to comp:5000.
 #   t_ms  acked(app->comp)  received(comp->app)  retrans_segments
-import re, subprocess, sys, time
+import re, subprocess, time
 num = lambda k, s: sum(int(x) for x in re.findall(r'\b' + k + r':(\d+)', s))
 while True:
     out = subprocess.run(['ss', '-tinH', 'state', 'established', '( dport = :5000 )'],

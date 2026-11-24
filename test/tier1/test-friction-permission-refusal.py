@@ -5,9 +5,7 @@ Test that permission refusal friction entries log the actual command (first ~160
 instead of the tool description, and that repeats are grouped by command shape (first two words + cwd root).
 """
 
-import json
 import os
-import sys
 import unittest
 from importlib.machinery import SourceFileLoader
 from importlib.util import module_from_spec, spec_from_loader

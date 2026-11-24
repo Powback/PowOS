@@ -14,7 +14,6 @@ Sleeping and waking for real (the cgroup freezer, pidfd_getfd, the stop-mode pro
 - /proc/net/tcp addresses become bindable hosts for the stop-mode proxy
 """
 
-import os
 import sys
 import tempfile
 import unittest

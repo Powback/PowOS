@@ -78,7 +78,7 @@ def render_api(spec: dict) -> str:
                        + (f" (auth `{ep['auth']}`)" if ep.get("auth") else ""))
         if a.get("refresh"):
             r = a["refresh"]
-            out.append(f"- refresh: " + (f"event stream `{r['event_stream']}`" if r.get("event_stream")
+            out.append("- refresh: " + (f"event stream `{r['event_stream']}`" if r.get("event_stream")
                                          else f"poll every {r.get('poll_s','?')}s"))
         if a.get("undo"):
             out.append(f"- undo: `{a['undo']}`")
@@ -86,7 +86,7 @@ def render_api(spec: dict) -> str:
             out.append(f"- confirmation shown: _{a['confirm_template']}_")
         inp = (a.get("inputs") or {}).get("properties") or {}
         if inp:
-            out.append(f"- inputs: " + ", ".join(f"`{k}`" for k in inp))
+            out.append("- inputs: " + ", ".join(f"`{k}`" for k in inp))
         out.append("")
     return "\n".join(out)
 
@@ -171,7 +171,7 @@ def render_call(spec: dict, action: str, args: dict) -> str:
            "                 ↳ NOTHING IS SENT. This is a preview only.", ""]
     if a["safety"] == "spend":
         tmpl = _fill(a.get("confirm_template", "(no template)"), args)
-        out += [f"  ⚠ spend action — a real call would FIRST require your confirmation:",
+        out += ["  ⚠ spend action — a real call would FIRST require your confirmation:",
                 f"      \"{tmpl}\"", "      and refuse without an explicit yes.", ""]
     if ep.get("ui"):
         ui = _fill(ep["ui"], args)
