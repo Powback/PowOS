@@ -33,6 +33,7 @@ GENERATED = {
     "stdb": ["targets/android/pkgs"],     # out/pkgs packages, built by ship.sh's "pkgs" step from these PKGBUILDs
     "xwl": ["targets/android/pkgs"],
     "kw": ["targets/android/pkgs"],
+    "wp": ["targets/android/pkgs"],
     "sbx_tgz": ["lib/ai/sandbox"],        # sandbox_bundle (node_modules excluded by ship.sh)
     "gc": ["tools/phone/owner.json"],     # the ship gate's url
     "oc": ["tools/phone/owner.json", "lib/devices/powos-deviced"],  # owner.conf, rendered by owner-apply

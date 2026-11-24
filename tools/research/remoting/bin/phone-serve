@@ -1,0 +1,19 @@
+#!/bin/bash
+# phone-serve APP MODE [PORT]: (phone container, as u) serve APP to the REAL phone's waypipe client (§8.7,
+# tools/phone/verify/waypipe-window.sh): socat listens on TCP PORT (default 15100, published on .58) and, once the
+# phone has dialled in, on /tmp/run/wp.sock for the waypipe server, which then starts APP. No tc: the phone's own Wi-Fi
+# is the link. MODE as common.sh (gpu | shm | video | video-stock). Run detached (exec -d); phone-stop ends it.
+# Logs: /tmp/run/{socat,app}.log; /tmp/run/serve.state says where it got to (waiting | connected | started | timeout).
+. /opt/rm/common.sh
+app=$1 mode=$2 port=${3:-15100} s=/tmp/run/wp.sock
+pkill -x waypipe; pkill -f waypipe-argbvideo; pkill -x socat; pkill -x firefox; pkill -x kate; pkill -x dolphin; sleep 0.3
+rm -f "$s"; echo waiting > /tmp/run/serve.state
+cmd=$(app_cmd "$app")
+# TCP first: socat opens its second address (the unix listener) only after the phone's connection is accepted.
+setsid socat TCP-LISTEN:"$port",reuseaddr,nodelay UNIX-LISTEN:"$s" >/tmp/run/socat.log 2>&1 &
+for _ in $(seq 900); do [ -S "$s" ] && break; sleep 0.1; done
+[ -S "$s" ] || { echo timeout > /tmp/run/serve.state; exit 1; }
+echo connected > /tmp/run/serve.state
+setsid $(wp_bin "$mode") $(wp_opts "$mode") -s "$s" server -- dbus-run-session -- $cmd >/tmp/run/app.log 2>&1 &
+echo started > /tmp/run/serve.state
+wait

@@ -1,0 +1,13 @@
+--- a/src/video.rs
++++ b/src/video.rs
+@@ -1313,6 +1313,10 @@
+         WlShmFormat::Bgr565 => (),
+         WlShmFormat::Xrgb8888 => (),
+         WlShmFormat::Xbgr8888 => (),
++        // PowOS measurement patch: also video-encode alpha formats (alpha is dropped). Firefox and other GL
++        // toolkits hand opaque windows over as ARGB8888, which stock waypipe never video-encodes.
++        WlShmFormat::Argb8888 => (),
++        WlShmFormat::Abgr8888 => (),
+         // These exceed the bit depth of the video formats, but video is already lossy.
+         // 10-bit encoding is still probably worth using if fast
+         WlShmFormat::Xrgb2101010 => (),

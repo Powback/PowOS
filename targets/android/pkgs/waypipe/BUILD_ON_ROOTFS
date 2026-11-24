@@ -1,0 +1,2 @@
+waypipe links libavcodec/libavutil (video), Vulkan and libgbm at build time: built against the rootfs's own ffmpeg
+(libavcodec.so.63 on 2026-11-24) so a newer Arch Linux ARM ffmpeg soname can never reach the phone.

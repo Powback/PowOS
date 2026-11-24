@@ -1,0 +1,55 @@
+# waypipe 0.11.3 for the phone's chroot: Linux windows of another machine (.58) shown on the phone's KWin
+# (docs/research/native-window-remoting.md §8.6/§8.7; unit units/phone/waypipe.json). Arch's own recipe
+# (gitlab.archlinux.org/archlinux/packaging/packages/waypipe, 0.11.3-1), the same release the .58 measurements used,
+# for aarch64, plus:
+#   0001  also video-encode ARGB8888/ABGR8888 DMA-BUFs (alpha dropped). Stock 0.11.3 video-encodes only opaque
+#         formats (src/video.rs supports_video_format), and Firefox's toplevel is ARGB8888, so stock --video never
+#         engaged for it (§8.2 finding 1: 52 MB/s lossless scroll vs 1.8 MB/s with this). The same 4 lines as
+#         tools/research/remoting/waypipe-argb-video.patch. Upstreamable; drop it when upstream takes alpha formats.
+# socat (the TCP relay to waypipe's unix socket, no ssh) is its own package, pkgs/socat, in the same unit: not a
+# depends, so pacman -U never resolves it from Arch Linux ARM (whose socat needs openssl 4; the rootfs has 3.6).
+pkgname=waypipe
+pkgver=0.11.3
+pkgrel=2
+pkgdesc='A proxy for Wayland protocol applications; like ssh -X (PowOS: ARGB video patch)'
+arch=(aarch64)
+url='https://gitlab.freedesktop.org/mstoeckl/waypipe'
+license=('MIT')
+# rustup instead of Arch's cargo: on the rootfs (BUILD_ON_ROOTFS) Arch Linux ARM's rust needs openssl 4, which would
+# break the rootfs's openssl-3 packages (pacman refuses the transaction); rustup needs only glibc/xz/zstd. The
+# toolchain is pinned (_rust) and lives in $srcdir, never on the build image.
+makedepends=('meson' 'ninja' 'scdoc' 'shaderc' 'pkgconf' 'rustup' 'rust-bindgen' 'clang' 'vulkan-headers')
+_rust=1.90.0
+depends=('lz4' 'zstd' 'vulkan-icd-loader' 'mesa' 'ffmpeg')
+optdepends=('openssh: the usual transport (waypipe ssh)')
+source=("https://gitlab.freedesktop.org/mstoeckl/$pkgname/-/archive/v$pkgver/$pkgname-v$pkgver.tar.gz"
+        0001-video-encode-ARGB8888-and-ABGR8888-buffers.patch)
+sha256sums=('92482a459eb86bef2dae025ea2eb37f5560aea3d3744a097bed9d284b863a5a6'
+            '5c6d3ee4607e6acb22abe6c9cf7712e57734d0f354e986af28d71caea544edaf')
+
+_rustenv() { export RUSTUP_HOME="$srcdir/rustup" CARGO_HOME="$srcdir/cargo" RUSTUP_TOOLCHAIN=$_rust; }
+
+prepare() {
+  _rustenv
+  rustup toolchain install --profile minimal "$_rust"
+  cd "$pkgname-v$pkgver"
+  patch -p1 < ../0001-video-encode-ARGB8888-and-ABGR8888-buffers.patch
+}
+
+build() {
+  _rustenv
+  cargo fetch --locked --manifest-path "$pkgname-v$pkgver/Cargo.toml"
+  mkdir -p build
+  # Every feature required, never auto: with meson's "auto" a missing bindgen silently built 0.11.3-1 with lz4, zstd
+  # and video all off (`waypipe --version`: "lz4: false ... video: false"). Tests off (makepkg runs --nocheck).
+  meson build "$pkgname-v$pkgver" --buildtype debugoptimized -Dwerror=false -Dtests=false --prefix /usr \
+    -Dwith_video=enabled -Dwith_dmabuf=enabled -Dwith_lz4=enabled -Dwith_zstd=enabled -Dwith_gbm=enabled
+  ninja -C build
+}
+
+package() {
+  _rustenv
+  DESTDIR="$pkgdir" ninja -C "$srcdir/build" install
+  install -Dm644 "$pkgname-v$pkgver/LICENSE.MIT" "$pkgdir/usr/share/licenses/$pkgname/LICENSE.MIT"
+  install -Dm644 "$pkgname-v$pkgver/LICENSE.GPLv3" "$pkgdir/usr/share/licenses/$pkgname/LICENSE.GPLv3"
+}
