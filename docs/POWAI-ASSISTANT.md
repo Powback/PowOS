@@ -391,6 +391,38 @@ Note: right now `com.powos.app` is still a `/data/app` install (`pm path`, no PR
 from NATIVE-SYSTEM-UI phase 0 has to be installed and booted before anything in phases 5–6 applies. Phases 0–4
 need no privileges at all.
 
+### 3.9 The keyboard's AI reply button
+
+The swipe keyboard (android-app-dev `projects/swipe-keyboard`, `ReplyController.java`) has a ✨ button in its
+candidate bar. Tap: PowOS screenshots the app being typed into and PowOS AI drafts ~3 replies from it and the field.
+Hold: the same plus a voice note (transcribed by the keyboard on the fleet voice path, `voiceagent.pow/ws` - the
+protocol GpuSpeech's GPU engine uses) saying what to reply. Chips above the keys: tap replaces the field's text,
+"More" asks for different ones (the shown ones go back as `avoid`), ✕ cancels at any point. Optimistic UI: the
+button lights and the bar says "Capturing screen" on the touch-down; "Listening" + live transcript while held;
+placeholder chips while drafting.
+
+- **Door:** `content://com.powos.app.keyboardai` (`system/KeyboardAiProvider.kt`, contract v1 in `KeyboardAi.kt`):
+  `probe`, `capture`, `drafts`, `cancel`, `release`. Exported, checked per call (`KeyboardAi.admit`): the
+  package `com.swipekeyboard` signed with android-app-dev's key (SHA-256 pinned) **and** the current input method;
+  PowOS itself; root/shell (they can screencap anyway; the device check calls it from adb).
+- **AI:** `powos manager --drafts` (`lib/ai/manager/reply_drafts.py`) in PowOS Linux: the chat's own sign-in (the
+  fleet endpoint's claude-auth tenant, or the device's own Claude login), one `claude -p` turn with the screenshot as
+  a stream-json image block, model `sonnet` (vision; `POWOS_DRAFTS_MODEL`), `--tools ""`, no MCP, no session
+  persisted. The keyboard holds no key and never sees the model.
+- **Screenshot, rooted:** PowOS's su (`RootShell`) runs `dumpsys window windows` (focused window FLAG_SECURE ->
+  refused) then `screencap` into the app's cache, read and deleted at once.
+- **Screenshot, no root (S25):** `KeyboardShotService`, PowOS's AccessibilityService that only takes screenshots
+  (`takeScreenshot`, API 30+, no window content); the user turns it on once - the keyboard's "Allow PowOS screen
+  access" opens its settings page. Without it, live mode's MediaProjection frame (`LiveCapture.latest()`, a third of
+  the screen, its own one-time consent) when live mode is on; else "needs-access".
+- **Privacy:** captured only on the button's press; the keyboard rows are cropped off (`imeTop`); the JPEG lives in
+  PowOS's memory only (`KeyboardAi.Shots`) until the chips are dismissed or 3 min, goes to the guest on stdin, and
+  claude keeps no session. Off for password and incognito fields (keyboard side); secure windows are refused
+  (dumpsys on root, a blacked-out capture on any path) and the button then stays off for that field.
+- **Checks:** `test/tier1/test-reply-drafts.py` (contract + parsing), `KeyboardAiTest.kt` (permission check,
+  secure-window parse, crop, contract), the keyboard's `ReplyDraftsTest.java`, device
+  `tools/phone/verify/keyboard-ai-reply.sh` (provider end to end with a canned voice-note transcript).
+
 ## 4. Risks and limits
 
 1. **OnePlus SystemUI quirks.** The VIS path relies on `Settings.Secure.assistant` equaling the active VIS. The

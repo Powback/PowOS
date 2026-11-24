@@ -193,6 +193,24 @@ _manager_auth_cmd() {
     esac
 }
 
+# powos manager --drafts: reply variations for the swipe keyboard's AI button (lib/ai/manager/reply_drafts.py; request
+# on stdin, one JSON line on stdout). The chat's own sign-in (the endpoint / the image's Claude login), none of the
+# persona, MCP or context the chat loads: one tool-less vision turn. Not signed in: {"ok": false, "error": <word>}.
+_manager_drafts() {
+    _manager_use_own_cli
+    _manager_ensure_claude >&2 || { echo '{"ok": false, "error": "install", "why": "Claude Code is not installed"}'; return 1; }
+    declare -f _ai_ensure_config &>/dev/null && _ai_ensure_config
+    # No authority round trip per draft (the chat's _manager_auth asks it): with an endpoint claude itself says when
+    # the tenant's login fails ("model" error); only "nothing to sign in with at all" is answered up front.
+    local how=endpoint
+    [[ -r "${POWOS_AI_ENDPOINT_FILE:-/etc/powos/ai/endpoint.conf}" || -n "${ANTHROPIC_BASE_URL:-}" ]] || how="$(_manager_login_word)"
+    if [[ "$how" == signin || "$how" == relogin ]]; then
+        echo "{\"ok\": false, \"error\": \"$how\", \"why\": \"PowOS AI is not signed in to Claude\"}"
+        return 4
+    fi
+    python3 "$_MANAGER_DIR/reply_drafts.py"
+}
+
 manager_run() {
     command -v python3 &>/dev/null || { echo "manager needs python3" >&2; return 1; }
     [[ -f "$MANAGER_SERVER" ]] || { echo "manager.py not found" >&2; return 1; }
@@ -210,6 +228,8 @@ manager_run() {
             -h|--help) python3 "$MANAGER_SERVER" --help; return ;;
             # How it's signed in, Claude Code's login, the native fleet sign-in, its logout (_manager_auth_cmd).
             --auth|--install|--signin|--fleet-login|--signout) _manager_auth_cmd "$@"; return ;;
+            # The keyboard's reply drafts (KeyboardAiProvider.kt): one request on stdin, one JSON line out.
+            --drafts) _manager_drafts; return ;;
             # The chat's stop button: the turn running against this store ends now (manager.py --stop; stopped / idle).
             --stop) python3 "$MANAGER_SERVER" --session-store "$store" --stop; return ;;
             *) passthru+=("$1") ;;

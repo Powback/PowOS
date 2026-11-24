@@ -73,12 +73,28 @@ object LiveCapture {
 
     internal fun setRunning(on: Boolean) {
         running = on
-        if (!on) synchronized(frames) { frames.clear() }
+        if (!on) {
+            synchronized(frames) {
+                frames.clear()
+                last?.recycle()
+                last = null
+            }
+        }
         onChange?.invoke(on)
     }
 
+    /** The last grab at the capture's own resolution (a third of the screen): the keyboard AI button's no-root fallback. */
+    private var last: Bitmap? = null
+
+    /** A copy of the latest grab (null: live mode is off or hasn't grabbed yet); system/KeyboardAiProvider.kt's. */
+    fun latest(): Bitmap? = synchronized(frames) { last?.takeIf { running }?.copy(Bitmap.Config.ARGB_8888, false) }
+
     /** A captured screen: kept if it differs from the last one kept (a still screen isn't 8 copies of itself). */
     internal fun add(screen: Bitmap) {
+        synchronized(frames) {
+            last?.recycle()
+            last = screen.copy(Bitmap.Config.ARGB_8888, false)
+        }
         val h = FRAME_W * screen.height / screen.width
         val small = Bitmap.createScaledBitmap(screen, FRAME_W, h, true)
         val sig = signature(small)

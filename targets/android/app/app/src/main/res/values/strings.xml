@@ -5,4 +5,7 @@
     <!-- Android's own "Activate device admin app?" screen shows these (devices/LockAccess.kt): the one thing asked. -->
     <string name="lock_admin_label">PowOS: lock from your devices</string>
     <string name="lock_admin_description">Lets your paired PowOS devices lock this phone\u2019s screen, and nothing else: PowOS can\u2019t see or change your PIN, wipe the phone or set password rules. Turn it off in the Devices app or here at any time.</string>
+    <!-- Android's accessibility settings show these (system/KeyboardShotService.kt). -->
+    <string name="keyboard_shot_label">PowOS keyboard screenshots</string>
+    <string name="keyboard_shot_description">Lets the PowOS keyboard’s AI button take a screenshot of the app you’re typing in, only when you tap it, so PowOS AI can draft replies. The screenshot is never saved, private screens are never captured, and nothing on screen is read otherwise.</string>
 </resources>

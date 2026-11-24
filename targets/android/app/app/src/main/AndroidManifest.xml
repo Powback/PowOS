@@ -451,6 +451,28 @@
             android:theme="@style/Theme.Omalauncher.Window"
             android:windowSoftInputMode="adjustResize" />
 
+        <!-- The swipe keyboard's AI reply button (system/KeyboardAi.kt): exported, every call checked in code
+             (KeyboardAi.admit: the keyboard's package + signer while it is the input method, PowOS, root/shell). -->
+        <provider
+            android:name=".system.KeyboardAiProvider"
+            android:authorities="com.powos.app.keyboardai"
+            android:exported="true" />
+
+        <!-- No root: the keyboard AI button's screenshot (AccessibilityService.takeScreenshot), turned on once by the
+             user; reads no window content. -->
+        <service
+            android:name=".system.KeyboardShotService"
+            android:exported="false"
+            android:label="@string/keyboard_shot_label"
+            android:permission="android.permission.BIND_ACCESSIBILITY_SERVICE">
+            <intent-filter>
+                <action android:name="android.accessibilityservice.AccessibilityService" />
+            </intent-filter>
+            <meta-data
+                android:name="android.accessibilityservice"
+                android:resource="@xml/keyboard_shot_accessibility" />
+        </service>
+
         <provider
             android:name="androidx.core.content.FileProvider"
             android:authorities="${applicationId}.files"
