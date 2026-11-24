@@ -114,6 +114,8 @@ cheap and safe first, behaviour-touching refactors last. None of these change wh
 ## Done (the 2026-11-24 sweep)
 
 - [x] Complexity ratchet: 5 budget entries lowered to the measured values (93ce374d).
+- [x] Python shared module: `lib/powos_py/common.py` (owner_conf, token) for 6 CLIs; powos-places now honours
+  `$POWOS_FILE_PLACES` and the rest of the owner config's rules (66398b00).
 - [x] Python lint: ruff F401/F541/F841, 34 findings -> 1 (a6431c6d; the cachefs item above is what remains).
 - [x] 49 comment lines over 120 reflowed, and the emu.sh usage range fixed (d9057098; self_push length fix 470b54df).
 - [x] shellcheck SC1087 in td-launch-phone.sh (bd11ae5e).
