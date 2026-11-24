@@ -39,7 +39,7 @@ lib/build-image.sh:cmd_build_image 85
 lib/containers-sync.sh:cmd_containers_sync 135
 lib/dev-commands.sh:dev_dockerize 86
 lib/dev-commands.sh:dev_dockerize_basic 99
-lib/dev-commands.sh:dev_fork 210
+lib/dev-commands.sh:dev_fork 145
 lib/dev-commands.sh:dev_new 83
 lib/dev-commands.sh:dev_new_ai 145
 lib/dev-commands.sh:dev_new_docker 106

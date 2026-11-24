@@ -721,6 +721,86 @@ EOF
     echo "  4. powos dev enable $name"
 }
 
+# dev_fork's pieces (split for the complexity ratchet): the fork's build.sh. A KDE app: cmake.
+_dev_fork_build_sh_kde() {
+    local proj_dir="$1"
+    cat > "$proj_dir/build.sh" << 'BUILDEOF'
+#!/bin/bash
+# Build script for KDE app
+set -euo pipefail
+
+SRC_DIR="$(dirname "$0")/src"
+OUTPUT_DIR="${1:-/var/lib/powos/extensions/$(basename $(dirname "$0"))}"
+
+echo "Building from: $SRC_DIR"
+echo "Output to: $OUTPUT_DIR"
+
+mkdir -p "$OUTPUT_DIR/usr/bin"
+mkdir -p "$OUTPUT_DIR/usr/lib64"
+mkdir -p "$OUTPUT_DIR/usr/share/applications"
+
+cd "$SRC_DIR"
+rm -rf build && mkdir -p build && cd build
+
+cmake .. \
+    -DCMAKE_INSTALL_PREFIX=/usr \
+    -DCMAKE_BUILD_TYPE=Release \
+    -DBUILD_TESTING=OFF
+
+make -j$(nproc)
+make install DESTDIR="$OUTPUT_DIR"
+
+echo "Build complete!"
+BUILDEOF
+}
+
+# Any other fork: probe the common build systems (cmake, make, configure).
+_dev_fork_build_sh_generic() {
+    local proj_dir="$1"
+    cat > "$proj_dir/build.sh" << 'BUILDEOF'
+#!/bin/bash
+set -euo pipefail
+
+SRC_DIR="$(dirname "$0")/src"
+OUTPUT_DIR="${1:-/var/lib/powos/extensions/$(basename $(dirname "$0"))}"
+
+echo "Building from: $SRC_DIR"
+echo "Output to: $OUTPUT_DIR"
+
+mkdir -p "$OUTPUT_DIR/usr/bin"
+
+cd "$SRC_DIR"
+
+# Try common build systems
+if [[ -f "CMakeLists.txt" ]]; then
+    rm -rf build && mkdir -p build && cd build
+    cmake .. -DCMAKE_INSTALL_PREFIX=/usr
+    make -j$(nproc)
+    make install DESTDIR="$OUTPUT_DIR"
+elif [[ -f "Makefile" ]]; then
+    make
+    make install PREFIX=/usr DESTDIR="$OUTPUT_DIR"
+elif [[ -f "configure" ]]; then
+    ./configure --prefix=/usr
+    make
+    make install DESTDIR="$OUTPUT_DIR"
+else
+    echo "No recognized build system. Edit build.sh manually."
+    exit 1
+fi
+
+echo "Build complete!"
+BUILDEOF
+}
+
+# The fork's executable build.sh: cmake for a KDE app, else a generic build-system probe.
+_dev_fork_build_sh() {
+    local proj_dir="$1" type="$2"
+    if [[ "$type" == "kde" ]]; then _dev_fork_build_sh_kde "$proj_dir"
+    else _dev_fork_build_sh_generic "$proj_dir"; fi
+    chmod +x "$proj_dir/build.sh"
+}
+
 dev_fork() {
     local upstream=""
     local use_docker=""
@@ -836,74 +916,7 @@ EOF
         echo "BUILD_DEPS=\"$BUILD_DEPS\"" >> "$proj_dir/project.conf"
     fi
 
-    # Create build.sh for KDE apps
-    if [[ "$type" == "kde" ]]; then
-        cat > "$proj_dir/build.sh" << 'BUILDEOF'
-#!/bin/bash
-# Build script for KDE app
-set -euo pipefail
-
-SRC_DIR="$(dirname "$0")/src"
-OUTPUT_DIR="${1:-/var/lib/powos/extensions/$(basename $(dirname "$0"))}"
-
-echo "Building from: $SRC_DIR"
-echo "Output to: $OUTPUT_DIR"
-
-mkdir -p "$OUTPUT_DIR/usr/bin"
-mkdir -p "$OUTPUT_DIR/usr/lib64"
-mkdir -p "$OUTPUT_DIR/usr/share/applications"
-
-cd "$SRC_DIR"
-rm -rf build && mkdir -p build && cd build
-
-cmake .. \
-    -DCMAKE_INSTALL_PREFIX=/usr \
-    -DCMAKE_BUILD_TYPE=Release \
-    -DBUILD_TESTING=OFF
-
-make -j$(nproc)
-make install DESTDIR="$OUTPUT_DIR"
-
-echo "Build complete!"
-BUILDEOF
-    else
-        # Generic build.sh
-        cat > "$proj_dir/build.sh" << 'BUILDEOF'
-#!/bin/bash
-set -euo pipefail
-
-SRC_DIR="$(dirname "$0")/src"
-OUTPUT_DIR="${1:-/var/lib/powos/extensions/$(basename $(dirname "$0"))}"
-
-echo "Building from: $SRC_DIR"
-echo "Output to: $OUTPUT_DIR"
-
-mkdir -p "$OUTPUT_DIR/usr/bin"
-
-cd "$SRC_DIR"
-
-# Try common build systems
-if [[ -f "CMakeLists.txt" ]]; then
-    rm -rf build && mkdir -p build && cd build
-    cmake .. -DCMAKE_INSTALL_PREFIX=/usr
-    make -j$(nproc)
-    make install DESTDIR="$OUTPUT_DIR"
-elif [[ -f "Makefile" ]]; then
-    make
-    make install PREFIX=/usr DESTDIR="$OUTPUT_DIR"
-elif [[ -f "configure" ]]; then
-    ./configure --prefix=/usr
-    make
-    make install DESTDIR="$OUTPUT_DIR"
-else
-    echo "No recognized build system. Edit build.sh manually."
-    exit 1
-fi
-
-echo "Build complete!"
-BUILDEOF
-    fi
-    chmod +x "$proj_dir/build.sh"
+    _dev_fork_build_sh "$proj_dir" "$type"
 
     # Dockerize if requested
     if [[ -n "$use_docker" ]]; then
