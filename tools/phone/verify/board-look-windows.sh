@@ -53,10 +53,11 @@
 #                 held and dragged to the page's middle (input motionevent) -> TWO Chrome windows, one per page, one
 #                 more Chrome task (a second instance, not the first window moved).
 #   recent-drag   (launcher-recents-first; the user, 11-23: "the drag to open as window works for the docked icons but not
-#                 the recent ones"): Calculator as a web window on the page shown (the dock is a taskbar there); then
-#                 REAL injected drags, each of an app with no window yet: the dock tray's first recent app moved up to
-#                 the page's middle with no hold (the pinned icons' lift-out), and the launcher's Recent, Suggested and
-#                 letter-list tiles held 0.9 s and dragged to the middle -> each opens as a web window of its own.
+#                 the recent ones"): REAL injected drags, each of an app with no window yet: the dock's first recent app
+#                 (bottom tray or side column; Notes/Clock seeded when none) moved to the page's middle with no hold
+#                 (the pinned icons' lift-out); then, Calculator as a web window on the page shown (the dock is a
+#                 taskbar there), the launcher's Recent, Suggested and letter-list tiles held 0.9 s and dragged to the
+#                 middle -> each opens as a web window of its own.
 #   calc-density  (calculator-mis-lays-out-at-certain-window-sizes, ask 1a1a369a6fa): Calculator as a web window (by
 #                 code) at its default size, then resized smaller (by code): its activity's reported configuration is
 #                 at the screen's density (WindowDpi.SCREEN_DENSITY_APPS: at 294 it sized its text by display 0's 442,
@@ -562,25 +563,39 @@ rdseed() { local p k t before id
   done
   echo "none: Notes and Clock each have the user's task, a window or a dock pin - only closing the user's own would free one"; }
 RDNJ=""
+# The dock's recent section wherever the dock is: the bottom dock's tray (.dock-tray, DockTray) or a side dock's column
+# (RecentSection inside .dock - DockTray is bottom-only; the 11-24 rounds looked under .dock-tray alone).
+DR=".home .dock .dock-recent"
+# rdwhy: what the dock's recent section holds when it has no app to drag (the FAIL line says why, not only "none").
+rdwhy() { ev "importShim('./state.ts').then(s=>JSON.stringify({dock:s.dockPosition.value,sections:document.querySelectorAll('$DR').length,cells:[...document.querySelectorAll('$DR .app[data-key]')].map(a=>a.dataset.key).slice(0,8),recent:s.recent.value.slice(0,8),pinned:s.dock.value.length}))"; }
 if [ "$CASE" = recent-drag ]; then
-  # Seeded before Calculator's window, so Home and the full-screen launch never touch the window the case shows.
-  if [ "$(rdfree ".home .dock-tray .dock-recent")" = none ]; then
+  # 1. The dock's recent drag with no window of the case's on the page (seeded first when needed; Home and the
+  #    full-screen launch happen before any window of the case's exists).
+  if [ "$(rdfree "$DR")" = none ]; then
     SEED=$(rdseed); log "dock-recent: no app without a window there at the start - seeded: $SEED"
-    case $SEED in none*) RDNJ=${SEED#none: } ;; esac
+    case $SEED in
+      none*) RDNJ=${SEED#none: } ;;
+      *) # The strip re-read (apps.changed -> fetchRecent) and drawn: wait for the seeded app's cell.
+        for i in 1 2 3 4 5 6 7 8 9 10; do [ "$(rdfree "$DR")" != none ] && break; [ "$i" = 5 ] && hemit apps.changed null; sleep 1; done ;;
+    esac
   fi
-  A1=none; [ -z "$RDNJ" ] && { A1=$(wwopen "$CALC"); sleep 3; chk open; }
   if [ -n "$RDNJ" ]; then
     # Not judged, no verdict: this SKIP is the log's first verdict line, the exit 2 follows the restore (below).
     echo "SKIP: recent-drag not judged - no app without a window in the dock's recents: $RDNJ"
     step setup "not judged: no app without a window in the dock's recents"; note "NOT JUDGED: $RDNJ"
-  elif [ "$A1" = none ]; then fail "setup: no web window for Calculator"
   else
-    step setup "Calculator's window $A1 on the page shown: the dock is a taskbar"
-    OPEN='importShim("./state.ts").then(s=>{s.drawer.value=1;return "ok"})'
-    rddrag dock-recent ".home .dock-tray .dock-recent" 0
-    rddrag launcher-recent ".drawer-page [data-section=recent]" 0.9 "$OPEN"
-    rddrag launcher-suggested ".drawer-page [data-section=suggested]" 0.9 "$OPEN"
-    rddrag launcher-letter ".drawer-page [data-view=letter]" 0.9 "$OPEN.then(()=>new Promise(r=>setTimeout(r,500))).then(()=>importShim('./ui/drawer.tsx')).then(d=>{d.launcherLetter.value='C';return 'ok'})"
+    [ "$(rdfree "$DR")" = none ] && log "dock-recent: still nothing to drag: $(rdwhy)"
+    rddrag dock-recent "$DR" 0
+    # 2. The launcher's tiles with Calculator's window on the page shown (the dock is a taskbar there).
+    A1=$(wwopen "$CALC"); sleep 3; chk open
+    if [ "$A1" = none ]; then fail "setup: no web window for Calculator"
+    else
+      step setup "Calculator's window $A1 on the page shown: the dock is a taskbar"
+      OPEN='importShim("./state.ts").then(s=>{s.drawer.value=1;return "ok"})'
+      rddrag launcher-recent ".drawer-page [data-section=recent]" 0.9 "$OPEN"
+      rddrag launcher-suggested ".drawer-page [data-section=suggested]" 0.9 "$OPEN"
+      rddrag launcher-letter ".drawer-page [data-view=letter]" 0.9 "$OPEN.then(()=>new Promise(r=>setTimeout(r,500))).then(()=>importShim('./ui/drawer.tsx')).then(d=>{d.launcherLetter.value='C';return 'ok'})"
+    fi
   fi
 fi
 
