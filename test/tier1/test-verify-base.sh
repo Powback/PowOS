@@ -3,6 +3,7 @@
 # shot.sh (no phone): sh_ is the exact pasted root-shell form, its SH_T / step caps hold, tap/swipe/drag validate their
 # integers and a drag is ONE on-device shell, hcall retries a transport miss, cdp_val unquotes, the verdict lines and
 # exit codes are the queue's, `within` kills an over-time command, and a check's own helpers are never replaced.
+# Then the lint: no verify script pastes a copy of base.sh's sh_ or hcall forms again (source base.sh instead).
 # No pipefail here on purpose (see run-all.sh): assertions use `grep -c` on captured output.
 set -u
 ROOT=$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)
@@ -123,5 +124,21 @@ is "here/T/A default from base.sh's own place" "$out" "$ROOT/tools/phone/verify/
 out=$(cd "$W" && T=$W A=$W/adb.sh bash -c "set -euo pipefail; . '$BASE'; tap 1 2 >/dev/null; echo fine" 2>&1); is "set -euo pipefail safe" "$out" "fine"
 command -v /bin/bash >/dev/null && { /bin/bash -n "$BASE" && ok "bash -n (/bin/bash)" || bad "bash -n"; }
 python3 "$ROOT/tools/agents/shell-pitfalls.py" "$BASE" >/dev/null 2>&1 && ok "shell-pitfalls clean" || bad "shell-pitfalls" "$(python3 "$ROOT/tools/agents/shell-pitfalls.py" "$BASE" 2>&1)"
+
+echo "== lint: no pasted copy of base.sh's forms in tools/phone/verify =="
+# The forms 52 / 8 / 1 checks pasted before base.sh (11-24). Another fork of them is fine; a copy is not.
+SH_FORM="sh_() { \"\$A\" shell \"su -c '\$*'\" 2>/dev/null | tr -d '\\r'; }"  # lint-ok: the pasted form, searched for
+HC_RETRY="hcall() { local v i; for i in 1 2 3 4; do v=\$(hcall_once \"\$@\"); case \$v in \"\"|\"cdp: adb\"*|*\"isn't running\"*|\"no page\"*)"
+HC_TRACE="$HC_RETRY echo \"hcall \$2: try \$i: '\${v}'\" >&2; sleep 2 ;; *) echo \"\$v\"; return ;; esac; done; echo \"ERR no answer after 4 tries (\${v:-empty})\"; }"
+HC_QUIET="$HC_RETRY sleep 2 ;; *) echo \"\$v\"; return ;; esac; done; echo \"ERR no answer after 4 tries (\${v:-empty})\"; }"
+pasted() { grep -lxF -e "$SH_FORM" -e "$HC_TRACE" -e "$HC_QUIET" -- "$@" 2>/dev/null; }
+for f in sh:SH_FORM trace:HC_TRACE quiet:HC_QUIET; do
+  eval "printf '%s\n' \"x=1\" \"\$${f#*:}\"" > "$W/pasted.sh"
+  [ -n "$(pasted "$W/pasted.sh")" ] && ok "the lint sees a pasted ${f%%:*} form" || bad "the lint misses the ${f%%:*} form"
+done
+grep -qxF "$HC_TRACE" <(sed -n '/^declare -F hcall >/s/^declare -F hcall >\/dev\/null || //p' "$BASE" | sed 's/\[ "\${HCALL_TRACE:-1}" = 0 \] || //') &&
+  ok "the lint's traced hcall form is base.sh's" || bad "HC_TRACE drifted from base.sh's hcall"
+hits=$(cd "$ROOT/tools/phone/verify" && pasted *.sh | grep -vx base.sh)
+[ -z "$hits" ] && ok "no copies of sh_/hcall - source base.sh" || bad "pasted base.sh forms (replace with: . \"\$here/base.sh\")" "$hits"
 
 echo ""; echo "== Results: $PASS passed, $FAIL failed =="; [ "$FAIL" -eq 0 ]
