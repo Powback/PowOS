@@ -50,11 +50,16 @@ cheap and safe first, behaviour-touching refactors last. None of these change wh
   tools/lint/shellcheck-baseline.txt (918 findings, 493 entries at landing). CI lint job + tools/git-hooks/pre-push run it;
   test/tier1/test-shellcheck-ratchet.sh. Errors 51 -> 1 (the SC2144 below, left baselined: fixing it changes
   behaviour). 43 SC2148 got `# shellcheck shell=` after the header block.
-- [ ] **Two real bugs shellcheck found whose fix changes shipped behaviour.** systemd/powos-hardware-detect:285
+- [x] **Two real bugs shellcheck found whose fix changes shipped behaviour.** systemd/powos-hardware-detect:285
   `[[ -f /sys/bus/pci/devices/*/power/control ]]` never globs, so the NVIDIA runtime-PM block has never run (SC2144;
   fix: a loop over the glob, then test on an NVIDIA laptop). containers/build_files/install-kernel:50
   `dnf5 versionlock add $pkgs` locks only the first kernel package of the array (SC2128; fix: `"${pkgs[@]}"`, then
   check the image build). Both are baselined in tools/lint/shellcheck-baseline.txt. Risk: medium. Owner: image/build.
+  Done 11-24: install-kernel locks `"${pkgs[@]}"` (every kernel package; no image-build test covers the script, the
+  ratchet now does). powos-hardware-detect's block is nvidia_runtime_pm: it acts only on a laptop chassis with a
+  non-NVIDIA display controller (hybrid/Optimus) and a GPU whose driver reports runtime D3, setting auto on that
+  slot's NVIDIA functions; desktops/servers/multi-GPU boxes like gpu-195 are a no-op
+  (test/tier1/test-hardware-detect-nvidia-pm.sh, fake sysfs). Both baseline entries removed.
 - [ ] **A ratchet for lines over 120 characters.** Why: about 18,100 code lines in 1,641 files are over 120.
   Comment-only lines in bin/, build/, lib/, test/ and tools/emu were reflowed (d9057098); the rest is code. The worst
   files: shell/dev/gate.mjs (2,137 lines), shell/ui/shell.css (567), shots.mjs, WebWindows.kt (412), ShellBridge.kt,

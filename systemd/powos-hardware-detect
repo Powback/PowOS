@@ -16,6 +16,9 @@ LOG_TAG="powos-hardware"
 POWOS_LIB="${POWOS_LIB:-/usr/lib/powos}"
 POWOS_PROFILES="${POWOS_PROFILES:-/etc/powos/profiles}"
 POWOS_STATE="/run/powos/hardware"
+# sysfs/procfs roots: the real ones at boot; test/tier1/test-hardware-detect-nvidia-pm.sh points them at a fake tree.
+SYSFS="${POWOS_SYSFS:-/sys}"
+PROCFS="${POWOS_PROCFS:-/proc}"
 
 log() {
     logger -t "$LOG_TAG" "$*"
@@ -88,9 +91,9 @@ detect_form_factor() {
     local form="unknown"
 
     # Check DMI chassis type
-    if [[ -f /sys/class/dmi/id/chassis_type ]]; then
+    if [[ -f $SYSFS/class/dmi/id/chassis_type ]]; then
         local chassis
-        chassis=$(cat /sys/class/dmi/id/chassis_type 2>/dev/null || echo "0")
+        chassis=$(cat $SYSFS/class/dmi/id/chassis_type 2>/dev/null || echo "0")
         case "$chassis" in
             3|4|5|6|7|15|16) form="desktop" ;;
             8|9|10|14) form="laptop" ;;
@@ -103,8 +106,8 @@ detect_form_factor() {
 
     # Also check for battery as laptop indicator
     if [[ "$form" == "unknown" ]]; then
-        if [[ -d /sys/class/power_supply/BAT0 ]] || \
-           [[ -d /sys/class/power_supply/BAT1 ]]; then
+        if [[ -d $SYSFS/class/power_supply/BAT0 ]] || \
+           [[ -d $SYSFS/class/power_supply/BAT1 ]]; then
             form="laptop"
         else
             form="desktop"
@@ -281,14 +284,44 @@ setup_nvidia() {
         log "NVIDIA persistence mode enabled"
     fi
 
-    # Configure power management for laptops
-    if [[ -f /sys/bus/pci/devices/*/power/control ]]; then
-        for dev in /sys/bus/pci/devices/*/; do
-            if [[ -f "${dev}vendor" ]] && grep -q "0x10de" "${dev}vendor" 2>/dev/null; then
-                echo "auto" > "${dev}power/control" 2>/dev/null || true
-            fi
+    nvidia_runtime_pm "$1"
+}
+
+# A PCI device's class is a display controller (0x03xxxx: VGA, 3D, display). $1: the device's sysfs dir.
+_pci_is_display() { [[ "$(cat "$1/class" 2>/dev/null)" == 0x03* ]]; }
+
+# NVIDIA runtime power management (RTD3): power/control=auto on the dGPU's PCI functions so it powers off while idle.
+# Only on a hybrid (Optimus) laptop - form factor laptop AND a non-NVIDIA display controller drives the panel - and only
+# for a GPU whose driver reports runtime D3 supported (/proc/driver/nvidia/gpus/<bdf>/power). Desktops, servers and
+# multi-GPU boxes (gpu-195: 2x RTX 3090, no iGPU) are left exactly as they are: there runtime D3 is unsupported or
+# unwanted (persistent AI jobs, the gaming GPU waking with a stall). $1: the form factor (detect_form_factor).
+# (Until 11-24 this tested `[[ -f glob ]]`, which never matches, so the block never ran on any machine - SC2144.)
+nvidia_runtime_pm() {
+    local form="$1" dev bdf slot fn status hybrid=0
+    [[ "$form" == laptop ]] || { log "NVIDIA runtime PM: skipped ($form, not a laptop)"; return 0; }
+    local devs=("$SYSFS"/bus/pci/devices/*)
+    [[ -e "${devs[0]}" ]] || return 0
+    for dev in "${devs[@]}"; do
+        _pci_is_display "$dev" && ! grep -q 0x10de "$dev/vendor" 2>/dev/null && hybrid=1
+    done
+    [[ $hybrid == 1 ]] || { log "NVIDIA runtime PM: skipped (no integrated GPU: not a hybrid laptop)"; return 0; }
+    for dev in "${devs[@]}"; do
+        grep -q 0x10de "$dev/vendor" 2>/dev/null && _pci_is_display "$dev" || continue
+        bdf="${dev##*/}"
+        status="$(grep -i 'Runtime D3 status' "$PROCFS/driver/nvidia/gpus/$bdf/power" 2>/dev/null || true)"
+        if [[ -z "$status" || "$status" == *"Not supported"* ]]; then
+            log "NVIDIA runtime PM: $bdf skipped (${status:-the driver reports no runtime D3 status})"
+            continue
+        fi
+        # The GPU and its sibling functions in the same slot (HDMI audio, USB-C controller) - all must be able to
+        # suspend for the slot to reach D3.
+        slot="${bdf%.*}"
+        for fn in "$SYSFS"/bus/pci/devices/"$slot".*; do
+            [[ -w "$fn/power/control" ]] && grep -q 0x10de "$fn/vendor" 2>/dev/null || continue
+            echo auto > "$fn/power/control" 2>/dev/null || true
         done
-    fi
+        log "NVIDIA runtime PM: enabled on $slot"
+    done
 }
 
 # ─────────────────────────────────────────────────────────────────
@@ -347,7 +380,7 @@ main() {
     # GPU-specific setup
     case "$gpu" in
         nvidia*)
-            setup_nvidia
+            setup_nvidia "$form"
             ;;
     esac
 
@@ -357,4 +390,5 @@ main() {
     log "Chameleon Boot: Hardware detection complete"
 }
 
-main "$@"
+# Sourced (the tier-1 test): functions only.
+[[ "${BASH_SOURCE[0]}" != "$0" ]] || main "$@"

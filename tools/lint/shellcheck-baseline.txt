@@ -19,7 +19,6 @@ build/iterate.sh SC2034 1
 build/media.sh SC2034 2
 config/etc/profile.d/49-powos-home-path.sh SC2164 1
 containers/build_files/cleanup SC2115 1
-containers/build_files/install-kernel SC2128 1
 design-qa/bf-fps-20261103/sample.sh SC2034 1
 design-qa/bf-fps-20261103/sample.sh SC2046 5
 design-qa/bf-fps-20261103/sample.sh SC2221 2
@@ -115,7 +114,6 @@ shell/push.sh SC2207 1
 sources/kde/build.sh SC2046 1
 sources/powos-shell/powos-desktop-shell SC2046 2
 systemd/powos-hardware-detect SC1090 1
-systemd/powos-hardware-detect SC2144 1
 systemd/powos-hydrate SC1090 2
 systemd/powos-init SC1090 1
 systemd/powos-overlay-load SC1090 1
