@@ -20,7 +20,7 @@ here=$(cd "$(dirname "$0")" && pwd); T=$here/..; A="$T/adb.sh"; ROOT=$(cd "$T/..
 OUT=${1:-$HOME/.cache/powos-verify/linux-session-$(date +%m%d-%H%M)}; mkdir -p "$OUT"
 L=$HOME/.cache/powos-verify.lock
 KWIN_MIN=${KWIN_MIN:-6.7.5-3.28}
-sh_() { "$A" shell "su -c '$*'" 2>/dev/null | tr -d '\r'; }
+. "$here/base.sh"  # sh_ and the shared check helpers (tools/phone/verify/base.sh)
 us() { printf '%s\n' "$1" > "$OUT/u.sh"; "$T/user.sh" "$OUT/u.sh" 2>/dev/null | grep -v "file pushed" | tr -d '\r'; }
 rs() { printf '%s\n' "$1" > "$OUT/r.sh"; "$T/root.sh" "$OUT/r.sh" 2>/dev/null | grep -v "file pushed" | tr -d '\r'; }
 irq() { sh_ "awk '\''/touch-0/{s+=\$2+\$3+\$4+\$5+\$6+\$7+\$8+\$9} END{print s}'\'' /proc/interrupts"; }

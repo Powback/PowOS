@@ -27,7 +27,7 @@ IMG=/usr/share/wallpapers/Next/contents/images/1440x2960.png
 PKG=${KWIN_PKG:-$(ls -t "$ROOT"/targets/android/out/pkgs/kwin-*.pkg.tar.xz "$ROOT"/../*/targets/android/out/pkgs/kwin-*.pkg.tar.xz \
   "${POWOS_BUILD_INPUTS_CACHE:-$HOME/.cache/powos-build-inputs}"/pkgs/kwin-*.pkg.tar.xz 2>/dev/null | head -1)}
 WANT=$(basename "${PKG:-none}" | sed -E 's/^kwin-([^-]+-[^-]+)-.*/\1/')
-sh_() { "$A" shell "su -c '$*'" 2>/dev/null | tr -d '\r'; }
+. "$here/base.sh"  # sh_ and the shared check helpers (tools/phone/verify/base.sh)
 us() { printf '%s\n' "$1" > "$OUT/u.sh"; "$T/user.sh" "$OUT/u.sh" 2>/dev/null | grep -v "file pushed" | tr -d '\r'; }
 # $1 run in the Plasma session's own environment (plasmashell's: WAYLAND_DISPLAY, XDG_SESSION_TYPE, XAUTHORITY...) -
 # user.sh's has none of them, so a Qt app started there was an X11 window (2026-10-23), not what the session starts.

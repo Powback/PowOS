@@ -24,7 +24,7 @@ ST=${KWACT_STATUS:-${SHIP_DIR:-$HOME/.cache/powos-ship-queue}/kwin-activation}
 . "$here/kwin-activate-lib.sh"
 . "$here/game-lib.sh"
 . "$here/kwin-up.sh"
-sh_() { "$A" shell "su -c '$*'" 2>/dev/null | tr -d '\r'; }
+. "$here/base.sh"  # sh_ and the shared check helpers (tools/phone/verify/base.sh)
 us() { printf '%s\n' "$1" > "$OUT/u.sh"; "$T/user.sh" "$OUT/u.sh" 2>/dev/null | grep -v "file pushed" | tr -d '\r'; }
 irq() { sh_ "awk '\''/touch-0/{s+=\$2+\$3+\$4+\$5+\$6+\$7+\$8+\$9} END{print s}'\'' /proc/interrupts"; }
 log() { echo "$*" | tee -a "$OUT/log.txt"; }

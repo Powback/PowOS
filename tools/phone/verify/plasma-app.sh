@@ -18,7 +18,7 @@ OUT=${1:-$HOME/.cache/powos-verify/plasma-app-$(date +%m%d-%H%M)}; mkdir -p "$OU
 L=$HOME/.cache/powos-verify.lock
 KEY=l:org.powos.plasma
 RUN=/data/data/com.powos.app/files/run/powos-apps
-sh_() { "$A" shell "su -c '$*'" 2>/dev/null | tr -d '\r'; }
+. "$here/base.sh"  # sh_ and the shared check helpers (tools/phone/verify/base.sh)
 # As the session user (its bus): powos-run.sh. Never sudo through it.
 us_() { "$A" shell "su -c \"sh /data/powos/powos-run.sh '$*'\"" 2>/dev/null | tr -d '\r'; }
 irq() { sh_ "awk '\''/touch-0/{s+=\$2+\$3+\$4+\$5+\$6+\$7+\$8+\$9} END{print s}'\'' /proc/interrupts"; }

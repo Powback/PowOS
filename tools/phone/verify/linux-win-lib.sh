@@ -3,7 +3,7 @@
 # unfolded home - the helpers linux-dock.sh has inline. Needs here, T, A, OUT set; sets MINE (apps this check started:
 # their window tasks closed and, but Steam, their processes ended by restore).
 MINE=""
-sh_() { "$A" shell "su -c '$*'" 2>/dev/null | tr -d '\r'; }
+. "$here/base.sh"  # sh_ and the shared check helpers (tools/phone/verify/base.sh)
 us() { printf '%s\n' "$1" > "$OUT/u.sh"; "$T/user.sh" "$OUT/u.sh" 2>/dev/null | grep -v "file pushed" | tr -d '\r'; }
 rs() { printf '%s\n' "$1" > "$OUT/r.sh"; "$T/root.sh" "$OUT/r.sh" 2>/dev/null | grep -v "file pushed" | tr -d '\r'; }
 irq() { sh_ "awk '\''/touch-0/{s+=\$2+\$3+\$4+\$5+\$6+\$7+\$8+\$9} END{print s}'\'' /proc/interrupts"; }

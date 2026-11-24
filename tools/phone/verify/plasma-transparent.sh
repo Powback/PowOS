@@ -29,7 +29,7 @@ L=$HOME/.cache/powos-verify.lock
 KEY=l:org.powos.plasma
 QML=/usr/share/plasma/wallpapers/org.powos.transparent/contents/ui/main.qml
 PT=/data/powos/root/tmp   # the chroot's /tmp, seen from Android
-sh_() { "$A" shell "su -c '$*'" 2>/dev/null | tr -d '\r'; }
+. "$here/base.sh"  # sh_ and the shared check helpers (tools/phone/verify/base.sh)
 # As the session user (its bus): a script file run by tools/phone/user.sh. Never sudo through it.
 us_() { printf '%s\n' "$1" > "$OUT/us.sh"; "$T/user.sh" "$OUT/us.sh" 2>/dev/null | grep -av -e "locale" -e "Qt depends" -e "If this causes" -e "for more information" -e "pushed"; }
 irq() { sh_ "awk '\''/touch-0/{s+=\$2+\$3+\$4+\$5+\$6+\$7+\$8+\$9} END{print s}'\'' /proc/interrupts"; }

@@ -17,7 +17,7 @@ here=$(cd "$(dirname "$0")" && pwd); T=$here/..; A="$T/adb.sh"; APP=${APP:-27419
 case $APP$SECS in *[!0-9]*) echo "FAIL setup: APP / SECS are numbers ($APP $SECS)"; exit 2 ;; esac
 OUT=${OUT:-$HOME/.cache/powos-verify/game-present-rate-$(date +%F_%H%M)}; mkdir -p "$OUT"; R=$OUT/run.txt
 log() { echo "$(date +%T) $*" | tee -a "$R"; }
-sh_() { "$A" shell "su -c '$*'" 2>/dev/null | tr -d '\r'; }
+. "$here/base.sh"  # sh_ and the shared check helpers (tools/phone/verify/base.sh)
 irq() { sh_ "awk '\''/touch-0/{s+=\$2+\$3+\$4+\$5+\$6+\$7+\$8+\$9} END{print s}'\'' /proc/interrupts"; }
 top() { sh_ "dumpsys activity activities | grep -m1 topResumedActivity"; }
 # A call on home's bridge exactly as the page makes it (bf-recents.sh's hcall).
