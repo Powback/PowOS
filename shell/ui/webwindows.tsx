@@ -3827,22 +3827,37 @@ function sideAt(side: string, e: PointerEvent): string {
 }
 
 /**
- * RZ7: a press on an outer zone that lands on ANOTHER window's frame is that window's - the zone is invisible, the
- * window under it is what the finger sees. Cascaded windows sit 32 dp apart ([cascade]), exactly a zone's depth, so
- * the newer window's top zone covered the whole visible strip of the one under it - its bar and its close button: a
- * tap there grabbed the newer window instead (window-bench 11-08: the storm's closes missed, the apps stayed open and
- * their next launches only raised them - "NOT LOADING storm 6 kate"). Now a button under the press is pressed, else
- * that window comes on top (a bar tap's switch). true: passed on (no resize).
+ * RZ7: a press on an outer zone that lands on ANOTHER window's bar is that window's - the zone is invisible, the bar
+ * under it is what the finger sees. Cascaded windows sit 32 dp apart ([cascade]), exactly a zone's depth, so the newer
+ * window's top zone covered the whole visible strip of the one under it - its bar and its close button: a tap there
+ * grabbed the newer window instead (window-bench 11-08: the storm's closes missed, the apps stayed open and their next
+ * launches only raised them - "NOT LOADING storm 6 kate"). Now a button under the press is pressed, else that window
+ * comes on top (a bar tap's switch). true: passed on (no resize).
+ * RZ8 (ww-shadow.sh 11-23: Chrome under the Calculator's west zones - its w and nw drags raised Chrome, nothing
+ * resized): over another window's BODY the zone is the window on top's, as on any desktop - a drag resizes it; only a
+ * tap there (never past [SLOP]) still brings that window on top ([tapUnder]).
  */
 function zonePassedOn(e: PointerEvent): boolean {
+  const other = otherUnder(e);
+  if (!other || !other.under.closest(".webwindow-title")) return false;
+  const button = other.under.closest<HTMLElement>("button");
+  if (button && other.el.contains(button)) button.click();
+  else raise(Number(other.el.dataset.wwid));
+  return true;
+}
+
+/** The topmost element under a zone press [e] that isn't its own window's, and the other window it is in, if any. */
+function otherUnder(e: PointerEvent): { under: Element; el: HTMLElement } | null {
   const own = (e.currentTarget as HTMLElement).closest(".webwindow");
   const under = document.elementsFromPoint(e.clientX, e.clientY).find((el) => !own?.contains(el));
-  const other = under?.closest<HTMLElement>(".webwindow[data-wwid]");
-  if (!under || !other) return false;
-  const button = under.closest<HTMLElement>("button");
-  if (button && other.contains(button)) button.click();
-  else raise(Number(other.dataset.wwid));
-  return true;
+  const el = under?.closest<HTMLElement>(".webwindow[data-wwid]");
+  return under && el ? { under, el } : null;
+}
+
+/** RZ8: the window a zone press [e] lies over (its body: [zonePassedOn] took its bar), raised if the press is a tap. */
+function tapUnder(e: PointerEvent): number | null {
+  const id = Number(otherUnder(e)?.el.dataset.wwid);
+  return Number.isFinite(id) && id > 0 ? id : null;
 }
 
 /**
@@ -3852,13 +3867,16 @@ function zonePassedOn(e: PointerEvent): boolean {
  * tick on the grab, the live size outline ([resizeView]) while it lasts, tile sizes snapped to ([snapLen]: RZ4).
  */
 function Edge({ id, side, height }: { id: number; side: (typeof EDGES)[number]; height?: string }) {
-  const start = useRef<(Grab & { side: string }) | null>(null);
+  const start = useRef<(Grab & { side: string; under: number | null }) | null>(null);
   const stop = (e: PointerEvent) => {
-    if (!start.current) return;
+    const s = start.current;
+    if (!s) return;
     e.stopPropagation();
     start.current = null;
     resizeView.value = null;
     resizeEnd(id);
+    // RZ8: a tap (never past the slop) over a lower window's body is that window's switch, as before RZ8.
+    if (s.under != null && e.type === "pointerup" && Math.hypot(e.clientX - s.px, e.clientY - s.py) < SLOP) raise(s.under);
   };
   return (
     <div
@@ -3873,7 +3891,7 @@ function Edge({ id, side, height }: { id: number; side: (typeof EDGES)[number]; 
         flashGrips(id);
         capture(e);
         if (tiledOn(id) != null) untile(id, "keep");
-        start.current = { px: e.clientX, py: e.clientY, x: win.x, y: win.y, w: win.w, h: win.h, side: sideAt(side, e) };
+        start.current = { px: e.clientX, py: e.clientY, x: win.x, y: win.y, w: win.w, h: win.h, side: sideAt(side, e), under: tapUnder(e) };
         hapticTick();
         resizeView.value = { id, snapped: "" };
         resizeStart(id);

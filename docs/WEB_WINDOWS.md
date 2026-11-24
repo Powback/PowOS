@@ -299,6 +299,15 @@ frame of drag latency; measure it before turning it on for drags (animations fir
   or a box too small for the corners gets the whole shadow, and a drag's start drops any stale slice. Gate
   `ww-shadow-track`: real touches on all 8 zones, out / into a strip's reach / in to the smallest window / out, with
   forced renders mid-drag; every move each piece's box and its caster's edges against the frame (1 px).
+  RZ8 (ww-shadow.sh 11-23 on f785d92e: n and s resized the Calculator, w, se and nw did not): Chrome lay under the
+  Calculator's west zones and RZ7 passed every zone press over another window's frame on to it - w and nw raised
+  Chrome. Now RZ7 passes on only a press on another window's BAR (its buttons, a bar tap's switch: the cascade case);
+  over a lower window's body the zone is the top window's (a drag resizes it, a tap still raises the one below). Gate
+  `ww-handles-unfolded`: all 8 zones by a real touch (CDP), out and in, alone and over a lower window under the west
+  zones (failed on the old code: w/nw over it). The check's s drag went past the screen's bottom (its way back began
+  off-screen and typed into the app): its finger now stays on the screen, and each drag logs what the grab point hits.
+  se's failure there did not reproduce in the gate (passes alone and over the lower window): the requeued check's hit
+  line says what its grab point lay on.
 - [ ] **N5 - games**: windowed games are Linux windows (N1-N4 apply); full screen stays the direct-scanout task. Check:
   a windowed Proton game's menu (untyped override-redirect) shows (0062), fps x/120 unchanged by N1.
 

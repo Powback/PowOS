@@ -62,27 +62,34 @@ for i in $(seq 1 15); do [ "$(wwel "$id" "e=>e.querySelector('.webwindow-body.li
 # The window at half the work area, its bottom right (ww-resize.sh's wwclear): room to grow up and left, near the dock.
 place() { ev "importShim('./ui/webwindows.tsx').then(m=>{const a=m.workArea(),W=Math.round((a.right-a.left)*0.5),H=Math.round((a.bottom-a.top)*0.5);m.placeWindow(${id#w},{x:a.right-W-56,y:a.bottom-H-64,w:W,h:H});return 'ok'},e=>'ERR '+e)"; }
 SW=$(sh_ "wm size" | grep -oE '[0-9]+x[0-9]+' | tail -1)
+clampx() { local v=$1 m=$(( ${SW%x*} - 8 )); [ "$v" -lt 8 ] && v=8; [ "$v" -gt "$m" ] && v=$m; echo "$v"; }
+clampy() { local v=$1 m=$(( ${SW#*x} - 8 )); [ "$v" -lt 8 ] && v=8; [ "$v" -gt "$m" ] && v=$m; echo "$v"; }
 sheet() { ffmpeg -v error -y -i "$OUT/$1.mp4" -vf "fps=10,scale=360:-1,tile=6x4" -frames:v 1 "$OUT/$1-sheet.png" 2>/dev/null; }
 
 # gesture <name> <zone> <dx> <dy> [rec]: one drag there and back on that zone, the sampler over both ways.
 gesture() {
-  local name=$1 zone=$2 dx=$3 dy=$4 rec=${5:-} px py qx qy f0 f1 rp="" res
+  local name=$1 zone=$2 dx=$3 dy=$4 rec=${5:-} px py qx qy ex ey f0 f1 rp="" res hit
   [ "$SECONDS" -lt "$WW_DEADLINE" ] || { bad "$name: not run - the deadline"; return; }
   r=$(place); [ "$r" = ok ] || { bad "$name: placing $id: $r"; return; }
   sleep 0.8
   read -r px py <<<"$(wwpt "$id" ".ww-edge-$zone")"
   [ -n "${py:-}" ] || { bad "$name: no .ww-edge-$zone on screen"; return; }
   f0=$(wwrect "$id")
+  # What a finger there hits (11-23: w and nw grabbed over Chrome's body, RZ7 raised Chrome - RZ8 since).
+  hit=$(ev "(()=>{const d=devicePixelRatio,t=document.elementFromPoint($px/d,$py/d);return (t?.className?.toString?.()||'none')+' in '+(t?.closest('.webwindow[data-wwid]')?.dataset.wwid??'-')})()")
+  # The finger stays on the screen (11-23: s's 600 px went past its bottom, the way back began off it and typed into
+  # the app): the end and the way back's start clamped to the screen.
+  ex=$(clampx $((px + dx))) ey=$(clampy $((py + dy)))
   if [ -n "$rec" ]; then
     sh_ "rm -f /data/local/tmp/wwsh.mp4"
     "$A" shell "su -c 'screenrecord --bit-rate 8000000 --time-limit 3 /data/local/tmp/wwsh.mp4'" >/dev/null 2>&1 & rp=$!
     sleep 0.6
   fi
   ev "__wwShadow.start(${id#w})" >/dev/null
-  sh_ "input swipe $px $py $((px + dx)) $((py + dy)) 700"
+  sh_ "input swipe $px $py $ex $ey 700"
   f1=$(wwrect "$id")
   read -r qx qy <<<"$(wwpt "$id" ".ww-edge-$zone")"
-  sh_ "input swipe ${qx:-$((px + dx))} ${qy:-$((py + dy))} $px $py 700"
+  sh_ "input swipe $(clampx "${qx:-$ex}") $(clampy "${qy:-$ey}") $px $py 700"
   sleep 0.3
   res=$(ev "__wwShadow.stop()")
   if [ -n "$rp" ]; then
@@ -90,7 +97,7 @@ gesture() {
     "$A" exec-out "su -c 'cat /data/local/tmp/wwsh.mp4; rm -f /data/local/tmp/wwsh.mp4'" > "$OUT/$name.mp4" 2>/dev/null
     [ -s "$OUT/$name.mp4" ] && sheet "$name"
   fi
-  log "$name ($zone $dx,$dy): frame $f0 -> $f1; shadow $res"
+  log "$name ($zone $dx,$dy): grab $px,$py on $hit, to $ex,$ey; frame $f0 -> $f1; shadow $res"
   [ "$f0" != "$f1" ] || bad "$name: the drag didn't resize the window (frame $f0 both times)"
   case $res in "frames "*" bad 0"*) ;; *) bad "$name: shadow off its frame: $res" ;; esac
   chk "$name"

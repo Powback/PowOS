@@ -12781,6 +12781,53 @@ async function fullStaysHost() {
   return [...fails, ...floatingFails("back from the host's full screen")];
 }
 
+/** RZ8's drags: one per zone and way, [d] px, signs per side (n/w: -1 out, s/e: +1 out). */
+const RZ8_DRAGS = (() => {
+  const out = { n: [0, -1], s: [0, 1], e: [1, 0], w: [-1, 0] };
+  const sides = ["n", "s", "e", "w", "ne", "nw", "se", "sw"];
+  const vec = (side, k) => [...side].reduce(([x, y], c) => [x + out[c][0] * k(c), y + out[c][1] * k(c)], [0, 0]);
+  // Out: up/left 150 (room there), down/right 40 (the dock's and the work area's edge are 56-64 px off); in: 100.
+  const grow = (c) => (c === "n" || c === "w" ? 150 : 40);
+  return sides.flatMap((side) => [
+    [`${side}-out`, side, ...vec(side, grow)],
+    [`${side}-in`, side, ...vec(side, () => -100)],
+  ]);
+})();
+
+/** One RZ8 drag by a real touch (CDP [cdp]) on [page]: the zone grabbed at its centre, moved in 12 steps; its fails. */
+async function wwHandlesDrag(page, cdp, under, [name, side, dx, dy]) {
+  const call = (fn, ...a) => page.evaluate(async (fn, a) => (await importShim("./dev/ww-handles-check.js"))[fn](...a), fn, a);
+  const touch = (type, x, y, t) => cdp.send("Input.dispatchTouchEvent", { type, touchPoints: type === "touchEnd" ? [] : [{ x, y }], timestamp: t });
+  const at = await call("handlesPut", side, under);
+  const label = `${name}${under ? " over a lower window" : ""}`;
+  if (at.why) return [`RZ8 ${label}: ${at.why}`];
+  const t0 = Date.now() / 1000;
+  await touch("touchStart", at.x, at.y, t0);
+  for (let i = 1; i <= 12; i++) {
+    await new Promise((ok) => setTimeout(ok, 16));
+    await touch("touchMove", at.x + (dx * i) / 12, at.y + (dy * i) / 12, t0 + i * 0.016);
+  }
+  await touch("touchEnd", 0, 0, t0 + 0.22);
+  await new Promise((ok) => setTimeout(ok, 120));
+  const got = await call("handlesFrame");
+  const v = await call("handlesVerdict", { name: label, side, dx, dy, f0: at.frame, f1: got.frame });
+  return v.map((f) => `${f} (grabbed at ${Math.round(at.x)},${Math.round(at.y)} on .${at.hit}${at.underLow ? ", the lower window under it" : ""}; on top: ${got.top})`);
+}
+
+/** RZ8 (dev/ww-handles-check.js): every zone of a window dragged by a real touch (CDP), alone and over a lower window. */
+async function wwHandlesScene(r) {
+  const cdp = await r.page.target().createCDPSession();
+  await cdp.send("Emulation.setTouchEmulationEnabled", { enabled: true, maxTouchPoints: 5 });
+  const fails = [];
+  try {
+    for (const under of [false, true]) for (const drag of RZ8_DRAGS) fails.push(...(await wwHandlesDrag(r.page, cdp, under, drag)));
+    return fails;
+  } finally {
+    await cdp.send("Emulation.setTouchEmulationEnabled", { enabled: false }).catch(() => {});
+    await r.page.evaluate(async () => (await importShim("./dev/ww-handles-check.js")).handlesDone()).catch(() => {});
+  }
+}
+
 async function edgeCarryScene(r) {
   const ready = await r.page.evaluate(EDGE_CARRY_HELPERS);
   if (ready.length) return ready;
@@ -15368,6 +15415,9 @@ try {
   // EC1: a window let go at the screen's right / left edge (or over the right dock) goes to the next / previous page with home, whole inside the work area (ww-edge-carry-unfolded; E2E 194 step 38, 197 step 39).
   if (process.env.SHELL_PAGES !== "0")
     runs.push(open(browser, `${ORIGIN}/index.html`, "ww-edge-carry-unfolded", { width: 821, height: 883 }).then((r) => whenReady(r, () => edgeCarryScene(r))));
+    // RZ8 (ww-shadow.sh 11-23: w, se and nw drags left the Calculator as it was): all 8 zones by a real finger, out
+    // and in, alone and over a lower window under the west zones (dev/ww-handles-check.js).
+    runs.push(open(browser, `${ORIGIN}/index.html`, "ww-handles-unfolded", { width: 821, height: 883 }).then((r) => whenReady(r, () => wwHandlesScene(r))));
   // WB1-WB4: the window bench's page side - open/live/maximise/restore/close frame-timed, no blank frame (ww-bench-unfolded; the user 11-07).
   if (process.env.SHELL_PAGES !== "0")
     runs.push(open(browser, `${ORIGIN}/index.html`, "ww-bench-unfolded", { width: 821, height: 883 }).then((r) => whenReady(r, async () => (await r.page.evaluate(WB_HELPERS), r.page.evaluate(wwBenchChecks)))));
