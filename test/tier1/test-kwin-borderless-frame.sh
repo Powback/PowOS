@@ -4,8 +4,9 @@
 # size) gets PowOS's bar, Steam/GTK/Chrome (frame extents, resizable, or moving themselves) don't (the user, 11-08:
 # Broforce "without a title bar, so there's no way to resize it or make it fullscreen").
 # The header is rebuilt from the patches that write it (git apply --include, no KWin tarball), then
-# targets/android/pkgs/kwin/test/task-policy-test.cpp is compiled and run. Also: PKGBUILD lists every patch on disk once,
-# in order, with one SKIP each (a patch left out of _patches is never applied - the change would silently not ship).
+# targets/android/pkgs/kwin/test/task-policy-test.cpp is compiled and run. Also: PKGBUILD lists every patch on disk
+# once, in order, with one SKIP each (a patch left out of _patches is never applied - the change would silently not
+# ship).
 set -u
 src=$(cd "$(dirname "$0")/../.." && pwd)
 pk=$src/targets/android/pkgs/kwin

@@ -12,19 +12,23 @@
 #   emu.sh status          running / booted, the commit its APK is from, the disk it uses
 #   emu.sh reset           back to the "powos-ready" snapshot now (a running emulator), APK again if needed
 #   emu.sh install [REF]   build REF (default origin's tip) with the normal build system (targets/android/prep-app.sh,
-#                          then targets/android/tools/warm-builder.sh, PUBLISH=0: never into android-app-dev/output, which PowApps serves to the
-#                          phone) from a clean checkout of it (.claude/worktrees/emu-build) and `adb install -r` it over
-#                          the system copy, as the phone's installs go; its commit goes to /data/local/tmp on the emulator
+#                          then targets/android/tools/warm-builder.sh, PUBLISH=0: never into android-app-dev/output,
+#                          which PowApps serves to the phone) from a clean checkout of it (.claude/worktrees/emu-build)
+#                          and `adb install -r` it over the system copy, as the phone's installs go; its commit goes to
+#                          /data/local/tmp on the emulator
 #   emu.sh remove          stop, then delete the AVD, its snapshot and the build checkout (the system image stays)
 #   emu.sh clean-recents   every recent task but PowOS's own removed (clean-recents.sh: emulator serial + qemu property
-#                          or it refuses) - queue-emu.sh runs it before a check whose header says `# needs: clean-recents`
+#                          or it refuses) - queue-emu.sh runs it before a check whose header says
+#                          `# needs: clean-recents`
 #   emu.sh wake            the screen kept on, now (queue-emu.sh runs this before each job: nobody is watching the
 #                          emulator, so unlike the phone it must never be left to decide a check can't run because
 #                          its screen slept)
 # Checks run against it with POWOS_DEVICE=emu (tools/phone/adb.sh picks the emulator); the queue's lane:
 # `queue.sh add --dev emu <task> <check> ...` runs at once (tools/phone/verify/queue.sh).
 # Disk: refuses to create or start below EMU_MIN_FREE_GB (default 25) free - the Mac's watchdog mails at 15 GB, and
-# the Colima VM died at 0.5 GB (2026-10-21). Uses ~13.7 GB: the image 4.3 GB + the AVD 9.4 GB (its snapshot holds the 4 GB RAM - the emulator raises less to 4096 MB for this screen; the 6 GB data partition is written whole: EncryptUserData).
+# the Colima VM died at 0.5 GB (2026-10-21). Uses ~13.7 GB: the image 4.3 GB + the AVD 9.4 GB (its snapshot holds the 4
+# GB RAM - the emulator raises less to 4096 MB for this screen; the 6 GB data partition is written whole:
+# EncryptUserData).
 # powos-units: deploy host=mac
 set -uo pipefail
 here=$(cd "$(dirname "$0")" && pwd -P)
@@ -59,7 +63,8 @@ space_guard() { local f; f=$(free_gb)
 lock="${XDG_CACHE_HOME:-$HOME/.cache}/powos-emu.lock"
 # emu_lock_acquire [label]: exclusive lock for install/reset/remove/stop, modeled on build-slot.sh. If LOCK_HELD=1
 # (queue-emu.sh or a job running under it), does nothing - the lock is already held. Waits up to 4 min for a live holder
-# (max 240 sleeps at 1s), then refuses. A dead holder's lock is reclaimed. Set a trap to release: trap 'emu_lock_release' EXIT.
+# (max 240 sleeps at 1s), then refuses. A dead holder's lock is reclaimed. Set a trap to release: trap
+# 'emu_lock_release' EXIT.
 emu_lock_acquire() { local label=${1:-emu.sh} holder_name waiting
   [ "${LOCK_HELD:-}" = 1 ] && return 0   # already held by parent (queue-emu.sh)
   mkdir -p "$(dirname "$lock")"
@@ -98,8 +103,8 @@ image() {
     "yes | /opt/android-sdk/cmdline-tools/latest/bin/sdkmanager --sdk_root=/sdk '$IMG_PKG' >/dev/null" || die "sdkmanager failed"
   [ -f "$SDK/$IMG_DIR/system.img" ] || die "no $SDK/$IMG_DIR/system.img after sdkmanager"
 }
-# The Open's inner screen: the display is 2268x2440 portrait (its panel is landscape under it, as on the phone), 442 dpi.
-# Written by hand: avdmanager needs a Java the Mac doesn't have, and the file is the whole definition anyway.
+# The Open's inner screen: the display is 2268x2440 portrait (its panel is landscape under it, as on the phone), 442
+# dpi. Written by hand: avdmanager needs a Java the Mac doesn't have, and the file is the whole definition anyway.
 avd_files() {
   mkdir -p "$AVD_HOME/$AVD.avd"
   printf 'avd.ini.encoding=UTF-8\npath=%s\npath.rel=avd/%s.avd\ntarget=android-36\n' "$AVD_HOME/$AVD.avd" "$AVD" > "$AVD_HOME/$AVD.ini"
@@ -153,8 +158,8 @@ halt() { local i
   a emu kill >/dev/null 2>&1
   for i in $(seq 30); do pgrep -f -- "-avd $AVD( |$)" >/dev/null || return 0; sleep 1; done
   pkill -9 -f -- "-avd $AVD( |$)"; sleep 1; }
-# wait_dev [s]: adb sees the emulator as a device (never adb's own unbounded wait-for-device: it held `start` 20 min on a
-# dead emulator, 2026-10-24).
+# wait_dev [s]: adb sees the emulator as a device (never adb's own unbounded wait-for-device: it held `start` 20 min on
+# a dead emulator, 2026-10-24).
 wait_dev() { local i; for i in $(seq "${1:-120}"); do running && return 0; sleep 1; done; die "the emulator isn't an adb device after ${1:-120} s"; }
 root_up() { a root >/dev/null 2>&1; sleep 2; wait_dev; wait_boot 120; }
 
@@ -195,9 +200,10 @@ build() {
   echo "$STATE/apk/$c.apk"
 }
 # The phone's system module, on the emulator's /system: the APK in /system/priv-app/PowOS and the reviewed allowlist
-# (targets/android/system-module/privapp-permissions.txt) as /system/etc/permissions/privapp-permissions-com.powos.app.xml.
-# A privileged permission the APK asks for that the list doesn't name is DENIED there (deny-permission: the phone
-# doesn't grant it either) - with enforce on, an unlisted one would stop the boot.
+# (targets/android/system-module/privapp-permissions.txt) as
+# /system/etc/permissions/privapp-permissions-com.powos.app.xml. A privileged permission the APK asks for that the list
+# doesn't name is DENIED there (deny-permission: the phone doesn't grant it either) - with enforce on, an unlisted one
+# would stop the boot.
 priv() {
   local apk=$1 req emupriv allow deny x=$STATE/privapp-permissions-com.powos.app.xml
   req=$(docker run --rm -v "$(dirname "$apk"):/w:ro" --entrypoint /opt/android-sdk/build-tools/35.0.0/aapt2 "$IMAGE" dump permissions "/w/$(basename "$apk")" |
@@ -259,8 +265,8 @@ su_access() {
 }
 # The phone's settings the window paths need, and SELinux permissive (the phone's Magisk policy lets PowOS's su
 # children do what they do; the emulator has no Magisk).
-# persist.powos.root=1: the flag rooted.sh sets on the phone (RootMode.java: home made Android's default through su, ...).
-# Freeform support is read at boot: set before create's last reboot.
+# persist.powos.root=1: the flag rooted.sh sets on the phone (RootMode.java: home made Android's default through su,
+# ...). Freeform support is read at boot: set before create's last reboot.
 # settings_enable_monitor_phantom_procs false: "Disable child process restrictions" (developer options), the engine's
 # documented requirement (targets/android/tools/device-test.sh push-rootfs) - without it Android's phantom process
 # killer ("Trimming phantom processes", past 32 children) ends KWin and the session bus as Plasma starts, no root.
@@ -269,7 +275,8 @@ settings_like_phone() {
     settings put global window_animation_scale 1; settings put system screen_off_timeout 2147483647; svc power stayon true; locksettings set-disabled true 2>/dev/null; true'
 }
 # HACK: SELinux permissive on the emulator: its policy has no rules for the PowOS app's su children (the phone's Magisk
-# patches them in). Real fix: Magisk (su + sepolicy patches) on the AVD, then enforcing (docs/REMOTE-POWOS.md section 4).
+# patches them in). Real fix: Magisk (su + sepolicy patches) on the AVD, then enforcing (docs/REMOTE-POWOS.md section
+# 4).
 selinux_permissive() { a shell setenforce 0; su_access; }
 # What the phone's user granted PowOS over time: every runtime permission it asks for, drawing over apps (the window
 # frames, edge handles: TYPE_APPLICATION_OVERLAY), all files. And the AVD's own launcher off: no longer the recents
@@ -396,5 +403,5 @@ remove)
   [ -e "$BUILD_TREE/.git" ] && git -C "$REPO" worktree remove --force "$BUILD_TREE"
   say "removed the AVD, its snapshot, $STATE and the build checkout (system image kept: $SDK/$IMG_DIR)"
   ;;
-*) sed -n 2,22p "$0" | sed 's/^# \{0,1\}//'; exit 2 ;;
+*) sed -n 2,25p "$0" | sed 's/^# \{0,1\}//'; exit 2 ;;
 esac

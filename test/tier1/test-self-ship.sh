@@ -52,7 +52,8 @@ grep -q "no ship secret" <<<"$out" && ok "no secret file -> says what to provisi
 code=$(curl -s -o /dev/null -w '%{http_code}' -H "Authorization: Bearer $SECRET" -d '{"sha":"zz","note":"n","from":"p"}' "$POWOS_SHIP_GATE_URL/request")
 [ "$code" = 400 ] && ok "bad sha -> 400" || bad "400" "$code"
 
-# provisioning: ship-deploy.sh gate-install makes the secret (temp HOME, launchctl/plutil/openssl-free stubs), idempotently, never printing it
+# provisioning: ship-deploy.sh gate-install makes the secret (temp HOME, launchctl/plutil/openssl-free stubs),
+# idempotently, never printing it
 H=$W/home; mkdir -p "$H/bin" "$H/pw/ship-runner/tools/phone"; touch "$H/pw/ship-runner/.git" "$H/pw/ship-runner/tools/phone/ship-gate.py"
 for c in launchctl plutil sleep; do printf '#!/bin/sh\nexit 0\n' > "$H/bin/$c"; chmod +x "$H/bin/$c"; done
 gi() { HOME="$H" POWOS_RUN_ROOT="$H/pw" PATH="$H/bin:$PATH" bash "$REPO/tools/phone/ship-deploy.sh" gate-install 2>&1; }

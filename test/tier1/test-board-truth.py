@@ -916,7 +916,8 @@ class HygieneCliTest(BoardTest):
         self.assertNotIn("nothing", mail.split("Decided")[1].split("\n")[0])
 
     def test_sweep_never_acts_on_manager_tasks(self):
-        # The manager builds some tasks itself: a PASS, a stalled owner or a twin title never closes/re-owns/merges them.
+        # The manager builds some tasks itself: a PASS, a stalled owner or a twin title never closes/re-owns/merges
+        # them.
         self.run_cli("task", "add", "Progress widget", "--id", "mgr", "--owner", "manager")
         self.run_cli("check", "set", "mgr", "j1", "PASS", "--name", "mgr-check")
         FakeStdb.db["work"]["mgr-twin"] = dict(FakeStdb.db["work"]["mgr"], id="mgr-twin", created=FakeStdb.db["work"]["mgr"]["created"] + 5)

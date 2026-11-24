@@ -41,10 +41,10 @@ const compilerOptions: ts.CompilerOptions = {
   types: [],
 };
 
-// [d.runtime.14] [d.runtime.39] A session is told about, and type-checked against, exactly the functions it has: sandbox.d.ts
-// declares them all, and each session keeps the types and the `declare function`s its hosts provide (a session
-// without a checkout has no codebase, only a verifier with a preview has the browser). A call to anything else is
-// a type error before it runs, never a failure inside it.
+// [d.runtime.14] [d.runtime.39] A session is told about, and type-checked against, exactly the functions it has:
+// sandbox.d.ts declares them all, and each session keeps the types and the `declare function`s its hosts provide (a
+// session without a checkout has no codebase, only a verifier with a preview has the browser). A call to anything else
+// is a type error before it runs, never a failure inside it.
 const FULL_DTS = readFileSync(SANDBOX_DTS, "utf8");
 const fullSource = ts.createSourceFile(SANDBOX_DTS, FULL_DTS, ts.ScriptTarget.ES2023, true);
 const declFiles = new Map<string, string>();
@@ -78,7 +78,8 @@ host.fileExists = (fileName) => fileName === MAIN || declFiles.has(fileName) || 
 host.readFile = (fileName) => (fileName === MAIN ? mainSource.text : declFiles.get(fileName) ?? readFile.call(host, fileName));
 host.writeFile = () => {};
 
-// `thrown` is what the code itself threw, when it threw something: runhost.ts hands that on rather than this description.
+// `thrown` is what the code itself threw, when it threw something: runhost.ts hands that on rather than this
+// description.
 export class SandboxError extends Error {
   readonly thrown?: { name?: string; message: string; stack?: string };
   constructor(message: string, thrown?: { name?: string; message: string; stack?: string }) {
@@ -185,7 +186,8 @@ function describeError(dumped: unknown): SandboxError {
   return new SandboxError(String(dumped));
 }
 
-// One job: a fresh runtime and context, the granted host functions as globals, `args`, a console that prints to the result.
+// One job: a fresh runtime and context, the granted host functions as globals, `args`, a console that prints to the
+// result.
 async function run(js: string, hosts: Hosts, root: string, args: Record<string, unknown>, limits: Limits): Promise<{ value: unknown; stdout: string }> {
   const QuickJS = await getQuickJS();
   const runtime = QuickJS.newRuntime();

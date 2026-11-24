@@ -7,7 +7,8 @@
 #     well under the budget, and the step it stopped at;
 #   - a long clock: the scan ends with the diagnosis verdict ("no tap ... opened a menu (N taps; home gestures to KWin
 #     ..., KWin touch-at lines ..." - d416d952's wording, which this check had not followed);
-#   - no `| xargs` left in it (comments aside); menus() reads named steamwebhelper windows too (no "has no name" filter).
+#   - no `| xargs` left in it (comments aside); menus() reads named steamwebhelper windows too (no "has no name"
+#   filter).
 set -u
 src=$(cd "$(dirname "$0")/../.." && pwd)
 fails=0

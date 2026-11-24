@@ -1,8 +1,8 @@
-// PORTED from SpaceTimeAI agents/worker/codemode/sandbox-thread.ts (9aa4c87); the only change: the job's limits ride along.
-// The code-mode sandbox's thread (offthread.ts starts it): type-checks and runs a session's eval in QuickJS here, off
-// the worker's main thread, and asks the main thread for each host function call. Model-written code may run for up to
-// the sandbox's deadline (five minutes) without yielding; on the main thread that held the database's websocket, and
-// STDB dropped the worker after 30 s without an answer to its pings, with every session it was running.
+// PORTED from SpaceTimeAI agents/worker/codemode/sandbox-thread.ts (9aa4c87); the only change: the job's limits ride
+// along. The code-mode sandbox's thread (offthread.ts starts it): type-checks and runs a session's eval in QuickJS
+// here, off the worker's main thread, and asks the main thread for each host function call. Model-written code may run
+// for up to the sandbox's deadline (five minutes) without yielding; on the main thread that held the database's
+// websocket, and STDB dropped the worker after 30 s without an answer to its pings, with every session it was running.
 import { parentPort } from 'node:worker_threads';
 import { evalCode, SandboxError, type Limits } from './sandbox.ts';
 

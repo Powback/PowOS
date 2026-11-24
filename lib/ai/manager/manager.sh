@@ -8,7 +8,8 @@ _MANAGER_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 MANAGER_SERVER="${MANAGER_SERVER:-$_MANAGER_DIR/manager.py}"
 MANAGER_SANDBOX="${MANAGER_SANDBOX:-$_MANAGER_DIR/../sandbox/sandbox.sh}"
 
-# One --mcp-config from several {"mcpServers":{...}} documents (claude takes one file per flag; one file keeps it simple).
+# One --mcp-config from several {"mcpServers":{...}} documents (claude takes one file per flag; one file keeps it
+# simple).
 _manager_merge_mcp() {
     python3 -c 'import json,sys
 print(json.dumps({"mcpServers": {k: v for a in sys.argv[1:] for k, v in json.loads(a)["mcpServers"].items()}}))' "$@"
@@ -18,9 +19,9 @@ print(json.dumps({"mcpServers": {k: v for a in sys.argv[1:] for k, v in json.loa
 _manager_sysprompt() {
     local ctx=""
     [[ -n "${AGENT_CONTEXT_CMD:-}" ]] && ctx="$(eval "$AGENT_CONTEXT_CMD" 2>/dev/null || true)"
-    # What THIS device is (platform, model, rooted or not, the owner's or standalone): capabilities.md is every device's.
-    # Optional, like every context step: `|| true` - a missing/failing helper (sh exits 127) must never kill the
-    # turn under bin/powos's errexit (11-09 "PowAI didn't answer (exit 127)").
+    # What THIS device is (platform, model, rooted or not, the owner's or standalone): capabilities.md is every
+    # device's. Optional, like every context step: `|| true` - a missing/failing helper (sh exits 127) must never kill
+    # the turn under bin/powos's errexit (11-09 "PowAI didn't answer (exit 127)").
     ctx="$(sh "$_MANAGER_DIR/powos-device-context" 2>/dev/null || true)${ctx:+
 
 $ctx}"
@@ -88,8 +89,8 @@ _manager_ensure_claude() {
 #   install   the manager's claude isn't installed (whatever the sign-in): the AI page's Install Claude
 #             (powos manager --install), then it's asked again - an endpoint still needs claude to run the manager
 # Only file presence and variable names are looked at - never a credential's contents.
-# fleet_login.py's one state word (relogin, or anything else), capped at $1 s when given; "" when it can't run or fails -
-# never a failing status (errexit: a failed auth probe killed the whole chat turn, 11-09).
+# fleet_login.py's one state word (relogin, or anything else), capped at $1 s when given; "" when it can't run or fails
+# - never a failing status (errexit: a failed auth probe killed the whole chat turn, 11-09).
 _manager_fleet_word() {
     command -v python3 &>/dev/null || return 0
     local cap=(); [[ -n "${1:-}" ]] && command -v timeout &>/dev/null && cap=(timeout "$1")

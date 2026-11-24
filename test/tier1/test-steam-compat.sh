@@ -73,7 +73,8 @@ check "native pin removes the mapping"             '[ "$(C get 200)" = "tool=- o
 C set 200 x86 >/dev/null; C set 100 kept:x86 >/dev/null
 check "config.vdf otherwise byte-identical"        'cmp -s <(grep -v "\"200\"" "$T/orig.vdf") <(grep -v "\"200\"" "$St/config/config.vdf") || diff <(sed "/\"200\"/,/}/d" "$St/config/config.vdf") "$T/orig.vdf" >/dev/null'
 check "backups kept"                               'ls "$St/config/" | grep -q powos-bak'
-# PowOS's ARM64 launch gate (compatibilitytools.d/powos-proton-arm64): "arm64" maps to it once it and Valve's runtime are there.
+# PowOS's ARM64 launch gate (compatibilitytools.d/powos-proton-arm64): "arm64" maps to it once it and Valve's runtime
+# are there.
 mkdir -p "$St/compatibilitytools.d/powos-proton-arm64" "$St/steamapps/common/SteamLinuxRuntime_4-arm64"
 touch "$St/compatibilitytools.d/powos-proton-arm64/powos-entry"
 C set 200 arm64 >/dev/null

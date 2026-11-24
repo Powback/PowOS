@@ -1391,7 +1391,8 @@ def truth(w, held, idle_roles, checks, now_ms=None, ws=()):
             return "no-check", (f"check {_check_name(last)} PASSED {ago(int(last.get('at') or now_ms))} ago, but "
                                 f"{open_why(kids, steps)} - not done")
         # A newer PASS of a shipped build supersedes every older FAIL (results[-1] is the latest by time); with the fix
-        # landed (commits recorded) that is the done rule's evidence - the board no longer waits for someone to close it.
+        # landed (commits recorded) that is the done rule's evidence - the board no longer waits for someone to close
+        # it.
         if last.get("shipped", True) and _jl(w.get("commits", "")):
             return "done", f"fix landed, check {_check_name(last)} PASSED {ago(int(last.get('at') or now_ms))} ago"
         return "no-check", f"check {_check_name(last)} PASSED {ago(int(last.get('at') or now_ms))} ago - close it or queue the next check"

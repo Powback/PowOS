@@ -25,7 +25,8 @@ MKSH = shutil.which('mksh')
 def device_sh(script, env=None, timeout=3):
     assert MKSH, "mksh (Android's /system/bin/sh) is missing: apt-get install mksh (tools/jobs/tier1.Dockerfile, CI lint)"
     with tempfile.TemporaryDirectory() as d:
-        # su on Android may have no TMPDIR; give the helper a real one here (its /data/local/tmp default is device-only).
+        # su on Android may have no TMPDIR; give the helper a real one here (its /data/local/tmp default is
+        # device-only).
         env = dict(os.environ, TMPDIR=d, **(env or {}))
         return subprocess.run([MKSH, '-c', script], capture_output=True, text=True, timeout=timeout, env=env)
 
