@@ -90,6 +90,16 @@ is "drag: DOWN, hold, 4 MOVEs over 400 ms, UP" "$(grep '^IN' "$LOG")" "$want"
 run 'drag 0 0 10 10' >/dev/null
 is "drag defaults: no hold, 12 MOVEs" "$(grep -c 'MOVE' "$LOG") $(grep -c 'sleep 0.033' "$LOG") $(grep -c 'sleep 0.000' "$LOG")" "12 12 0"
 out=$(run 'drag 0 0 10 1.5'); is "drag: bad args refused" "$(calls)" 0
+run 'drag 0 0 0 20 0 200 2 1500' >/dev/null
+want="IN input motionevent DOWN 0 0
+IN input motionevent MOVE 0 10
+IN sleep 0.100
+IN input motionevent MOVE 0 20
+IN sleep 0.100
+IN sleep 1.500
+IN input motionevent UP 0 20"
+is "drag: end hold before UP (a scrub resting on its letter)" "$(grep '^IN' "$LOG")" "$want"
+out=$(run 'drag 0 0 0 20 0 200 2 x'); is "drag: bad end hold refused" "$(calls)" 0
 
 echo "== cdp / hcall / shot =="
 out=$(run 'printf "%s\n" "\"opened\"" > cdp.answers; cdp_val "1" app'); is "cdp_val unquotes a JSON string" "$out" "opened

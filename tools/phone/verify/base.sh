@@ -18,9 +18,10 @@
 #                           stderr). hcall_once: one try.
 #   tap x y | tap "x y"     validated integers (else "FAIL: tap: bad coordinates" and rc 2, nothing sent).
 #   swipe x1 y1 x2 y2 [ms]  one `input swipe` (real time on the phone; default 300 ms).
-#   drag x1 y1 x2 y2 [hold_ms] [move_ms] [steps]  DOWN, hold, `steps` MOVEs spread over move_ms, UP - all in ONE
-#                           on-device shell, so adb's per-call latency can't stretch or bunch the gesture
-#                           (defaults 0, 400, 12).
+#   drag x1 y1 x2 y2 [hold_ms] [move_ms] [steps] [end_hold_ms]  DOWN, hold, `steps` MOVEs spread over move_ms, a hold
+#                           at the end (a finger resting on a scrubbed-to spot), UP - all in ONE on-device shell, so
+#                           adb's per-call latency can't stretch or bunch the gesture (defaults 0, 400, 12, 0). Run it
+#                           with `&` to probe the page while the finger is still down.
 #   shot <out.png> [args]   tools/phone/shot.sh, its last line.
 #   step <name> [cap_s]     "== name"; with cap_s, every sh_/rsh until the next step is capped at what's left of it,
 #                           and a call past it sends nothing and prints "FAIL: step <name>: past its <cap_s> s cap".
@@ -112,8 +113,8 @@ declare -F swipe >/dev/null || swipe() {
 }
 declare -F drag >/dev/null || drag() {
   # shellcheck disable=SC2048,SC2086
-  set -- $*; local hold=${5:-0} ms=${6:-400} n=${7:-12} k s dt
-  vb_xy drag 7 "$1" "$2" "$3" "$4" "$hold" "$ms" "$n" || return 2
+  set -- $*; local hold=${5:-0} ms=${6:-400} n=${7:-12} endh=${8:-0} k s dt
+  vb_xy drag 8 "$1" "$2" "$3" "$4" "$hold" "$ms" "$n" "$endh" || return 2
   [ "$n" -ge 1 ] || n=1
   dt=$((ms / n)); s="input motionevent DOWN $1 $2"
   [ "$hold" -gt 0 ] && s="$s
@@ -123,6 +124,8 @@ sleep $((hold / 1000)).$(printf %03d $((hold % 1000)))"
 input motionevent MOVE $(($1 + ($3 - $1) * k / n)) $(($2 + ($4 - $2) * k / n))
 sleep $((dt / 1000)).$(printf %03d $((dt % 1000)))"
   done
+  [ "$endh" -gt 0 ] && s="$s
+sleep $((endh / 1000)).$(printf %03d $((endh % 1000)))"
   printf '%s\ninput motionevent UP %s %s\n' "$s" "$3" "$4" | rsh
 }
 declare -F shot >/dev/null || shot() { "$T/shot.sh" "$@" 2>&1 | tail -1; }
