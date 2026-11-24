@@ -146,7 +146,7 @@ run() {  # run <variant> <n>
     [ -n "$(ls -A "$S/steamapps/downloading" 2>/dev/null)" ] && first download "$now_"  # Steam updates first: not the launch's time
     pgrep -f pv-adverb >/dev/null && first container "$now_"
     pgrep -f wineserver >/dev/null && first wineserver "$now_"
-    [ -n "${seen[wineserver]:-}" ] && pgrep -f "${EXE:-common[\\/]$IDIR[\\/].*\.exe}" | while read -r x; do ! grep -qa 'proton\|reaper\|python\|pressure-vessel\|steam-launch-wrapper' "/proc/$x/cmdline" && echo y; done | grep -q y && first exe "$now_"
+    [ -n "${seen[wineserver]:-}" ] && pgrep -f "${EXE:-common[\\/]${IDIR}[\\/].*\.exe}" | while read -r x; do ! grep -qa 'proton\|reaper\|python\|pressure-vessel\|steam-launch-wrapper' "/proc/$x/cmdline" && echo y; done | grep -q y && first exe "$now_"
     W=$(gamewin); [ -n "$W" ] && [ "$(mapped "$W")" = IsViewable ] && { first window "$now_"; break; }
     [ ${#seen[@]} != $k ] && k=${#seen[@]} && pill "$GAME $v: $(for s in reaper container wineserver exe; do [ -n "${seen[$s]:-}" ] && last=$s; done; echo "${last:-Steam}")"
     touched; sleep 0.25
@@ -158,7 +158,7 @@ run() {  # run <variant> <n>
     # whether it changes: a still black window is a render failure, not a slow start.
     xframes grab "$WIN_NAME" 3 "$d/grab" >/dev/null 2>&1; cp "$d/grab/f1.png" "$d/window.png" 2>/dev/null
     echo "   frames in 10 s: $(xframes count "$W" 10 5) distinct; window.png $([ -s "$d/window.png" ] && echo saved || echo none)"
-    echo "   window $W $(xwininfo -id "$W" | awk '/Width|Height/ {printf "%s ", $2}'), alive: $(pgrep -fc "${EXE:-common[\\/]$IDIR[\\/].*\.exe}") game exe"
+    echo "   window $W $(xwininfo -id "$W" | awk '/Width|Height/ {printf "%s ", $2}'), alive: $(pgrep -fc "${EXE:-common[\\/]${IDIR}[\\/].*\.exe}") game exe"
   elif [ -n "${seen[ended]:-}" ]; then fail "start-$v" "the launch chain ended ${seen[ended]} ms after the tap, no window"
   else fail "start-$v" "no window in $LAUNCH_S s:$(for s in reaper container wineserver exe; do printf ' %s=%s' $s "${seen[$s]:--}"; done)"; fi
   [ -n "${seen[download]:-}" ] && echo "INVALID $v #$2: Steam downloaded an update during the launch (from ${seen[download]} ms) - the time isn't the launch's"
