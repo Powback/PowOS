@@ -20,7 +20,7 @@ APP=${APP:-kwrite}; case $APP in kwrite|kate) ;; *) echo "ENV: APP is kwrite or 
 OUT=${1:-$HOME/.cache/powos-verify/window-task-ime-$(date +%m%d-%H%M)}; mkdir -p "$OUT"; R=$OUT/log.txt
 L=$HOME/.cache/powos-verify.lock
 N=$(date +%s)$RANDOM; F=/tmp/powos-ime-check-$N.txt
-sh_() { "$A" shell "su -c '$*'" 2>/dev/null | tr -d '\r'; }
+. "$here/base.sh"  # sh_ and the shared check helpers (tools/phone/verify/base.sh)
 # As the session user, with the session's environment (plasmashell's or KWin's: the bus, the display).
 us() { printf '%s\n' 'P=$(pgrep -x plasmashell | head -1); [ -n "$P" ] || P=$(pgrep -x kwin_wayland | head -1)
 [ -n "$P" ] && while IFS= read -r -d "" kv; do export "$kv"; done < /proc/$P/environ 2>/dev/null
