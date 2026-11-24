@@ -15137,6 +15137,11 @@ try {
   const widthCases = [["cover", { width: 404, height: 900 }], ["inner", { width: 821, height: 883 }]].flatMap(([label, view]) => ["left", "right"].flatMap((position) => ["apps", "ai"].map((kind) => [`side-dock-width-${label}-${position}-${kind}`, view, position, kind])));
   for (const [name, view, position, kind] of widthCases)
     runs.push(open(browser, `${ORIGIN}/index.html`, name, view).then((r) => whenReady(r, () => r.page.evaluate(async (p, k) => (await importShim("./dev/side-dock-width-check.js")).sideDockWidthCheck(p, k), position, kind))));
+  // The launcher over home with a side dock: unfolded the dock is adopted BESIDE the app grid, folded it gives way
+  // (dev/side-dock-width-check.js sideDockLauncherCheck; device check side-dock-layout.sh).
+  for (const [label, view] of [["cover", { width: 404, height: 900 }], ["inner", { width: 821, height: 883 }]])
+    for (const position of ["left", "right"])
+      runs.push(open(browser, `${ORIGIN}/index.html`, `side-dock-launcher-${label}-${position}`, view).then((r) => whenReady(r, () => r.page.evaluate(async (p) => (await importShim("./dev/side-dock-width-check.js")).sideDockLauncherCheck(p), position))));
   const dockViews = { cover: { width: 404, height: 900 }, inner: { width: 821, height: 883 }, desktop: { width: 1280, height: 800 } };
   for (const [label, mode, width, height] of [["cover", "home", 404, 900], ["inner", "home", 821, 883], ["desktop", "desktop", 1280, 800]]) {
     for (const position of ["bottom", "left", "right"]) {

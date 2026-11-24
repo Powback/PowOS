@@ -64,12 +64,21 @@ for state in 0 3; do
     done
     "$T/shot.sh" "$OUT/home-$state-$side.png" >/dev/null || exit 1
     ev 'importShim("./state.ts").then(s=>{s.drawer.value=1;return "open"})' >/dev/null
-    sleep 1
+    # Judge after the launcher's transition ends: wait until no animation runs on the dock/launcher (up to 4 s).
+    for _ in 1 2 3 4 5 6 7 8; do
+      sleep 0.5
+      [ "$(ev 'document.getAnimations().some(a=>a.playState==="running"&&a.effect?.target?.closest?.(".home>.dock,.launcher-clip"))')" = false ] && break
+    done
+    # The shot first, so a FAIL below still leaves the picture of what it judged.
+    "$T/shot.sh" "$OUT/launcher-$state-$side.png" >/dev/null || exit 1
     verdict=$(ev '(()=>{const c=document.querySelector(".launcher-clip").getBoundingClientRect(),b=document.querySelector(".home > .bar").getBoundingClientRect();return c.left<20&&c.right>innerWidth-20&&b.top>=0&&b.bottom<=innerHeight+1&&b.bottom>innerHeight-60?"ok":JSON.stringify({clip:c.toJSON(),bar:b.toJSON(),size:[innerWidth,innerHeight]})})()')
     [ "$verdict" = ok ] || { echo "FAIL: $state $side launcher: $verdict"; exit 1; }
-    visible=$(ev 'getComputedStyle(document.querySelector(".home>.dock")).opacity')
-    [ "$visible" = 0 ] || { echo "FAIL: $state $side dock covers launcher (opacity $visible)"; exit 1; }
-    "$T/shot.sh" "$OUT/launcher-$state-$side.png" >/dev/null || exit 1
+    # The dock against the launcher, by hit-testing and boxes, not opacity (gate side-dock-launcher-*): unfolded (.wide)
+    # home's launcher ADOPTS the dock (shell.css .home.adopts.wide > .dock, the user 2026-10-31: "reuse the docking") -
+    # shown at opacity 1, tappable, BESIDE the app grid; folded it gives way and a touch at its spot lands on the launcher.
+    # The old rule (opacity must be 0) failed the intended unfolded dock (board side-dock-align-bottom, 2026-11-23).
+    dockv=$(ev '(()=>{const d=document.querySelector(".home>.dock:not(.dock-tray)"),g=document.querySelector(".home .drawer-clip>.drawer");if(!d||!g)return "no dock or launcher grid";const r=d.getBoundingClientRect(),q=g.getBoundingClientRect(),h=document.elementFromPoint(Math.min(Math.max(r.left+r.width/2,1),innerWidth-1),r.top+r.height/2),onDock=!!h?.closest(".home>.dock"),what=h?h.tagName.toLowerCase()+"."+[...h.classList].join("."):"nothing",shown=r.width>0&&r.right>1&&r.left<innerWidth-1&&Number(getComputedStyle(d).opacity)>0.05,over=Math.min(r.right,q.right)-Math.max(r.left,q.left);if(document.querySelector(".home").classList.contains("wide"))return !shown?"unfolded launcher did not adopt the dock":!onDock?"touch at the dock lands on "+what:over>1?"dock covers "+Math.round(over)+" px of the app grid":"ok";return shown||onDock?"dock stays over the launcher (touch lands on "+what+")":"ok"})()')
+    [ "$dockv" = ok ] || { echo "FAIL: $state $side dock vs launcher: $dockv"; exit 1; }
     echo "PASS: $state $side dock swipe isolated; launcher/search fully visible"
   done
 done

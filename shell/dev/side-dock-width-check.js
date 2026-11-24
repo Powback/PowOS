@@ -56,3 +56,43 @@ export async function sideDockWidthCheck(position, kind) {
   const pad = { left: parseFloat(cs.paddingLeft), right: parseFloat(cs.paddingRight) };
   return [...reserveFails(pad, position === "left" ? "left" : "right"), ...contentFails(clip, pad, kind)];
 }
+
+/** [el] or one of its ancestors matches [sel]. */
+const within = (el, sel) => !!el?.closest(sel);
+
+/** Unfolded: the adopted dock is shown, takes the touch at its centre and stays clear of the app grid. */
+function wideFails(d, g, hit, what) {
+  const fails = [];
+  if (!dockShown()) fails.push("unfolded: the launcher did not adopt the side dock (it slid out or faded)");
+  if (!within(hit, ".home > .dock")) fails.push(`unfolded: a touch at the dock's centre lands on ${what}, not the dock`);
+  const overlap = Math.min(d.right, g.right) - Math.max(d.left, g.left);
+  if (overlap > 1) fails.push(`unfolded: the dock covers ${px(overlap)} px of the app grid (dock ${px(d.left)}-${px(d.right)}, grid ${px(g.left)}-${px(g.right)})`);
+  return fails;
+}
+
+/** Folded: the dock gave way and the launcher takes the touch at its spot. */
+function foldedFails(hit) {
+  const fails = [];
+  if (dockShown()) fails.push("folded: the side dock stays shown over the launcher");
+  if (within(hit, ".home > .dock")) fails.push("folded: a touch at the dock's spot lands on the dock, not the launcher");
+  return fails;
+}
+
+/**
+ * The launcher open over home with a side dock at [position] (device check side-dock-layout.sh "dock covers launcher",
+ * board side-dock-align-bottom): unfolded (.wide) home's launcher ADOPTS the dock (shell.css .home.adopts.wide > .dock,
+ * the user 2026-10-31: "reuse the docking") - shown, tappable, BESIDE the app grid, never over it; folded the dock gives
+ * way and the launcher is what a touch at the dock's spot lands on. Judged by hit-testing and boxes, after the
+ * transition, never by opacity alone (opacity 1 is the adopted dock's intended state).
+ */
+export async function sideDockLauncherCheck(position) {
+  await openWith(position, "apps");
+  await sleep(600);
+  const dock = document.querySelector(".home > .dock:not(.dock-tray)");
+  const grid = document.querySelector(".home .drawer-clip > .drawer");
+  if (!dock || !grid) return [`no ${dock ? "launcher grid" : "dock"} with the launcher open`];
+  const d = dock.getBoundingClientRect();
+  const hit = document.elementFromPoint(Math.min(Math.max(d.left + d.width / 2, 1), innerWidth - 1), d.top + d.height / 2);
+  const what = hit ? `${hit.tagName.toLowerCase()}.${[...hit.classList].join(".")}` : "nothing";
+  return document.querySelector(".home").classList.contains("wide") ? wideFails(d, grid.getBoundingClientRect(), hit, what) : foldedFails(hit);
+}
