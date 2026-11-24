@@ -3,6 +3,7 @@
 # way the drawer does - powos-open-task, so the game's window is shown as its own Android task in front. A bare
 # `steam steam://rungameid/...` left the game's window as no task in front: bf-pacing measured PowOS's home
 # ("in front: HomeShell", 2026-10-23). Without powos-open-task: Steam alone, as before.
+# shellcheck shell=sh
 mkdir -p /tmp/bflog
 powos sleep never steam 2>&1 | tail -2
 cd /home/powos

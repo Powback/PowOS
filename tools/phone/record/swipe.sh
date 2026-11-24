@@ -1,6 +1,7 @@
 # swipe.sh: run as root on the phone (run.sh pushes it): home -> PowOS AI's page -> Settings, then a recorded swipe
 # home from the app and a second one on home, screencaps after each. Injected input only; aborts on a real touch IRQ.
 # Output in /data/local/tmp/hg* (root's screenrecord can't write /sdcard). Display id: the cover screen.
+# shellcheck shell=sh
 irq() { awk '/touch-0/{s+=$2+$3+$4+$5+$6+$7+$8+$9} END{print s}' /proc/interrupts; }
 I0=$(irq)
 chk() { [ "$(irq)" != "$I0" ] && { echo "ABORT real touch at $1"; pkill -INT screenrecord; exit 3; }; }

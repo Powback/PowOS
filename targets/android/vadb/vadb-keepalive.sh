@@ -8,7 +8,7 @@
 # VADB_UNAUTH_BACKOFF_S (default 600 s); reading the state never prompts, so an Allow is picked up within 30 s.
 # tools/phone/adb.sh backs off the same way on the Mac's side (docs/REMOTE-POWOS.md, "adb authorization").
 set -u
-: "${ANDROID_SERIAL:?ANDROID_SERIAL (host:port of the phone's adbd) is required}"
+: "${ANDROID_SERIAL:?ANDROID_SERIAL (host:port of the adbd on the phone) is required}"
 mkdir -p /state/xfer /state/status
 adb start-server >/dev/null 2>&1
 last= unauth_at=0

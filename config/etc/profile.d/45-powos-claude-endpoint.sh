@@ -9,6 +9,7 @@
 # Parsed, never sourced (a stray line must not run in every shell). The environment wins: an exported value is a
 # deliberate override. No endpoint.conf (a sellable install, not one of the owner's devices): nothing is set and
 # Claude Code's own sign-in is used (the 11-04 decision).
+# shellcheck shell=dash
 
 _powos_claude_endpoint() {
   local f=${POWOS_AI_ENDPOINT_FILE:-/etc/powos/ai/endpoint.conf} k v

@@ -9,6 +9,7 @@
 # web window - HomeShell IS in front then. A layer in the HWC list is one SurfaceFlinger composes this frame (hidden,
 # detached or covered-and-culled ones are not there: the 21:38 game full screen on a dead surface had none), and
 # "screen-sized" (>= 80 % of the display's largest frame) keeps a windowed Steam out.
+# shellcheck shell=sh
 dumpsys SurfaceFlinger 2>/dev/null | awk '
   /\(active\) HWC layers/ { p = 1; next }
   p && /^Display .*HWC layers/ { p = 0 }

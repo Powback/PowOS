@@ -5,6 +5,7 @@
 #   state    one line: game=none | game=frozen (Steam's sleep cgroup frozen with it) | game=awake
 #   freeze   the user's game back as they left it: out of sight and frozen (`powos game <appid> freeze`), never closed
 #   dir      its install dir (Steam's appmanifest installdir under the library that has it)
+# shellcheck shell=dash
 export XDG_RUNTIME_DIR=${XDG_RUNTIME_DIR:-/run/powos-app}
 export DBUS_SESSION_BUS_ADDRESS=${DBUS_SESSION_BUS_ADDRESS:-unix:path=$XDG_RUNTIME_DIR/bus}
 APP=${APP:-274190}

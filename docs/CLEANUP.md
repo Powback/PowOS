@@ -38,13 +38,23 @@ cheap and safe first, behaviour-touching refactors last. None of these change wh
   progress.ts:54 carries a HACK that asks for this. `areaOf` and `ago` have three different versions. Files: those
   files plus `apps/build.sh` (the `@powos/shared` alias exists). Risk: low for `app.ts`/`AREAS`/`byArea`. `areaOf`
   and `ago` change behaviour, so pick one version and run a design check. Owner: powos-shell.
-- [ ] **Run CI's shellcheck over every tracked .sh file, not only bin/, lib/, build/ and sources/ (142 of 773).** Why:
+- [x] **Run CI's shellcheck over every tracked .sh file, not only bin/, lib/, build/ and sources/ (142 of 773).** Why:
   tools/, targets/ and test/ are never linted. At error level today the only real finding was SC1087 (fixed
   bd11ae5e). The other 43 errors are SC2148: sourced or pushed snippets with no shebang (config/etc/profile.d/*,
   tools/phone/verify/bf-*.sh, *-lib.sh). Add `# shellcheck shell=sh|bash`, but not at line 1 where a header is parsed
   (`# lanes:` in bf-*.sh is read by the queue). vadb-keepalive.sh:11 is a parser false positive and needs a
   disable directive. Files: .github/workflows/build-test-publish.yml, test-complexity.sh's file list, those snippets.
   Risk: low. Owner: tools/CI.
+  Done: tools/lint/shellcheck-ratchet.py lints all ~870 shell files (tracked *.sh + extensionless sh shebangs) at
+  warning level, pinned shellcheck 0.9.0, one file per run; old debt frozen per file and code in
+  tools/lint/shellcheck-baseline.txt (918 findings, 493 entries at landing). CI lint job + tools/git-hooks/pre-push run it;
+  test/tier1/test-shellcheck-ratchet.sh. Errors 51 -> 1 (the SC2144 below, left baselined: fixing it changes
+  behaviour). 43 SC2148 got `# shellcheck shell=` after the header block.
+- [ ] **Two real bugs shellcheck found whose fix changes shipped behaviour.** systemd/powos-hardware-detect:285
+  `[[ -f /sys/bus/pci/devices/*/power/control ]]` never globs, so the NVIDIA runtime-PM block has never run (SC2144;
+  fix: a loop over the glob, then test on an NVIDIA laptop). containers/build_files/install-kernel:50
+  `dnf5 versionlock add $pkgs` locks only the first kernel package of the array (SC2128; fix: `"${pkgs[@]}"`, then
+  check the image build). Both are baselined in tools/lint/shellcheck-baseline.txt. Risk: medium. Owner: image/build.
 - [ ] **A ratchet for lines over 120 characters.** Why: about 18,100 code lines in 1,641 files are over 120.
   Comment-only lines in bin/, build/, lib/, test/ and tools/emu were reflowed (d9057098); the rest is code. The worst
   files: shell/dev/gate.mjs (2,137 lines), shell/ui/shell.css (567), shots.mjs, WebWindows.kt (412), ShellBridge.kt,

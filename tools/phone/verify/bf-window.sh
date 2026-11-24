@@ -5,6 +5,7 @@
 # the name exactly or a title starting "<name> " (bf-lib gamewin's rule). `wait`: the same, looked at every 2 s for up to <secs> s in this one call (one adb call
 # instead of two per 5 s from the Mac: those calls were most of bf-pacing's time), "touched" as soon as the touch IRQs
 # move from <count>.
+# shellcheck shell=sh
 export DISPLAY=:0 XAUTHORITY=$(tr "\0" "\n" < /proc/$(pgrep -x Xwayland | head -1)/cmdline | grep -A1 -x -- -auth | tail -1)
 if [ -z "${WIN_NAME:-}" ]; then
   S=$HOME/.local/share/Steam

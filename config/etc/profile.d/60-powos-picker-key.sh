@@ -1,6 +1,7 @@
 # Left twice on an empty prompt, in a PowOS tmux session: the session picker (powos-tmux-shell --switch, as Ctrl+b s
 # opens it), over the session - pick another, or Esc back. Left anywhere else moves the cursor as ever.
 # Login shells read this (tmux starts its shells as login shells); interactive bash inside tmux only.
+# shellcheck shell=bash
 case $- in *i*) ;; *) return 0 ;; esac
 [ -n "$BASH_VERSION" ] && [ -n "$TMUX" ] || return 0
 

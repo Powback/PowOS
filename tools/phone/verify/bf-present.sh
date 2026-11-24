@@ -9,6 +9,7 @@
 # and <outdir>/vrr.txt = ColorOS's VRR state (its CVT render-rate cap).
 # Toybox grep has no "\|" in a basic regex: the old `grep -v "a\|b"` dropped nothing, so the 6 picked were container
 # layers (ActivityRecord, the window's) that never carry a buffer - "no presents" read as a compositor fault (03:58).
+# shellcheck shell=sh
 mkdir -p "$3"; end=$(( $(date +%s) + $1 ))
 # Only layers that can carry the game's buffers, the BLAST SurfaceView (where KWin's window task draws) or home's web
 # window buffer ([BBQ] powos-ww-<id>-linux, unfolded) first: on

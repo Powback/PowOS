@@ -13,6 +13,7 @@
 #                           app took the request, whether a new session started - /data/powos/session.log).
 #   kwin_up MIN             both: install, and restart only if the running KWin is stale (older package or old files).
 #   kwin_state              "kwin=<pid|-> kwin_new=<0|1>" (1: its libkwin is the installed file, not a deleted one).
+# shellcheck shell=bash
 KWIN_ROOT=$(cd "$T/../.." && pwd)
 _kw_sh() ( set -o pipefail; "$T/adb.sh" shell "su -c '$*'" 2>/dev/null | tr -d '\r'; )
 _kw_rs() ( set -o pipefail; printf '%s\n' "$1" > "$OUT/kw-r.sh"; "$T/root.sh" "$OUT/kw-r.sh" 2>/dev/null | sed '/file pushed/d' | tr -d '\r'; )

@@ -15,6 +15,7 @@
 # old wake let the phone doze again before the 120 s idle window came - 25 jobs never ran). The keyguard: only
 # `wm dismiss-keyguard` (dismisses a swipe lock; a PIN/pattern lock stays up - never entered). Battery below
 # WAKE_MIN_BATT (20) % and not charging: never woken.
+# shellcheck shell=bash
 WL_WOKE=${WL_WOKE:-$HOME/.cache/powos-verify-woke}
 # SELF_INPUT: prefix for an adb shell command that changes the screen state (KEYCODE_WAKEUP/SLEEP, a power key): it
 # marks the next 8 s as the tools' own on the phone (powos-selfinput, read by idle.sh's touch watcher), since the

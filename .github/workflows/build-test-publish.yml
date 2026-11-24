@@ -72,20 +72,20 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0   # the shellcheck ratchet compares its baseline with the pushed range's base
 
-      - name: ShellCheck (errors only — style/info are tracked debt)
+      # EVERY tracked shell script (*.sh + extensionless sh/bash-shebang files, ~870), at warning level, as a ratchet:
+      # the old step linted bin/, lib/, build/ and sources/ only (142 of 773) at error level, so tools/, targets/ and
+      # test/ were never linted. Old warnings are frozen per file and code in tools/lint/shellcheck-baseline.txt; a
+      # new finding, a file that got worse, a stale entry or a raised entry fails. Pinned shellcheck 0.9.0 (Ubuntu
+      # 24.04's; the script falls back to the koalaman image of that version if apt ever ships another).
+      - name: ShellCheck (ratchet, every shell script)
+        env:
+          SHELLCHECK_BASELINE_REF: ${{ github.event_name == 'push' && github.event.before || github.event.pull_request.base.sha }}
         run: |
           sudo apt-get install -y shellcheck
-          # bin/ mixes shells with other interpreters (e.g. the python3
-          # pow-collision-check hook) — shellcheck hard-fails non-shell
-          # scripts with SC1071, so lint only files with a sh/bash shebang.
-          mapfile -t shell_bins < <(grep -lE '^#!\s*(/usr)?/bin/(env +)?(ba)?sh\b' bin/*)
-          # lib/*.sh does NOT descend into lib/mods/ or lib/ai/ — 31 files were
-          # never linted. That is why SC2261 in lib/mods/nexus-api.sh (two
-          # redirections competing for stdin, silently returning an empty
-          # file_id) never failed a build. Enumerate, do not glob.
-          mapfile -t shell_all < <(git ls-files 'lib/**/*.sh' 'lib/*.sh' 'build/*.sh' 'sources/**/*.sh' | sort -u)
-          shellcheck -S error "${shell_bins[@]}" "${shell_all[@]}"
+          python3 tools/lint/shellcheck-ratchet.py --check
 
       # A RATCHET, not a ceiling: existing debt is frozen in
       # build/complexity-budget.txt, new functions are capped at 15. Raising a

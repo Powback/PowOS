@@ -4,6 +4,7 @@
 #   tools/phone/adb.sh shell su -c "sh /data/local/tmp/desktop-windows.sh"   (after AWAKE_ONLY=1 tools/phone/idle.sh --wait 120 MAX)
 # Opens Konsole and Settings as an Android window (powos-android-app), screencaps every display before / with them /
 # after Konsole closes (desk-<n>-<display>.png in /data/local/tmp), warns on a real touch. The Settings window stays.
+# shellcheck shell=sh
 top=$(dumpsys activity activities | grep -m1 topResumedActivity)
 echo "$top"
 case "$top" in *com.powos.app*) ;; *) echo "SKIP: PowOS isn't in front"; exit 4;; esac

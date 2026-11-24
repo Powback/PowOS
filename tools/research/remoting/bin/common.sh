@@ -5,6 +5,7 @@
 #   video-stock  stock waypipe --video=h264 (0.11.3 picks the hw encoder when Vulkan video encode exists; no CLI
 #                switch for sw) - only opaque DMABUF formats get video, see the Dockerfile
 #   video     waypipe-argbvideo --video=h264 (the same release + ARGB8888/ABGR8888 accepted for video)
+# shellcheck shell=sh
 export XDG_RUNTIME_DIR=/tmp/xdg
 mkdir -p -m 700 "$XDG_RUNTIME_DIR" /tmp/run 2>/dev/null || true
 wp_opts() {

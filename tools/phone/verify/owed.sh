@@ -2,6 +2,7 @@
 # merged tiles, the Lights popup (held press, read only), the control center and PowOS AI's page (frost v2). Injected
 # input only; aborts (exit 3) on any real touch. Transient UI closed first; every opened surface closed again (Back);
 # home returned to its first page. Screencaps: /data/local/tmp/cv/owed-<step>-<fold>.png. Changes no setting.
+# shellcheck shell=sh
 D=/data/local/tmp/cv; mkdir -p $D
 LX=${1:-0}; LY=${2:-0}
 irq() { awk '/touch-0/{for(i=2;i<=NF;i++) if($i ~ /^[0-9]+$/) s+=$i; else break} END{print s}' /proc/interrupts; }

@@ -8,6 +8,7 @@
 # reached a level (look at the last one) and the record to tune the sequence from. Keys default to BF_PLAY_KEYS:
 # Broforce's "any key" title, then Return (= the pad's A) through the main menu's first entries (Start -> Campaign -> the save slot ->
 # the world map's next mission). Prints "play <n> keys, last grab <file>" or "play: no game window".
+# shellcheck shell=sh
 export DISPLAY=:0 XAUTHORITY=$(tr "\0" "\n" < /proc/$(pgrep -x Xwayland | head -1)/cmdline | grep -A1 -x -- -auth | tail -1)
 d=$(dirname "$0"); for f in "$d/powos-pad-lib.sh" "$d/pad-lib.sh" ''; do [ -f "$f" ] && break; done   # pushed / repo
 [ -n "$f" ] || { echo "play: no pad-lib.sh next to $0"; exit 1; }; . "$f"

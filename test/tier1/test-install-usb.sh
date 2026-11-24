@@ -65,6 +65,7 @@ initrd /initramfs.img
 options root=UUID=deadbeef rw quiet rd.powos.ramboot=1
 EOF
 
+# shellcheck disable=SC2218  # the real one from $LIB; the stub further down replaces it only for the main() tests
 write_bls_entries "$ENTRIES" >/dev/null 2>&1
 
 check "install entry created"        '[[ -f "$ENTRIES/powos-install.conf" ]]'
@@ -98,6 +99,7 @@ check "aidebug entry forces ramboot off" \
     'grep -q "rd.powos.ramboot=0" "$ENTRIES/powos-aidebug.conf"'
 
 # Idempotency: re-run must not template off its own generated entries.
+# shellcheck disable=SC2218  # the real one from $LIB; the stub further down replaces it only for the main() tests
 write_bls_entries "$ENTRIES" >/dev/null 2>&1
 check "re-run keeps a single powos.install=1 in install entry" \
     '[[ "$(grep -c "powos.install=1" "$ENTRIES/powos-install.conf")" == "1" ]]'
@@ -106,6 +108,7 @@ check "re-run keeps a single powos.install=1 in install entry" \
 BADENTRIES="$WORK/bad/entries"
 mkdir -p "$BADENTRIES"
 printf 'title Broken\nlinux /vmlinuz\n' > "$BADENTRIES/bad.conf"
+# shellcheck disable=SC2218  # the real one from $LIB; the stub further down replaces it only for the main() tests
 write_bls_entries "$BADENTRIES" >/dev/null 2>&1
 check "no options line → no install entry written" \
     '[[ ! -f "$BADENTRIES/powos-install.conf" ]]'

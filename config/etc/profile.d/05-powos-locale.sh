@@ -8,6 +8,7 @@
 # tmux's own status line) as '?'. Setting UTF-8 here, before 49/50 and before
 # any TUI runs, fixes it. Only touches the locale when it is not already UTF-8,
 # so an explicit user locale is respected.
+# shellcheck shell=sh
 
 case "${LC_ALL:-${LC_CTYPE:-${LANG:-}}}" in
     *[Uu][Tt][Ff]-8* | *[Uu][Tt][Ff]8*) : ;;   # already UTF-8, leave it

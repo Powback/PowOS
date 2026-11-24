@@ -1,3 +1,4 @@
+# shellcheck shell=sh
 P=$(for d in /proc/[0-9]*; do c=$(tr '\0' ' ' < $d/cmdline 2>/dev/null); case "$c" in *FEX*Broforce*|*FEX*wine*i386*Broforce*) echo ${d#/proc/} $(cat $d/task/*/stat 2>/dev/null | wc -l);; esac; done | sort -k2 -n | tail -1 | cut -d' ' -f1)
 echo game_pid=$P; [ -z "$P" ] && { echo NOGAME; exit 0; }
 tr '\0' ' ' < /proc/$P/cmdline | cut -c1-300; echo

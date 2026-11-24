@@ -8,6 +8,7 @@
 #  - a hard cap inside the container: `timeout -s KILL` around the command, GATE_RUN_MS + 60 s, so it ends even if
 #    everything outside it died (gate, its trap, the next gate never starting).
 # Sourced; needs $$ of the gate (GATE_PARENT_PID is exported for dev/preview.sh run under it).
+# shellcheck shell=bash
 export GATE_PARENT_PID=${GATE_PARENT_PID:-$$}
 export GATE_RUN_LABEL=${GATE_RUN_LABEL:-"powos-gate-run=$GATE_PARENT_PID-$(date +%s)"}
 gc_host=$(hostname -s 2>/dev/null || hostname)

@@ -1,4 +1,5 @@
 # Sourced on the device and in the offline shell simulation. No pipeline wait on logcat.
+# shellcheck shell=ksh
 resize_first_match() (
   token=$1
   # su on Android may have no TMPDIR, and /tmp does not exist there.

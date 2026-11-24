@@ -6,6 +6,7 @@
 # frame), skin temperature and the policy0/3/7 caps. "touched" (and nothing else) when the touch IRQs move from <count>.
 # The pattern is [B]roforce_beta[.]exe: a plain Broforce_beta.exe also matched this script's own `sh -c` command line,
 # so a "game" was always found and bf-quiet never started it (2026-11-05 03:02 soak: home in front for 600 s).
+# shellcheck shell=dash
 S=${1:-60}; I0=${2:-}
 irq() { awk '/touch-0/{s+=$2+$3+$4+$5+$6+$7+$8+$9} END{print s}' /proc/interrupts; }
 front() { echo "focus $(dumpsys window 2>/dev/null | grep -m1 mCurrentFocus | sed -nE 's#.*/[a-zA-Z0-9_.]*\.([A-Za-z0-9_$]+)\}.*#\1#p; s#.*mCurrentFocus=Window\{[^ ]+ [^ ]+ ([^}/ ]+)\}.*#\1#p' | head -1)"

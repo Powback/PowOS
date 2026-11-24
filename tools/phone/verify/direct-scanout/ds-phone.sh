@@ -3,6 +3,7 @@
 #   SHOWN      -> <tag>.sf-shown.txt (dumpsys SurfaceFlinger), <tag>.shown.raw / .png (screencap of that display)
 #   FLIPPING   -> <tag>.sf-flip.txt one second into the A/B flips
 #   SHOWN_END  -> <tag>.end.raw
+# shellcheck shell=sh
 D=$1; LS=$2; DID=$3; TAG=$4; shift 4
 cd "$D" || exit 2
 rm -f "$TAG".*

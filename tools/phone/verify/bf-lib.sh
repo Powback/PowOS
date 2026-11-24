@@ -5,6 +5,7 @@
 # started is closed, exit 3 (the queue retries in the next window).
 # Mac side (bf-pacing.sh, bf-run.sh, bf-checker.sh, bf-fold.sh): `BF_ADB=<tools/phone/adb.sh> . bf-lib.sh` defines
 # only pill <text>: the same step file, written over adb as the session user (at most 15 s), and the log line.
+# shellcheck shell=bash
 if [ -n "${BF_ADB:-}" ]; then
   # `BF_ADB=$A . bf-lib.sh` sets BF_ADB only while this file is sourced: kept for pill(), which runs later (under
   # set -u, "BF_ADB: unbound variable" failed every bf-pacing/bf-checker/bf-fold job, 2026-10-23 05:02).

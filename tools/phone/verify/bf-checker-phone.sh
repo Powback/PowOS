@@ -6,6 +6,7 @@
 #                      the window is looked up by name each second
 #   logs <dir>         DXVK's log (config, device, warnings) + the Unity log tail into <dir>
 #   clean              back to no user_settings.py (or the one there before) and no dxvk.conf
+# shellcheck shell=sh
 S=$HOME/.local/share/Steam; G=$S/steamapps/common/Broforce; P="$S/steamapps/common/Proton - Experimental"
 L=$HOME/.cache/bfc-dxvk
 export DISPLAY=:0

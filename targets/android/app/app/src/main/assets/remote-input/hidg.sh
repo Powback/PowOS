@@ -12,6 +12,7 @@
 # names - ours are "powos_kb"/"powos_mouse", so a mode change (mtp, rndis) or a replug keeps them, and adb's f1 stays
 # what init made it. Only a reboot drops them (configfs is in memory): RemoteInput runs `up` again then. Binding goes
 # through the UDC file directly, never sys.usb.config=none, which stops adbd (network adb would drop with it).
+# shellcheck shell=sh
 G=/config/usb_gadget/g1
 KB=$G/functions/hid.powos_kb
 MS=$G/functions/hid.powos_mouse

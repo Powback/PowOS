@@ -9,6 +9,7 @@
 # idle Steam window beside the game never hides the game's stall. Layers are looked up again every sample: a fold or
 # a resize gives the task a new BLAST layer. <outdir>/kwin.txt: KWin's + Xwayland's lines of the run (window task
 # frames / Xwayland KGSL / (EE) BUG), which say at which stage a stall sat.
+# shellcheck shell=sh
 secs=$1 app=$2 out=$3
 mkdir -p "$out"; rm -f "$out"/samples "$out"/p.*
 LOG=/data/powos/root/run/powos-app/hyprland.log

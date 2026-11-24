@@ -5,6 +5,7 @@
 #   . "$(dirname "$0")/sketch-lib.sh"; sketch_fresh || exit 1; ...; drop
 # Sketch open (waiting for it to mount), gallery, "new drawing", then wait until the page is on a drawing none of the
 # user's: one eval, the waits run on the phone.
+# shellcheck shell=dash
 q_js='const t = (ms) => new Promise((r) => setTimeout(r, ms)), q = (s) => document.querySelector(s);
   const until = async (f, n) => { for (let i = 0; i < n; i++) { const v = f(); if (v) return v; await t(250); } return f(); };'
 fresh() {

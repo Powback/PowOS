@@ -6,6 +6,7 @@
 # nothing starts until it is answered - ABZU 11-07 15:44 SynchronizingCloud "syncfailed" (cloud sync failed), then
 # four verify launches 15:59-16:07 "no game window in 116 s" while gameprocess_log stayed silent. Its dialog is a
 # nameless steamwebhelper window (no "Steam Dialog" caption), so powos-open-task never brings it forward.
+# shellcheck shell=sh
 L=$HOME/.local/share/Steam/logs/console_log.txt
 line=$(tail -c 4194304 "$L" 2>/dev/null | grep -a "GameAction \[AppID ${APP:-274190}, ActionID " | tail -1)
 case $line in *"LaunchApp waiting for user response to "*) ;; *) echo "ask none"; exit 0 ;; esac

@@ -10,6 +10,7 @@
 #   cgroup <pid> <comm> <cpuset line> <cpu line> allowed=<cpus>   for each process with a thread above 20%
 #   boost <game-boost.sh status line>                    holder / main thread placement / thermal owner / uclamp
 # A cap below hw = someone (thermal, the vendor's performance HAL) limits that cluster while the game runs.
+# shellcheck shell=sh
 s=${1:-30} out=${2:-/data/local/tmp/bfprof}; mkdir -p "$out"; f=$out/prof.txt; : > "$f"
 snap() { for t in /proc/[0-9]*/task/[0-9]*; do read -r l < "$t/stat" 2>/dev/null && echo "${t#/proc/} $l"; done 2>/dev/null; }
 snap > "$out/s1"; t1=$(date +%s); K=/sys/class/kgsl/kgsl-3d0; P=/sys/devices/system/cpu/cpufreq

@@ -14,6 +14,7 @@
 #
 # Runs before 50-powos-tmux-resume.sh so a tmux session it starts inherits the
 # clean path too.
+# shellcheck shell=dash
 
 [ -n "$BASH_VERSION" ] || return 0
 

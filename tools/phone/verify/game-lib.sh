@@ -6,6 +6,7 @@
 #   game_up       the Steam app id of the game running now; "none" when adb answered and none runs; "" when adb failed
 #   game_gate     exit 3 "a game runs (app <id>): not now" when one runs (or adb can't say); returns otherwise
 # adb: $phone/adb.sh when the caller sets phone (queue.sh), else tools/phone/adb.sh next to this file.
+# shellcheck shell=bash
 _game_lib_adb=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)/adb.sh
 game_up() { local o a=${phone:+$phone/adb.sh}
   o=$(perl -e 'alarm shift; exec @ARGV' 10 "${a:-$_game_lib_adb}" shell "pgrep -af '[r]eaper SteamLaunch AppId='; echo adb-ok" 2>/dev/null | tr -d '\r')

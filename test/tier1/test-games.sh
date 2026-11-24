@@ -54,6 +54,7 @@ reset_gms() { GMS_DRY_RUN=0; GMS_ASSUME_YES=0; GMS_SIZE_GB=""; GMS_WHOLE=0; GMS_
 case "$(uname -s 2>/dev/null)" in
     MSYS*|MINGW*|CYGWIN*) export MSYS=winsymlinks:nativestrict ;;
 esac
+# shellcheck disable=SC2218  # the real mkdir: the mock mkdir() further down is defined only for the mutation tests
 mkdir -p "$TMP/probe-target"
 SYMLINKS_OK=0
 if ln -s "$TMP/probe-target" "$TMP/probe-link" 2>/dev/null && [[ -L "$TMP/probe-link" ]]; then

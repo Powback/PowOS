@@ -5,6 +5,7 @@
 #    inodes of the candidates on disk to match them against
 #  - the Vulkan/FEX/Turnip env of those processes, and where their stderr goes (Turnip's warnings land there)
 #  - KGSL's per-process GPU memory owners (debugfs) and the AHB bus error count over 20 s
+# shellcheck shell=sh
 echo "== candidates (inode size path)"
 for f in /usr/lib/libvulkan_freedreno.so /usr/share/fex-emu/RootFS/Fedora_44/usr/lib64/libvulkan_freedreno.so \
   /usr/share/fex-emu/RootFS/Fedora_44/usr/lib/libvulkan_freedreno.so; do echo "$(stat -Lc '%i %s' "$f") $f $(pacman -Qoq "$f" 2>/dev/null)"; done

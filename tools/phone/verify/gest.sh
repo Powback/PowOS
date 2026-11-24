@@ -1,6 +1,7 @@
 # gest.sh <A|B|C|D|R>: gesture journeys on the cover screen (runs ON the phone as Android root, pushed by journey.sh).
 # Injected input only; aborts (exit 3) the moment a real touch IRQ moves. Output: /data/local/tmp/cv/<run>.mp4 + <run>-<step>.png
 # A home from page 2 · B home from page 1 · C switcher from home + from an app · D home from the PowOS AI page · R back to page 1
+# shellcheck shell=sh
 RUN=$1; D=/data/local/tmp/cv; mkdir -p $D
 irq() { awk '/touch-0/{s+=$2+$3+$4+$5+$6+$7+$8+$9} END{print s}' /proc/interrupts; }
 I0=$(irq)

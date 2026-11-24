@@ -20,6 +20,7 @@
 # exactly one implementation to maintain.
 #
 # Opt out for one login/panel with:  POWOS_NO_TMUX=1
+# shellcheck shell=sh
 
 [ -n "$BASH_VERSION" ] || return 0
 

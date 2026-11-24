@@ -6,6 +6,7 @@
 #   layer - so no "popup N buffer" line can exist.
 # layers=0 (kwin < 3.72, N3a, PopupLog): "popup N buffer #..." (the offscreen reader counted one).
 # The caller fetches KWin's lines (its own root wrapper, from its own log start) and defines say/bad.
+# shellcheck shell=bash
 popup_proof() {
   local n=$1 layers=$2 lines=$3 klive=$4 l
   if [ "$layers" = 1 ]; then

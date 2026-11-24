@@ -7,6 +7,7 @@
 #   status powos-open-task printed "task" (the caller's status line)
 # plus which ksycoca6 cache the launch (re)built, if any - the in-process kbuildsycoca of 11-10 04:38 (docs/research/
 # linux-app-cold-start.md). Prints key=value lines; never touches a running instance (exit 3 when EXE already runs).
+# shellcheck shell=sh
 ID=$1 EXE=$2 EXEC=$3 TAG=$4
 R=/data/powos/root; H=$R/run/powos-app/hyprland.log; C=$R/home/powos/.cache; O=/data/local/tmp/powos-cold-$TAG.out
 now() { echo $(( $(date +%s%N) / 1000000 )); }
