@@ -16,6 +16,12 @@ import time
 import urllib.error
 import urllib.request
 
+# The helpers PowOS's Python tools share (lib/powos_py/common.py; next to lib/apps, lib/devices, lib/ai/agents).
+_HERE = os.path.dirname(os.path.realpath(__file__))
+sys.path.append(next((d for d in (_HERE, os.path.dirname(_HERE), os.path.dirname(os.path.dirname(_HERE)))
+                      if os.path.isdir(os.path.join(d, "powos_py"))), "/usr/lib/powos"))
+from powos_py.common import owner_conf, token  # noqa: E402
+
 # Bump this whenever a CLI-parsed flag/verb is added (f199/f170: the Mac forwards a Down request's raw argv
 # to whatever copy of THIS script is installed on the phone over adb - an older phone copy rejects a flag
 # the Mac just finished validating for itself, and that parse error reads as a real bug. __cli_version__
@@ -183,19 +189,6 @@ Examples:
 def die(msg, code=1):
     print(f"powos agents: {msg}", file=sys.stderr)
     sys.exit(code)
-
-
-def token():
-    p = os.path.expanduser("~/.config/spacetime/cli.toml")
-    try:
-        with open(p) as f:
-            for line in f:
-                k, _, v = line.partition("=")
-                if k.strip() == "spacetimedb_token":
-                    return v.strip().strip('"')
-    except OSError:
-        pass
-    return None
 
 
 class Down(Exception):
@@ -2310,28 +2303,6 @@ def full_text(open_, decided):
 
 
 STDB_DATA = "/var/lib/powos/stdb"
-
-
-def owner_conf(key):
-    """One setting of the owner's devices: $KEY, else KEY=value in the owner config - $POWOS_OWNER_CONF, else
-    /etc/powos/owner.conf, else ~/.config/powos/owner.conf (the first that exists; powos-deviced writes it when the
-    device pairs with the owner's hub and removes it on unpair). A fresh device has none: "" = not configured."""
-    if os.environ.get(key):
-        return os.environ[key]
-    p = os.environ.get("POWOS_OWNER_CONF")
-    for path in [p] if p is not None else ["/etc/powos/owner.conf", os.path.expanduser("~/.config/powos/owner.conf")]:
-        try:
-            with open(path) as f:
-                lines = f.read().splitlines()
-        except OSError:
-            continue
-        val = ""
-        for line in lines:
-            k, sep, v = line.strip().partition("=")
-            if sep and k.strip() == key:
-                val = v.strip()
-        return val[1:-1] if len(val) > 1 and val[0] == val[-1] and val[0] in "\"'" else val
-    return ""
 
 
 def board_remote():

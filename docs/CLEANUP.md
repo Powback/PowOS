@@ -9,13 +9,16 @@ cheap and safe first, behaviour-touching refactors last. None of these change wh
 
 ## Next
 
-- [ ] **Python shared module for the `lib/apps/powos-*` and `lib/ai/agents/*` CLIs.** Why: `owner_conf` is pasted into
+- [x] **Python shared module for the `lib/apps/powos-*` and `lib/ai/agents/*` CLIs.** Why: `owner_conf` is pasted into
   powos-rootsh:59, powos-terms:45, powos-agents-cli:2314 and powos-places:112, and the copies have drifted. The
   powos-places copy skips the `$KEY` env override and `/etc/powos/owner.conf`, which looks like a real bug. `token()`
   is byte-identical in powos-agents-cli:188 and powos-pet:59 (and equivalent in powos-progress-cli:43). `http`, `die`
   and `opts` have also forked, with different timeouts and 404 handling. Files: a new `lib/powos_py/common.py`
   installed next to them (Containerfile, the phone's powos-core map, a units claim) plus those CLIs. Risk: medium,
   because the import path has to work on x86, the phone and the Mac. Owner: agents/board expert.
+  Done: `lib/powos_py/common.py` holds `owner_conf` and `token`; the six CLIs import it (powos-places now honours
+  `$KEY`, /etc/powos/owner.conf, last-wins and quotes; test-places.py pins it). `http`, `die` and `opts` stay per
+  tool: their prefixes, timeouts, 404 messages and flag grammars differ on purpose.
 - [ ] **Shared `verify/base.sh` for the phone checks.** Why: 52 of 239 `tools/phone/verify/*.sh` paste the same `sh_()`
   line, 27 define `hcall`/`hcall_once` (8 are identical, 16 are forks), and about 78 re-define `chk/fail/pass/log`.
   Only 42 source `e2e-lib.sh`, and there are 10 separate `*-lib.sh` files. Files: tools/phone/verify/*. Risk: medium,

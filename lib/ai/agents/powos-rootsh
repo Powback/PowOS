@@ -49,32 +49,17 @@ import sys
 import threading
 import time
 
+# The helpers PowOS's Python tools share (lib/powos_py/common.py; next to lib/apps, lib/devices, lib/ai/agents).
+_HERE = os.path.dirname(os.path.realpath(__file__))
+sys.path.append(next((d for d in (_HERE, os.path.dirname(_HERE), os.path.dirname(os.path.dirname(_HERE)))
+                      if os.path.isdir(os.path.join(d, "powos_py"))), "/usr/lib/powos"))
+from powos_py.common import owner_conf  # noqa: E402
+
 DIR = os.environ.get("POWOS_ROOTSH_DIR") or os.path.join(os.path.expanduser("~"), ".local", "state", "powos", "vadb")
 SOCK = os.path.join(DIR, "rootsh.sock")
 LOCK = os.path.join(DIR, "rootsh.lock")
 LOG = os.path.join(DIR, "rootsh.log")
 STATUS = os.path.join(DIR, "status")
-
-
-def owner_conf(key):
-    """$KEY, else KEY=value in the owner config ($POWOS_OWNER_CONF, else /etc/powos/owner.conf, else
-    ~/.config/powos/owner.conf: written when the device pairs with the owner's hub). "" = not configured."""
-    if os.environ.get(key):
-        return os.environ[key]
-    p = os.environ.get("POWOS_OWNER_CONF")
-    for path in [p] if p is not None else ["/etc/powos/owner.conf", os.path.expanduser("~/.config/powos/owner.conf")]:
-        try:
-            with open(path) as f:
-                lines = f.read().splitlines()
-        except OSError:
-            continue
-        val = ""
-        for line in lines:
-            k, sep, v = line.strip().partition("=")
-            if sep and k.strip() == key:
-                val = v.strip()
-        return val[1:-1] if len(val) > 1 and val[0] == val[-1] and val[0] in "\"'" else val
-    return ""
 
 
 # The owner's Mac: `docker exec -i powos-vadb adb shell -T su` (owner.conf). Unset: no root shell configured here.
