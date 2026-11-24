@@ -71,6 +71,8 @@ Scripts: `tools/phone/verify/` (header of each says where it runs).
 - Every check runs through ONE queue: `tools/phone/verify/queue.sh add <board-task> <script> [args]` (returns at once;
   the runner takes one free window for all queued checks, LOCK_HELD=1, result on the board task; `queue.sh list`).
   A Mac-side check script uses window-lock.sh (honours LOCK_HELD) and exits 3 on a real touch (re-queued).
+  It sources `tools/phone/verify/base.sh` after setting here/T/A (sh_, rsh, hcall, cdp_val, integer-checked tap/swipe,
+  a one-shell `drag`, shot, step caps, pass/fail/skip/result) - never paste its sh_/hcall (test-verify-base.sh lints).
 - `add [--close] [--name TEXT] [--screen inner|cover] <task> <cmd>`: marks the task's step "phone check queued" (the AI
   page's "test now"; the result's step replaces it). The runner stays up while jobs are queued (a window that didn't
   come is waited for again) - "test now" needs one waiting. A job exiting 0 with a `^FAIL` line is a FAIL; a FAIL gets a

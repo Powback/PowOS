@@ -19,11 +19,19 @@ cheap and safe first, behaviour-touching refactors last. None of these change wh
   Done: `lib/powos_py/common.py` holds `owner_conf` and `token`; the six CLIs import it (powos-places now honours
   `$KEY`, /etc/powos/owner.conf, last-wins and quotes; test-places.py pins it). `http`, `die` and `opts` stay per
   tool: their prefixes, timeouts, 404 messages and flag grammars differ on purpose.
-- [ ] **Shared `verify/base.sh` for the phone checks.** Why: 52 of 239 `tools/phone/verify/*.sh` paste the same `sh_()`
+- [x] **Shared `verify/base.sh` for the phone checks.** Why: 52 of 239 `tools/phone/verify/*.sh` paste the same `sh_()`
   line, 27 define `hcall`/`hcall_once` (8 are identical, 16 are forks), and about 78 re-define `chk/fail/pass/log`.
   Only 42 source `e2e-lib.sh`, and there are 10 separate `*-lib.sh` files. Files: tools/phone/verify/*. Risk: medium,
   because e2e-lib's `sh_` tries `sess_sh` first, so collapsing onto it changes behaviour. Start with a thin base that
   has only the identical forms, then add a lint that refuses a re-definition. Owner: powos-phone.
+  Done 11-24: `tools/phone/verify/base.sh` (sh_ in the exact pasted form, opt-in SH_T / per-step caps, rsh, `within`,
+  cdp_eval/cdp_val, hcall with HCALL_ID/HCALL_TRACE, integer-checked tap/swipe, a one-shell `drag`, shot,
+  step/pass/fail/skip/result in the queue's format; a name is defined only when the check hasn't defined it).
+  All 52 pasted `sh_` lines and 9 hcall pairs (7 identical + 2 differing only in id base / trace) now source it
+  (27057e38, a897bae0, 6b211866, 24511abb, d1cf6002). test/tier1/test-verify-base.sh tests it with a fake adb and
+  refuses a new pasted copy (8d04c699). Left for later, each a behaviour change to judge one by one: the `sh_` forks
+  (`</dev/null`, perl alarm, e2e-lib's sess_sh), the 16 other hcall forks, the per-script chk/fail/pass/log and the
+  other `*-lib.sh` files.
 - [ ] **Put `AREAS`, `byArea`, `ago` and the per-app `useApp` into `shell/ui/shared/` (the f179 lib).** Why:
   `apps/{health,pet,powos-progress,sketch}/ui/lib/app.ts` are the same file apart from `DATABASE` and the doc comment.
   `AREAS` is byte-identical in apps/powos-progress/ui/lib/progress.ts:50 and shell/ui/aiboard.tsx:393, and
