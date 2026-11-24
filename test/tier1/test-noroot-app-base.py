@@ -68,9 +68,10 @@ class NoRootAppBase(unittest.TestCase):
         self.assertIn('REGISTRY = "powos-registry"', (ROOT / 'lib/apps/powos-app').read_text())
 
     def test_build_app_accepts_a_module_only_app(self):
-        text = (ROOT / 'targets/android/build-app.sh').read_text()
+        # The staging moved to targets/android/prep-app.sh (shared by build-app.sh and the emulator lane).
+        text = (ROOT / 'targets/android/prep-app.sh').read_text()
         self.assertTrue(re.search(r'\[ ! -d "\$d/ui" \] \|\| \[ -d "\$d/out/ui" \]', text),
-                        'build-app.sh must require out/ui only for an app with a ui/')
+                        'prep-app.sh must require out/ui only for an app with a ui/')
 
     def test_bundled_apps_staged_inside_the_gradle_project(self):
         # The warm builder mirrors only targets/android/app + shell into /work: copyApps must read a folder inside the
@@ -80,8 +81,11 @@ class NoRootAppBase(unittest.TestCase):
         self.assertNotIn('../../../apps', gradle)
         self.assertNotIn('../../../lib', gradle)
         text = (ROOT / 'targets/android/build-app.sh').read_text()
-        self.assertIn('STAGE=$HERE/app/app/bundled-apps', text)
-        self.assertIn('cp "$ROOT/lib/apps/powos-noroot-services" "$STAGE/"', text)
+        prep = (ROOT / 'targets/android/prep-app.sh').read_text()
+        self.assertIn('"$HERE/prep-app.sh"', text)
+        for t in (text, prep):
+            self.assertIn('STAGE=$HERE/app/app/bundled-apps', t)
+        self.assertIn('cp "$ROOT/lib/apps/powos-noroot-services" "$STAGE/"', prep)
         self.assertIn('the APK lacks assets/', text)
 
     def test_bundled_list_lines_resolve(self):
