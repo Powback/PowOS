@@ -193,6 +193,7 @@ function native(host: NonNullable<Window["PowosHost"]>): Bridge {
       chat: () => call<Chat>("ai.chat"),
       send: (text, recents = true) => call("ai.send", text, recents),
       unqueue: (id) => call("ai.unqueue", id),
+      stop: () => call("ai.stop"),
       verifyGo: (task) => call("verify.go", task),
       verdict: (task, works, line) => call("ai.verdict", task, works, line ?? ""),
       verifyState: () => call("verify.state"),

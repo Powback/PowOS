@@ -31,7 +31,9 @@ sh_ "dumpsys window | grep -m1 mCurrentFocus" | grep -qi PowosLock && up
 chk lock
 home; chk home
 # The AI page: its header (.ai-screen.shown) and the one bar in its "ai" role.
-st='(document.querySelector(".ai-screen.shown")&&document.querySelector("form.bar[data-role=ai] textarea")?"page":"no")+" "+(document.querySelector(".ai-screen .ai-state.busy")?"busy":"idle")'
+# busy/idle: the page's own chat state (the host's PowosAiChat.busy, as ai.changed brings it) - 11-24 a header class
+# (.ai-state.busy) that this page no longer draws read "idle" all along, and "the turn ended" meant nothing.
+st='importShim("./state.ts").then(S=>(document.querySelector(".ai-screen.shown")&&document.querySelector("form.bar[data-role=ai] textarea")?"page":"no")+" "+(S.chat.value.busy?"busy":"idle"))'
 for i in 1 2 3 4 5 6; do s=$(ev 'document.querySelector("form.bar textarea")?"up":"no"'); [ "$s" = up ] && break; sleep 2; done
 # Where home is (page, drawer, edit mode, the AI page's tab): said when the swipes don't get there.
 where='(async()=>{const S=await importShim("./state.ts");return JSON.stringify({page:S.page.value,drawer:S.drawer.value,editing:S.editing?.value,ai:S.aiScreen?.value,roles:[...document.querySelectorAll("form.bar")].map(f=>f.dataset.role||"-")})})()'
@@ -66,29 +68,44 @@ echo "stop shown after the send: $shown ($(( $(date +%s) - t0 )) s)"
 [ $shown = yes ] || { "$T/shot.sh" "$OUT/ai-stop-nostop.png" >/dev/null 2>&1; echo "verify FAIL: no stop button after a send (an APK before ai.stop?)"; exit 1; }
 sleep 6; chk mid-answer
 "$T/shot.sh" "$OUT/ai-stop-answering.png" >/dev/null 2>&1
-running0=$(sh_ "ps -A -o args" | grep -c "[m]anager.py.*--once")
-echo "manager turns running before stop: $running0; page: $(ev "$st")"
+# THIS check's turn: the broker pid in turn.pid now (manager.py once(), written at its start) and its whole process
+# tree (claude, its MCP servers and tool commands) - 11-24 a bare count of `manager.py --once` couldn't tell our turn
+# from another one (an agent's mail answered right after).
+PIDF=/data/powos/root/home/powos/.local/state/powos/ai/manager/turn.pid
+tpid=$(sh_ "cat $PIDF 2>/dev/null")
+tree() { sh_ "ps -A -o pid,ppid" | awk -v r="$1" '$1 ~ /^[0-9]+$/ {p[$1]=$2} END{for(k in p){x=k; while(x!="" && x!=r && x!=1 && x!=0) x=p[x]; if(x==r) print k}}' | sort -n | tr '\n' ' '; }
+case $tpid in ''|*[!0-9]*) echo "verify FAIL: no turn.pid while the turn runs (the manager before --stop?): '$tpid'"; exit 1;; esac
+pids=$(tree "$tpid")
+echo "our turn: broker $tpid, its tree: $pids; page: $(ev "$st")"
+case $(ev "$st") in *busy) ;; *) echo "verify FAIL: the page says the chat is idle while our turn runs"; exit 1;; esac
 ev 'document.querySelector("form.bar[data-role=ai] .send.stop").click(),"tapped"'
 t1=$(date +%s)
 sleep 1
 back=$(ev 'document.querySelector("form.bar[data-role=ai] .send.stop")?"stop":"send"')
 echo "1 s after the tap the button is: $back"
+gone=no
+for i in $(seq 1 30); do
+  left=$(sh_ "for p in $pids; do [ -d /proc/\$p ] && echo \$p; done" | tr '\n' ' ')
+  [ -z "${left// /}" ] && { gone=yes; break; }
+  sleep 0.5
+done
+echo "our turn's processes gone: $gone ($(( $(date +%s) - t1 )) s after the tap)${left:+, left: $left}"
+[ $gone = yes ] || sh_ "for p in $left; do cat /proc/\$p/cmdline | tr '\\0' ' ' | cut -c1-160; echo; done"
 ended=no
-for i in $(seq 1 30); do case $(ev "$st") in *idle) ended=yes; break;; esac; sleep 0.5; done
-echo "turn ended: $ended ($(( $(date +%s) - t1 )) s after the tap)"
+for i in $(seq 1 20); do case $(ev "$st") in *idle) ended=yes; break;; esac; sleep 0.5; done
+echo "the page's chat idle: $ended"
 sleep 1
-said=$(ev '(()=>{const n=[...document.querySelectorAll(".ai-screen .msg")].map(m=>m.textContent.trim());return n.slice(-3).join(" | ")})()')
-echo "last messages: $said"
-running=$(sh_ "ps -A -o args" | grep -c "[m]anager.py.*--once")
-echo "manager turns running after stop: $running"
+# The item our ask started: the last one after our message must be the quiet "stopped" (our MSG itself says "stopped").
+said=$(ev '(()=>{const n=[...document.querySelectorAll(".ai-screen .msg")].map(m=>m.textContent.trim());const i=n.findLastIndex(t=>t.startsWith("stop-button check from a test script"));return i<0?"(our message not found)":n.slice(i+1).join(" | ")})()')
+echo "after our message: $said"
 "$T/shot.sh" "$OUT/ai-stop-after.png" >/dev/null 2>&1
 chk after
 ok=1
 [ "$back" = send ] || { echo "the button stayed stop after the tap"; ok=0; }
-[ $ended = yes ] || { echo "the turn didn't end within 15 s of stop"; ok=0; }
-case $said in *stopped*) ;; *) echo "no \"stopped\" line on the page"; ok=0;; esac
+[ $gone = yes ] || { echo "our turn's processes still run 15 s after stop"; ok=0; }
+[ $ended = yes ] || { echo "the chat stayed busy after stop"; ok=0; }
+case $said in *stopped) ;; *) echo "no quiet \"stopped\" after our message"; ok=0;; esac
 case $said in *"didn't answer"*) echo "an error line instead of a quiet stopped"; ok=0;; esac
-[ "$running" = 0 ] || { echo "a manager turn is still running in PowOS"; ok=0; }
-[ $ok = 1 ] && echo "verify PASS: stop showed on send, its tap ended the turn ($(( $(date +%s) - t1 )) s), stopped shown, send back" \
-  || echo "verify FAIL: stop didn't end the turn cleanly (shots in $OUT)"
+[ $ok = 1 ] && echo "verify PASS: stop showed on send, its tap ended our turn (broker $tpid + its tree) in $(( $(date +%s) - t1 )) s, stopped shown, send back" \
+  || echo "verify FAIL: stop didn't end our turn cleanly (shots in $OUT)"
 [ $ok = 1 ]

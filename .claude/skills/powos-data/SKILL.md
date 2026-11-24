@@ -414,6 +414,10 @@ answered when a user item follows it (Thread passes `reply`); then only the ques
   the turn's process is destroyed if still running. Turn end with `stopping`: running tools -> ok=false, a quiet
   note "stopped" (never "didn't answer"), queued messages go next. ai.chat carries `stoppable` (older APK: no stop)
   and `stopping`. Tests: test-manager.py StopTests.
+- 11-24: the first phone run "passed" the UI and the turn ran on: the REAL bridge (bridge.ts's first `ai: {`) had no
+  `stop: () => call("ai.stop")` - optional ai calls type-check and work in the gate's mock either way. Now
+  test-shell-bridge-ai.py fails when the mock has an ai call the real bridge lacks. ai-stop.sh follows ITS turn: the
+  broker pid in turn.pid + its process tree must be gone, busy read from the page's S.chat (not a header class).
 
 ## Keyboard / nav padding (shell.css)
 - The page's insets come from the host as --inset-bottom (nav ~16 px folded) and --inset-keyboard (app.tsx applyInsets,
