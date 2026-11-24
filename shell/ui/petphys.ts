@@ -165,7 +165,7 @@ export function standOn(p: Pet, r: Rect | null, world: World) {
   }
 }
 
-const clamp = (v: number, lo: number, hi: number) => Math.min(hi, Math.max(lo, v));
+export const clamp = (v: number, lo: number, hi: number) => Math.min(hi, Math.max(lo, v));
 const toward = (v: number, to: number, d: number) => (v < to ? Math.min(to, v + d) : Math.max(to, v - d));
 
 /** The rect under its feet now (top within [eps] of the feet, the feet's span over it), or null. */
