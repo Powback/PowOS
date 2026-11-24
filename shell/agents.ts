@@ -52,20 +52,6 @@ export const isSub = (a: Agent) => a.id.includes("/");
 
 const RANK: Record<Agent["state"], number> = { needs_you: 0, working: 1, blocked: 2, paused: 3, idle: 4, gone: 5 };
 
-/** An agent's parent's id: a row id, or "@role" - that role's live agent (the manager), latest first. */
-export function parentOf(a: Agent): string | null {
-  const p = a.parent;
-  if (!p) return null;
-  if (!p.startsWith("@")) return rows.has(p) ? p : null;
-  let best: Agent | null = null;
-  for (const s of rows.values()) {
-    const r = s.value;
-    if (r.role === p.slice(1) && !isSub(r) && r.id !== a.id && r.state !== "gone" && (!best || r.last > best.last))
-      best = r;
-  }
-  return best?.id ?? null;
-}
-
 function order() {
   const all = [...rows.values()].map((s) => s.value);
   const tops = all

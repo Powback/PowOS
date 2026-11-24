@@ -232,8 +232,6 @@ export const desktopDockPlacement = stored("dock.position.desktop", "left");
 const desktopShell = new URLSearchParams(location.search).get("mode") === "desktop";
 /** The dock mode in use: "desktop" (the desktop shell), "unfolded" (wide home) or "mobile" (folded). */
 export const dockMode = computed(() => desktopShell ? "desktop" : wideHome.value ? "unfolded" : "mobile");
-/** The desktop shell or the unfolded home: the wide layouts (launcher, gestures). */
-export const desktopDockMode = computed(() => dockMode.value !== "mobile");
 const placements = { mobile: mobileDockPlacement, unfolded: unfoldedDockPlacement, desktop: desktopDockPlacement };
 const activeDockPlacement = () => placements[dockMode.value];
 /** The active preference also serves gesture/layout callers when the display changes. */
@@ -554,9 +552,6 @@ powos.on("home.changed", async () => (home.value = await powos.home.get()));
 document.addEventListener("visibilitychange", async () => {
   if (!document.hidden) await fetchRecent();
 });
-
-/** Closes the pull-up panel (the drawer or PowOS AI's). */
-export const closePanel = () => closeDrawer();
 
 /**
  * Closes the drawer: the keyboard down, the search cleared - [clear]: by default, except the launcher overlay's

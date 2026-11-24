@@ -64,7 +64,6 @@ export const notifDrag = signal<number | null>(null);
 /** The notification panel's openness on screen: dragged, or settled. */
 export const notifShown = () => notifDrag.value ?? (notif.value ? 1 : 0);
 export const notifOpen = computed(() => notifShown() > 0);
-export const notifDragging = computed(() => notifDrag.value != null);
 /**
  * The host takes a pull down on home itself (shade.homePull answered true): home claims nothing for it. False (no
  * gesture input): a swipe down on home asks for the shade (shade.open), not following the finger.
