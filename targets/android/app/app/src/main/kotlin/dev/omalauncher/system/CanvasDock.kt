@@ -22,8 +22,13 @@ import org.json.JSONObject
  * Path A of docs/research/pscanvas.md ("Driving Open Canvas from PowOS"), the one that needs no Oplus permission:
  * PowOS, the default launcher (shortcut host), publishes one dynamic "app pair" shortcut - its intents in on-screen
  * order (intent 0 left, intent 1 right), extras isPsSplitScreenCombination=true, userIds, androidx.flexible.
- * layoutOrientation 2 (side by side) - and starts it with LauncherApps.startShortcut. system_server
- * (OplusPairTaskManager -> OplusSplitScreenManagerService.startPocketStudio) makes the privileged canvas start.
+ * layoutOrientation 2 (side by side) - and starts it with LauncherApps.startShortcut, the SAME keys in the start's
+ * options ([startOptions]). system_server (LauncherAppsService.startShortcutInner -> OplusSplitScreenManagerService.
+ * startPairTaskIfNeed -> startPocketStudio) makes the privileged canvas start - but only when the OPTIONS say
+ * isPsSplitScreenCombination: OplusPairTaskManager.prepareOptionsBeforeStartShortcut copies the shortcut's own extras
+ * in with query flags 1026 (MATCH_PINNED | MATCH_PINNED_BY_ANY_LAUNCHER), so a DYNAMIC shortcut's extras never reach
+ * it. That was the 11-24 device failure (build f785d92e): the start went to plain startActivitiesInPackage, both apps
+ * came up in their own tasks, no canvas (isInPocketStudio false, 0 regions).
  *
  * HACK: started by INTENT (task ids -1): whether pscanvas reuses each app's running task (its state) or starts it
  * fresh is OxygenOS's, unread until the pscanvas APK is decompiled - [dock] logs it on every dock ("reused" / "new
@@ -43,6 +48,9 @@ object CanvasDock {
     const val KEY_USER_IDS = "userIds"
     const val KEY_ORIENTATION = "androidx.flexible.layoutOrientation"
 
+    /** startPocketStudio: options "focusIndex" -> androidx.flexible.focusIndex, the app that has focus in the canvas. */
+    const val KEY_FOCUS = "focusIndex"
+
     /** CanvasCalculateLayoutRect.twoSplitLayout: 2 side by side, 1 one over the other. */
     const val SIDE_BY_SIDE = 2
 
@@ -57,7 +65,10 @@ object CanvasDock {
         fun label(labels: Map<String, String>) = packages.joinToString(" | ") { labels[it] ?: it.substringAfterLast('.') }
     }
 
-    /** The pair for [dragged] docked on [side] with [other] on the other side, for user [userId]. Pure: CanvasDockTest. */
+    /**
+     * The pair for [dragged] docked on [side] with [other] on the other side, for user [userId]: canvas order, and the
+     * extras - the shortcut's AND the start's options ([startOptions]); focus on the dragged app. Pure: CanvasDockTest.
+     */
     fun plan(
         dragged: String,
         other: String,
@@ -71,6 +82,7 @@ object CanvasDock {
                 KEY_COMBINATION to true,
                 KEY_USER_IDS to IntArray(order.size) { userId },
                 KEY_ORIENTATION to SIDE_BY_SIDE,
+                KEY_FOCUS to order.indexOf(dragged),
             ),
         )
     }
@@ -205,7 +217,8 @@ object CanvasDock {
         val labels = pair.associate { it.pkg!! to it.label }
         val pm = context.packageManager
         val plan = plan(pkgs[0], pkgs[1], side, android.os.Process.myUserHandle().hashCode())
-        val intents = plan.packages.map { p -> pm.getLaunchIntentForPackage(p)!!.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK) }
+        // startPairTaskIfNeed reads each intent's getPackage() (null: no canvas), so it is set, not left to the component.
+        val intents = plan.packages.map { p -> pm.getLaunchIntentForPackage(p)!!.setPackage(p).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK) }
         val before = plan.packages.associateWith { p -> tasks.firstOrNull { it.pkg == p }?.id }
         val info =
             ShortcutInfo.Builder(context, SHORTCUT_ID)
@@ -218,9 +231,7 @@ object CanvasDock {
         val ok =
             runCatching {
                 sm.pushDynamicShortcut(info)
-                // The same keys in the start's options too (OplusPairTaskManager merges the shortcut's extras into them).
-                val opts = Bundle().apply { putInt(KEY_ORIENTATION, SIDE_BY_SIDE) }
-                la.startShortcut(context.packageName, SHORTCUT_ID, null, opts, android.os.Process.myUserHandle())
+                la.startShortcut(context.packageName, SHORTCUT_ID, null, startOptions(plan), android.os.Process.myUserHandle())
             }.onFailure { Log.w(TAG, "dock ${plan.packages}: start failed", it) }.isSuccess
         if (!ok) return Result(false, "Split view didn't open")
         Switcher.launched("canvas dock ${plan.packages.joinToString(" | ")}")
@@ -235,7 +246,13 @@ object CanvasDock {
     /** Open Canvas's own container task (com.oplus.pscanvas): the split view itself, never a stray app to float. */
     fun isCanvas(pkg: String?): Boolean = pkg == CANVAS_PACKAGE
 
-    /** The task ids Open Canvas holds now (its regions; empty when none or not readable). */
+    /**
+     * The task ids Open Canvas holds now (its regions; empty when none or not readable). HACK: on this ROM never readable
+     * - getPocketStudioTaskRegion enforces com.oplus.permission.safe.WINDOW (OplusActivityTaskManagerServiceEnhance;
+     * 11-24 log: InvocationTargetException every read), so [outcome] reads UNKNOWN for a live canvas and the verify
+     * check judges the sides from dumpsys. Real fix: that permission (priv-app allowlist, user OK first) or a
+     * no-permission source of the canvas's member tasks.
+     */
     fun canvasTasks(): Set<Int> = if (!hasFwm) emptySet() else runCatching { regions(fwm("getPocketStudioTaskRegion", Int::class.javaPrimitiveType!! to 0)).keys().asSequence().mapNotNull { it.toIntOrNull() }.toSet() }.getOrDefault(emptySet())
 
     /**
@@ -327,6 +344,7 @@ object CanvasDock {
                         when {
                             was == null -> "had no task"
                             was in inCanvas -> "reused (task $was in the canvas)"
+                            after[p] == was -> "not in the canvas (still its task $was, canvas has $inCanvas)"
                             else -> "new task (was $was, canvas has $inCanvas, recents now ${after[p]})"
                         }
                     "$p $note"
@@ -389,6 +407,22 @@ object CanvasDock {
 
     private fun systemProperty(key: String): String? =
         runCatching { Class.forName("android.os.SystemProperties").getMethod("get", String::class.java).invoke(null, key) as String }.getOrNull()
+
+    /**
+     * The start's options: the plan's extras as a Bundle. They have to be here, not only on the shortcut - the system
+     * reads only a PINNED shortcut's extras (class doc), and PowOS's is dynamic (a pin needs the user's confirmation).
+     */
+    private fun startOptions(plan: Plan) =
+        Bundle().apply {
+            plan.extras.forEach { (k, v) ->
+                when (v) {
+                    is Boolean -> putBoolean(k, v)
+                    is Int -> putInt(k, v)
+                    is IntArray -> putIntArray(k, v)
+                    is String -> putString(k, v)
+                }
+            }
+        }
 
     private fun persistable(m: Map<String, Any>) =
         PersistableBundle().apply {

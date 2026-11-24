@@ -326,6 +326,23 @@ supportsSplitScreenMultiWindow false); Discord's blocklist entry is `type="1:0:0
 `CanvasDock.owns` exempts the canvas from adopt and the floating hand-over, split flags count only for live tasks, and
 `CanvasDock.checkBack` brings the dragged app back with a note when it isn't in a canvas region 2.5-4 s after the start.
 
+**Fixed (11-24), device run of build f785d92e: the drag opened no canvas** (isInPocketStudio false, 0 regions; Chrome
+and Calculator just came to the front in their own tasks). Cause, `services.jar`: `OplusPairTaskManager.
+prepareOptionsBeforeStartShortcut` copies the shortcut's extras into the start options through
+`ShortcutServiceInternal.getShortcuts(..., queryFlags 1026, ...)` = MATCH_PINNED | MATCH_PINNED_BY_ANY_LAUNCHER
+(`ShortcutService.LocalService.getFilterFromQuery`: no MATCH_DYNAMIC). PowOS's `powos-canvas-pair` is a dynamic
+shortcut, so its `isPsSplitScreenCombination` never reached `startShortcutInner`/`startPairTaskIfNeed`, and the
+intents went to plain `startActivitiesInPackage`. OxygenOS's own app pairs are pinned shortcuts on its launcher, which
+is why the path works for them. Fix: `CanvasDock.startOptions` passes the plan's keys (`isPsSplitScreenCombination`,
+`userIds`, `androidx.flexible.layoutOrientation`, `focusIndex` = the dragged app) in `startShortcut`'s own options
+Bundle; `startPairTaskIfNeed` reads exactly that Bundle, and `getActivityOptionsForLauncher` keeps it raw for a
+combination. Each intent also gets `setPackage` (`startPairTaskIfNeed` bails on a null `getPackage()`).
+Also: `FlexibleWindowManager.getPocketStudioTaskRegion` enforces `com.oplus.permission.safe.WINDOW`
+(`OplusActivityTaskManagerServiceEnhance`), so PowOS can never read the regions (every read threw); the verify check
+reads the sides from `dumpsys window` instead. The run's "bridge stopped answering" for Calculator and Settings was the
+check's own `tid`: "no task yet" answered `''`, which `hcall` retries as a failed hop into "ERR no answer (empty)"
+(and that text then went on as the task id). Not a host crash.
+
 ## 6. com.oplus.pscanvas itself
 
 PENDING: the phone was off the VPN for the whole session (see the hand-back). Next: pull `pm path com.oplus.pscanvas`

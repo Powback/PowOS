@@ -31,6 +31,12 @@ class CanvasDockTest {
     }
 
     @Test
+    fun theDraggedAppHasFocusInTheCanvas() {
+        assertEquals(0, CanvasDock.plan(settings, files, CanvasDock.Side.LEFT, 0).extras["focusIndex"])
+        assertEquals(1, CanvasDock.plan(settings, files, CanvasDock.Side.RIGHT, 0).extras["focusIndex"])
+    }
+
+    @Test
     fun labelReadsInCanvasOrder() {
         val labels = mapOf(settings to "Settings", files to "Files")
         assertEquals("Files | Settings", CanvasDock.plan(settings, files, CanvasDock.Side.RIGHT, 0).label(labels))
