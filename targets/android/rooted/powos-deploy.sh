@@ -339,6 +339,17 @@ if [ -d $A ]; then
     cp "$p" $R/tmp/ && chroot $R /usr/bin/env -i PATH=/usr/bin:/usr/sbin /bin/sh -c "pacman -U --noconfirm --needed /tmp/${p##*/} >/dev/null && rm -f /tmp/${p##*/}" &&
       echo "kwin: $(chroot $R /usr/bin/pacman -Q kwin 2>/dev/null)"
   done
+  # waypipe and socat, our packages (pkgs/waypipe: 0.11.3 + the ARGB video patch; pkgs/socat: built on the rootfs's
+  # openssl 3): remote Linux windows on KWin over TCP (docs/research/native-window-remoting.md §8.7). Tools; nothing
+  # runs until something starts them.
+  # powos-units: pkg:waypipe pkg:socat
+  for n in socat waypipe; do
+    for p in $A/$n-[0-9]*.pkg.tar.*; do
+      [ -e "$p" ] || continue; older $n "$p" && continue
+      cp "$p" $R/tmp/ && chroot $R /usr/bin/env -i PATH=/usr/bin:/usr/sbin /bin/sh -c "pacman -U --noconfirm --needed /tmp/${p##*/} >/dev/null && rm -f /tmp/${p##*/}" &&
+        echo "$n: $(chroot $R /usr/bin/pacman -Q $n 2>/dev/null)"
+    done
+  done
   L=$R/usr/lib/powos/apps
   mkdir -p $L/services $L/registry
   # powos-container: containers with hard limits in Android's cgroups (docs/PHONE-KERNEL-CONTAINERS.md section 12;

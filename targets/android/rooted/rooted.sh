@@ -190,6 +190,13 @@ deploy)
   kw=$("$HERE/../tools/newest-pkgs.sh" "$HERE/../out/pkgs" kwin)
   if [ -n "$kw" ]; then adb push -q "$kw" "/data/local/tmp/powos-apps/${kw##*/}"
   else echo "rooted.sh: no kwin package (targets/android/build-pkgs.sh kwin) - KWin not updated"; fi
+  # waypipe (pkgs/waypipe: 0.11.3 + the ARGB video patch) and its TCP relay socat (pkgs/socat, on the rootfs's
+  # openssl): remote Linux windows on KWin (unit waypipe).
+  for n in waypipe socat; do
+    wp=$("$HERE/../tools/newest-pkgs.sh" "$HERE/../out/pkgs" $n)
+    if [ -n "$wp" ]; then adb push -q "$wp" "/data/local/tmp/powos-apps/${wp##*/}"
+    else echo "rooted.sh: no $n package (targets/android/build-pkgs.sh $n) - $n not updated"; fi
+  done
   # The module every composed widget runs (apps/composed; apps/build.sh composed): its source, wasm, stamp, bindings.
   cmp=$HERE/../../../apps/composed
   adb shell mkdir -p /data/local/tmp/powos-apps/composed

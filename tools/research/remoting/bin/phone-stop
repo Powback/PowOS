@@ -1,0 +1,5 @@
+#!/bin/bash
+# phone-stop: (phone container) end everything phone-serve started; prints what still runs (nothing, normally).
+pkill -x waypipe; pkill -f waypipe-argbvideo; pkill -x socat; pkill -f phone-serve; pkill -x firefox; pkill -x kate; pkill -x dolphin
+pkill -f dbus-run-session; sleep 0.5
+pgrep -l 'waypipe|socat|firefox|kate|dolphin' || echo "nothing left"

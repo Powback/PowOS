@@ -1,0 +1,28 @@
+{
+  "id": "waypipe",
+  "name": "waypipe (remote Linux windows)",
+  "kind": "system",
+  "owner": "system:powos-deploy",
+  "purpose": "`waypipe` 0.11.3 (+ the ARGB video patch) and `socat`: a Linux window of another machine (.58) shown on the phone's KWin as a web window, over TCP (docs/research/native-window-remoting.md §8.7); command-line tools, nothing runs until a check or the user starts one",
+  "installedBy": "targets/android/rooted/powos-deploy.sh (our package, targets/android/pkgs/waypipe; socat from Arch Linux ARM as its dependency)",
+  "packages": [
+    "waypipe",
+    "socat"
+  ],
+  "files": [
+    "/usr/bin/waypipe"
+  ],
+  "processes": [
+    {
+      "match": "^waypipe( |$)"
+    }
+  ],
+  "limits": {
+    "memory": "1g",
+    "pids": 64
+  },
+  "autosleep": "never",
+  "remove": {
+    "commands": []
+  }
+}

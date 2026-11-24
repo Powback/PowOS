@@ -3,6 +3,8 @@
 #   comp    headless sway = the "phone" compositor, + waypipe client behind a TCP listener (port 5000)
 #   app     waypipe server + the apps (Firefox / Kate / Dolphin); tc netem on both ends' eth0 emulates phone Wi-Fi
 #   criu-a / criu-b   CRIU pre-copy hand-off source and destination (profile criu)
+#   phone   waypipe server + the apps for the REAL phone (profile phone, §8.7): no tc, its relay listens on .58's TCP
+#           15100 for the OnePlus's waypipe client (tools/phone/verify/waypipe-window.sh drives both ends; phone-dc)
 # cgroup_parent nomad.slice = .58's one hard cap for job work (PowStation/docs/COMPUTE.md "Hard limits").
 # Capabilities below are inside rootless podman's user namespace (no host privilege); label=disable because SELinux
 # (enforcing on .58) denies container_t the render node otherwise.
@@ -18,6 +20,7 @@ x-pow:
     app: {role: build-job, lifecycle: {policy: job}, access: {exposure: none, authentication: none}}
     criu-a: {role: build-job, lifecycle: {policy: job}, access: {exposure: none, authentication: none}}
     criu-b: {role: build-job, lifecycle: {policy: job}, access: {exposure: none, authentication: none}}
+    phone: {role: build-job, lifecycle: {policy: job}, access: {exposure: lan, authentication: none}}
   datasets: {}
 
 x-common: &common
@@ -57,3 +60,14 @@ services:
     cpus: 2
     mem_limit: 4g
     cap_add: [SYS_ADMIN, SYS_PTRACE, CHECKPOINT_RESTORE, NET_ADMIN, SYS_RESOURCE, DAC_READ_SEARCH]
+  phone:
+    <<: *common
+    profiles: [phone]
+    hostname: wp58
+    cpus: 6
+    mem_limit: 12g
+    cap_add: [SYS_PTRACE]
+    devices: [/dev/dri/renderD128:/dev/dri/renderD128]
+    # The phone's waypipe client dials in (socat TCP <-> waypipe's unix socket inside): .58's firewalld zone allows
+    # 1025-65535/tcp. Up only for the check's run; the check takes it down again (phone-dc down).
+    ports: ["15100:15100"]
