@@ -74,6 +74,42 @@ grep -qx "note to the user" "$STUB_SHIP.log" 2>/dev/null && ok "ship stub got th
   && ok "--queue args forwarded as separate words" \
   || bad "--queue args forwarded as separate words" "$(cat "$STUB_QUEUE.log" 2>/dev/null)"
 
+# == 1b. --queue argv mapping onto `queue.sh add [flags] <board-task> <cmd> [args...]` (11-24: agents got queue.sh's
+# usage text back). Each case lands one change against a fresh stub queue.sh and asserts its exact argv.
+qcase() {   # qcase <name> <expected argv, one per line> <land args after the paths...>
+  local name=$1 want=$2; shift 2
+  local w="$TMP/wq$((++QN))" q="$TMP/queueq$QN.sh"
+  new_worktree "$w"; echo "q$QN" > "$w/tracked.txt"; stub "$q"
+  out=$(cd "$w" && LAND_AGENTS_CLI="$STUB_CLI" LAND_SHIP="$STUB_SHIP" LAND_QUEUE="$q" \
+    "$LAND" "queue case $QN" -- tracked.txt --no-ship "$@" 2>&1); rc=$?
+  got=$(cat "$q.log" 2>/dev/null)
+  [ $rc -eq 0 ] && [ "$got" = "$want" ] && ok "--queue: $name" || bad "--queue: $name" "rc=$rc argv=[$(tr '\n' ' ' <<<"$got")] $out"
+}
+QN=0
+qcase "explicit task, flags, cmd + args" "$(printf 'add\n--dev\nemu\n--name\ntwo words\nt1\ntools/phone/verify/fake.sh\n--round\n1')" \
+  --task t1 --step s --queue --dev emu --name "two words" t1 tools/phone/verify/fake.sh --round 1
+qcase "task left out -> --task's id put first" "$(printf 'add\nt1\ntools/phone/verify/fake.sh\n--round\n1')" \
+  --task t1 --step s --queue tools/phone/verify/fake.sh --round 1
+qcase "task left out, cmd with no args" "$(printf 'add\n--close\nt1\ntools/phone/verify/fake.sh')" \
+  --task t1 --step s --queue --close tools/phone/verify/fake.sh
+qcase "a PATH command (bash) is not taken for a task id" "$(printf 'add\nt1\nbash\ntools/phone/verify/fake.sh')" \
+  --task t1 --step s --queue bash tools/phone/verify/fake.sh
+qcase "one quoted string: task + cmd + quoted arg" "$(printf 'add\nt2\ntools/phone/verify/fake.sh\n--note\na b')" \
+  --queue "t2 tools/phone/verify/fake.sh --note 'a b'"
+qcase "task + one quoted cmd line" "$(printf 'add\nt2\nenv\nPROFILE=1\ntools/x.sh\n12')" \
+  --queue t2 "env PROFILE=1 tools/x.sh 12"
+qcase "quoted cmd line, task from --task" "$(printf 'add\nt1\ntools/phone/verify/fake.sh\n--round\n1')" \
+  --task t1 --step s --queue "tools/phone/verify/fake.sh --round 1"
+qcase "a different explicit task than --task is kept" "$(printf 'add\nother-task\ntools/phone/verify/fake.sh')" \
+  --task t1 --step s --queue other-task tools/phone/verify/fake.sh
+# No task id anywhere: refused BEFORE anything lands, with the fix in the message, and queue.sh never called.
+WQ="$TMP/wq_none"; new_worktree "$WQ"; echo none > "$WQ/tracked.txt"; QSTUB="$TMP/queue_none.sh"; stub "$QSTUB"
+out=$(cd "$WQ" && LAND_QUEUE="$QSTUB" "$LAND" "no task" -- tracked.txt --no-ship --queue tools/phone/verify/fake.sh 2>&1); rc=$?
+[ $rc -eq 2 ] && grep -q "needs the board task first" <<<"$out" && [ ! -e "$QSTUB.log" ] \
+  && [ -z "$(git -C "$BARE" log "$LAND_BASE" --oneline --grep='^no task$')" ] \
+  && ok "--queue with no board task is refused before landing" \
+  || bad "--queue with no board task is refused before landing" "rc=$rc: $out"
+
 # == 2. refuses a path with no uncommitted change =======================================================
 W2="$TMP/w2"; new_worktree "$W2"
 out=$(cd "$W2" && "$LAND" "nothing changed" -- tracked.txt 2>&1); rc=$?

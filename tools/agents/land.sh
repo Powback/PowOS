@@ -21,8 +21,9 @@
 #      the board isn't reachable - never fails the landing over that;
 #   6. requests a ship automatically for critical paths (shell/, targets/android/, apps/, lib/, tools/app-api/),
 #      or if --ship "note" is given; use --no-ship to suppress automatic ship requests.
-#   7. queues phone/emulator checks (tools/phone/verify/queue.sh add), if asked - arguments after --queue are
-#      passed on as separate words, not one quoted string.
+#   7. queues phone/emulator checks (tools/phone/verify/queue.sh add), if asked: --queue [flags] <board-task> <cmd>
+#      [args...], forwarded as separate words; the board task may be left out when --task gives it, and a quoted
+#      command line is split (checked before anything lands - see "--queue args" below).
 # Prints ONE summary line per step it ran. Never touches the shared base worktree (powos-multiplatform; old
 # path .claude/worktrees/powos-multiplatform, new $POWOS_RUN_ROOT/powos-multiplatform) directly - this is a
 # per-agent worktree tool (tools/agents/worktree.sh new <name>).
@@ -45,7 +46,7 @@ RUN_ROOT=${POWOS_RUN_ROOT:-$HOME/pw}   # powos-multiplatform's new home (wt-move
 # /var -> /private/var) - an unresolved RUN_ROOT would never match a resolved $top.
 [ -d "$RUN_ROOT" ] && RUN_ROOT=$(cd "$RUN_ROOT" && pwd -P)
 
-usage() { sed -n '2,33p' "$0" | sed 's/^# \{0,1\}//'; }
+usage() { sed -n '2,36p' "$0" | sed 's/^# \{0,1\}//'; }
 [ $# -ge 1 ] || { usage >&2; exit 2; }
 case "${1:-}" in -h|--help) usage; exit 0 ;; esac
 msg=$1; shift
@@ -69,6 +70,50 @@ done
 [ ${#paths[@]} -gt 0 ] || { echo "land.sh: no paths given after --" >&2; exit 2; }
 if { [ -n "$task_id" ] && [ -z "$step_text" ]; } || { [ -z "$task_id" ] && [ -n "$step_text" ]; }; then
   echo "land.sh: --task and --step go together" >&2; exit 2
+fi
+
+# --queue args -> queue.sh add's own order: [flags] <board-task> <cmd> [args...]. Checked HERE, before anything
+# lands, so a bad spec never leaves a landed commit with no check behind it (11-24: two agents got queue.sh's usage
+# text back after the push and had to queue by hand). What agents actually write, all mapped onto that order:
+#   --queue T cmd a b             as queue.sh wants it - unchanged
+#   --task T ... --queue cmd a b  the board task left out (it's --task's): T is put in front of cmd
+#   --queue "cmd a b" / T "cmd a b" / "T cmd a b"   one quoted string: split like a shell would (shlex), never eval'd
+# The task id is told from a command by queue.sh's own id rule; a word with a / or a .sh/.py ending, `env`, or
+# anything on PATH (bash, python3) is a command. No task id anywhere (no --task either) is refused here with the fix, not with queue.sh's usage line.
+is_task_word() {
+  case "$1" in */*|*.sh|*.py|env) return 1 ;; esac
+  [ "$1" = "$task_id" ] && return 0
+  command -v -- "$1" >/dev/null 2>&1 && return 1   # bash, python3, true...: a command, not a board id
+  [[ $1 =~ ^[A-Za-z0-9][A-Za-z0-9_.:-]{0,63}$ ]]
+}
+split_words() {   # split_words <string>: shell-style split, one word per NUL (python3 shlex: quotes honoured, no expansion)
+  python3 -c 'import shlex,sys
+for w in shlex.split(sys.argv[1]): sys.stdout.write(w + "\0")' "$1"
+}
+if [ ${#queue_args[@]} -gt 0 ]; then
+  qflags=() qrest=()
+  set -- "${queue_args[@]}"
+  while [ $# -gt 0 ]; do case "$1" in
+    --close) qflags+=("$1"); shift ;;
+    --name|--screen|--dev|--budget) [ $# -ge 2 ] || { echo "land.sh: --queue $1 needs a value" >&2; exit 2; }; qflags+=("$1" "$2"); shift 2 ;;
+    *) break ;; esac; done
+  # One remaining word with whitespace, or <task> + one such word: a quoted command line - split it.
+  if [ $# -eq 1 ] && [[ $1 == *[[:space:]]* ]]; then
+    qs=$1; set --; while IFS= read -r -d '' w; do set -- "$@" "$w"; done < <(split_words "$qs")
+  elif [ $# -eq 2 ] && is_task_word "$1" && [[ $2 == *[[:space:]]* ]] && [ ! -e "$2" ]; then
+    qt=$1 qs=$2; set -- "$qt"; while IFS= read -r -d '' w; do set -- "$@" "$w"; done < <(split_words "$qs")
+  fi
+  [ $# -gt 0 ] || { echo "land.sh: --queue needs a check command" >&2; exit 2; }
+  if is_task_word "$1" && { [ $# -ge 2 ] || [ -z "$task_id" ]; }; then
+    qrest=("$@")                                  # <task> <cmd> [args...] (or a lone id: refused just below)
+  elif [ -n "$task_id" ]; then
+    qrest=("$task_id" "$@")                       # board task left out: --task's
+  else
+    echo "land.sh: --queue needs the board task first: --queue <board-task> $* (or give --task <id>)" >&2; exit 2
+  fi
+  [ ${#qrest[@]} -ge 2 ] || { echo "land.sh: --queue ${qrest[0]}: no check command after the board task" >&2; exit 2; }
+  queue_args=(${qflags[@]+"${qflags[@]}"} "${qrest[@]}")
+  set --
 fi
 
 top=$(git rev-parse --show-toplevel 2>/dev/null) || { echo "land.sh: run it inside a PowOS git worktree" >&2; exit 2; }
@@ -302,7 +347,8 @@ if [ ${#queue_args[@]} -gt 0 ]; then
   if out=$(bash "$queue" add "${queue_args[@]}" 2>&1); then
     echo "land: queued check: ${queue_args[*]}"
   else
-    echo "land: queue FAILED: $(echo "$out" | tail -1)" >&2
+    echo "land: queue FAILED: bash $queue add ${queue_args[*]}" >&2
+    echo "$out" | tail -5 | sed 's/^/  /' >&2
   fi
 fi
 exit 0
