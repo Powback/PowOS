@@ -33,11 +33,24 @@ home; chk home
 # The AI page: its header (.ai-screen.shown) and the one bar in its "ai" role.
 st='(document.querySelector(".ai-screen.shown")&&document.querySelector("form.bar[data-role=ai] textarea")?"page":"no")+" "+(document.querySelector(".ai-screen .ai-state.busy")?"busy":"idle")'
 for i in 1 2 3 4 5 6; do s=$(ev 'document.querySelector("form.bar textarea")?"up":"no"'); [ "$s" = up ] && break; sleep 2; done
-for i in 1 2; do
+# Where home is (page, drawer, edit mode, the AI page's tab): said when the swipes don't get there.
+where='(async()=>{const S=await importShim("./state.ts");return JSON.stringify({page:S.page.value,drawer:S.drawer.value,editing:S.editing?.value,ai:S.aiScreen?.value,roles:[...document.querySelectorAll("form.bar")].map(f=>f.dataset.role||"-")})})()'
+# The swipe right, once per page left of where home is (HOME doesn't always bring its first page back; 11-24 the run
+# saw "no idle" after two swipes - home not on its first page, or the swipe on a widget that keeps it). The stop
+# button is the check, not the page swipe (ai-tab-head.sh / the gate's home-swipes check that): still not there after
+# four, the page is put up over CDP (state.ts page -1, as bar-same-rect.sh), its state logged.
+for i in 1 2 3 4; do
   sh_ "input swipe $((W * 3 / 10)) $((H / 2)) $((W * 9 / 10)) $((H / 2)) 350"; sleep 1.5; chk page
   s=$(ev "$st"); case $s in page*) break;; esac
 done
-case $s in page*) ;; *) echo "FAIL: the AI page's field isn't showing: $s"; exit 1;; esac
+case $s in
+  page*) ;;
+  *) echo "the swipes didn't reach the AI page ($s): $(ev "$where") - putting it up over CDP"
+     "$T/shot.sh" "$OUT/ai-stop-noswipe.png" >/dev/null 2>&1
+     ev 'importShim("./state.ts").then(S=>{S.drawer.value=0;S.page.value=-1;return "set"})' >/dev/null; sleep 1.5
+     s=$(ev "$st") ;;
+esac
+case $s in page*) ;; *) echo "FAIL: the AI page's field isn't showing: $s $(ev "$where")"; exit 1;; esac
 # Another turn under way (an agent's mail): not ours to stop - wait a minute, else try later.
 for i in $(seq 1 30); do case $(ev "$st") in *idle) break;; esac; sleep 2; done
 case $(ev "$st") in *idle) ;; *) echo "the chat is busy with another turn - re-queued"; exit 3;; esac
