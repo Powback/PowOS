@@ -17442,11 +17442,13 @@ async function lpMount() {
     data.push({ id: `room-${i}`, type: "room", metadata: { name: n, archetype: "living_room" }, children: [], services: [{ rid: `group-${i}`, rtype: "grouped_light" }] });
     data.push({ id: `group-${i}`, type: "grouped_light", owner: { rid: `room-${i}`, rtype: "room" }, on: { on: true }, dimming: { brightness: 60 } });
   });
-  const rows = { bridge: [{ id: 1, bridgeId: "001788fffe000000", ip: "192.168.50.20", name: "Hue Bridge" }], pref: [] };
+  // The account's bridge (home_bridge, synced since 11-24) and the old per-device row, as a migrated phone has both.
+  const bridge = [{ id: 1, bridgeId: "001788fffe000000", ip: "192.168.50.20", name: "Hue Bridge" }];
+  const rows = { bridge, home_bridge: bridge, pref: [] };
   const calls = [];
   const res = (status, body) => ({ status, ok: status < 300, json: () => body, text: () => JSON.stringify(body), headers: {} });
   const host = {
-    useDb: () => ({ conn: { db: { bridge: {}, pref: {} }, reducers: {} }, status: "connected", epoch: 1 }),
+    useDb: () => ({ conn: { db: { bridge: {}, home_bridge: {}, pref: {} }, reducers: {} }, status: "connected", epoch: 1 }),
     useRows: (_db, t) => rows[t] ?? [],
     openApp: () => {},
     net: {

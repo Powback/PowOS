@@ -24,6 +24,14 @@
     "hidden": true,
     "order": 2
    }
+  ],
+  "home_bridge": [
+   {
+    "id": 1,
+    "bridgeId": "001788fffe000000",
+    "ip": "192.168.50.20",
+    "name": "Hue Bridge"
+   }
   ]
  },
  "net": [
