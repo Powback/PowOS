@@ -27,7 +27,35 @@
 #   queue.sh add remote-linux-window-from-58-on-the-oneplus-via-w tools/phone/verify/waypipe-window.sh
 set -uo pipefail
 NAME=waypipe-window; . "$(dirname "$0")/wwc-lib.sh"
-WW_DEADLINE=${WWC_DEADLINE_S:-560}
+# The steps' deadline inside the queue's budget (480 s for this job): 80 s before it, so wwc_clean (its own 40 s) and the
+# verdict land before the queue's kill. It was 560 s - past the 480 s budget, so it never fired: 11-25 19:48 the run sat
+# 418 s after "kate: .58 serve state started" and the queue killed it with no line saying where.
+WW_DEADLINE=${WWC_DEADLINE_S:-$(( ${QUEUE_BUDGET_S:-480} - 80 ))}
+# result <text>: a number as it is taken - a "RESULT: " line queue.sh puts on the board task with the verdict, so a
+# timeout or a later FAIL never loses what was measured (perf-scenarios.sh result(), 37295929).
+result() { say "RESULT: $*"; }
+# Per-phase caps (wall clock): every step that waits on the phone, .58 or the page is bounded on its own, and a step
+# that runs out says which one and what it saw - never the budget's bare "FAIL timeout".
+# cap <s> <cmd...>: the command, TERMed with its children after <s> s; rc 124 then. The killer's output goes nowhere
+# (a $(cap ...) caller would otherwise wait for its sleep).
+_kids() { local c; for c in $(pgrep -P "$1" 2>/dev/null); do _kids "$c"; done; kill -TERM "$1" 2>/dev/null; }
+cap() { local s=$1 p w rc; shift; "$@" & p=$!
+  ( sleep "$s"; kill -0 "$p" 2>/dev/null && { _kids "$p"; : > "${TMPDIR:-/tmp}/wpcap.$p"; } ) >/dev/null 2>&1 </dev/null & w=$!
+  wait "$p"; rc=$?; pkill -P "$w" 2>/dev/null; kill "$w" 2>/dev/null
+  [ -f "${TMPDIR:-/tmp}/wpcap.$p" ] && { rm -f "${TMPDIR:-/tmp}/wpcap.$p"; return 124; }; return $rc; }
+# phase <name>: the step being run, its start (elapsed seconds) kept for its RESULT line.
+PHASE=setup PH0=$SECONDS
+phase() { PHASE=$1 PH0=$SECONDS; }
+took() { echo $((SECONDS - PH0)); }
+# front: what's in front on the phone and whether home's page answers - said when a page wait runs out (a remote window
+# opened as its own task in front hides home, and every page call then waits out its timeout).
+front() { echo "front=$(cap 10 sh_ "dumpsys activity activities | grep -m1 topResumedActivity" | sed -nE 's#.*/[a-zA-Z0-9_.]*\.([A-Za-z0-9_$]+) .*#\1#p') home=$(CDP_TIMEOUT_S=5 cap 10 wwc_vis | head -c 20)"; }
+# wait_new <cap_s> <before>: a new "l:" web window within cap_s s of wall clock (wwnew counted tries, each up to 4 page
+# calls of CDP_TIMEOUT_S: 60 tries could be an hour against a page that stopped answering).
+wait_new() { local end=$((SECONDS + $1)) n=""
+  while [ "$SECONDS" -lt "$end" ]; do
+    n=$(WW_DEADLINE=$end CDP_TIMEOUT_S=5 cap 15 wwids l: | tr ' ' '\n' | grep -vxF -f <(printf '%s\n' $2 _) | head -1)
+    [ -n "$n" ] && break; sleep 1; done; echo "$n"; }
 ROOT=$(cd "$T/../.." && pwd)
 DC="$ROOT/tools/research/remoting/dc"
 H58=${WP_HOST:-192.168.50.58} PORT=${WP_PORT:-15100}
@@ -47,78 +75,99 @@ rssi() { sh_ "cmd wifi status" | grep -oE 'RSSI: -?[0-9]+|Link speed: [0-9]+' | 
 now() { sh_ "date +%s.%N" | cut -c1-14; }
 keyboard_up() { [ "$(sh_ "dumpsys input_method" | grep -m1 -oE "mInputShown=(true|false)")" = mInputShown=true ]; }
 
-pre=$(rs 'pacman -Q waypipe socat 2>&1 | tr "\n" " "')
+phase packages
+pre=$(cap 30 rs 'pacman -Q waypipe socat 2>&1 | tr "\n" " "')
 case $pre in *"waypipe 0.11.3"*socat*) say "phone: $pre" ;; *) echo "SKIP: waypipe/socat not deployed on the phone yet ($pre) - stays queued"; exit 3 ;; esac
 docker --context "${POW_JOB_CONTEXT:-pow58}" image inspect localhost/rmm/remoting:latest >/dev/null 2>&1 ||
   { say "building the measurement image on .58 (tools/research/remoting)"; dc build phone >/dev/null 2>&1 || { echo "SKIP: the .58 image didn't build"; exit 5; }; }
-wwc_start
-dc up -d phone >/dev/null 2>&1 || bad "the .58 container didn't start (rmm phone)"
-WPV=$(dc exec -T phone sh -c 'waypipe --version; waypipe-argbvideo --version' 2>/dev/null | tr '\n' ' ')
-say ".58: $WPV; phone $(rssi)"
+phase home; wwc_start; result "setup: packages + home $(took) s"
+phase .58-up
+cap 60 dc up -d phone >/dev/null 2>&1 || bad "the .58 container didn't start (rmm phone) in $(took) s"
+WPV=$(cap 20 dc exec -T phone sh -c 'waypipe --version; waypipe-argbvideo --version' 2>/dev/null | tr '\n' ' ')
+R0=$(cap 10 rssi)
+say ".58: $WPV; phone $R0"; result ".58 up $(took) s; phone wifi $(echo "$R0" | grep -oE 'RSSI: -?[0-9]+|Link speed: [0-9]+' | head -2 | tr '\n' ' ')"
 OK=0
 for app in $APPS; do
   [ "$NF" = 0 ] || break
   mode=$(mode_of "$app"); N="$OUT/$app"; mkdir -p "$N"
+  # An app needs ~150 s (connect 30 + window 60 + live 25 + idle/typing/scroll ~35 + close/logs); one that can't fit
+  # before the steps' deadline isn't started - the apps measured keep their results.
+  [ $((WW_DEADLINE - SECONDS)) -ge 150 ] || { result "$app: not run - $((WW_DEADLINE - SECONDS)) s left before the deadline, it needs ~150 s"; continue; }
   say "== $app ($mode)"
-  dc exec -T -d -u u phone phone-serve "$app" "$mode" "$PORT" >/dev/null 2>&1
+  phase "$app: .58 serve"
+  cap 20 dc exec -T -d -u u phone phone-serve "$app" "$mode" "$PORT" >/dev/null 2>&1 || say "$app: phone-serve start rc $? after $(took) s"
   sleep 1
-  before=$(wwids l:)
-  ww_us "$PENV; rm -rf /tmp/wpw; mkdir -p /tmp/wpw
+  before=$(WW_DEADLINE=$((SECONDS + 20)) CDP_TIMEOUT_S=10 cap 25 wwids l:)
+  phase "$app: phone connect"
+  cap 30 ww_us "$PENV; rm -rf /tmp/wpw; mkdir -p /tmp/wpw
 setsid -f waypipe --debug -s /tmp/wpw/wp.sock client > /tmp/wpw/client.log 2>&1 < /dev/null
 for i in \$(seq 50); do [ -S /tmp/wpw/wp.sock ] && break; sleep 0.1; done
 setsid -f socat TCP:$H58:$PORT,nodelay UNIX-CONNECT:/tmp/wpw/wp.sock > /tmp/wpw/socat.log 2>&1 < /dev/null
 sleep 1; pgrep -af 'waypipe --debug|UNIX-CONNECT:/tmp/wpw' | head -3" | tee -a "$N/phone-start.txt" >/dev/null
-  ss0=$(ss_sample)
-  st=$(dc exec -T phone cat /tmp/run/serve.state 2>/dev/null)
+  ss0=$(cap 15 ss_sample)
+  st=$(cap 15 dc exec -T phone cat /tmp/run/serve.state 2>/dev/null)
   say "$app: .58 serve state ${st:-?}, phone tcp $ss0"
+  result "$app: connected in $(took) s, serve state ${st:-?}, phone tcp acked/received/retrans ${ss0:-?}"
   case $st in connected|started) ;; *) bad "$app: the phone's socat never reached $H58:$PORT (serve state ${st:-?}; $(ww_us 'cat /tmp/wpw/socat.log' | tail -1))"; break ;; esac
-  W=$(wwnew 60 "$before" l:)
-  W=$(echo "$W" | head -1)
+  phase "$app: window"
+  W=$(wait_new 60 "$before")
   if [ -z "$W" ]; then
-    bad "$app: no new Linux web window within 60 s ($(ww_us 'grep -m3 -E "Wrn|ERR" /tmp/wpw/client.log'))"
-    "$T/shot.sh" "$N/no-window.png" >/dev/null 2>&1; break
+    ssW=$(cap 15 ss_sample)
+    bad "$app: no new Linux web window within $(took) s ($(front); phone tcp ${ssW:-?}; client: $(cap 15 ww_us 'grep -m3 -E "Wrn|ERR" /tmp/wpw/client.log' | tr '\n' ' '))"
+    result "$app: no window after $(took) s; phone tcp ${ssW:-?}"
+    cap 30 "$T/shot.sh" "$N/no-window.png" >/dev/null 2>&1; break
   fi
+  result "$app: web window $W after $(took) s"
   MINE_W="$MINE_W $W"
-  key=$(wwhost "$W" key); state=$(wwhost "$W" state)
-  for _ in $(seq 20); do [ "$(wwel "$W" "e=>e.querySelector('.webwindow-body.live')?'live':'placeholder'")" = live ] && break; sleep 1; done
-  live=$(wwel "$W" "e=>e.querySelector('.webwindow-body.live')?'live':'placeholder'")
-  bar=$(wwbar "$W"); body=$(wwbody "$W")
+  phase "$app: live body"
+  # The page reads, bounded by wall clock: 25 s for the window's body to go live (it was 20 tries of up to 20 s each).
+  end=$((SECONDS + 25)); live=""
+  while [ "$SECONDS" -lt "$end" ]; do
+    live=$(WW_DEADLINE=$end CDP_TIMEOUT_S=5 cap 8 wwel "$W" "e=>e.querySelector('.webwindow-body.live')?'live':'placeholder'")
+    [ "$live" = live ] && break; sleep 1; done
+  key=$(CDP_TIMEOUT_S=5 cap 25 wwhost "$W" key); state=$(CDP_TIMEOUT_S=5 cap 25 wwhost "$W" state)
+  bar=$(CDP_TIMEOUT_S=5 cap 10 wwbar "$W"); body=$(CDP_TIMEOUT_S=5 cap 10 wwbody "$W")
+  [ "$live" = live ] || say "$app: body ${live:-no answer} after $(took) s ($(front))"
+  result "$app: body ${live:-no answer} after $(took) s, title bar ${bar:-?}"
   say "$app: web window $W key=$key state=$state body=$live title-bar=$bar body-rect=${body:-none}"
   [ "$live" = live ] && [ "$bar" = true ] && [ -n "$body" ] ||
     bad "$app: window $W is not a live native child surface of a web window (body $live, title bar $bar)"
   sleep 4
-  "$T/shot.sh" "$N/window.png" >/dev/null 2>&1 && say "$app: screenshot $N/window.png"
+  cap 30 "$T/shot.sh" "$N/window.png" >/dev/null 2>&1 && say "$app: screenshot $N/window.png"
+  phase "$app: input"
   # Phases: samples on the phone's clock (the client log's), bytes from ss before/after each.
   PH="{}" SS="{\"start\": \"$ss0\""
-  for _ in $(seq 10); do keyboard_up && break; sleep 1; done
-  kb=$(keyboard_up && echo yes || echo no); say "$app: Android keyboard for its text field: $kb"
-  t0=$(now); s0=$(ss_sample); sleep 10; t1=$(now); s1=$(ss_sample)
+  end=$((SECONDS + 12)); while [ "$SECONDS" -lt "$end" ]; do cap 8 keyboard_up && break; sleep 1; done
+  kb=$(cap 8 keyboard_up && echo yes || echo no); say "$app: Android keyboard for its text field: $kb"
+  t0=$(cap 10 now); s0=$(cap 15 ss_sample); sleep 10; t1=$(cap 10 now); s1=$(cap 15 ss_sample)
   PH="\"idle\": [$t0, $t1]"; SS="$SS, \"idle0\": \"$s0\", \"idle1\": \"$s1\""
+  result "$app: idle 10 s, phone tcp ${s0:-?} -> ${s1:-?}; keyboard $kb"
   if [ "$kb" = yes ]; then
     letters=$(python3 -c 'import random; r=random.Random(1); print(" ".join("KEYCODE_"+r.choice("ABCDEFGHIJKLMNOPQRSTUVWXYZ") for _ in range(60)))')
-    t0=$(now); s0=$(ss_sample)
-    sh_ "echo \$(( \$(date +%s) + 30 )) > /data/local/tmp/powos-selfinput; input keyevent --delay 200 $letters"
-    t1=$(now); s1=$(ss_sample)
+    t0=$(cap 10 now); s0=$(cap 15 ss_sample)
+    cap 40 sh_ "echo \$(( \$(date +%s) + 30 )) > /data/local/tmp/powos-selfinput; input keyevent --delay 200 $letters"
+    t1=$(cap 10 now); s1=$(cap 15 ss_sample)
     PH="$PH, \"typing\": [$t0, $t1]"; SS="$SS, \"typing0\": \"$s0\", \"typing1\": \"$s1\""
     sleep 1.5
-    t0=$(now); s0=$(ss_sample)
+    t0=$(cap 10 now); s0=$(cap 15 ss_sample)
     if [ "$app" = firefox ]; then sh_ "input keyevent KEYCODE_F8"; sleep 10
     else sh_ "echo \$(( \$(date +%s) + 12 )) > /data/local/tmp/powos-selfinput; input keyevent --duration 8000 KEYCODE_DPAD_DOWN"; fi
-    t1=$(now); s1=$(ss_sample)
+    t1=$(cap 10 now); s1=$(cap 15 ss_sample)
     [ "$app" = firefox ] && sh_ "input keyevent KEYCODE_F9"
     PH="$PH, \"scroll\": [$t0, $t1]"; SS="$SS, \"scroll0\": \"$s0\", \"scroll1\": \"$s1\""
-    "$T/shot.sh" "$N/after-input.png" >/dev/null 2>&1
+    cap 30 "$T/shot.sh" "$N/after-input.png" >/dev/null 2>&1
     sh_ "input keyevent KEYCODE_BACK" >/dev/null   # the keyboard down
   else
     say "$app: no keyboard (no focused text field) - window, idle bytes and buffer path only"
   fi
-  ssE=$(ss_sample); R=$(rssi)
+  ssE=$(cap 15 ss_sample); R=$(cap 10 rssi)
   SS="$SS, \"end\": \"$ssE\"}"
   # Close: the web window's own close (KWin quit) first, then the transport on both ends.
-  ww_close "$W"; MINE_W=${MINE_W% $W}
-  sleep 1; dc exec -T phone phone-stop >/dev/null 2>&1; phone_stop
-  ww_us "gzip -c /tmp/wpw/client.log" > "$N/client.log.gz" 2>/dev/null
-  dc exec -T phone sh -c 'cat /tmp/run/app.log' > "$N/server.log" 2>/dev/null
+  phase "$app: close"
+  CDP_TIMEOUT_S=10 cap 30 ww_close "$W"; MINE_W=${MINE_W% $W}
+  sleep 1; cap 20 dc exec -T phone phone-stop >/dev/null 2>&1; cap 20 phone_stop
+  cap 30 ww_us "gzip -c /tmp/wpw/client.log" > "$N/client.log.gz" 2>/dev/null
+  cap 30 dc exec -T phone sh -c 'cat /tmp/run/app.log' > "$N/server.log" 2>/dev/null
   gunzip -f "$N/client.log.gz" 2>/dev/null
   python3 - "$N/net.json" "{$PH}" "$SS" "$R" <<'PY'
 import json, re, sys
@@ -128,9 +177,10 @@ m = re.search(r"RSSI: (-?\d+)", r); l = re.search(r"Link speed: (\d+)", r)
 json.dump({"phases": ph, "ss": {k: f(v) for k, v in ss.items()}, "rssi": int(m.group(1)) if m else None,
            "link": int(l.group(1)) if l else None}, open(out, "w"))
 PY
-  res=$(python3 "$T/verify/waypipe-window.py" "$N/client.log" "$N/net.json" "$app" "$mode" 2>&1 | tail -1)
+  res=$(cap 30 python3 "$T/verify/waypipe-window.py" "$N/client.log" "$N/net.json" "$app" "$mode" 2>&1 | tail -1)
   printf '%s\n' "$res" >> "$OUT/results.jsonl"
   say "$app: $res"
+  result "$app: $(printf %s "$res" | cut -c1-200)"
   say "BAR $app: $(python3 -c 'import json,sys; print(json.loads(sys.argv[1]).get("bar","?"))' "$res" 2>/dev/null)"
   OK=$((OK + 1))
 done
