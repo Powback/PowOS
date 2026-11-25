@@ -57,6 +57,7 @@ object DefaultKeyboard {
     private const val KEY_DEFAULT_DONE = "defaultDone"
     private const val KEY_ASKED_INSTALL = "askedInstall"
     private const val KEY_PENDING = "pending"
+    private const val KEY_GRANTED = "granted"
     private const val ACTION_RESULT = "com.powos.app.KEYBOARD_INSTALL_RESULT"
     private const val CHANNEL = "keyboard"
     private const val NOTE_ID = 0x4b42
@@ -113,7 +114,10 @@ object DefaultKeyboard {
         val have = installed(c)
         val target = KeyboardPlan.target(have?.longVersionCode, published, failed(c))
         if (target != null) update(c, have, target)
-        if (installed(c) != null) applyDefault(c)
+        if (installed(c) != null) {
+            grantOnce(c)
+            applyDefault(c)
+        }
     }
 
     private fun update(
@@ -233,6 +237,7 @@ object DefaultKeyboard {
                 .any { it.serviceInfo.permission == Manifest.permission.BIND_INPUT_METHOD }
         if (have?.longVersionCode == target && ime) {
             Log.i(TAG, "swipe keyboard $target installed")
+            grantOnce(c)
             return
         }
         markFailed(c, target, "installed but its input method isn't there (version ${have?.longVersionCode})")
@@ -246,6 +251,17 @@ object DefaultKeyboard {
             // before `make build PROJECT=swipe-keyboard` publishes), so a build without the service never reaches the store.
             notify(c, "Keyboard update failed", "The swipe keyboard update didn't start; PowOS takes the next build", null)
         }
+    }
+
+    /**
+     * Rooted: the keyboard's runtime permissions (AutoGrants' allowlist: the mic) once per phone - right after the
+     * first install, or on the first check for a keyboard installed before this existed. Once: a permission the user
+     * takes back later stays taken back (updates keep grants anyway). Not rooted: nothing; the keyboard asks when ✨
+     * or its mic is first held.
+     */
+    private fun grantOnce(c: Context) {
+        if (prefs(c).getBoolean(KEY_GRANTED, false) || !andro.marchy.RootMode.enabled()) return
+        if (AutoGrants.apply(c, PACKAGE)) prefs(c).edit().putBoolean(KEY_GRANTED, true).apply()
     }
 
     private fun canWriteSecure(c: Context) =

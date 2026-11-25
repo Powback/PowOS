@@ -664,6 +664,13 @@ export interface Bridge {
     background?(): Promise<BackgroundApp[]>;
     /** Stops background app [key] (Android: force-stopped; Linux: [close]'s clean close). False: not stopped. */
     stopBackground?(key: string): Promise<boolean>;
+    /**
+     * What `.pow` web app [key] ("w:<host>") was allowed in its window: "microphone", "camera", "location", "midi"
+     * (WebAppPermissions.kt). An older APK rejects it ("no such call").
+     */
+    permissions?(key: string): Promise<string[]>;
+    /** Takes [kind] back from web app [key] ([permissions]); the site asks again next time. False: it didn't have it. */
+    revoke?(key: string, kind: string): Promise<boolean>;
   };
   usage: {
     /** Keys, last opened first. */

@@ -9,7 +9,7 @@ import { running, runOf } from "./running.ts";
 import { badgeOf } from "../apps/badge.ts";
 import { useEffect, useLayoutEffect, useRef, useState } from "preact/hooks";
 import { apps, closeDrawer, dock, launch, menu, setDocked, shownHomePage } from "../state.ts";
-import { computed } from "@preact/signals";
+import { computed, signal } from "@preact/signals";
 import { Icon, type IconName } from "./icons.tsx";
 import { startCarry } from "./grid.tsx";
 import { closeApp, windowsOf } from "./desktops.ts";
@@ -300,6 +300,28 @@ function newWindowItem(app: App): Item[] {
   return [["new window", () => void shownHomePage().then((p) => openNewWindow(app.key, app.label, p))]];
 }
 
+/**
+ * What each web app was allowed (the host's WebAppPermissions: microphone, camera, location, midi), read when its menu
+ * opens. An older APK has no call: no lines.
+ */
+const webGrants = signal<Record<string, string[]>>({});
+
+async function loadGrants(key: string) {
+  const read = powos.apps.permissions;
+  if (!read) return;
+  const kinds = await read(key).catch(() => [] as string[]);
+  webGrants.value = { ...webGrants.value, [key]: kinds };
+}
+
+/** A web app's site permissions, one line each: tapping it takes that one back (the site asks again next time). */
+function grantItems(app: App): Item[] {
+  if (app.kind !== "web" || !powos.apps.revoke) return [];
+  return (webGrants.value[app.key] ?? []).map((kind) => [
+    `revoke ${kind}`,
+    () => void powos.apps.revoke!(app.key, kind).then(() => loadGrants(app.key)),
+  ]);
+}
+
 /** What the app menu offers for [app]. */
 function menuItems(app: App): Item[] {
   const docked = dock.value.includes(app.key);
@@ -321,6 +343,7 @@ function menuItems(app: App): Item[] {
     ...(android && !app.system ? ([["uninstall", () => powos.apps.uninstall(app.key)]] as Item[]) : []),
     // A .pow web app (issue #8): only its launcher entry goes, and the catalog sync leaves it out from then on (PowApps
     // installs it again); the service itself is untouched.
+    ...grantItems(app),
     ...(app.kind === "web" ? ([["remove from launcher", () => powos.apps.uninstall(app.key)]] as Item[]) : []),
   ];
 }
@@ -340,6 +363,10 @@ function useMenuPresence() {
  */
 export function AppMenu() {
   const { m, leaving } = useMenuPresence();
+  const webKey = m?.app.kind === "web" ? m.app.key : null;
+  useEffect(() => {
+    if (webKey && !leaving) void loadGrants(webKey);
+  }, [webKey, leaving]);
   if (!m) return null;
   const { app, at } = m;
   const items = menuItems(app);

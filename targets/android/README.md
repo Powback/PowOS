@@ -151,6 +151,14 @@ settings directly. No root: Android's PackageInstaller (the first install and "i
 a notification; later updates without a prompt where Android allows it) and one notification to pick the keyboard.
 A keyboard the user picks afterwards stays.
 
+Runtime permissions (the user 11-25: "the apps added automatically dont have microphone permissions etc"): rooted,
+PowOS `pm grant`s what an app it installs needs, once, right after install, from an explicit per-package allowlist
+(`system/AutoGrants.kt`: the keyboard's RECORD_AUDIO for voice and ✨'s spoken note) and only what the app declares.
+No root: the keyboard asks at first use - an input method can't show the dialog, so its see-through
+`MicPermissionActivity` asks when ✨ is first held or 🎤 tapped. PowOS's bundled apps (`apps/*`) use no mic/camera of
+their own (the shell's voice goes through PowOS's own RECORD_AUDIO); `.pow` web apps: docs/WEB_WINDOWS.md
+"Web app permissions".
+
 ## Hacks (and why)
 
 Every workaround is marked `HACK:` at the spot in the code. Summary:

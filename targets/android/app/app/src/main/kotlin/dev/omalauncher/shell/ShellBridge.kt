@@ -570,6 +570,12 @@ class ShellBridge(
             "apps.uninstall" ->
                 if (a.getString(0).startsWith("w:")) WebApps.uninstall(context, a.getString(0).removePrefix("w:"))
                 else android(a.getString(0))?.let { runtime.androidApps.uninstall(it) }
+            // A .pow web app's site permissions (WebAppPermissions: what its window may use), and taking one back.
+            "apps.permissions" ->
+                a.getString(0).takeIf { it.startsWith("w:") }?.let { key ->
+                    JSONArray(WebPermissions.KINDS.filter { it in WebAppPermissions.of(context, key.removePrefix("w:")) })
+                } ?: JSONArray()
+            "apps.revoke" -> a.getString(0).startsWith("w:") && WebAppPermissions.revoke(context, a.getString(0).removePrefix("w:"), a.getString(1))
             // App API's "+ add app": the deep links an app opens, read from its manifest - nothing fired (AppLinks.kt).
             "apps.links" -> AppLinks.read(context, a.getString(0))
             "usage.recent" -> JSONArray(installed(runtime.usage.recent).take(a.optInt(0, 5)))

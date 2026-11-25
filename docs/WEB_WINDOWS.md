@@ -28,6 +28,42 @@ scope here, and `powos_desktop_mode` stays as it is (unchanged).
 
 ---
 
+## Web app permissions (2026-11-25)
+
+The user, 11-25: "the apps added automatically dont have microphone permissions etc". A `.pow` web app (WebApps.kt,
+synced from PowStation's catalog) runs in `WebAppActivity`, one WebView per site. What it does now:
+
+- **Asks**: `onPermissionRequest` (getUserMedia's mic/camera, Web MIDI sysex) and `onGeolocationPermissionsShowPrompt`.
+  Each maps to a kind (WebPermissions.kt: microphone -> RECORD_AUDIO, camera -> CAMERA, location -> FINE or COARSE,
+  midi -> nothing). A kind the site isn't allowed yet: PowOS's own dialog ("Allow <app> to use your microphone?"),
+  then Android's dialog for what PowOS itself doesn't hold - never silently. DRM ids and unknown resources: refused.
+- **Who**: only a frame whose origin is the app's own `.pow` host (or a host under it); anything embedded from
+  elsewhere, non-`.pow`, an address: refused without asking.
+- **Remembered** per site (key = the app id, the host; launcher key `w:<host>`) in files/webapp-permissions.json
+  (WebAppPermissions.kt). The app's long-press menu lists them as "revoke <kind>" (bridge `apps.permissions` /
+  `apps.revoke`; gate `webAppGrantsCheck`, shot `web-app-menu-perms`); removing the app from the launcher forgets them.
+  Geolocation is answered with retain=false so a revoke applies on the next load.
+- Also: file uploads (`onShowFileChooser` -> Android's picker), full-screen video (`onShowCustomView`), autoplay
+  (`mediaPlaybackRequiresUserGesture=false`, already).
+
+**Secure context (the decision).** getUserMedia and geolocation exist only in a secure context, and `.pow` is plain
+HTTP. Android's WebView has no API to mark an origin trustworthy (Chromium's `unsafely-treat-insecure-origin-as-secure`
+is a command-line flag a release WebView reads only when the app/device is debuggable) - not a product path. PowStation
+already has the fleet answer: its local CA (`PowStation/bin/pow-local-cert`, name-constrained to `.pow`, leaf certs per
+host, served on `websecure` with `local-only@docker`). So:
+
+- PowOS carries the CA's public cert (`res/raw/pow_ca.pem`) and trusts it **only** in WebAppActivity, **only** for the
+  app's own `.pow` host, **only** for an unknown-issuer error, and only when the leaf is signed by it, valid now, not a
+  CA and names the host (PowCa.trusts, `onReceivedSslError`). Every other host, error kind and the rest of the app keep
+  Android's normal TLS checks; nothing is relaxed globally (no network-security-config change).
+- WebAppTls opens the app on `https://` when its host answers a HEAD over TLS with such a cert (2xx/3xx/401; Traefik's
+  404 = a cert but no websecure router -> stays http), remembered per host and re-checked in the background each open.
+  The rest stay on http (no mic there). Moving a site to https changes its origin: its localStorage starts fresh once.
+- A site that needs the mic/camera gets `bin/pow-local-cert <host>` + a websecure router. Done for `voiceagent.pow`
+  (PowStation 2a67b0d); powmap/mao/powpass/senditt had it already. If the CA is ever rotated, update `pow_ca.pem`.
+- HACK (PowStation): Traefik's file watch misses edits made on the Mac (VirtioFS carries no inotify into the VM);
+  pow-local-cert now touches the config from inside the VM.
+
 ## The host snapshot: the contract (WINDOWS_FIX_PLAN.md phase 2, 2026-11-11)
 
 The host (`WebWindows.kt`) owns which windows exist and their state; the page (`ui/webwindows.tsx`) owns layout. All

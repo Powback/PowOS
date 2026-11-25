@@ -118,6 +118,8 @@ object WebApps {
                 icons.remove(id)
                 File(dir(context), "$id.png").delete()
                 if (removedSet(context).add(id)) saveRemoved(context)
+                // Its site permissions go with it: installed again, it asks again.
+                WebAppPermissions.revoke(context, id, null)
                 save(context)
                 before.size != apps!!.size
             }

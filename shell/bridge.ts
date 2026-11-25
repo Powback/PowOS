@@ -147,6 +147,8 @@ function native(host: NonNullable<Window["PowosHost"]>): Bridge {
       // The phone's only: another host (or an older APK) rejects them ("no such call") and the switcher lists none.
       background: () => call<BackgroundApp[]>("apps.background"),
       stopBackground: (key) => call<boolean>("apps.stopBackground", key),
+      permissions: (key) => call<string[]>("apps.permissions", key),
+      revoke: (key, kind) => call<boolean>("apps.revoke", key, kind),
     },
     usage: { recent: (limit) => call<string[]>("usage.recent", limit), frequent: (limit) => call<string[]>("usage.frequent", limit) },
     files: { places: () => call<FilePlace[]>("files.places"), open: (id) => call<boolean>("files.open", id) },
@@ -658,6 +660,14 @@ function mock(): Bridge {
       // A few running, Steam frozen (a game asleep with it) and Dolphin frozen (powos-sleep-gui).
       running: async () => ({ "a:chrome": "running", "l:konsole": "running", "a:spotify": "running", "a:signal": "running", "l:dolphin": "frozen", "l:steam": "frozen" }),
       links: async (pkg) => ({ pkg, label: pkg, links: [{ uri: `https://${pkg}.example/item/.*`, activity: ".ItemActivity" }] }),
+      // A web app's site grants (WebAppPermissions.kt): none until a shot or test sets window.__webGrants.
+      permissions: async (key) => ((window as unknown as { __webGrants?: Record<string, string[]> }).__webGrants ?? {})[key] ?? [],
+      revoke: async (key, kind) => {
+        const g = ((window as unknown as { __webGrants?: Record<string, string[]> }).__webGrants ??= {});
+        const had = (g[key] ?? []).includes(kind);
+        g[key] = (g[key] ?? []).filter((k) => k !== kind);
+        return had;
+      },
       ...mockBackground(icon),
     },
     // Most used: some recent, some opened less lately (the launcher's Suggested leaves out what Recent shows).

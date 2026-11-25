@@ -8429,6 +8429,49 @@ async function appMenuCheck() {
 }
 
 /**
+ * In the page: a `.pow` web app's menu (apps.tsx AppMenu grantItems) lists what its site was allowed (the host's
+ * "apps.permissions", WebAppPermissions.kt) as "revoke <kind>" lines before "remove from launcher"; a tap takes that
+ * one back through "apps.revoke" and the line goes. An Android app's menu has none.
+ */
+async function webAppGrantsCheck() {
+  const S = await window.__gw.mod("./state.ts");
+  const { powos } = await window.__gw.mod("./bridge.ts");
+  const fails = [];
+  const was = { permissions: powos.apps.permissions, revoke: powos.apps.revoke };
+  const grants = { "w:gate.pow": ["microphone", "camera"] };
+  const revoked = [];
+  powos.apps.permissions = async (key) => [...(grants[key] ?? [])];
+  powos.apps.revoke = async (key, kind) => (revoked.push(`${key} ${kind}`), (grants[key] = (grants[key] ?? []).filter((k) => k !== kind)), true);
+  const items = () => [...document.querySelectorAll(".menu .menu-item")].map((b) => b.textContent);
+  const at = new DOMRect(100, 200, 60, 60);
+  try {
+    S.menu.value = null;
+    await window.__gw.frames(1);
+    S.menu.value = { app: { key: "w:gate.pow", label: "Gate", icon: "", kind: "web", url: "http://gate.pow/", web: "page" }, at };
+    await window.__gw.until(() => items().includes("revoke camera"), 2000);
+    const tail = items().slice(-3);
+    if (tail.join("|") !== "revoke microphone|revoke camera|remove from launcher") fails.push(`web app menu ends [${items().join(", ")}], not [..., revoke microphone, revoke camera, remove from launcher]`);
+    [...document.querySelectorAll(".menu .menu-item")].find((b) => b.textContent === "revoke microphone")?.click();
+    await window.__gw.until(() => revoked.length > 0, 2000);
+    if (revoked.join() !== "w:gate.pow microphone") fails.push(`"revoke microphone" revoked [${revoked.join()}]`);
+    S.menu.value = null;
+    await window.__gw.frames(2);
+    S.menu.value = { app: { key: "w:gate.pow", label: "Gate", icon: "", kind: "web", url: "http://gate.pow/", web: "page" }, at };
+    await window.__gw.until(() => items().includes("revoke camera"), 2000);
+    if (items().includes("revoke microphone")) fails.push(`after revoking, the menu still offers [${items().join(", ")}]`);
+    S.menu.value = null;
+    await window.__gw.frames(1);
+    S.menu.value = { app: { key: "a:gate.menu/.Main", label: "Menu App", icon: "", kind: "android" }, at };
+    await window.__gw.until(() => items().length > 0, 2000);
+    if (items().some((t) => t.startsWith("revoke "))) fails.push(`an Android app's menu offers [${items().join(", ")}]`);
+  } finally {
+    S.menu.value = null;
+    Object.assign(powos.apps, was);
+  }
+  return fails;
+}
+
+/**
  * In the page: a touch inside a floating window is the app's (ui/gesture.ts startGesture, desktops.ts inWindow) - a
  * swipe up there never opens the launcher, down never the shade; the same swipe outside every window still does.
  */
@@ -15364,7 +15407,7 @@ try {
             await r.page.reload().catch(() => {});
             await r.page.waitForFunction(() => window.__powosAlive === true, { timeout: READY_MS, polling: 50 }).catch(() => {});
           }
-          for (const step of [desktopReleaseCheck, desktopsCheck, desktopsEdge, dockTapCheck, appMenuCheck, windowTouchCheck, webWindowCheck, PINCH_HELPERS, webWindowPinchCheck, TILE_HELPERS, webWindowTileInputCheck, webWindowTileLayoutCheck, DOCK_HELPERS, webWindowTileDockCheck, webWindowParkCheck, webWindowSnapGhostCheck, TAB_HELPERS, TAB_JUDGES, webWindowTabsCheck, webWindowResizeCheck, webWindowZoneKeepsHome, webWindowRegionsTiled, webWindowRegionsResized, webWindowClearAll, webWindowReloadCheck, webWindowStallCheck, webWindowGhostCheck, SY_HELPERS, SY_STEPS, webWindowSnapshotSync, GRAB_HELPERS, webWindowGrabCheck, dtHelpers, webDockToggleOne, webDockToggleHost, webDockTogglePage, webDockToggleMany, webDockToggleCell, webDockLaunchFull, ONE_HELPERS, webWindowOneInstance, webWindowOneLauncher, SF_HELPERS, webWindowSnapFill, webWindowRelaunch, webDockGroupCheck, WW_HELPERS, webWindowMaskCheck, GLUE_HELPERS, webWindowGlueCheck, webWindowGlueAiCheck, webWindowAheadCheck]) {
+          for (const step of [desktopReleaseCheck, desktopsCheck, desktopsEdge, dockTapCheck, appMenuCheck, webAppGrantsCheck, windowTouchCheck, webWindowCheck, PINCH_HELPERS, webWindowPinchCheck, TILE_HELPERS, webWindowTileInputCheck, webWindowTileLayoutCheck, DOCK_HELPERS, webWindowTileDockCheck, webWindowParkCheck, webWindowSnapGhostCheck, TAB_HELPERS, TAB_JUDGES, webWindowTabsCheck, webWindowResizeCheck, webWindowZoneKeepsHome, webWindowRegionsTiled, webWindowRegionsResized, webWindowClearAll, webWindowReloadCheck, webWindowStallCheck, webWindowGhostCheck, SY_HELPERS, SY_STEPS, webWindowSnapshotSync, GRAB_HELPERS, webWindowGrabCheck, dtHelpers, webDockToggleOne, webDockToggleHost, webDockTogglePage, webDockToggleMany, webDockToggleCell, webDockLaunchFull, ONE_HELPERS, webWindowOneInstance, webWindowOneLauncher, SF_HELPERS, webWindowSnapFill, webWindowRelaunch, webDockGroupCheck, WW_HELPERS, webWindowMaskCheck, GLUE_HELPERS, webWindowGlueCheck, webWindowGlueAiCheck, webWindowAheadCheck]) {
             const problems = await r.page.evaluate(step).catch((e) => { throw new Error(`${step.name}: ${e.message}`); });
             if (problems.length) return problems;
           }

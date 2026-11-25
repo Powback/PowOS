@@ -32,6 +32,12 @@
     <uses-permission android:name="android.permission.VIBRATE" />
     <!-- Speech input for the agent prompt bar; only recognized text reaches Linux. -->
     <uses-permission android:name="android.permission.RECORD_AUDIO" />
+    <!-- What a .pow web app may ask for in its window (shell/WebAppActivity.kt, WebPermissions.kt): getUserMedia's
+         camera and the site's geolocation, asked at run time and only after the user allowed it for that site. -->
+    <uses-permission android:name="android.permission.CAMERA" />
+    <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
+    <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />
+    <uses-feature android:name="android.hardware.camera" android:required="false" />
     <!-- Home's swipe down pulls the notification shade down. -->
     <!-- The control center's state and sliders (shell/QuickSettings.kt). WRITE_SETTINGS is an app op, granted there. -->
     <uses-permission android:name="android.permission.ACCESS_WIFI_STATE" />
