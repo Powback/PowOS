@@ -4520,6 +4520,12 @@ html:root .ai-screen.status > .ai-glass.tile { --glass-blur-native: var(--backdr
 /* Wraps rather than cut (the user, 11-01: "Done this month…" truncated); the title itself is kept short (aistatus.tsx heroTitle). */
 .ais-title { font-size: calc(var(--text-item) * 1.18); font-weight: 700; color: var(--color-foreground); overflow-wrap: anywhere; }
 .ais-line { font-size: var(--text-small); color: var(--color-foreground); opacity: 0.86; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+/* The hero's counts, "12 open · 48 done" (aistatus.tsx Hero): each a tap that filters the list; the one on is underlined.
+   A taller tap area by padding, given back by margin: the title stays one line high (gate ai-status: never wraps). */
+.ais-counts { font-variant-numeric: tabular-nums; }
+.ais-tally { min-height: 0; padding: 8px 0; margin: -8px 0; border: 0; background: none; font: inherit; color: inherit; text-decoration: underline 2px transparent; text-underline-offset: 2px; transition: text-decoration-color var(--spring-ms) var(--spring); }
+.ais-tally.on { text-decoration-color: var(--color-accent); }
+.ais-tally-all { margin-left: auto; min-height: 32px; padding: 0 4px; border: 0; background: none; font: inherit; font-weight: 600; letter-spacing: 0; text-transform: none; color: var(--color-accent); }
 .ai-screen > .ai-scroll.ais { display: flex; flex-direction: column; gap: 12px; padding-inline: var(--ais-side); padding-top: calc(var(--ai-head) - var(--inset-top, 0px) + 22px); padding-bottom: calc(var(--ai-tail) + 40px); }
 .ais-sec { display: flex; flex-direction: column; animation: ais-rise var(--spring-slow-ms) var(--spring-slow) both; }
 .ais-h { display: flex; white-space: nowrap; align-items: center; gap: 8px; margin: 0 0 4px; padding: 0 4px; font-size: var(--text-small); font-weight: 650; letter-spacing: 0.06em; text-transform: uppercase; color: var(--color-foreground); opacity: 0.9; }

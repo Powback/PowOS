@@ -22,7 +22,7 @@ import { fleet, isPowOS, otherProjects, projectOf, workingNow, type Worker } fro
 import { aiScreen, chat, openPanel, page } from "../state.ts";
 import { board, boardSeen, checks, list, noteOf, WorkFeed, type WorkRow } from "./aiboard.tsx";
 import { upNext, UpNext } from "./upnext.tsx";
-import { areaOf, areaStats, dotOf, heroRing, progressFocus, waitsOn, type AreaStat, type Dot } from "./aiprogress.tsx";
+import { areaOf, areaStats, counts, dotOf, heroRing, progressFocus, waitsOn, type AreaStat, type BoardCounts, type Dot } from "./aiprogress.tsx";
 import { NeedStack } from "./aistack.tsx";
 import type { MicTarget } from "./dictation.ts";
 import { BrokenReply, clearBroken, type Broken } from "./brokenreply.tsx";
@@ -47,7 +47,7 @@ export const whileShown = <T,>(shown: boolean, f: () => T): T => (shown ? f() : 
 /** What the status page shows: what needs the user, the fleet and its working agents, recently done, up next. */
 const statusData = () => {
   const f = fleet();
-  return { needs: needsYou(), f, working: workingNow(f), done: recentlyDone(), next: upNext() };
+  return { needs: needsYou(), f, working: workingNow(f), done: recentlyDone(), next: upNext(), c: counts.value };
 };
 
 /** "3 working · 1 needs you", or "All quiet". */
@@ -284,11 +284,11 @@ function CountItem({ w, d }: { w: WorkRow; d: Dot }) {
 const toProgress = (area: string | null) => ((progressFocus.value = area ? { area, id: "" } : null), (aiAgent.value = null), (aiScreen.value = "progress"));
 
 /** One state's tasks in an opened area: its heading and count, then each task behind that count. */
-function CountGroup({ d, rows }: { d: Dot; rows: WorkRow[] }) {
+function CountGroup({ d, rows, head = STATE_HEAD[d], state = d }: { d: Dot; rows: WorkRow[]; head?: string; state?: string }) {
   return (
-    <section class="ais-ck-group" data-state={d} aria-label={STATE_HEAD[d]}>
+    <section class="ais-ck-group" data-state={state} aria-label={head}>
       <h4 class="ais-ck-h">
-        {STATE_HEAD[d]}
+        {head}
         <span class="ais-n">{rows.length}</span>
       </h4>
       <ul class="ais-ck-list">
@@ -584,22 +584,117 @@ function Foot({ compose }: { compose: preact.ComponentChildren }) {
 /** The manager is working: only this flips the hero's word, so a reply streaming in (each chunk a new chat) leaves the hero be. */
 const managerBusy = computed(() => chat.value.busy);
 
-/** The hero's title, short enough never to be cut: "Daily driver 50%", or "66% this month" (the month's share done). */
-const heroTitle = (r: { pct: number; label: string }) => (/this month/i.test(r.label) ? `${r.pct}% this month` : `${r.label} ${r.pct}%`);
+/** Which tasks a header count filters the page's list to (null: the page as it is). */
+export type CountKind = "open" | "done";
+export const countFilter = signal<CountKind | null>(null);
 
-/** The hero: the daily driver's ring and two lines - its name and share, then what's going on. [onTap]: folded, the strip's tap. */
+/** A count tapped: the list filtered to it (again: the whole page back); folded, the sections open and the status back. */
+function pickCount(k: CountKind) {
+  const on = countFilter.value === k ? null : k;
+  countFilter.value = on;
+  if (on && foldShrunk.value) unshrink();
+  if (on) foldOpen.value = true;
+}
+
+/** One of the header's counts, "12 open": a tap filters the list to those tasks. */
+function CountButton({ k, n, on }: { k: CountKind; n: number; on: boolean }) {
+  return (
+    <button type="button" class={`ais-tally ${on ? "on" : ""}`} data-count={k} aria-pressed={on} onClick={() => pickCount(k)}>
+      {n} {k}
+    </button>
+  );
+}
+
+/** The hero's second line: the daily driver's share when the board has that epic, what's going on, done this week. */
+const heroLine = (ring: { pct: number } | null, line: string, c: BoardCounts) =>
+  [ring ? `Daily driver ${ring.pct}%` : "", line, c.week ? `${c.week} done this week` : ""].filter(Boolean).join(" · ");
+
+/**
+ * The hero: the counts first - "12 open · 48 done", each a tap that filters the list (the user, 11-25, circling "Done
+ * this month 30%": the percentage meant nothing, they want how many are open and how many done) - then one line: the
+ * daily driver's share (its ring beside, only when the board has that epic), what's going on, done this week.
+ * [onTap]: folded, the strip's tap (not on a count or the ⋯).
+ */
 function Hero({ shown, needs, working, more, onTap }: { shown: boolean; needs: number; working: number; more: preact.ComponentChildren; onTap?: () => void }) {
-  const { ring, line } = whileShown(shown, () => ({ ring: heroRing.value, line: statusLine(working, needs, managerBusy.value) }));
-  const tap = onTap && ((e: MouseEvent) => !(e.target as Element).closest(".ai-more") && onTap());
+  const { ring, line, c, on, seen } = whileShown(shown, () => ({ ring: heroRing.value, line: statusLine(working, needs, managerBusy.value), c: counts.value, on: countFilter.value, seen: boardSeen.value }));
+  const tap = onTap && ((e: MouseEvent) => !(e.target as Element).closest(".ai-more, .ais-tally") && onTap());
   return (
     <header class={`ais-top ${onTap ? "ais-strip" : ""}`} onClick={tap}>
       {ring && <HeroRing pct={ring.pct} label={ring.label} />}
       <span class="ais-status">
-        <span class="ais-title">{ring ? heroTitle(ring) : "PowOS AI"}</span>
-        <span class="ais-line">{line}</span>
+        {seen ? (
+          <span class="ais-title ais-counts">
+            <CountButton k="open" n={c.open} on={on === "open"} />
+            {" · "}
+            <CountButton k="done" n={c.done} on={on === "done"} />
+          </span>
+        ) : (
+          <span class="ais-title">PowOS AI</span>
+        )}
+        <span class="ais-line">{heroLine(ring, line, c)}</span>
       </span>
       {more}
     </header>
+  );
+}
+
+/** The open tasks' groups, in the order that matters to the user: needs you, to check, working, up next, paused, idle. */
+const OPEN_GROUPS: [string, string, Dot][] = [
+  ["waiting", "Needs you", "waiting"],
+  ["check", "To check", "check"],
+  ["working", "Working", "working"],
+  ["queued", "Up next", "stalled"],
+  ["paused", "Paused", "stalled"],
+  ["stalled", "Idle", "stalled"],
+];
+/** An open task's group: its state dot, an idle one split into up next (queued), paused (blocked) and idle. */
+const openGroupOf = (w: WorkRow, d: Dot) => (d !== "stalled" ? d : w.status === "queued" ? "queued" : w.status === "blocked" ? "paused" : "stalled");
+
+/** The done list shows this many, then a "more" row. */
+const COUNT_DONE_ROWS = 20;
+
+/**
+ * The list a header count filtered to (countFilter): every open task, by state, each with what it waits on and "Open
+ * task"; or every done task, newest first, each opening in place. Its heading is the same count, "Show all" the page back.
+ */
+function CountList({ which, c, shown }: { which: CountKind; c: BoardCounts; shown: boolean }) {
+  const you = whileShown(shown, () => needIds(needsYou()));
+  const [all, setAll] = useState(false);
+  const [openId, setOpenId] = useState<string | null>(null);
+  const rows = which === "open" ? c.rows.open : c.rows.done;
+  const groups = which === "open" ? OPEN_GROUPS.map(([k, head, d]) => ({ k, head, d, rows: rows.filter((w) => openGroupOf(w, dotOf(w, you)) === k) })).filter((g) => g.rows.length) : [];
+  const done = all ? rows : rows.slice(0, COUNT_DONE_ROWS);
+  return (
+    <section class="ais-sec ais-counted" data-sec={`count-${which}`} aria-label={which === "open" ? "Open tasks" : "Done tasks"}>
+      <h3 class="ais-h">
+        {which === "open" ? "Open" : "Done"}
+        <span class="ais-n">{rows.length}</span>
+        <button type="button" class="ais-tally-all" onClick={() => (countFilter.value = null)}>
+          Show all
+        </button>
+      </h3>
+      {!rows.length && <div class="ais-empty">{which === "open" ? "Nothing open." : "Nothing done yet."}</div>}
+      {which === "open" ? (
+        <div class="ais-ck">
+          {groups.map((g) => (
+            <CountGroup key={g.k} d={g.d} rows={g.rows} head={g.head} state={g.k} />
+          ))}
+        </div>
+      ) : (
+        <ul class="ais-list ais-done">
+          {done.map((w) => (
+            <DoneRow key={w.id} w={w} open={openId === w.id} onToggle={() => setOpenId(openId === w.id ? null : w.id)} />
+          ))}
+          {rows.length > done.length && (
+            <li>
+              <button type="button" class="ais-more" onClick={() => setAll(true)}>
+                {rows.length - done.length} more
+              </button>
+            </li>
+          )}
+        </ul>
+      )}
+    </section>
   );
 }
 
@@ -617,20 +712,27 @@ export function AiStatus(props: { shown: boolean; more: preact.ComponentChildren
 /** The status page alone (unfolded's left column; folded without a chat below it): hero, sections, foot. */
 function StatusPage(props: { shown: boolean; more: preact.ComponentChildren; compose?: preact.ComponentChildren; mic: MicTarget; beside?: boolean }) {
   const { shown, more } = props;
-  const { needs, f, working, done, next } = whileShown(shown, statusData);
+  const { needs, f, working, done, next, c } = whileShown(shown, statusData);
   const quiet = !needs.length && !working.length && !done.length && !next.length;
+  const filter = countFilter.value;
   return (
     <>
       {shown && <WorkFeed />}
       <Hero shown={shown} needs={needs.length} working={working.length} more={more} />
       <div class="ai-scroll ais">
         <NeedStack needs={needs} />
-        {props.beside && <NeedsAttention stuck={f.attention} />}
-        {props.beside && <ByArea shown={shown} />}
-        <WorkingNow working={working} shown={shown} />
-        <UpNext rows={next} busy={busyPage(needs.length, working.length)} />
-        <RecentlyDone rows={done} />
-        {quiet && <div class="ais-empty">Nothing waits on you and no agent is working right now.</div>}
+        {filter ? (
+          <CountList which={filter} c={c} shown={shown} />
+        ) : (
+          <>
+            {props.beside && <NeedsAttention stuck={f.attention} />}
+            {props.beside && <ByArea shown={shown} />}
+            <WorkingNow working={working} shown={shown} />
+            <UpNext rows={next} busy={busyPage(needs.length, working.length)} />
+            <RecentlyDone rows={done} />
+            {quiet && <div class="ais-empty">Nothing waits on you and no agent is working right now.</div>}
+          </>
+        )}
       </div>
       {!props.beside && <Foot compose={props.compose} />}
     </>
@@ -700,15 +802,15 @@ function useCollapse(wrap: preact.RefObject<HTMLDivElement>) {
   }, []);
 }
 
-/** Done today (local day), of Recently done's rows. */
-const doneToday = (rows: WorkRow[]) => rows.filter((w) => new Date(Number(w.done || w.updated)).toDateString() === new Date().toDateString()).length;
+/** The sections closed: the count's filter goes with them. */
+const closeFold = () => ((foldOpen.value = false), (countFilter.value = null));
 
-/** The one summary row: "3 working · 12 done today ▾", a tiny dot per working agent; a tap opens the sections in place. */
-function FoldSummary({ working, done, next }: { working: number; done: WorkRow[]; next: number }) {
+/** The one summary row: "3 working · 12 done today ▾" (today: boardCounts, as the header), a tiny dot per working agent; a tap opens the sections in place. */
+function FoldSummary({ working, today, next }: { working: number; today: number; next: number }) {
   const open = foldOpen.value;
-  const words = [`${working} working`, `${doneToday(done)} done today`, next ? `${next} up next` : ""].filter(Boolean).join(" · ");
+  const words = [`${working} working`, `${today} done today`, next ? `${next} up next` : ""].filter(Boolean).join(" · ");
   return (
-    <button type="button" class="ais-sum" aria-expanded={open} onClick={() => (foldOpen.value = !open)}>
+    <button type="button" class="ais-sum" aria-expanded={open} onClick={() => (open ? closeFold() : (foldOpen.value = true))}>
       <span class="ais-sum-dots" aria-hidden="true">
         {Array.from({ length: Math.min(working, 8) }, (_, i) => (
           <span key={i} class="ais-sum-dot" />
@@ -721,7 +823,7 @@ function FoldSummary({ working, done, next }: { working: number; done: WorkRow[]
 }
 
 /** The strip's tap: shrunk, the status back; else the summary opened or closed. */
-const stripTap = () => (foldShrunk.value ? unshrink() : (foldOpen.value = !foldOpen.value));
+const stripTap = () => (foldShrunk.value ? unshrink() : foldOpen.value ? closeFold() : (foldOpen.value = true));
 
 /**
  * The folded page (the manager's design, 11-01; the user, 17:05: "collapse working now and recently done and then show
@@ -733,9 +835,10 @@ function Stacked(props: { shown: boolean; more: preact.ComponentChildren; compos
   const { shown, more } = props;
   const wrap = useRef<HTMLDivElement>(null);
   useCollapse(wrap);
-  const { needs, working, done, next } = whileShown(shown, statusData);
+  const { needs, working, done, next, c } = whileShown(shown, statusData);
   const open = foldOpen.value;
-  const any = working.length + done.length + next.length > 0;
+  const filter = countFilter.value;
+  const any = working.length + done.length + next.length > 0 || !!filter;
   return (
     <>
       {shown && <WorkFeed />}
@@ -743,12 +846,18 @@ function Stacked(props: { shown: boolean; more: preact.ComponentChildren; compos
       <div class={`ais-fold ${foldShrunk.value ? "shrunk" : ""}`} inert={foldShrunk.value}>
         <div class="ai-scroll ais">
           <NeedStack needs={needs} />
-          {any && <FoldSummary working={working.length} done={done} next={next.length} />}
+          {any && <FoldSummary working={working.length} today={c.today} next={next.length} />}
           <div class={`ais-sum-body ${open ? "open" : ""}`} inert={!open}>
             <div class="ais-sum-in">
-              <WorkingNow working={working} shown={shown} />
-              <UpNext rows={next} busy={busyPage(needs.length, working.length)} />
-              <RecentlyDone rows={done} />
+              {filter ? (
+                <CountList which={filter} c={c} shown={shown} />
+              ) : (
+                <>
+                  <WorkingNow working={working} shown={shown} />
+                  <UpNext rows={next} busy={busyPage(needs.length, working.length)} />
+                  <RecentlyDone rows={done} />
+                </>
+              )}
             </div>
           </div>
         </div>

@@ -24,6 +24,7 @@ ui/assist.*             ^(assist-draw-.*|send-dictation-assist-.*)$
 dev/assist-draw-check.js  ^assist-draw-.*$
 dev/ai-tab-head-check.js  ^ai-tab-head-.*$
 dev/ai-devices-check.js  ^ai-devices-.*$
+dev/ai-counts-check.js  ^ai-counts-.*$
 ui/aidevices.tsx        ^(ai-devices-.*|ai-tab-head-.*)$
 ui/devicesview.ts       ^ai-devices-.*$
 ui/pet.*                ^pet$

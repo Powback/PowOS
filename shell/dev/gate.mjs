@@ -5336,7 +5336,7 @@ async function aiStatusWordsSetup() {
     row("mac:w3", { step: "Bash cd /Users/macback/pw/x && npm test shell/ui/a.tsx" }),
   ] });
   P.board.value = P.board.value.filter((w) => !/^daily driver/i.test(w.title));
-  await G.until(() => document.querySelectorAll(".ai-screen.status .ais-work").length >= 3 && /this month/.test(document.querySelector(".ai-screen.status .ais-title")?.textContent ?? ""), 3000);
+  await G.until(() => document.querySelectorAll(".ai-screen.status .ais-work").length >= 3 && /\d+ open/.test(document.querySelector(".ai-screen.status .ais-title")?.textContent ?? ""), 3000);
   const h = document.querySelector(".ai-screen.status .ais-title");
   return {
     rows: [...document.querySelectorAll(".ai-screen.status .ais-work")].map((e) => [e.querySelector(".ais-work-title")?.textContent.trim(), e.querySelector(".ais-step-t.in")?.textContent.trim() ?? ""]),
@@ -5358,10 +5358,10 @@ function aiStatusRowWords(rows) {
   return fails;
 }
 
-/** The hero's title: "N% this month" without a daily driver row, never cut nor ellipsed. */
+/** The hero's title: "N open · M done" (counts, never a month's share; the user 11-25), never cut nor ellipsed. */
 function aiStatusHeadWords(head) {
   if (!head) return ["no hero title"];
-  const fails = /^\d+% this month$/.test(head.text) ? [] : [`the header reads "${head.text}", not "N% this month"`];
+  const fails = /^\d+ open · \d+ done$/.test(head.text) ? [] : [`the header reads "${head.text}", not "N open · M done"`];
   if (head.cut) fails.push(`the header "${head.text}" is cut`);
   if (head.ellipsis) fails.push("the header still ends in an ellipsis when long");
   return fails;
@@ -5859,7 +5859,8 @@ async function aiParkedFacts() {
   const names = [...document.querySelectorAll(".aip-parked .aip-area-name")].map(txt);
   const inAreas = [...document.querySelectorAll(".aip-areas:not(.aip-parked) .aip-area-name")].map(txt);
   const sub = txt(document.querySelector(".aip-ring-sub"));
-  const counts = A.boardCounts(P.board.value);
+  const { open, done, backlog, stale } = A.boardCounts(P.board.value);
+  const counts = { open, done, backlog, stale };
   const below = (() => {
     const areas = document.querySelector(".aip-areas:not(.aip-parked)")?.getBoundingClientRect();
     const parked = document.querySelector(".aip-parked")?.getBoundingClientRect();
@@ -16066,6 +16067,18 @@ try {
       runs.push(open(browser, `${ORIGIN}/index.html`, `ai-devices-${label}`, view).then((r) => whenReady(r, async () => {
         const fails = await r.page.evaluate(async () => (await importShim("./dev/ai-devices-check.js")).aiDevicesCheck());
         return fails.map((f) => `ai-devices-${label}: ${f}`);
+      })));
+  // The header's counts (dev/ai-counts-check.js; the user, 11-25, circling "Done this month 30%": how many are open,
+  // how many done): "N open · M done" off a mock board of every state (backlog/stale in neither), each count a tap that
+  // filters the list to exactly those tasks, folded and unfolded.
+  if (process.env.SHELL_PAGES !== "0")
+    for (const [label, view] of [
+      ["folded", { width: 404, height: 899 }],
+      ["unfolded", { width: 821, height: 883 }],
+    ])
+      runs.push(open(browser, `${ORIGIN}/index.html`, `ai-counts-${label}`, view).then((r) => whenReady(r, async () => {
+        const fails = await r.page.evaluate(async () => (await importShim("./dev/ai-counts-check.js")).aiCountsCheck());
+        return fails.map((f) => `ai-counts-${label}: ${f}`);
       })));
   // Try cards show before | after, the after an emulator shot of the fix (the user, 2026-11-01).
   if (process.env.SHELL_PAGES !== "0")

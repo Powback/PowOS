@@ -27,8 +27,18 @@ export async function aiHeroRenders() {
   // The busy word turns on with the first chunk and off with the last: two renders at most (the setup's chat is idle).
   if (counts.chat > 2) fails.push(`the hero rendered ${counts.chat}x over a 20-chunk reply, expected <= 2 (busy on, off)`);
   if (counts.board > 5) fails.push(`the hero rendered ${counts.board}x over 5 board updates, expected <= 5`);
-  if (!document.querySelector(".ai-screen.status .ais-top .ais-title")?.textContent?.includes("%")) fails.push("the hero shows no ring figure");
+  fails.push(...heroFigureFails());
   return { fails, counts };
+}
+
+/** The daily driver's figure is on the ring and its line; the title is the board's counts (the user, 11-25). */
+function heroFigureFails() {
+  const of = (sel) => document.querySelector(`.ai-screen.status .ais-top ${sel}`);
+  const words = (sel) => (of(sel) ? of(sel).textContent.trim() : "");
+  const fails = [];
+  if (!of(".ais-ring") || !words(".ais-line").includes("%")) fails.push("the hero shows no ring figure");
+  if (!/^\d+ open · \d+ done$/.test(words(".ais-title"))) fails.push("the hero's title isn't the board's counts");
+  return fails;
 }
 
 // Perf P1 (same trace): the AI page's tab row (AiSegs) re-rendered on every reply chunk - it read chat.value whole for

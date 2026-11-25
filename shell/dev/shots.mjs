@@ -624,6 +624,10 @@ const SCENES = [
   ["ai-tab-devices", "home", DEVICES_MOCK, "wallpaper", undefined, AI_TAB_SIZES],
   // The Devices tab's signed-in devices: Remove's confirm on the offline desktop; the Removed fold open.
   ["ai-devices-confirm", "home", DEVICES_CONFIRM, "wallpaper", undefined, SIZES],
+  // The header's counts off a mock board of every state (dev/ai-counts-check.js; the user 11-25): plain, "open" tapped, "done" tapped.
+  ["ai-counts", "home", 'const K = await U("./dev/ai-counts-check.js"); await K.aiCountsSetup();', "wallpaper", undefined, SIZES],
+  ["ai-counts-open", "home", 'const K = await U("./dev/ai-counts-check.js"); await K.aiCountsSetup(); await K.tapCount("open");', "wallpaper", undefined, SIZES],
+  ["ai-counts-done", "home", 'const K = await U("./dev/ai-counts-check.js"); await K.aiCountsSetup(); await K.tapCount("done");', "wallpaper", undefined, SIZES],
   ["ai-devices-removed", "home", DEVICES_REMOVED, "wallpaper", undefined, SIZES],
   ["chat", "home", `S.chat.value = { busy: false, items: ${CHAT_SAMPLE} }; S.chatting.value = true; S.drawer.value = 1;`, "wallpaper"],
   ["chat-open", "home", `S.chat.value = { busy: false, items: ${CHAT_SAMPLE} }; S.chatting.value = true; S.drawer.value = 1; await sleep(300); document.querySelector('.chat .tl-row')?.click(); await sleep(100); document.querySelectorAll('.chat .tl-row.has-out')[0]?.click(); document.querySelectorAll('.chat .tl-row.has-out')[2]?.click();`, "wallpaper"],
@@ -1131,6 +1135,8 @@ for (let i = 0; i <= 4; i++) {
 
 try {
   for (const [name, mode, setup, behind, touch, sizes] of SCENES) {
+    // The film scenes are pushed after the list's SHOTS_ONLY filter: '^ai-counts' also rendered every film-* frame.
+    if (ONLY && !ONLY.test(name)) continue;
     for (const [sizeName, size] of Object.entries(sizes ?? (mode === "desktop" ? DESKTOP_SIZES : SIZES))) {
       let timer;
       const limit = new Promise((_, no) => (timer = setTimeout(() => no(new Error("timed out (40 s)")), 40000)));

@@ -49,20 +49,44 @@ export function areaOf(w: WorkRow) {
 const doneAt = (w: WorkRow) => Number(w.done || w.updated || 0);
 const inMonth = (w: WorkRow, now: number) => w.status !== "done" || now - doneAt(w) < MONTH_MS;
 
+/** What boardCounts gives: how many are open, done (today, this week), parked; and the open and done rows behind them. */
+export interface BoardCounts {
+  open: number;
+  done: number;
+  backlog: number;
+  stale: number;
+  today: number;
+  week: number;
+  rows: { open: WorkRow[]; done: WorkRow[] };
+}
+
+/** How many of [done] (newest first) were done since local midnight, and in the last 7 days. */
+function doneWhen(done: WorkRow[], now: number) {
+  const midnight = new Date(now).setHours(0, 0, 0, 0);
+  return { today: done.filter((w) => doneAt(w) >= midnight).length, week: done.filter((w) => now - doneAt(w) < 7 * 24 * 3_600_000).length };
+}
+
 /**
  * The board's counts, the ONE place they are worked out (every header and glance reads these, so a parked task is
- * never counted as open work anywhere): [open] - not done and not parked; [done] - closed (the board keeps a week);
- * [backlog] / [stale] - parked, shown only in their folds.
+ * never counted as open work anywhere): [open] - not done and not parked; [done] - closed (the board keeps a week), of
+ * them [today] / [week]; [backlog] / [stale] - parked, shown only in their folds; [rows] the open and done tasks behind
+ * the two numbers (done newest first) - the list a tap on the status header's "N open" / "M done" filters to (the user,
+ * 11-25, circling "Done this month 30%": they want how many are open and how many done, not a share of a month).
  */
-export function boardCounts(rows: WorkRow[] = board.value): { open: number; done: number; backlog: number; stale: number } {
-  const c = { open: 0, done: 0, backlog: 0, stale: 0 };
+export function boardCounts(rows: WorkRow[] = board.value, now = Date.now()): BoardCounts {
+  const parked = { backlog: 0, stale: 0 };
+  const open: WorkRow[] = [];
+  const done: WorkRow[] = [];
   for (const w of rows) {
-    if (w.status === "done") c.done++;
-    else if (w.status === "backlog" || w.status === "stale") c[w.status]++;
-    else c.open++;
+    if (w.status === "backlog" || w.status === "stale") parked[w.status]++;
+    else (w.status === "done" ? done : open).push(w);
   }
-  return c;
+  done.sort((a, b) => doneAt(b) - doneAt(a));
+  return { open: open.length, done: done.length, ...parked, ...doneWhen(done, now), rows: { open, done } };
 }
+
+/** [boardCounts] worked out once per board change, never per render (as heroRing). */
+export const counts = computed(() => boardCounts(board.value));
 
 /** The board per area: the most waiting on the user first, then the most open. Parked tasks (backlog, stale) aren't in it. */
 export function areaStats(rows: WorkRow[] = board.value, now = Date.now(), you: Set<string> = needIds(needsYou(rows))): AreaStat[] {
@@ -83,19 +107,24 @@ export function areaStats(rows: WorkRow[] = board.value, now = Date.now(), you: 
 
 /** The ring's figure: the daily-driver epic's own progress (its board row), else the month's share done overall. */
 export function driverPct(stats: AreaStat[], rows: WorkRow[] = board.value): { pct: number; label: string } | null {
-  const w = rows.find((x) => /^daily driver\b/i.test(x.title) && (x.progressTotal ?? 0) > 0);
-  if (w) return { pct: Math.round((100 * Math.min(w.progressDone ?? 0, w.progressTotal!)) / w.progressTotal!), label: "Daily driver" };
+  const dd = dailyDriverOf(rows);
+  if (dd) return dd;
   const total = stats.reduce((n, a) => n + a.total, 0);
   return total ? { pct: Math.round((100 * stats.reduce((n, a) => n + a.done, 0)) / total), label: "Done this month" } : null;
 }
 
+/** The daily-driver epic's own progress (its board row with steps), or null when the board has none. */
+export function dailyDriverOf(rows: WorkRow[] = board.value): { pct: number; label: string } | null {
+  const w = rows.find((x) => /^daily driver\b/i.test(x.title) && (x.progressTotal ?? 0) > 0);
+  return w ? { pct: Math.round((100 * Math.min(w.progressDone ?? 0, w.progressTotal!)) / w.progressTotal!), label: "Daily driver" } : null;
+}
+
 /**
- * The status hero's ring figure, worked out once per change of the board, its checks or the user's answers - never per
- * render. Perf trace perf-1793551432355 (11-01 17:43): the hero re-scanned the whole board twice on each render (needsYou,
- * then areaStats), one 4.7 ms commit on the phone, more than half a 120 Hz frame. The month window's edge is read when
- * the board changes, which it does many times an hour: a row ageing out of it between two changes waits for the next.
+ * The status hero's ring: the daily driver's figure only - never the month's share done (the user, 11-25, circling "Done
+ * this month 30%": it meant nothing; the hero leads with counts, boardCounts). Worked out once per board change, never
+ * per render (perf trace perf-1793551432355, 11-01: a per-render board scan was a 4.7 ms commit).
  */
-export const heroRing = computed(() => driverPct(areaStats(board.value, Date.now(), needIds(needsYou()))));
+export const heroRing = computed(() => dailyDriverOf(board.value));
 
 /** A large progress ring with its percentage in the middle. */
 export function ProgressRing({ pct, label, sub }: { pct: number; label: string; sub?: string }) {
