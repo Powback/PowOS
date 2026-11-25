@@ -11,3 +11,8 @@ echo "$out" | grep -q yes && echo yes
 # lint-ok: the dump is two lines, both written before head can exit
 "$A" shell dumpsys -l | head -n1 && echo listed
 "$A" shell dumpsys input_method | awk '/x/{print; exit}' # lint-ok: fixture escape on the line itself
+wg_age() {
+  { docker exec wireguard wg show wg0 dump 2>/dev/null || true; } | awk -F'\t' -v now="$(date +%s)" \
+    -v ip="$ip" 'NR > 1 && !f && index("," $4 ",", "," ip "/32,") { print now - $5; f = 1 }'
+}
+up=$(docker ps -q --filter name=x | awk 'NF{f=1} END{exit !f}' && echo yes)

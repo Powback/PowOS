@@ -25,6 +25,9 @@
 # Everything lives in /data/powos (+ /data/adb/service.d/powos.sh). Removing PowOS = deleting those.
 # powos-units: deploy - what this installs on the phone is checked against units/ (test/tier1/test-units-registry.py)
 set -euo pipefail
+# A step that fails under set -e names itself in the deploy's log (adb pushes are -q: 11-25 a failing one left the
+# ship's log with only its header line and "rc 141").
+trap 'rc=$?; echo "rooted.sh: line $LINENO failed (rc $rc): $BASH_COMMAND" >&2' ERR
 HERE=$(cd "$(dirname "$0")" && pwd)
 NOTE="" SILENT="" ARGS=()
 while [ $# -gt 0 ]; do

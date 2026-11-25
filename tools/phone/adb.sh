@@ -4,6 +4,9 @@
 # Paths given to push/pull/install are on the Mac, anywhere (temp dirs too); they reach a throwaway android-builder container sharing
 # powos-vadb's network, so any session or agent can use it (no per-session mounts).
 set -euo pipefail
+# A step that fails under set -e says so: adb.sh's own exits (69 offline, 70 transport) print their reason, but a
+# failing check before adb ran (wg_age's rc 141, 11-25) ended the caller's deploy with nothing in its log.
+trap 'rc=$?; echo "adb.sh: line $LINENO failed (rc $rc): $BASH_COMMAND" >&2' ERR
 # The device: POWOS_DEVICE=phone (default) or emu - the emulator lane (tools/emu/emu.sh: the AVD shaped like the Open's
 # inner screen), through the SDK's own adb on the Mac. Every check that goes through adb.sh (and cdp.sh, idle.sh,
 # root.sh, user.sh, shot.sh) runs unchanged against it.
@@ -31,9 +34,13 @@ fi
 # PHONE_WG_STALE_S (default 180 s, WireGuard's own reject-after time) means no packet can reach the phone. Exit 69
 # (EX_UNAVAILABLE) with "phone offline" on stderr, without touching adb. Unreadable (wireguard container down or not
 # ours): carry on as before - the command then fails on its own.
+# awk reads the whole dump (no `exit` on the match) and the function never fails: under this file's
+# `set -euo pipefail` an awk that left early could SIGPIPE `docker exec` (a Go CLI dies of it on stdout), and a
+# failing `age=$(wg_age)` ended adb.sh with rc 141 and no message - every caller then died silently (the rooted
+# deploy's "FAILED rc 141" with only the log's header line: 11-09 9430aab0c, 11-25 cffe536e9).
 wg_age() {
-  docker exec wireguard wg show wg0 dump 2>/dev/null | awk -F'\t' -v now="$(date +%s)" \
-    -v ip="$serial_ip" 'NR > 1 && index("," $4 ",", "," ip "/32,") { print ($5 == 0 ? "never" : now - $5); exit }'
+  { docker exec wireguard wg show wg0 dump 2>/dev/null || true; } | awk -F'\t' -v now="$(date +%s)" \
+    -v ip="$serial_ip" 'NR > 1 && !f && index("," $4 ",", "," ip "/32,") { print ($5 == 0 ? "never" : now - $5); f = 1 }'
 }
 # Not a VPN peer (a LAN serial): no handshake to check.
 [[ "$serial_ip" == 10.13.13.* ]] || wg_age() { :; }

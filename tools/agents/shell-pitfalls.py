@@ -8,7 +8,8 @@ WHY (11-10): three checks FAILed on shell pitfalls, not product bugs; each cost 
                 `| grep -q`, `| grep -m1`, `| grep x >/dev/null` - GNU grep and ugrep quit early then too) closes
                 the pipe early; adb dies of SIGPIPE (141) and the pipeline reads as false even on a match. Read to
                 the end (`awk '/x/&&!f{print;f=1}'`, `awk '/x/{f=1} END{exit !f}'` for a test) or filter on the
-                phone side (`sh_ "dumpsys window | grep -m1 x"`). (plasma-modes focus())
+                phone side (`sh_ "dumpsys window | grep -m1 x"`). (plasma-modes focus()) Any `docker ...` producer
+                too: adb.sh's `docker exec wireguard wg show | awk '...exit'` killed rooted deploys rc 141 (11-25).
   nested-quote  a single quote inside an argument that ends up inside `su -c '...'` (sh_ "...", a literal
                 "su -c '...'") closes the su string early, so the command runs mangled. Use \\" or '\\''.
                 (ww-popup-x11)
@@ -53,10 +54,26 @@ def awk_programs(text):
     """Yield (offset, program) for every awk program written as a single-quoted shell word after `awk`."""
     for m in AWK_RE.finditer(text):
         i = m.end()
-        # skip options/assignments up to the program's opening quote, on the same logical line
+        # skip options/assignments up to the program's opening quote, on the same logical line. An option word is
+        # skipped whole, its quotes too: `awk -F'\t' -v ip="$x" '...exit'` (adb.sh's wg_age, 11-25) read '\t' as the
+        # program and missed the exit.
         while i < len(text) and text[i] != "'" and text[i] != "\n":
+            if text.startswith("\\\n", i):  # a line continuation between the words
+                i += 2
+                continue
+            if text[i] == '"':  # a double-quoted word (-v now="$(date +%s)"): skipped whole
+                close = text.find('"', i + 1)
+                i = close + 1 if close > 0 else len(text)
+                continue
             if text[i] in "|;&)`":
                 break
+            if text[i] == "-" and (i == 0 or text[i - 1] in " \t"):
+                while i < len(text) and text[i] not in " \t\n|;&)`":
+                    if text[i] in "'\"":
+                        close = text.find(text[i], i + 1)
+                        i = close if close > 0 else len(text) - 1
+                    i += 1
+                continue
             i += 1
         if i >= len(text) or text[i] != "'":
             continue
@@ -166,7 +183,10 @@ def is_producer(seg, wrappers):
     first = s.split(None, 1)[0] if s.split() else ""
     remote = ADB_RE.match(s + " ") is not None or first in wrappers
     if not remote:
-        return re.match(r"(dumpsys|logcat|journalctl)\b", s) is not None or re.match(r"cat\b[^|]*\.log\b", s) is not None
+        # docker's CLI (Go) dies of SIGPIPE on its stdout too: `docker exec wireguard wg show wg0 dump | awk '...exit'`
+        # in adb.sh's wg_age failed ~1 in 200 calls with rc 141, silently ending every rooted deploy that hit it (11-25).
+        return (re.match(r"(dumpsys|logcat|journalctl|docker)\b", s) is not None
+                or re.match(r"cat\b[^|]*\.log\b", s) is not None)
     spans = quoted_spans(s)
     for m in PRODUCER_WORD.finditer(s):
         inside = [sp for sp in spans if sp[0] <= m.start() < sp[1]]
@@ -368,7 +388,11 @@ def check_sigpipe(text, lines):
                     or (subst and errexit))
             # the last command of a function: its status is the function's (`f | grep -q`, `if f`)
             if not used:
-                rest = s[s.find(segs[-1]) + len(segs[-1]):]
+                # located by its tail: split_pipelines shows a $(...) inside the segment as $(…), so the whole
+                # segment is not in s (adb.sh's wg_age `awk -v now="$(date +%s)" '...exit'` was missed, 11-25)
+                tail = segs[-1].rstrip()[-24:]
+                pos = s.rfind(tail) if tail else -1
+                rest = s[pos + len(tail):] if pos >= 0 else ""
                 nxt = llist[idx + 1][1].strip() if idx + 1 < len(llist) else ""
                 if re.match(r"\s*[;\n]?\s*\}", rest) or (nxt.startswith("}") and re.sub(r"\s", "", rest) in ("", ";")):
                     used = True
@@ -611,7 +635,7 @@ def lint_file(path):
             found.append((ln, "awk-ternary", "unparenthesized ?: with < or > in print/printf (BSD awk reads a redirect)"))
     for ln, kind in check_sigpipe(text, lines):
         if not lint_ok(lines, ln):
-            found.append((ln, "sigpipe", f"pipefail + adb/dumpsys/logcat producer + early-exit consumer ({kind})"
+            found.append((ln, "sigpipe", f"pipefail + adb/dumpsys/logcat/docker producer + early-exit consumer ({kind})"
                                          " whose status is used; read to the end (awk '/x/{f=1} END{exit !f}')"))
     for ln in check_nested_quotes(text, lines):
         if not lint_ok(lines, ln):

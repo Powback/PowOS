@@ -40,7 +40,7 @@ PENV='export XDG_RUNTIME_DIR=/run/powos-app WAYLAND_DISPLAY=wayland-0'
 phone_stop() { ww_us "pkill -f 'waypipe --debug -s /tmp/wpw/' ; pkill -f 'UNIX-CONNECT:/tmp/wpw/'; sleep 0.3; pgrep -af 'waypipe|socat' | grep /tmp/wpw || true" >/dev/null; }
 wwc_extra() { phone_stop; dc exec -T phone phone-stop >/dev/null 2>&1; dc rm -sf phone >/dev/null 2>&1
   local left; left=$(ww_us "pgrep -af 'waypipe|socat' | grep /tmp/wpw" ); [ -z "$left" ] || say "left on the phone: $left"
-  say "cleaned: .58 container $(docker --context "${POW_JOB_CONTEXT:-pow58}" ps -q --filter name=rmm-phone | grep -q . && echo STILL UP || echo removed), phone waypipe/socat ended"; }
+  say "cleaned: .58 container $(docker --context "${POW_JOB_CONTEXT:-pow58}" ps -q --filter name=rmm-phone | awk 'NF{f=1} END{exit !f}' && echo STILL UP || echo removed), phone waypipe/socat ended"; }
 # ss_sample: the waypipe TCP connection on the phone - "bytes_acked bytes_received retrans_total".
 ss_sample() { rs "ss -tin dst $H58 | tr -s ' \t' '\n' | awk -F: '/^bytes_acked:/{a=\$2} /^bytes_received:/{r=\$2} /^retrans:/{split(\$2,x,\"/\"); t=x[2]} END{print a+0, r+0, t+0}'" | tail -1; }
 rssi() { sh_ "cmd wifi status" | grep -oE 'RSSI: -?[0-9]+|Link speed: [0-9]+' | tr '\n' ' '; }

@@ -1192,7 +1192,12 @@ run)
           if ! ug=$(units_gate "$Q/units-gate.log"); then
             rrc=9; echo "REFUSED: an install no unit claims (units/; test/tier1/test-units-registry.py): $ug" >> "$rlog"
           else
-            ( PATH="$here/bin:$PATH" POWOS_SHIP_SERVICE=1 targets/android/rooted/rooted.sh deploy --note "$rn" ) >> "$rlog" 2>&1 || rrc=$?
+            # Traced (bash -x, a timestamp per step) into its log with all of its stdout and stderr: 11-25 cffe536e9
+            # failed rc 141 after 6.5 min with nothing but the header in the log (its adb pushes are -q), so neither
+            # the failing step nor the slow ones could be seen. The trace is rooted.sh's own; adb.sh etc. are not traced.
+            ( PATH="$here/bin:$PATH" POWOS_SHIP_SERVICE=1 PS4='+ $(date +%T) rooted.sh:$LINENO: ' \
+                bash -x targets/android/rooted/rooted.sh deploy --note "$rn" ) >> "$rlog" 2>&1 || rrc=$?
+            echo "$(date +%T) rooted.sh deploy rc $rrc" >> "$rlog"
           fi
           rm -rf "$SL"; rm -f "$Q/installing"; [ "$(cat "$Q/wants-phone" 2>/dev/null)" = $$ ] && rm -f "$Q/wants-phone"
           if [ $rrc = 0 ]; then
@@ -1210,7 +1215,7 @@ run)
           else
             echo "$T" > "$Q/failed-rooted"; rm -f "$Q/rooted-pending" "$Q/rooted-note"
             echo "$(date +%T) ${T:0:9}: rooted deploy FAILED rc $rrc (log $rlog) - waiting for a new origin commit"
-            mail "ship ${T:0:9} (rooted:$rchg) FAILED rc $rrc: $(tail -1 "$rlog" | cut -c1-200) - log $rlog on the Mac; fix it on origin, then ship.sh request again"
+            mail "ship ${T:0:9} (rooted:$rchg) FAILED rc $rrc: $(grep -v -e '^+ ' -e '^[0-9:]* rooted.sh deploy rc ' "$rlog" | tail -1 | cut -c1-200) - log $rlog on the Mac; fix it on origin, then ship.sh request again"
           fi
         fi
       fi

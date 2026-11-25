@@ -21,7 +21,7 @@ expect() {  # expect <fixture> <kind> <count>
 
 echo "== bad fixtures are caught =="
 expect bad-awk-ternary.sh awk-ternary 3
-expect bad-sigpipe.sh sigpipe 7
+expect bad-sigpipe.sh sigpipe 9
 expect bad-nested-quote.sh nested-quote 4
 expect bad-logcat-dup-tag.sh logcat-dup-tag 2
 expect bad-py-c.sh py-c 3
