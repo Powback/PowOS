@@ -147,30 +147,43 @@ object StatusIcons {
         show4g: Boolean = false,
     ): String? {
         val lte = if (show4g) "4G" else "LTE"
-        @Suppress("DEPRECATION")
-        return when (override) {
-            TelephonyDisplayInfo.OVERRIDE_NETWORK_TYPE_NR_ADVANCED, TelephonyDisplayInfo.OVERRIDE_NETWORK_TYPE_NR_NSA_MMWAVE -> "5G+"
-            TelephonyDisplayInfo.OVERRIDE_NETWORK_TYPE_NR_NSA -> "5G"
-            TelephonyDisplayInfo.OVERRIDE_NETWORK_TYPE_LTE_CA, TelephonyDisplayInfo.OVERRIDE_NETWORK_TYPE_LTE_ADVANCED_PRO -> "$lte+"
-            else ->
-                when (network) {
-                    TelephonyManager.NETWORK_TYPE_NR -> "5G"
-                    TelephonyManager.NETWORK_TYPE_LTE -> lte
-                    19 -> "$lte+" // NETWORK_TYPE_LTE_CA (hidden)
-                    TelephonyManager.NETWORK_TYPE_HSPAP -> "H+"
-                    TelephonyManager.NETWORK_TYPE_HSDPA, TelephonyManager.NETWORK_TYPE_HSUPA, TelephonyManager.NETWORK_TYPE_HSPA -> "H"
-                    TelephonyManager.NETWORK_TYPE_UMTS, TelephonyManager.NETWORK_TYPE_TD_SCDMA,
-                    TelephonyManager.NETWORK_TYPE_EVDO_0, TelephonyManager.NETWORK_TYPE_EVDO_A, TelephonyManager.NETWORK_TYPE_EVDO_B,
-                    TelephonyManager.NETWORK_TYPE_EHRPD,
-                    -> "3G"
-                    TelephonyManager.NETWORK_TYPE_EDGE -> "E"
-                    TelephonyManager.NETWORK_TYPE_GPRS -> "G"
-                    TelephonyManager.NETWORK_TYPE_CDMA, TelephonyManager.NETWORK_TYPE_1xRTT -> "1X"
-                    TelephonyManager.NETWORK_TYPE_GSM -> "G"
-                    else -> null // UNKNOWN, IWLAN (Wi-Fi calling: no mobile type)
-                }
-        }
+        val raised = OVERRIDES[override] ?: RADIO[network] ?: return null // UNKNOWN, IWLAN (Wi-Fi calling): no mobile type
+        return raised.replace("LTE", lte)
     }
+
+    /** The display overrides' labels ("LTE" becomes the carrier's "4G" in [type]). */
+    @Suppress("DEPRECATION")
+    private val OVERRIDES =
+        mapOf(
+            TelephonyDisplayInfo.OVERRIDE_NETWORK_TYPE_NR_ADVANCED to "5G+",
+            TelephonyDisplayInfo.OVERRIDE_NETWORK_TYPE_NR_NSA_MMWAVE to "5G+",
+            TelephonyDisplayInfo.OVERRIDE_NETWORK_TYPE_NR_NSA to "5G",
+            TelephonyDisplayInfo.OVERRIDE_NETWORK_TYPE_LTE_CA to "LTE+",
+            TelephonyDisplayInfo.OVERRIDE_NETWORK_TYPE_LTE_ADVANCED_PRO to "LTE+",
+        )
+
+    /** The radios' own labels, as SystemUI's MobileMappings. */
+    private val RADIO =
+        mapOf(
+            TelephonyManager.NETWORK_TYPE_NR to "5G",
+            TelephonyManager.NETWORK_TYPE_LTE to "LTE",
+            19 to "LTE+", // NETWORK_TYPE_LTE_CA (hidden)
+            TelephonyManager.NETWORK_TYPE_HSPAP to "H+",
+            TelephonyManager.NETWORK_TYPE_HSDPA to "H",
+            TelephonyManager.NETWORK_TYPE_HSUPA to "H",
+            TelephonyManager.NETWORK_TYPE_HSPA to "H",
+            TelephonyManager.NETWORK_TYPE_UMTS to "3G",
+            TelephonyManager.NETWORK_TYPE_TD_SCDMA to "3G",
+            TelephonyManager.NETWORK_TYPE_EVDO_0 to "3G",
+            TelephonyManager.NETWORK_TYPE_EVDO_A to "3G",
+            TelephonyManager.NETWORK_TYPE_EVDO_B to "3G",
+            TelephonyManager.NETWORK_TYPE_EHRPD to "3G",
+            TelephonyManager.NETWORK_TYPE_EDGE to "E",
+            TelephonyManager.NETWORK_TYPE_GPRS to "G",
+            TelephonyManager.NETWORK_TYPE_GSM to "G",
+            TelephonyManager.NETWORK_TYPE_CDMA to "1X",
+            TelephonyManager.NETWORK_TYPE_1xRTT to "1X",
+        )
 
     /** TelephonyManager.DATA_ACTIVITY_* -> the bar's data arrows. */
     fun activity(value: Int): String? =

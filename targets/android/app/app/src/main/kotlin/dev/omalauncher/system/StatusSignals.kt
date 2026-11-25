@@ -244,33 +244,43 @@ class StatusSignals(
     // --- the SIMs
 
     /** The subscriptions again (a SIM in or out, the phone permission granted, carrier config): callbacks per SIM. */
-    @Suppress("MissingPermission")
     private fun resubscribe() {
         val allowed = phoneAllowed()
-        val active =
-            if (allowed) {
-                runCatching { subscriptions?.activeSubscriptionInfoList.orEmpty().map { it.subscriptionId to it.simSlotIndex } }.getOrDefault(emptyList())
-            } else {
-                emptyList()
-            }
         // Without the permission (or no active subscription known): the default subscription's manager, as slot 0.
-        val wanted = active.ifEmpty { listOf(SubscriptionManager.getDefaultSubscriptionId() to 0) }
-        if (wanted.map { it.first } != subs.keys.toList() || allowed != listenedAllowed) {
-            listenedAllowed = allowed
-            subs.values.forEach { s -> s.callbacks.forEach { runCatching { s.manager.unregisterTelephonyCallback(it) } } }
-            subs.clear()
-            for ((id, slot) in wanted) {
-                val manager = if (id >= 0) telephony.createForSubscriptionId(id) else telephony
-                val sub = Sub(id, slot, manager)
-                subs[id] = sub
-                listen(sub, allowed)
-            }
-        }
-        for (s in subs.values) {
-            s.show4g = allowed && runCatching { context.getSystemService(CarrierConfigManager::class.java)?.getConfigForSubId(s.id)?.getBoolean(CarrierConfigManager.KEY_SHOW_4G_FOR_LTE_DATA_ICON_BOOL) == true }.getOrDefault(false)
-            s.carrier = runCatching { s.manager.networkOperatorName?.takeIf { it.isNotBlank() } }.getOrNull()
-        }
+        val wanted = activeSubs(allowed).ifEmpty { listOf(SubscriptionManager.getDefaultSubscriptionId() to 0) }
+        if (wanted.map { it.first } != subs.keys.toList() || allowed != listenedAllowed) relisten(wanted, allowed)
+        subs.values.forEach { carrier(it, allowed) }
         cells(allowed)
+    }
+
+    /** (subscription id, slot) of each active SIM; none without the phone permission. */
+    @Suppress("MissingPermission")
+    private fun activeSubs(allowed: Boolean): List<Pair<Int, Int>> {
+        if (!allowed) return emptyList()
+        return runCatching { subscriptions?.activeSubscriptionInfoList.orEmpty().map { it.subscriptionId to it.simSlotIndex } }.getOrDefault(emptyList())
+    }
+
+    private fun relisten(
+        wanted: List<Pair<Int, Int>>,
+        allowed: Boolean,
+    ) {
+        listenedAllowed = allowed
+        subs.values.forEach { s -> s.callbacks.forEach { runCatching { s.manager.unregisterTelephonyCallback(it) } } }
+        subs.clear()
+        for ((id, slot) in wanted) {
+            val sub = Sub(id, slot, if (id >= 0) telephony.createForSubscriptionId(id) else telephony)
+            subs[id] = sub
+            listen(sub, allowed)
+        }
+    }
+
+    private fun carrier(
+        s: Sub,
+        allowed: Boolean,
+    ) {
+        val config = if (allowed) runCatching { context.getSystemService(CarrierConfigManager::class.java)?.getConfigForSubId(s.id) }.getOrNull() else null
+        s.show4g = config?.getBoolean(CarrierConfigManager.KEY_SHOW_4G_FOR_LTE_DATA_ICON_BOOL) == true
+        s.carrier = runCatching { s.manager.networkOperatorName?.takeIf { it.isNotBlank() } }.getOrNull()
     }
 
     private fun listen(
@@ -336,24 +346,31 @@ class StatusSignals(
         val slots = runCatching { telephony.activeModemCount }.getOrDefault(1).coerceAtLeast(1)
         val sims = (0 until slots).map { StatusIcons.sim(runCatching { telephony.getSimState(it) }.getOrDefault(TelephonyManager.SIM_STATE_UNKNOWN)) }
         val dataSub = SubscriptionManager.getDefaultDataSubscriptionId()
-        val shown =
-            StatusIcons.slots(sims).map { (slot, sim) ->
-                val sub = subs.values.firstOrNull { it.slot == slot } ?: subs.values.firstOrNull()?.takeIf { slot == 0 && subs.size == 1 }
-                if (sub == null || sim != "ready") return@map Cell(slot, sim)
-                val data = sub.id == dataSub || subs.size == 1
-                Cell(
-                    slot = slot,
-                    sim = sim,
-                    bars = sub.bars,
-                    service = sub.service,
-                    type = if (data && sub.service == "in") StatusIcons.type(sub.network, sub.override, sub.show4g) else null,
-                    roaming = sub.roaming,
-                    activity = if (data && sub.connected) sub.activity else null,
-                    data = data,
-                    carrier = sub.carrier,
-                )
-            }
+        val shown = StatusIcons.slots(sims).map { (slot, sim) -> cell(slot, sim, dataSub) }
         update { copy(cells = shown, limited = !allowed) }
+    }
+
+    /** [slot]'s icon: its SIM state, and with a ready SIM what its subscription's callbacks said. */
+    private fun cell(
+        slot: Int,
+        sim: String,
+        dataSub: Int,
+    ): Cell {
+        val sub = subs.values.firstOrNull { it.slot == slot } ?: subs.values.singleOrNull()?.takeIf { slot == 0 }
+        if (sub == null || sim != "ready") return Cell(slot, sim)
+        val data = sub.id == dataSub || subs.size == 1
+        val inService = sub.service == "in"
+        return Cell(
+            slot = slot,
+            sim = sim,
+            bars = sub.bars,
+            service = sub.service,
+            type = StatusIcons.type(sub.network, sub.override, sub.show4g).takeIf { data && inService },
+            roaming = sub.roaming,
+            activity = sub.activity.takeIf { data && sub.connected },
+            data = data,
+            carrier = sub.carrier,
+        )
     }
 
     private inline fun update(f: Status.() -> Status) {
