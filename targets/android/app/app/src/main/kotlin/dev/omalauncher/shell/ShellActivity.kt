@@ -20,6 +20,10 @@ import kotlinx.coroutines.launch
 /** Home with its pull-up panel up ("apps" or "ai"): an edge gesture's (EdgeGestures). */
 const val EXTRA_HOME_PANEL = "dev.omalauncher.shell.panel"
 
+/** One of the shell's screens open over home (screens.ts ScreenName): a notification's details, e.g. "settings" for
+ *  PowosUpdates' failed packages (Settings > system updates lists each one and why). */
+const val EXTRA_SCREEN = "dev.omalauncher.shell.screen"
+
 /** With [EXTRA_HOME_PANEL] "ai": words waiting in PowOS AI's field (a share to the old AI app's entry). */
 const val EXTRA_HOME_DRAFT = "dev.omalauncher.shell.draft"
 
@@ -396,6 +400,7 @@ class ShellActivity : Activity() {
     /** [EXTRA_HOME_PANEL] (an edge gesture's "app drawer", the old AI app's entries): home with that pull-up panel
      * up, [EXTRA_HOME_DRAFT] in the AI page's field. Sent once the page is ready (a cold start's intent too). */
     private fun openPanel(intent: Intent) {
+        intent.getStringExtra(EXTRA_SCREEN)?.let { name -> host.whenReady { host.bridge.emit("screens.open", org.json.JSONObject().put("name", name)) } }
         val kind = intent.getStringExtra(EXTRA_HOME_PANEL) ?: return
         val ev = org.json.JSONObject().put("kind", kind)
         intent.getStringExtra(EXTRA_HOME_DRAFT)?.let { d -> ev.put("draft", d) }

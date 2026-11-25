@@ -77,12 +77,37 @@ public final class Progress {
         NotificationManager nm = nm(ctx);
         if (nm == null)
             return;
-        nm.notify(nid(id), new Notification.Builder(ctx, CHANNEL)
+        Notification.Builder b = new Notification.Builder(ctx, CHANNEL)
                 .setSmallIcon(android.R.drawable.stat_notify_error)
                 .setContentTitle((title == null ? id : title) + " failed")
                 .setContentText(message)
-                .setAutoCancel(true)
-                .build());
+                .setStyle(new Notification.BigTextStyle().bigText(message))
+                .setAutoCancel(true);
+        android.app.PendingIntent tap = details(ctx, id);
+        if (tap != null)
+            b.setContentIntent(tap);
+        nm.notify(nid(id), b.build());
+    }
+
+    /** The PowOS shell's screen a failed job's details are on (screens.ts), null: none. */
+    static String screenFor(String id) {
+        // lib/phone-update.sh's base step: Settings > system updates lists each package that failed and why.
+        return "base-sync".equals(id) ? "settings" : null;
+    }
+
+    /** A tap that opens [screenFor]'s screen in the PowOS shell (ShellActivity's EXTRA_SCREEN), null: not in this app. */
+    private static android.app.PendingIntent details(Context ctx, String id) {
+        String screen = screenFor(id);
+        if (screen == null)
+            return null;
+        android.content.Intent i = new android.content.Intent()
+                .setClassName(ctx, "dev.omalauncher.shell.ShellActivity")
+                .addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)
+                .putExtra("dev.omalauncher.shell.screen", screen);
+        if (ctx.getPackageManager().resolveActivity(i, 0) == null)
+            return null;
+        return android.app.PendingIntent.getActivity(ctx, nid(id), i,
+                android.app.PendingIntent.FLAG_IMMUTABLE | android.app.PendingIntent.FLAG_UPDATE_CURRENT);
     }
 
     /** A job id from a file name "progress-ID.state", or null. */

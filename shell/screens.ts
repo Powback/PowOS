@@ -102,6 +102,16 @@ export interface PowosUpdates {
   rooted: boolean;
   via: "app" | "ship";
   waiting: string[];
+  /** Linux packages the updater couldn't install, each with pacman's reason; missing on an older host. */
+  failures?: UpdateFailure[];
+}
+
+/** One package lib/phone-update.sh couldn't install (UpdatePlan.Failure): tried again after [next] (Unix s; 0: unknown). */
+export interface UpdateFailure {
+  package: string;
+  reason: string;
+  tries: number;
+  next: number;
 }
 
 export interface SettingsState {

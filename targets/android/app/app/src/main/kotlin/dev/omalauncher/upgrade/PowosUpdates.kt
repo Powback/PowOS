@@ -166,6 +166,7 @@ object UpdatePlan {
         val shell: String?,
         val rooted: Boolean,
         val apkWaiting: Boolean,
+        val failures: List<Failure> = emptyList(),
     ) {
         fun json(): JSONObject =
             JSONObject()
@@ -178,6 +179,7 @@ object UpdatePlan {
                 .put("rooted", rooted)
                 .put("via", if (rooted) "ship" else "app")
                 .put("waiting", JSONArray(if (apkWaiting) listOf(APK_WAITING) else emptyList()))
+                .put("failures", JSONArray(failures.map { it.json() }))
     }
 
     /** What an APK the installer holds for the person's tap reads as (the notification is the way to install it). */
@@ -194,9 +196,11 @@ object UpdatePlan {
         reached: Boolean,
         linuxFailed: Boolean,
         vpn: Boolean = false,
+        failures: List<Failure> = emptyList(),
     ): String? =
         when {
             !reached -> unreachable(vpn)
+            failures.isNotEmpty() -> failedLine(failures)
             linuxFailed -> "the Linux update didn't finish (see run/powos-update.log)"
             else -> null
         }
@@ -214,6 +218,51 @@ object UpdatePlan {
         got: Long,
         total: Long,
     ): Int? = if (total > 0) (got * 100 / total).toInt() else null
+
+    /**
+     * A package lib/phone-update.sh couldn't install: its "#fail <package> <reason>" line, or a line of the image's
+     * failures file (/var/lib/powos/update-failures: package, tries, next try in epoch seconds, reason - tab-separated;
+     * the session start's runs write it too). [next] 0: not known (a run's own line).
+     */
+    data class Failure(
+        val pkg: String,
+        val reason: String,
+        val tries: Int = 1,
+        val next: Long = 0,
+    ) {
+        fun json(): JSONObject = JSONObject().put("package", pkg).put("reason", reason).put("tries", tries).put("next", next)
+    }
+
+    /** A run's "#fail <package> <reason>" lines, each package once (the last). */
+    fun failures(lines: List<String>): List<Failure> =
+        lines
+            .mapNotNull { l -> FAIL.find(l.trim())?.let { Failure(it.groupValues[1], it.groupValues[2].trim()) } }
+            .associateBy { it.pkg }
+            .values
+            .toList()
+
+    /** The image's failures file ([Failure]); bad lines skipped. */
+    fun parseFailures(text: String): List<Failure> =
+        text.lines().mapNotNull { l ->
+            val f = l.split('\t')
+            if (f.size < 4 || f[0].isBlank()) return@mapNotNull null
+            Failure(f[0], f.drop(3).joinToString("\t").trim(), f[1].toIntOrNull() ?: 1, f[2].toLongOrNull() ?: 0)
+        }
+
+    /** Settings' and the notification's line for failed packages: "couldn't install gum (why) and fzf (why)". */
+    fun failedLine(fs: List<Failure>): String? {
+        if (fs.isEmpty()) return null
+        val named = fs.take(3).joinToString(", ") { "${it.pkg} (${it.reason})" }
+        return "couldn't install $named${if (fs.size > 3) " and ${fs.size - 3} more" else ""} - tried again later"
+    }
+
+    /** The notification's title for failed packages (its tap opens Settings' details): null when none failed. */
+    fun failedTitle(fs: List<Failure>): String? =
+        fs.takeIf { it.isNotEmpty() }?.let { f ->
+            "Couldn't install ${if (f.size == 1) f[0].pkg else "${f.size} Linux packages: " + f.take(3).joinToString(", ") { it.pkg }} - tap for details"
+        }
+
+    private val FAIL = Regex("^#fail (\\S+) (.+)$")
 
     /** pacman's "(2/3) upgrading kwin  [###]" on a terminal, "upgrading kwin..." without one (the app's pipe). */
     private val STEP = Regex("^(?:\\((\\d+)/(\\d+)\\) )?(upgrading|installing|reinstalling) ([A-Za-z0-9@._+-]+?)(?:\\.\\.\\.)?(?:\\s|$)")
@@ -268,8 +317,26 @@ object PowosUpdates {
             shell = runCatching { ShellSource.servedCommit(context) }.getOrNull(),
             rooted = RootedGuest.enabled,
             apkWaiting = s.apkWaiting,
+            failures = failures(context),
         )
     }
+
+    /** The image's failures file (lib/phone-update.sh): what the last runs couldn't install and why, empty: none. */
+    fun failures(context: Context): List<UpdatePlan.Failure> =
+        runCatching {
+            UpdatePlan.parseFailures(File(andro.marchy.SessionService.rootfs(context), "var/lib/powos/update-failures").readText())
+        }.getOrDefault(emptyList())
+
+    /** A notification's tap: Settings, whose "system updates" card lists each failed package and why. */
+    fun details(context: Context): PendingIntent =
+        PendingIntent.getActivity(
+            context,
+            0x5058,
+            Intent(context, dev.omalauncher.shell.ShellActivity::class.java)
+                .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                .putExtra(dev.omalauncher.shell.EXTRA_SCREEN, "settings"),
+            PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT,
+        )
 
     /**
      * The state for the Linux side: run/powos-updates.json (the image's XDG_RUNTIME_DIR, rooted /run/powos-app), written
@@ -335,7 +402,7 @@ object PowosUpdates {
         status(context).checking = true
         publish(context)
         try {
-            val (reached, done) = runSteps(context)
+            val (reached, done, failed) = runSteps(context, force)
             if (reached) {
                 val at = System.currentTimeMillis()
                 state.writeText("$at $now")
@@ -343,16 +410,26 @@ object PowosUpdates {
                 status.summary = UpdatePlan.result(done)
             }
             val summary = UpdatePlan.summary(reached, done, force, vpnUp(context))
-            Log.i(TAG, "run done: ${summary ?: "nothing new"}")
-            if (summary == null) UpdateNotes.cancel(context) else UpdateNotes.finished(context, summary)
+            Log.i(TAG, "run done: ${summary ?: "nothing new"}${UpdatePlan.failedLine(failed)?.let { "; $it" }.orEmpty()}")
+            // A package that failed: its own notification, naming it, whose tap opens the details (11-25 S25: "it
+            // failed to install some linux updates" and nothing else).
+            val title = UpdatePlan.failedTitle(failed)
+            when {
+                title != null -> UpdateNotes.finished(context, title, details(context), UpdatePlan.failedLine(failed))
+                summary == null -> UpdateNotes.cancel(context)
+                else -> UpdateNotes.finished(context, summary)
+            }
         } finally {
             status.checking = false
             publish(context)
         }
     }
 
-    /** The three steps: whether the store answered, and what changed. */
-    private fun runSteps(context: Context): Pair<Boolean, List<String>> {
+    /** The three steps: whether the store answered, what changed, and the Linux packages that failed. */
+    private fun runSteps(
+        context: Context,
+        force: Boolean,
+    ): Triple<Boolean, List<String>, List<UpdatePlan.Failure>> {
         val done = mutableListOf<String>()
         Store.byAddress = false
         UpdateNotes.progress(context, "Checking for updates")
@@ -360,11 +437,12 @@ object PowosUpdates {
         if (apk.getOrNull() == true) done += "the app (tap to install)"
         val shell = runCatching { ShellBundleApply.run(context, installedVersion(context)) }.onFailure { Log.i(TAG, "shell: $it") }
         shell.getOrNull()?.let { done += it }
-        val linux = runCatching { linux(context) }.onFailure { Log.i(TAG, "linux: $it") }.getOrNull()
-        UpdatePlan.packages(linux)?.let { done += it }
+        val linux = runCatching { linux(context, force) }.onFailure { Log.i(TAG, "linux: $it") }.getOrNull()
+        UpdatePlan.packages(linux?.first)?.let { done += it }
+        val failed = linux?.second.orEmpty()
         val reached = apk.isSuccess || shell.isSuccess
-        status.error = UpdatePlan.error(reached, linuxFailed = linux == null && EngineGuest.enabled, vpn = vpnUp(context))
-        return reached to done
+        status.error = UpdatePlan.error(reached, linuxFailed = linux == null && EngineGuest.enabled, vpn = vpnUp(context), failures = failed)
+        return Triple(reached, done, failed)
     }
 
     /** Whether a VPN carries the phone's traffic now (the store answers off the LAN only through one). */
@@ -448,13 +526,19 @@ object PowosUpdates {
 
     // ── 3. Linux ────────────────────────────────────────────────────────────────────────────────────────────────────
 
-    /** Packages the run changed, null: no PowOS image here. */
-    private fun linux(context: Context): Int? {
+    /**
+     * Packages the run changed and the ones it couldn't install ("#fail" lines), null: no PowOS image here. [force]
+     * (Settings' check): failed packages are tried now, not after their backoff (--retry).
+     */
+    private fun linux(
+        context: Context,
+        force: Boolean,
+    ): Pair<Int, List<UpdatePlan.Failure>>? {
         if (!EngineGuest.enabled) return null
         UpdateNotes.progress(context, "Updating Linux packages")
         // An image without the updater yet: the session's own bootstrap, which installs powos-core (and with it the updater).
         val boot = andro.marchy.SessionPlan.packagesCommand().replace("exec >", ": >")
-        val p = EngineGuest.process("if [ -f /usr/lib/powos/phone-update.sh ]; then exec sh /usr/lib/powos/phone-update.sh; else $boot; fi").start()
+        val p = EngineGuest.process("if [ -f /usr/lib/powos/phone-update.sh ]; then exec sh /usr/lib/powos/phone-update.sh${if (force) " --retry" else ""}; else $boot; fi").start()
         p.outputStream.close()
         val lines = mutableListOf<String>()
         p.inputStream.bufferedReader().useLines { seq ->
@@ -465,8 +549,10 @@ object PowosUpdates {
         }
         if (!p.waitFor(20, TimeUnit.MINUTES)) p.destroy()
         runCatching { File(context.filesDir, "run/powos-update.log").writeText(lines.takeLast(400).joinToString("\n")) }
-        check(lines.none { it.trim() == "#done fail" }) { "phone-update failed: ${lines.takeLast(3)}" }
-        return UpdatePlan.changed(lines)
+        val failed = UpdatePlan.failures(lines)
+        // A failure the updater named is reported as such; one it didn't (no "#fail" line) stays an error.
+        check(failed.isNotEmpty() || lines.none { it.trim() == "#done fail" }) { "phone-update failed: ${lines.takeLast(3)}" }
+        return UpdatePlan.changed(lines) to failed
     }
 }
 
@@ -693,7 +779,14 @@ internal object UpdateNotes {
         context: Context,
         text: String,
         tap: PendingIntent? = null,
-    ) = post(context, builder(context, text).setAutoCancel(true).apply { tap?.let(::setContentIntent) })
+        detail: String? = null,
+    ) = post(
+        context,
+        builder(context, text).setAutoCancel(true).apply {
+            tap?.let(::setContentIntent)
+            detail?.let { setContentText(it).setStyle(Notification.BigTextStyle().bigText(it)) }
+        },
+    )
 
     fun cancel(context: Context) {
         context.getSystemService(NotificationManager::class.java)?.cancel(ID)

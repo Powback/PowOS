@@ -136,4 +136,30 @@ class PowosUpdatesTest {
         assertTrue(r.isNull("checked") && r.isNull("shell") && r.isNull("summary"))
         assertEquals(0, r.getJSONArray("waiting").length())
     }
+
+    // 11-25 S25: "it failed to install some linux updates" - which package, and why, from lib/phone-update.sh.
+    @Test
+    fun namesEachFailedPackageAndWhy() {
+        val lines = listOf("#step base", "#fail gum the mirror no longer has this version", "#fail [powos] not enough free space", "#fail gum the mirror no longer has its version", "#done fail")
+        val f = UpdatePlan.failures(lines)
+        assertEquals(listOf("gum", "[powos]"), f.map { it.pkg })
+        assertEquals("the mirror no longer has its version", f[0].reason)
+        assertEquals("Couldn't install 2 Linux packages: gum, [powos] - tap for details", UpdatePlan.failedTitle(f))
+        assertEquals("Couldn't install gum - tap for details", UpdatePlan.failedTitle(f.take(1)))
+        assertNull(UpdatePlan.failedTitle(emptyList()))
+        assertEquals(
+            "couldn't install gum (the mirror no longer has its version), [powos] (not enough free space) - tried again later",
+            UpdatePlan.error(reached = true, linuxFailed = false, failures = f),
+        )
+        assertEquals("the Linux update didn't finish (see run/powos-update.log)", UpdatePlan.error(reached = true, linuxFailed = true))
+    }
+
+    @Test
+    fun readsTheImagesFailuresFile() {
+        val f = UpdatePlan.parseFailures("gum\t2\t5600\tthe mirror no longer has its version\nbad line\n\nfzf\tx\ty\tno connection to the package mirror\n")
+        assertEquals(2, f.size)
+        assertEquals(UpdatePlan.Failure("gum", "the mirror no longer has its version", 2, 5600), f[0])
+        assertEquals(1, f[1].tries)
+        assertEquals("gum", f[0].json().getString("package"))
+    }
 }

@@ -18,6 +18,22 @@ left its files in a pack, while pacman lists it installed, so no upgrade brings 
 `phone-update.sh` reinstalls [powos]'s from [powos] and Arch's only at the installed version, and shows it
 (`#step base`, `powos-progress base-sync`). A new base image is still never needed for an installed phone.
 
+**Phones without root: only what applies, failures named** (11-25, the S25: "it failed to install some linux
+updates", nothing more). The base step installed every missing package in ONE pacman transaction, and Arch's were
+reinstalled only at the installed version - which Arch Linux ARM drops within days (no archive: fzf 0.74.5-1 and gh
+2.103.3-1 of the 11-14 base already 404). So an older base's catch-up (tmux, fzf, btop, ... left in the apps pack)
+failed as a whole at every session start, and the engine's progress notification said only "... failed". Now:
+- `-Syu` from `[powos]` `--ignore`s the packages whose pack the phone hasn't added (`phone-base-sync.py --away`, the
+  split's own rules): steam / fex-emu / socat updates no longer write a pack's files into a phone without that pack.
+- The base step installs each package alone; a dropped Arch version takes the mirror's current one from a private
+  fresh database only when that transaction is that package alone (never a partial upgrade), else the reason names
+  the upgrades it would need and the pack to add.
+- Every failure is a `#fail <package> <reason>` line and a row in `/var/lib/powos/update-failures` (tries, next try);
+  a failed package waits 30 min, doubling to a day (`--retry`, Settings' check: now). Settings > system updates lists
+  each with its reason; the failure notification (the app's run: "Couldn't install gum - tap for details"; the session
+  start's: the engine's progress notification) opens Settings there (`ShellActivity` `EXTRA_SCREEN`).
+Tests: `test-phone-update.sh`, `test-phone-base-sync.py`, `PowosUpdatesTest`.
+
 `powos-core` holds `bin/` -> `/usr/bin` and `lib/` -> `/usr/lib/powos` (`lib/self-phone.sh self_phone_apply`: the CLI,
 its libraries, the manager with `fleet_login.py`, claude-login) and the phone's session scripts, shims and `play/`
 launchers at the paths `install-powos-android.sh` installs them (`targets/android/tools/phone-files.sh` reads that map

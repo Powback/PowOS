@@ -28,6 +28,7 @@ import {
   type JoinState,
   partOf,
   type PowosUpdates,
+  type UpdateFailure,
   type SettingsState,
   type StoreState,
   type StoreWidget,
@@ -419,6 +420,28 @@ function Updates({ u }: { u: NonNullable<SettingsState["updates"]> }) {
         <UpdatesAction u={u} busy={working || checking} check={() => (ask(), act("settings", "check"))} />
       </div>
       <JobLog job={u.job} />
+      {!!p?.failures?.length && <UpdateFailures list={p.failures} />}
+    </div>
+  );
+}
+
+/**
+ * The packages the last runs couldn't install, each with its reason and when it's tried again (11-25 S25: a
+ * notification said only that some Linux updates failed). The failure notification's tap opens Settings here.
+ */
+function UpdateFailures({ list }: { list: UpdateFailure[] }) {
+  const when = (next: number) => {
+    const m = Math.round((next * 1000 - Date.now()) / 60_000);
+    return next <= 0 || m <= 0 ? "tried again on the next check" : m < 60 ? `tried again in ${m} min` : `tried again in ${Math.round(m / 60)} h`;
+  };
+  return (
+    <div class="scr-log failed" data-setting="update failures">
+      {list.map((f) => (
+        <div key={f.package}>
+          {f.package === "[powos]" ? "PowOS packages" : f.package}: {f.reason} · {when(f.next)}
+          {f.tries > 1 ? ` · ${f.tries} tries` : ""}
+        </div>
+      ))}
     </div>
   );
 }

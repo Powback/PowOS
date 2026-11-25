@@ -65,4 +65,18 @@ with tempfile.TemporaryDirectory() as r:
     os.rename(os.path.join(r, "var/lib/pacman/local/spacetimedb-1-1"), os.path.join(r, "var/lib/pacman/local/spacetimedb-1-2"))  # pacman's reinstall
 
     check("spacetimedb" not in run(r, conf), "after the reinstall: complete")
+
+    # --away (11-25 S25: [powos] upgrades reached packages of a pack the phone never added): pack packages until
+    # their pack is added; base packages never.
+    def away():
+        out = subprocess.run([sys.executable, "-I", SYNC, "--away", "--root", r, "--conf", conf], capture_output=True, text=True)
+        return out.stdout.split()
+    got = away()
+    # kgsl: a root by a provided name only (split-rootfs.py assign starts its closure from installed names), so the
+    # split sends it to the rest pack and --away follows the split.
+    check("brave" in got and not {"base", "libz", "tmux", "spacetimedb"} & set(got), f"--away: the apps pack's packages only ({got})")
+    check(os.path.isfile(os.path.join(r, "var/lib/powos/base-away.cache")) and away() == got, "--away: cached apart from the base list")
+    os.makedirs(os.path.join(r, "var/lib/powos/packs"))
+    open(os.path.join(r, "var/lib/powos/packs/apps"), "w").close()
+    check(away() == [], "--away: the pack added -> nothing held back")
 sys.exit(fail)

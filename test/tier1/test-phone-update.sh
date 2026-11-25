@@ -55,7 +55,7 @@ exec "$@"
 S
 chmod +x "$T/bin/"*
 printf '[options]\n\n[powos]\nServer = http://x\n' > "$T/conf"
-run() { : > "$T/log"; env PATH="$T/bin:$PATH" LOG="$T/log" TMPDIR="$T" POWOS_UPDATE_CONF="$T/conf" POWOS_PACMAN_LOCK="$T/db.lck" "$@" sh "$ROOT/lib/phone-update.sh" ${ARGS:-}; }
+run() { : > "$T/log"; env PATH="$T/bin:$PATH" LOG="$T/log" TMPDIR="$T" POWOS_UPDATE_CONF="$T/conf" POWOS_PACMAN_LOCK="$T/db.lck" POWOS_UPDATE_FAILURES="$T/failures" "$@" sh "$ROOT/lib/phone-update.sh" ${ARGS:-}; }
 
 : > "$T/db.lck"; out=$(run HAVE=3500.gaaa-1 REPO=3517.gbbb-1)
 [ ! -e "$T/db.lck" ] && ok "a stale pacman lock is removed" || bad "stale lock left"
@@ -101,7 +101,7 @@ printf '[options]\n\n[powos]\nServer = http://x\n' > "$T/conf"
 
 # The base catch-up (gh#13, razr 11-10: an old base without SpacetimeDB): what phone-base-sync.py names is reinstalled -
 # [powos]'s from [powos], Arch's only at the installed version, the rest left for its pack.
-printf 'print("spacetimedb\\ntmux\\nghost\\nnewer")\n' > "$T/sync"   # phone-update runs it with python3
+printf 'import sys\nprint("" if "--away" in sys.argv else "spacetimedb\\ntmux\\nghost\\nnewer")\n' > "$T/sync"   # run with python3
 cat > "$T/bin/pacman" <<'S'
 #!/bin/sh
 echo "pacman $*" >> "$LOG"
@@ -127,6 +127,60 @@ grep -qx -- "pacman -S --noconfirm tmux" "$T/log" && ok "base: tmux at its insta
 echo "$out" | grep -q '^#step base$' && ok "base: a progress step" || bad "no #step base"
 out=$(ARGS=--check run POWOS_BASE_SYNC="$T/sync")
 grep -q -- "-S --noconfirm spacetimedb" "$T/log" && bad "--check reinstalled" || ok "--check changes no base"
+
+# Non-root package selection (11-25 S25: steam pkgrel 50 reached a phone without the gaming pack): [powos] packages
+# whose pack isn't added are --ignore'd; one not from [powos] isn't named (the command line stays short).
+printf 'import sys\nprint("steam\\nsocat\\nbrave" if "--away" in sys.argv else "")\n' > "$T/sync"
+cat > "$T/bin/pacman" <<'S'
+#!/bin/sh
+echo "pacman $*" >> "$LOG"
+case "$*" in
+  *"-Slq powos") printf 'steam\nsocat\nkwin\npowos-core\n' ;;
+  "-Q powos-core") exit 1 ;; *"-Si powos-core"*) exit 1 ;;
+  *) exit 0 ;;
+esac
+S
+out=$(run POWOS_BASE_SYNC="$T/sync")
+grep -q -- "-Syu --noconfirm --ignore powos-core,steam,socat$" "$T/log" && ok "non-root: packs not added aren't upgraded" || bad "away: $(grep -- -Syu "$T/log")"
+printf 'import sys\nprint("")\n' > "$T/sync"; run POWOS_BASE_SYNC="$T/sync" >/dev/null
+grep -q -- "-Syu --noconfirm --ignore powos-core$" "$T/log" && ok "a full rootfs / every pack added: nothing ignored" || bad "full: $(grep -- -Syu "$T/log")"
+
+# The base step's failures (11-25 S25 "failed to install some linux updates"): Arch Linux ARM dropped the installed
+# version (404). fzf's current one needs nothing else -> taken from a private fresh db; gum's needs a newer glibc -> not
+# taken, named with the reason, backed off; one package failing doesn't stop the next.
+printf 'import sys\nprint("" if "--away" in sys.argv else "gum\\nfzf\\ntmux")\n' > "$T/sync"
+cat > "$T/bin/pacman" <<'S'
+#!/bin/sh
+echo "pacman $*" >> "$LOG"
+case "$*" in
+  "-Q powos-core") exit 1 ;; *"-Si powos-core"*) exit 1 ;;
+  *"--config"*"-Si "*) exit 1 ;;
+  "-Si "*) echo "Version         : 1-1" ;;
+  "-Q "*) echo "${3:-x} 1-1" ;;
+  "-S --noconfirm gum"|"-S --noconfirm fzf") echo "error: failed retrieving file '$3-1-1-aarch64.pkg.tar.xz' from mirror : The requested URL returned error: 404"; exit 1 ;;
+  *"--print"*"gum") printf 'glibc\ngum\n' ;;
+  *"--print"*"fzf") echo fzf ;;
+  *) exit 0 ;;
+esac
+S
+printf '#!/bin/sh\necho "progress $*" >> "$LOG"\n' > "$T/bin/powos-progress"; chmod +x "$T/bin/pacman" "$T/bin/powos-progress"
+rm -f "$T/failures"
+out=$(run POWOS_BASE_SYNC="$T/sync" POWOS_UPDATE_NOW=1000)
+grep -q -- "-S --noconfirm --dbpath .*fzf$" "$T/log" && ok "base: a dropped version -> the mirror's, when it changes nothing else" || bad "fzf: $(cat "$T/log")"
+grep -q -- "-S --noconfirm --dbpath .*gum$" "$T/log" && bad "gum taken with a partial upgrade" || ok "base: never a partial upgrade (gum needs glibc)"
+grep -qx -- "pacman -S --noconfirm tmux" "$T/log" && ok "base: a failure doesn't stop the next package" || bad "tmux not tried: $(cat "$T/log")"
+echo "$out" | grep -q '^#fail gum .*needs other upgrades (glibc,gum)' && ok "base: #fail names the package and why" || bad "no #fail gum: $out"
+echo "$out" | grep -q '^#done fail$' && ok "base: the run says it failed" || bad "no #done fail"
+grep -q "progress base-sync failed" "$T/log" && bad "the app's run posted its own failure notification too" || ok "the app's run: one notification (the app's)"
+awk -F'\t' '$1 == "gum" && $2 == 1 && $3 == 2800 && $4 ~ /Settings > Storage/' "$T/failures" | grep -q . && ok "failures file: gum, try 1, next in 30 min" || bad "failures: $(cat "$T/failures")"
+grep -q "^fzf\|^tmux" "$T/failures" && bad "a success left a failure line" || ok "successes leave no line"
+out=$(run POWOS_BASE_SYNC="$T/sync" POWOS_UPDATE_NOW=2000)
+{ ! grep -q -- "-S --noconfirm gum" "$T/log" && echo "$out" | grep -q "gum failed before"; } && ok "backoff: gum waits" || bad "gum retried in its backoff: $(cat "$T/log")"
+out=$(ARGS="--session --retry" run POWOS_BASE_SYNC="$T/sync" POWOS_UPDATE_NOW=2000)
+grep -q -- "-S --noconfirm gum" "$T/log" && ok "--retry: tried now" || bad "--retry didn't"
+grep -q "progress base-sync failed Couldn't add gum (the mirror no longer has its version" "$T/log" && ok "the session's run: a failure notification naming gum and why" || bad "session note: $(grep progress "$T/log")"
+awk -F'\t' '$1 == "gum" && $2 == 2 && $3 == 5600' "$T/failures" | grep -q . && ok "backoff doubles (1 h)" || bad "backoff: $(cat "$T/failures")"
+rm -f "$T/bin/powos-progress"
 
 # 3. `powos update` on a phone goes to it.
 grep -q 'phone-update.sh" --check' "$ROOT/bin/powos" && ok "powos update check -> phone-update.sh" || bad "bin/powos doesn't route the phone"

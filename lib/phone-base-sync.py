@@ -5,6 +5,8 @@ installed, so no update brings it back (razr 11-10: spacetimedb-2.12.0-1 install
 no SpacetimeDB for any PowOS app). lib/phone-update.sh reinstalls what this prints (docs/PHONE-UPDATES.md, "base").
 
   phone-base-sync.py [--root R] [--conf rootfs-packs.conf]   one package name per line, nothing on a full rootfs
+  phone-base-sync.py --away [--root R] [--conf C]            the installed packages whose pack this phone hasn't
+                                                              added: updates leave them alone (phone-update.sh --ignore)
 
 A package counts when most of the files today's split puts in the base are missing from disk: a whole package left in
 a pack, not one file a script removed on purpose. A pack the phone added has its files there, so it never counts.
@@ -74,14 +76,29 @@ def missing(root, conf):
     return out
 
 
+def away(root, conf):
+    """Installed packages whose home is a pack this phone hasn't added (var/lib/powos/packs/<name> marks an added one).
+    pacman lists them installed - the split keeps the whole db - but their files never came: an upgrade from [powos]
+    would write a pack's files into a phone without the pack (11-25 S25: steam pkgrel 50 and fex-emu pulled into a
+    phone with no gaming pack), and adding the pack later would lay the older files over the newer package."""
+    split = load_split()
+    db, _ = split.read_db(local_db(root))
+    home = split.assign(split.rules(conf), db)
+    added = os.path.join(root, "var/lib/powos/packs")
+    have = set(os.listdir(added)) if os.path.isdir(added) else set()
+    return sorted(p for p, h in home.items() if h != "base" and h not in have)
+
+
 def main(a):
-    root, conf = "/", None
+    root, conf, mode = "/", None, "missing"
     while a:
         k = a.pop(0)
         if k == "--root" and a:
             root = a.pop(0)
         elif k == "--conf" and a:
             conf = a.pop(0)
+        elif k == "--away":
+            mode = "away"
         else:
             sys.exit(__doc__)
     # A full rootfs (rooted phones, base-less builds) has no pack list: nothing was split off.
@@ -100,7 +117,7 @@ def main(a):
     packs = os.path.join(root, "var/lib/powos/packs")
     key = " ".join([stat("var/lib/pacman/local"), stat(conf), stat("var/lib/powos/packs"),
                     ",".join(sorted(os.listdir(packs))) if os.path.isdir(packs) else "-"])
-    cache = os.path.join(root, "var/lib/powos/base-sync.cache")
+    cache = os.path.join(root, "var/lib/powos/base-sync.cache" if mode == "missing" else "var/lib/powos/base-away.cache")
     try:
         with open(cache) as f:
             lines = f.read().splitlines()
@@ -111,7 +128,7 @@ def main(a):
             return
     except OSError:
         pass
-    out = missing(root, conf)
+    out = missing(root, conf) if mode == "missing" else away(root, conf)
     try:
         os.makedirs(os.path.dirname(cache), exist_ok=True)
         with open(cache, "w") as f:
