@@ -37,7 +37,10 @@ for _ in $(seq 1 20); do
 done
 echo "page: ${page:-none}"
 case "$page" in https://*) ;; *) fails+=("voiceagent.pow didn't open on https (got '${page:-no page}'): no secure context, no mic") ;; esac
-ev() { "$here/cdp.sh" eval voiceagent.pow/ "$1" 2>&1 | tail -1; }
+# cdp.sh prints a string result JSON-quoted ("asking"); unquoted here, so the compares below see the bare value. The
+# 11-25 run compared '"asking"' with asking, left the tap loop at once (PowOS's dialog sat there untapped, webapp.png)
+# and failed "mic capture is '"asking"'".
+ev() { "$here/cdp.sh" eval voiceagent.pow/ "$1" 2>&1 | tail -1 | tr -d '\r' | sed -E 's/^"(.*)"$/\1/'; }
 echo "secure: $(ev 'String(window.isSecureContext) + " " + typeof navigator.mediaDevices')"
 ev 'window.__aapMic = "asking"; navigator.mediaDevices.getUserMedia({ audio: true }).then((s) => { window.__aapStream = s; window.__aapMic = s.getAudioTracks()[0].readyState; }, (e) => { window.__aapMic = "error " + e.name; }); "asked"' >/dev/null
 # PowOS's dialog ("Allow"), then Android's if PowOS lacked the mic ("While using the app" / "Allow"): tapped where
@@ -61,7 +64,7 @@ for _ in 1 2 3; do
   got=$(ev 'window.__aapMic')
   [ "$got" = asking ] || break
   xy=$(tap_allow)
-  [ -n "$xy" ] || continue
+  [ -n "$xy" ] || { echo "no Allow button on screen yet"; continue; }
   echo "tap: $xy"
   "$A" shell input tap $(echo "$xy" | awk '{print $1, $2}') >/dev/null
 done
