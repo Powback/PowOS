@@ -42,7 +42,7 @@ signature/privileged permission) for the full version; **nr-gap** = works rooted
 
 | feature | status | evidence | impact | root |
 |---|---|---|---|---|
-| Tile toggles (Wi-Fi, BT, data, airplane, location, dark mode, NFC, battery saver), screenshot, lock tile | **nr-gap** | QuickSettings.kt `root("svc wifi ...")`, `root("input keyevent KEYCODE_SYSRQ")` etc.: `root()` only logs "failed" without root - no fallback (Settings.Panel, accessibility global actions) | H (S25/razr) | nr-gap |
+| Tile toggles (Wi-Fi, BT, data, airplane, location, dark mode, NFC, battery saver), screenshot, lock tile | done (11-25, `control-center-toggles-work-without-root`; device check pending) | shell/TilePaths.kt picks per tile: root su (rooted), else the app's own call (Wi-Fi/BT legacy APIs, dark mode, DND, rotation), accessibility global actions (screenshot, lock), lock admin, else Android's panel/page; missing grant = toast + the grant page. Optimistic flip, rolled back after 5 s if the state didn't follow | - | any |
 | Brightness + volume sliders, ringer | done | QuickSettings.kt `brightness`, `volume`, `ringer` | - | any |
 | Third-party tiles | done | TileHost.kt | - | any |
 | Media card + output switcher | done | ShellMedia.kt ("the phone's output picker"), control.tsx | - | any |
@@ -78,7 +78,7 @@ signature/privileged permission) for the full version; **nr-gap** = works rooted
 | Split screen | wip | board `switcher-drag-dock-open-canvas` | - | - |
 | Picture-in-picture | done | webwindows.tsx PP1 (Android PiP honoured), 7a53eb85 | - | any |
 | Timers / stopwatch visible outside the Clock app | partial | only as notifications in the shade | M | any |
-| Battery saver | done rooted / nr-gap | tile `cmd power set-mode` (root) | M | nr-gap |
+| Battery saver | done | tile `cmd power set-mode` (root); no root: battery saver settings page (TilePaths) | - | any |
 | DND toggle | done | tile `dnd` | - | any |
 | DND schedules / modes | stock | long-press opens ZEN_MODE_SETTINGS | L | - |
 | Digital Wellbeing | stock | Settings app; nothing in PowOS | L | - |
@@ -120,7 +120,7 @@ signature/privileged permission) for the full version; **nr-gap** = works rooted
 
 ## Ranked gaps (parity + QoL merged; wip items excluded)
 
-1. Control-center toggles do nothing without root (S25, razr) - **nr-gap**, H.
+1. ~~Control-center toggles do nothing without root (S25, razr)~~ - done 11-25 (TilePaths.kt), device check pending.
 2. Lock face: camera + torch shortcuts - any, H.
 3. Fingerprint unlock straight from the face (verify on all three; UDFPS target on S25/razr) - any, H.
 4. Long-press Android app shortcuts in the app menu - any, H.

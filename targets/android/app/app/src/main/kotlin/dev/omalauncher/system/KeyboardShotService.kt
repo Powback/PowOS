@@ -11,7 +11,9 @@ import android.view.accessibility.AccessibilityEvent
  * AccessibilityService.takeScreenshot (API 30+), the one way an app takes a silent screenshot without root once the user
  * has allowed it. The user turns it on once (Settings > Accessibility > PowOS keyboard screenshots; the keyboard walks
  * the user there from its own panel, restricted settings included - [KeyboardAccess]). It reads no window content and
- * handles no events: it only takes a screenshot when the keyboard's button is tapped. Secure windows come back black and are refused ([KeyboardAi.blackedOut]).
+ * handles no events: it only takes a screenshot when the keyboard's button is tapped, and (no root) performs the
+ * control center's Screenshot and Lock tiles as global actions (GLOBAL_ACTION_TAKE_SCREENSHOT / _LOCK_SCREEN, which need
+ * no extra capability; shell/TilePaths.kt) when those are tapped. Secure windows come back black and are refused ([KeyboardAi.blackedOut]).
  */
 class KeyboardShotService : AccessibilityService() {
     override fun onServiceConnected() {

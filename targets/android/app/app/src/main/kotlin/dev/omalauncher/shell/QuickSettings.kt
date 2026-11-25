@@ -20,6 +20,10 @@ import android.service.quicksettings.Tile
 import android.service.notification.NotificationListenerService
 import android.telephony.TelephonyManager
 import android.util.Log
+import android.widget.Toast
+import dev.omalauncher.devices.LockAccess
+import dev.omalauncher.linux.RootedGuest
+import dev.omalauncher.system.KeyboardShotService
 import dev.omalauncher.widgets.runtime.MediaListener
 import org.json.JSONArray
 import org.json.JSONObject
@@ -34,7 +38,10 @@ import kotlin.math.sqrt
  * What an app may switch, it switches itself: the flashlight (CameraManager), do not disturb (the notification
  * listener's interruption filter), brightness and auto-rotate (system settings, WRITE_SETTINGS), volume and the ringer
  * (AudioManager). The rest - Wi-Fi, Bluetooth, mobile data, airplane mode, location, dark mode, battery saver, NFC -
- * Android lets only its own UI switch: those go through the root session PowOS runs anyway ([root]).
+ * Android lets only its own UI switch: rooted PowOS switches them through its root session ([root]); without root
+ * each tile takes the next way [TilePaths] picks (the legacy Wi-Fi/Bluetooth calls, Android's panel for it, the
+ * accessibility service's screenshot/lock), and one that can't act opens the page that lets it and says why. A
+ * flipped switch shows at once and rolls back if the system's state didn't follow ([expect]).
  *
  * HACK: the switches through root (svc / cmd / settings in a su shell). Real fix: the privileged permissions SystemUI's
  * tiles hold (NETWORK_SETTINGS, BLUETOOTH_PRIVILEGED, MODIFY_PHONE_STATE, WRITE_SECURE_SETTINGS, MODIFY_DAY_NIGHT_MODE,
@@ -145,6 +152,7 @@ class QuickSettings(
     private val location = context.getSystemService(LocationManager::class.java)
     private val uiMode = context.getSystemService(UiModeManager::class.java)
     private val telephony = context.getSystemService(TelephonyManager::class.java)
+    private val bluetooth: android.bluetooth.BluetoothAdapter? = runCatching { context.getSystemService(android.bluetooth.BluetoothManager::class.java)?.adapter }.getOrNull()
     private val nfc: NfcAdapter? = runCatching { NfcAdapter.getDefaultAdapter(context) }.getOrNull()
     private var torch = false
     private val torchCamera: String? =
@@ -171,6 +179,38 @@ class QuickSettings(
                 main.postDelayed(pending, 150)
             }
         }
+
+    // Declared before init: init's listeners may ask for the state (tile(), toggle()) at once.
+    /** The switches flipped optimistically ([expect]), by tile id. */
+    private val expected = java.util.concurrent.ConcurrentHashMap<String, Expect>()
+
+    /** Each tile's state as the system has it ([realOn]). */
+    private val reals: Map<String, (Sys) -> Boolean?> =
+        mapOf(
+            "wifi" to { s -> s.wifi },
+            "bt" to { _ -> global("bluetooth_on") == 1 },
+            "cell" to { _ -> global("mobile_data") == 1 },
+            "location" to { s -> s.location },
+            "airplane" to { _ -> global(Settings.Global.AIRPLANE_MODE_ON) == 1 },
+            "rotation" to { _ -> system(Settings.System.ACCELEROMETER_ROTATION) == 1 },
+            "dnd" to { s -> s.dnd },
+            "darkmode" to { s -> s.night?.let { it == UiModeManager.MODE_NIGHT_YES } },
+            "nfc" to { s -> s.nfc },
+            "battery" to { s -> s.powerSave },
+            "powersave" to { s -> s.powerSave },
+        )
+
+    /** Each [direct] switch, given whether the tile is on now. */
+    @Suppress("DEPRECATION")
+    @android.annotation.SuppressLint("MissingPermission")
+    private val directs: Map<String, (Boolean) -> Boolean> =
+        mapOf(
+            "wifi" to { off -> wifi?.setWifiEnabled(!off) == true },
+            "bt" to { off -> bluetooth?.let { if (off) it.disable() else it.enable() } == true },
+            "darkmode" to { off -> night(if (off) UiModeManager.MODE_NIGHT_NO else UiModeManager.MODE_NIGHT_YES) },
+            "dnd" to ::dnd,
+            "rotation" to { off -> Settings.System.canWrite(context) && Settings.System.putInt(context.contentResolver, Settings.System.ACCELEROMETER_ROTATION, if (off) 0 else 1) },
+        )
 
     init {
         cameras.registerTorchCallback(torchCallback, main)
@@ -208,18 +248,18 @@ class QuickSettings(
             detail: String? = null,
         ) = t.put("label", label).put("on", on ?: JSONObject.NULL).put("detail", detail ?: JSONObject.NULL)
         return when (id) {
-            "wifi" -> sw("Wi-Fi", sys.wifi)
-            "bt" -> sw("Bluetooth", global("bluetooth_on") == 1)
-            "cell" -> sw("Mobile data", global("mobile_data") == 1, sys.operator)
+            "wifi" -> sw("Wi-Fi", shown(id, sys.wifi))
+            "bt" -> sw("Bluetooth", shown(id, global("bluetooth_on") == 1))
+            "cell" -> sw("Mobile data", shown(id, global("mobile_data") == 1), sys.operator)
             "flashlight" -> if (torchCamera == null) null else sw("Torch", torch)
-            "location" -> sw("Location", sys.location)
-            "airplane" -> sw("Airplane mode", global(Settings.Global.AIRPLANE_MODE_ON) == 1)
-            "rotation" -> sw("Auto-rotate", system(Settings.System.ACCELEROMETER_ROTATION) == 1)
-            "dnd" -> sw("Do not disturb", sys.dnd)
-            "darkmode" -> sw("Dark mode", sys.night == UiModeManager.MODE_NIGHT_YES)
+            "location" -> sw("Location", shown(id, sys.location))
+            "airplane" -> sw("Airplane mode", shown(id, global(Settings.Global.AIRPLANE_MODE_ON) == 1))
+            "rotation" -> sw("Auto-rotate", shown(id, system(Settings.System.ACCELEROMETER_ROTATION) == 1))
+            "dnd" -> sw("Do not disturb", shown(id, sys.dnd))
+            "darkmode" -> sw("Dark mode", shown(id, sys.night == UiModeManager.MODE_NIGHT_YES))
             "hotspot" -> sw("Hotspot", sys.hotspot)
-            "nfc" -> if (nfc == null) null else sw("NFC", sys.nfc)
-            "battery", "powersave" -> sw("Battery saver", sys.powerSave)
+            "nfc" -> if (nfc == null) null else sw("NFC", shown(id, sys.nfc))
+            "battery", "powersave" -> sw("Battery saver", shown("battery", sys.powerSave))
             "controls" -> sw("Device controls", null)
             "wallet" -> sw("Wallet", null)
             "screenshot" -> sw("Screenshot", null)
@@ -256,33 +296,205 @@ class QuickSettings(
         return cn to info.loadLabel(context.packageManager).toString()
     }
 
+    /** A tile tapped: its path on this phone ([TilePaths]: root, the app's own call, Android's panel, or why not). */
     fun toggle(name: String) {
         when (name) {
             "torch", "flashlight" -> torchCamera?.let { cameras.setTorchMode(it, !torch) }
-            "dnd" ->
-                MediaListener.connected?.let {
-                    val on = it.currentInterruptionFilter > NotificationListenerService.INTERRUPTION_FILTER_ALL
-                    it.requestInterruptionFilter(
-                        if (on) NotificationListenerService.INTERRUPTION_FILTER_ALL else NotificationListenerService.INTERRUPTION_FILTER_PRIORITY,
-                    )
-                    changed()
-                }
-            "wifi" -> root("svc wifi ${if (sysNow().wifi == true) "disable" else "enable"}")
-            "bt" -> root("svc bluetooth ${if (global("bluetooth_on") == 1) "disable" else "enable"}")
-            "cell" -> root("svc data ${if (global("mobile_data") == 1) "disable" else "enable"}")
-            "airplane" -> root("cmd connectivity airplane-mode ${if (global(Settings.Global.AIRPLANE_MODE_ON) == 1) "disable" else "enable"}")
-            "location" -> root("cmd location set-location-enabled ${sysNow().location != true}")
-            "rotation" -> setSystem(Settings.System.ACCELEROMETER_ROTATION, if (system(Settings.System.ACCELEROMETER_ROTATION) == 1) 0 else 1)
-            "darkmode" -> root("cmd uimode night ${if (sysNow().night == UiModeManager.MODE_NIGHT_YES) "no" else "yes"}")
-            "nfc" -> root("svc nfc ${if (sysNow().nfc == true) "disable" else "enable"}")
-            "battery", "powersave" -> root("cmd power set-mode ${if (sysNow().powerSave) 0 else 1}")
             "hotspot" -> open("hotspot")
-            // Actions, not switches: the panel shuts first (the page does), then they run.
-            "screenshot" -> main.postDelayed({ root("input keyevent KEYCODE_SYSRQ") }, PANEL_GONE_MS)
-            "lockscreen" -> root("input keyevent KEYCODE_SLEEP")
-            // A third-party tile switches in place when it's hosted ([TileHost]), else opens.
-            else -> if (!TileHost.click(name)) open(name)
+            else -> {
+                val on = realOn(name, sysNow())
+                val caps = caps()
+                val path = TilePaths.choose(name, on, caps)
+                // A third-party tile switches in place when it's hosted ([TileHost]), else opens.
+                if (path == null) {
+                    if (!TileHost.click(name)) open(name)
+                    return
+                }
+                Log.i(TAG, "tile $name (on=$on): $path")
+                // OnePlus's battery saver id and "powersave" show as the "battery" tile.
+                if (on != null && TilePaths.optimistic(path)) expect(if (name == "powersave") "battery" else name, !on, path)
+                act(name, on, caps, path)
+            }
         }
+    }
+
+    /** What this phone lets the tiles do, now ([TilePaths]). */
+    private fun caps() =
+        TileCaps(
+            rooted = RootedGuest.enabled,
+            legacyWifi = wifi != null && context.applicationInfo.targetSdkVersion < android.os.Build.VERSION_CODES.Q,
+            legacyBt = bluetooth != null && context.applicationInfo.targetSdkVersion < android.os.Build.VERSION_CODES.TIRAMISU,
+            accessibility = KeyboardShotService.instance != null,
+            lockAdmin = LockAccess.allowed(context),
+            writeSettings = Settings.System.canWrite(context),
+            dndAccess = MediaListener.connected != null,
+        )
+
+    /** Tile [id]'s [path]; one that doesn't take goes on to [TilePaths.fallback] (never silent). */
+    private fun act(
+        id: String,
+        on: Boolean?,
+        caps: TileCaps,
+        path: TilePath,
+    ) {
+        val next = { failed(id, on, caps, path) }
+        when (path) {
+            is TilePath.Root -> su(id, path.cmd, next)
+            TilePath.Direct -> io.execute { if (directly(id, on)) changed() else next() }
+            is TilePath.Global -> global(path.action, next)
+            TilePath.AdminLock -> adminLock(next)
+            is TilePath.Panel -> panel(path.page)
+            is TilePath.Ask -> ask(path)
+        }
+    }
+
+    /** Tile [id]'s su [cmd]; a screenshot after the panel's slide (the page shuts it first). */
+    private fun su(
+        id: String,
+        cmd: String,
+        failed: () -> Unit,
+    ) {
+        val delay = if (id == "screenshot") PANEL_GONE_MS else 0L
+        main.postDelayed({ root(cmd) { ok -> if (!ok) failed() } }, delay)
+    }
+
+    /** The lock admin's lockNow; [failed] if Android refused it. */
+    private fun adminLock(failed: () -> Unit) {
+        if (runCatching { LockAccess.locker(context).lock() }.isFailure) failed()
+    }
+
+    /** [path] didn't take: the optimistic flip goes, the next way runs ([TilePaths.fallback]). */
+    private fun failed(
+        id: String,
+        on: Boolean?,
+        caps: TileCaps,
+        path: TilePath,
+    ) {
+        expected.remove(id)
+        TilePaths.fallback(id, on, caps)?.takeIf { it != path }?.let { main.post { act(id, on, caps, it) } }
+        changed()
+    }
+
+    /** An accessibility global action, after the panel's slide for a screenshot; [failed] if the service is gone. */
+    private fun global(
+        action: Int,
+        failed: () -> Unit,
+    ) = main.postDelayed(
+        { if (KeyboardShotService.instance?.performGlobalAction(action) != true) failed() },
+        if (action == TilePaths.GLOBAL_SCREENSHOT) PANEL_GONE_MS else 0L,
+    )
+
+    /** Why the tile can't act, said; the page that lets it opened. */
+    private fun ask(path: TilePath.Ask) {
+        main.post { Toast.makeText(context, path.why, Toast.LENGTH_LONG).show() }
+        panel(path.page)
+    }
+
+    /** [direct], a refusal (an exception) as false. */
+    private fun directly(
+        id: String,
+        on: Boolean?,
+    ): Boolean = runCatching { direct(id, on) }.onFailure { Log.w(TAG, "$id: refused", it) }.getOrDefault(false)
+
+    /**
+     * The app's own switch for tile [id] (on: its state now): false if Android refused it. HACK: Wi-Fi and Bluetooth
+     * through the legacy calls, which work only because the app targets SDK 28 (targetSdk is pinned there for W^X, see
+     * build.gradle). Real fix: the privileged permissions in the class comment; until then a target bump turns these
+     * into the panels ([TileCaps.legacyWifi] / [TileCaps.legacyBt] go false by themselves).
+     */
+    private fun direct(
+        id: String,
+        on: Boolean?,
+    ): Boolean = directs[id]?.invoke(on == true) ?: false
+
+    /** Dark mode [want]: without MODIFY_DAY_NIGHT_MODE Android ignores it (logs "Night mode locked"), so read it back. */
+    private fun night(want: Int): Boolean {
+        val ui = uiMode ?: return false
+        ui.nightMode = want
+        return ui.nightMode == want
+    }
+
+    /** Do not disturb off ([off]: it's on now) or on, through the notification listener; false without one. */
+    private fun dnd(off: Boolean): Boolean {
+        val l = MediaListener.connected ?: return false
+        l.requestInterruptionFilter(if (off) NotificationListenerService.INTERRUPTION_FILTER_ALL else NotificationListenerService.INTERRUPTION_FILTER_PRIORITY)
+        return true
+    }
+
+    /** Android's panel or page for a [TilePath.Panel] / [TilePath.Ask]: the control center goes, the sheet comes up over home. */
+    private fun panel(page: String) {
+        main.post {
+            collapse()
+            val sheet =
+                when (page) {
+                    "wifi" -> Intent(Settings.Panel.ACTION_WIFI)
+                    "cell" -> Intent(Settings.Panel.ACTION_INTERNET_CONNECTIVITY)
+                    "nfc" -> Intent(Settings.Panel.ACTION_NFC)
+                    "write-settings" -> Intent(Settings.ACTION_MANAGE_WRITE_SETTINGS, android.net.Uri.parse("package:${context.packageName}"))
+                    "accessibility" ->
+                        Intent("android.settings.ACCESSIBILITY_DETAILS_SETTINGS")
+                            .putExtra(Intent.EXTRA_COMPONENT_NAME, ComponentName(context, KeyboardShotService::class.java).flattenToString())
+                            .takeIf { context.packageManager.resolveActivity(it, 0) != null } ?: Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS)
+                    "lock-admin" -> return@post runCatching { LockAccess.ask(context) }.onFailure { Log.w(TAG, "lock admin screen", it) }.let {}
+                    // A settings page: as a tile's long press opens it.
+                    else -> return@post open(page)
+                }
+            // Android's own sheets (and the grant pages): launched plain, never into an app window (QuickPageRoute's PANEL).
+            runCatching { context.startActivity(sheet.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)) }
+                .onFailure {
+                    Log.w(TAG, "no sheet for $page", it)
+                    open(page)
+                }
+        }
+    }
+
+    /** Tile [id]'s state as the system has it (null: not a switch / unknown). */
+    private fun realOn(
+        id: String,
+        sys: Sys,
+    ): Boolean? = reals[id]?.invoke(sys)
+
+    /** A switch flipped and not yet seen by the system: shown [on] until it is, or [until] passes. */
+    private class Expect(
+        val on: Boolean,
+        val until: Long,
+    )
+
+    /**
+     * Tile [id] shown [on] at once (optimistic); [SETTLE_MS] later, read again: not there, the real state comes back
+     * (rollback), and a direct call Android accepted but didn't carry out opens the tile's page (never silent).
+     */
+    private fun expect(
+        id: String,
+        on: Boolean,
+        path: TilePath,
+    ) {
+        val e = Expect(on, android.os.SystemClock.uptimeMillis() + SETTLE_MS)
+        expected[id] = e
+        main.postDelayed({
+            reads.execute {
+                val now = runCatching { readSys() }.getOrNull() ?: return@execute
+                sys = now
+                val real = realOn(id, now)
+                if (!expected.remove(id, e) || real == on) return@execute onChanged()
+                Log.w(TAG, "tile $id: still $real after ${SETTLE_MS}ms ($path), rolled back")
+                if (path == TilePath.Direct) TilePaths.fallback(id, !on, caps())?.let { main.post { act(id, !on, caps(), it) } }
+                onChanged()
+            }
+        }, SETTLE_MS)
+    }
+
+    /** [real], or the flip [expect]ed while the system hasn't caught up. */
+    private fun shown(
+        id: String,
+        real: Boolean?,
+    ): Boolean? {
+        val e = expected[id] ?: return real
+        if (real == e.on || android.os.SystemClock.uptimeMillis() > e.until) {
+            expected.remove(id, e)
+            return real
+        }
+        return e.on
     }
 
     /** Whether this page shows the control center: the third-party tiles listen (and report) while one does. */
@@ -439,12 +651,16 @@ class QuickSettings(
     /** The order's third-party tiles to [TileHost] - not OnePlus's battery saver, which is the system's own switch. */
     private fun hostTiles(ids: List<String>) = TileHost.host(ids.filter { it.startsWith("custom(") && !it.contains("com.oplus.battery/") })
 
-    private fun root(cmd: String) =
-        io.execute {
-            val out = rootOut(cmd)
-            if (out == null) Log.w(TAG, "root: $cmd failed")
-            changed()
-        }
+    /** [cmd] in the root shell, off the main thread; [done] (whether it worked) before the page hears of the change. */
+    private fun root(
+        cmd: String,
+        done: (Boolean) -> Unit = {},
+    ) = io.execute {
+        val out = rootOut(cmd)
+        if (out == null) Log.w(TAG, "root: $cmd failed")
+        done(out != null)
+        changed()
+    }
 
     fun close() {
         cameras.unregisterTorchCallback(torchCallback)
@@ -459,6 +675,9 @@ class QuickSettings(
 
         /** The panel's slide away, before a screenshot is taken. */
         private const val PANEL_GONE_MS = 450L
+
+        /** How long a flipped switch may take to show in the system's state (Wi-Fi and Bluetooth take ~1-3 s) before it's rolled back. */
+        private const val SETTLE_MS = 5_000L
 
         private val io = Executors.newSingleThreadExecutor()
 

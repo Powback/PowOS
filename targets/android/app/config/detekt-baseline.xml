@@ -239,7 +239,6 @@
     <ID>CyclomaticComplexMethod:PowosRecentsService.kt$PowosRecentsService$private fun startGestures()</ID>
     <ID>CyclomaticComplexMethod:PtyTerminal.kt$PtyTerminal$override fun key( code: Int, pressed: Boolean, )</ID>
     <ID>CyclomaticComplexMethod:QuickSettings.kt$QuickSettings$fun open(name: String)</ID>
-    <ID>CyclomaticComplexMethod:QuickSettings.kt$QuickSettings$fun toggle(name: String)</ID>
     <ID>CyclomaticComplexMethod:QuickSettings.kt$QuickSettings$private fun tile(id: String): JSONObject?</ID>
     <ID>CyclomaticComplexMethod:RecentsTransition.kt$RecentsTransition$private fun apply(look: Look)</ID>
     <ID>CyclomaticComplexMethod:RecentsTransition.kt$RecentsTransition$private fun finishAnimated( end: End, hold: ((() -&gt; Unit) -&gt; Unit)?, done: (Boolean) -&gt; Unit, )</ID>

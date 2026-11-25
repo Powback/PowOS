@@ -41,6 +41,8 @@
     <!-- Home's swipe down pulls the notification shade down. -->
     <!-- The control center's state and sliders (shell/QuickSettings.kt). WRITE_SETTINGS is an app op, granted there. -->
     <uses-permission android:name="android.permission.ACCESS_WIFI_STATE" />
+    <!-- The Wi-Fi tile without root: WifiManager.setWifiEnabled (legacy, targetSdk 28; shell/TilePaths.kt). -->
+    <uses-permission android:name="android.permission.CHANGE_WIFI_STATE" />
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
     <uses-permission android:name="android.permission.NFC" />
     <uses-permission android:name="android.permission.MODIFY_AUDIO_SETTINGS" />
