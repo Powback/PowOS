@@ -25,16 +25,16 @@ object CameraHole {
     }
 
     /**
-     * [hole] (natural orientation of a [w]x[h] natural px display) in [rotation] (Surface.ROTATION_*), scaled by
+     * [hole] (natural orientation of a [natural] = w to h px display) in [rotation] (Surface.ROTATION_*), scaled by
      * [scale] (logical / physical px) - RotationUtils.transformPhysicalToLogicalCoordinates.
      */
     fun turn(
         hole: BarRect,
         rotation: Int,
-        w: Int,
-        h: Int,
+        natural: Pair<Int, Int>,
         scale: Float = 1f,
     ): BarRect {
+        val (w, h) = natural
         fun pt(
             x: Int,
             y: Int,
@@ -101,7 +101,7 @@ object CameraHole {
         val real = android.graphics.Point().also { display.getRealSize(it) }
         val natural = maxOf(mode.physicalWidth, mode.physicalHeight)
         val scale = if (natural > 0) maxOf(real.x, real.y).toFloat() / natural else 1f
-        return holes.map { turn(it, display.rotation, mode.physicalWidth, mode.physicalHeight, scale) }
+        return holes.map { turn(it, display.rotation, mode.physicalWidth to mode.physicalHeight, scale) }
     }
 
     /** The cutout path's filled shape inside [box] (API 31+), when it is a real shape rather than the box again. */

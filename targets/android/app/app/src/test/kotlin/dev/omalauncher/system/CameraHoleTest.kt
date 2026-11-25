@@ -44,11 +44,11 @@ class CameraHoleTest {
     @Test
     fun turnsWithTheDisplay() {
         // The inner screen turned 90 (the hole top-right upright ends up top-left): RotationUtils' physical -> logical.
-        assertEquals(BarRect(46, 48, 122, 124), CameraHole.turn(innerHole, 1, 2268, 2440))
-        assertEquals(innerHole, CameraHole.turn(innerHole, 0, 2268, 2440))
-        assertEquals(BarRect(48, 2318, 124, 2394), CameraHole.turn(innerHole, 2, 2268, 2440))
+        assertEquals(BarRect(46, 48, 122, 124), CameraHole.turn(innerHole, 1, 2268 to 2440))
+        assertEquals(innerHole, CameraHole.turn(innerHole, 0, 2268 to 2440))
+        assertEquals(BarRect(48, 2318, 124, 2394), CameraHole.turn(innerHole, 2, 2268 to 2440))
         // A scaled resolution (wm size at half): the hole halves too.
-        assertEquals(BarRect(1072, 23, 1110, 61), CameraHole.turn(innerHole, 0, 2268, 2440, 0.5f))
+        assertEquals(BarRect(1072, 23, 1110, 61), CameraHole.turn(innerHole, 0, 2268 to 2440, 0.5f))
     }
 
     @Test
