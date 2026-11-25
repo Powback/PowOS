@@ -355,9 +355,36 @@ def validate_datasets(model, policy, errors, warnings):
 
 # Address ranges a Docker network must never take (2026-11-09): the Colima VM's vzNAT link (the Mac is
 # 192.168.64.1; a network holding it, mcspacetime_default 192.168.64.0/20, killed all VM egress during the
-# vzNAT switch), the LAN, Lima's user-mode network and the WireGuard subnets.
+# vzNAT switch), the LAN, Lima's user-mode network and the WireGuard subnets. Plus (11-25) the upstream router's LAN
+# 192.168.178.0/24 behind the ASUS, where the Hue bridge lives (192.168.178.143): agent-gateway_default had taken
+# 192.168.176.0/20 from Docker's old pool, so the VM routed 192.168.178.x into an empty Docker bridge and every
+# full-tunnel WireGuard phone (the S25) lost the bridge - "lights couldn't reach it" at home.
 RESERVED_NETS = [ipaddress.ip_network(n) for n in (
-    "192.168.64.0/18", "192.168.50.0/24", "192.168.5.0/24", "10.13.13.0/24", "10.13.14.0/24")]
+    "192.168.64.0/18", "192.168.50.0/24", "192.168.5.0/24", "10.13.13.0/24", "10.13.14.0/24", "192.168.178.0/24")]
+
+
+def live_network_warnings(context=None):
+    """Networks the engine already holds in a reserved range. A project's check only sees subnets its compose names;
+    one Docker handed out from an older pool before 10.128.0.0/9 (agent-gateway_default) only shows here. Best effort:
+    no engine reachable = no warnings."""
+    docker = ["docker"] + (["--context", context] if context else [])
+    try:
+        ids = capture(docker + ["network", "ls", "-q"], timeout=15).split()
+        rows = json.loads(capture(docker + ["network", "inspect"] + ids, timeout=30)) if ids else []
+    except (Failure, ValueError):
+        return []
+    warnings = []
+    for row in rows:
+        for cfg in ((row.get("IPAM") or {}).get("Config") or []):
+            try:
+                subnet = ipaddress.ip_network(cfg.get("Subnet") or "", strict=False)
+            except ValueError:
+                continue
+            for reserved in RESERVED_NETS:
+                if subnet.version == reserved.version and subnet.overlaps(reserved):
+                    warnings.append(f"live network {row.get('Name')} holds {subnet}, overlapping reserved {reserved}: "
+                                    "traffic for that range is routed into it; recreate it from the 10.128.0.0/9 pool")
+    return warnings
 
 
 def network_errors(model):
@@ -590,7 +617,7 @@ def fleet(manifest_file):
                     if current[0] == previous[0] and current[2] == previous[2] and port_overlap(current[1], previous[1]) and (current[3] == previous[3] or current[3] in {"0.0.0.0", "::"} or previous[3] in {"0.0.0.0", "::"}):
                         errors.append(f"port conflict {current[1]}/{current[2]}: {previous[4]} and {where}")
                 ports.append(current)
-    return {"schema": SCHEMA, "projects": reports, "errors": errors,
+    return {"schema": SCHEMA, "projects": reports, "errors": errors, "warnings": live_network_warnings(),
             "ok": not errors and all(not r["errors"] for r in reports)}
 
 
@@ -632,6 +659,7 @@ def main(argv=None):
         else:
             for report in result["projects"]: report_text(report)
             for error in result["errors"]: print("ERROR: " + error)
+            for warning in result["warnings"]: print("WARNING: " + warning)
         return 0 if result["ok"] else 1
     model = load_model(flags)
     report = inspect_model(model)

@@ -222,9 +222,26 @@ class CliTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as d:
             manifest = Path(d) / "fleet.json"
             manifest.write_text(json.dumps({"projects": [{"compose": "a.yml"}, {"compose": "b.yml"}]}))
-            with patch.object(p, "load_model", side_effect=[model, other]): result = p.fleet(manifest)
+            with patch.object(p, "load_model", side_effect=[model, other]), patch.object(p, "live_network_warnings", return_value=[]):
+                result = p.fleet(manifest)
         self.assertFalse(result["ok"])
         self.assertTrue(any("duplicate" in e for e in result["errors"]))
+
+    def test_hue_lan_reserved(self):
+        # 11-25: a network over 192.168.178.0/24 (the upstream LAN with the Hue bridge) blackholes it for the VM.
+        model = fixture()
+        model["networks"] = {"default": {"ipam": {"config": [{"subnet": "192.168.176.0/20"}]}}}
+        self.assertTrue(any("192.168.178.0/24" in e for e in p.network_errors(model)))
+
+    def test_live_networks_in_reserved_ranges_warn(self):
+        rows = [{"Name": "agent-gateway_default", "IPAM": {"Config": [{"Subnet": "192.168.176.0/20"}]}},
+                {"Name": "fine", "IPAM": {"Config": [{"Subnet": "10.128.7.0/24"}]}}, {"Name": "host", "IPAM": {"Config": []}}]
+        with patch.object(p, "capture", side_effect=["a\nb\nc\n", json.dumps(rows)]):
+            warnings = p.live_network_warnings()
+        self.assertEqual(len(warnings), 1)
+        self.assertIn("agent-gateway_default", warnings[0])
+        with patch.object(p, "capture", side_effect=p.Failure("no engine")):
+            self.assertEqual(p.live_network_warnings(), [])
 
 
 def job_fixture(host="powstation"):
