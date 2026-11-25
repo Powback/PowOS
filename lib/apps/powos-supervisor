@@ -15,6 +15,8 @@ powos-runtime (native / sandbox / container, the user's setting) and keeps each 
   - a changed mode (powos-runtime config) restarts the service in the new mode
   - asleep in stop mode (powos-sleepd: /run/powos-sleep/stopped/<id>): stopped and not restarted until the file goes;
     SIGUSR1 checks at once (powos-sleepd sends it either way)
+  - a manifest added to SERVICES while it runs (a deploy: rooted/powos-deploy.sh, then SIGUSR1) is started at the next
+    rescan or SIGUSR1 - no session or boot restart (11-25: powos-account-sync was installed and never started)
   - the phone's daily idle-CPU sample (IdleSample): /var/log/powos/idle-cpu.log, a note to the user when over budget
 
 HACK: a small supervisor of our own, because the proper one - systemd --user with real MemoryMax=/CPUWeight= per
@@ -439,6 +441,33 @@ class IdleSample:
                 pass
 
 
+def load_new(services):
+    """Adds a Service for each manifest in SERVICES not loaded yet (by path, or by id: one per id); returns the new
+    ones. A bad manifest is logged once per change of its file, never fatal."""
+    have = {s.path for s in services} | {s.id for s in services}
+    new = []
+    for name in sorted(os.listdir(SERVICES)) if os.path.isdir(SERVICES) else []:
+        path = os.path.join(SERVICES, name)
+        if not name.endswith(".json") or path in have:
+            continue
+        try:
+            s = Service(path)
+        except (OSError, ValueError, KeyError) as e:
+            key = (path, os.path.getmtime(path) if os.path.exists(path) else 0)
+            if key not in BAD:
+                BAD.add(key)
+                log(f"{name}: bad manifest: {e}")
+            continue
+        if s.id not in have:
+            services.append(s)
+            new.append(s)
+            have |= {s.path, s.id}
+    return new
+
+
+BAD = set()
+
+
 def serve():
     if os.getuid() != 0:
         sys.exit("powos-supervisor: runs as root (the system tier)")
@@ -455,15 +484,11 @@ def serve():
     with open(f"{STATE}/supervisor.pid", "w") as f:
         f.write(str(os.getpid()))
     services = []
-    for name in sorted(os.listdir(SERVICES)) if os.path.isdir(SERVICES) else []:
-        if name.endswith(".json"):
-            try:
-                services.append(Service(os.path.join(SERVICES, name)))
-            except (OSError, ValueError, KeyError) as e:
-                log(f"{name}: bad manifest: {e}")
+    load_new(services)
     log(f"up: {', '.join(s.id for s in services) or 'no services'}")
     stop = []
     scanned = 0.0
+    rescan = False
     sampler = IdleSample() if device() == "phone" else None
     # Signals are waited for, not handled: blocked here and taken by sigtimedwait in the tick's one sleep (~0.1
     # wakeups/s idle) - a service's exit (SIGCHLD) restarts it at once rather than at the next tick.
@@ -471,6 +496,10 @@ def serve():
     while not stop:
         now = time.time()
         default, apps = runtime_config()
+        if now - scanned >= RESCAN or rescan:
+            rescan = False
+            for s in load_new(services):
+                log(f"{s.id}: new manifest, starting")
         if now - scanned >= RESCAN or any(s.pids is None and s.proc is not None for s in services):
             ps, scanned = procs(), now
             for s in services:
@@ -500,7 +529,9 @@ def serve():
         due = [s.next_start - time.time() for s in services
                if s.proc is None and not s.held and not os.path.exists(f"{SLEPT}/{s.id}")]
         got = signal.sigtimedwait(WAITED, max(0.05, min([TICK, *due])))
-        if got and got.si_signo not in (signal.SIGCHLD, signal.SIGUSR1):
+        if got and got.si_signo == signal.SIGUSR1:
+            rescan = True
+        elif got and got.si_signo != signal.SIGCHLD:
             stop.append(1)
     for s in services:
         s.stop("supervisor stopping")

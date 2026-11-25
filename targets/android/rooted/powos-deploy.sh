@@ -390,6 +390,25 @@ if [ -d $A ]; then
   rm -rf $L/sleep && cp -r $A/sleep $L/sleep && chmod -R a+rX $L/sleep
   # Their unit manifests come with the rest (units/phone, below).
   install -m 644 $A/services/*.json $L/services/
+  # A service manifest the running supervisor doesn't run yet (a new one, e.g. powos-account-sync) starts now, not at
+  # the next boot (11-25: account sync was installed and never ran): SIGUSR1 makes the supervisor load new manifests.
+  # One from before 11-25 doesn't: it is stopped and started again on the new file (rooted.sh system stop + on: ~1 s
+  # without SpacetimeDB and the other services; the desktop session, its apps and Steam keep running).
+  sys_ids() { for f in $L/services/*.json; do sed -n 's/^ *"id": *"\([^"]*\)".*/\1/p' "$f" | head -1; done; }
+  sys_missing() { for i in $(sys_ids); do grep -q "\"id\": \"$i\"" $R/run/powos-system/status.json 2>/dev/null || echo "$i"; done; }
+  sup=$(cat $R/run/powos-system/supervisor.pid 2>/dev/null)
+  if [ ! -e /data/powos/system-tier.off ] && [ -n "$sup" ] && grep -q powos-supervisor /proc/$sup/cmdline 2>/dev/null && [ -n "$(sys_missing)" ]; then
+    kill -USR1 "$sup"
+    for _ in $(seq 30); do [ -z "$(sys_missing)" ] && break; sleep 0.5; done
+    if [ -n "$(sys_missing)" ]; then
+      echo "system tier: restarting the supervisor for $(sys_missing | tr '\n' ' ')(it predates loading new manifests)"
+      kill "$sup"
+      for _ in $(seq 40); do [ -d /proc/$sup ] || break; sleep 0.25; done
+      sh /data/powos/powos-start.sh
+      for _ in $(seq 40); do [ -z "$(sys_missing)" ] && break; sleep 0.5; done
+    fi
+    [ -z "$(sys_missing)" ] && echo "system tier: every service manifest running" || echo "system tier: not running yet: $(sys_missing | tr '\n' ' ')"
+  fi
   # The device agent (unit powos-deviced; its manifest came with the services above, so the supervisor starts it):
   # `powos devices` runs it from here. A running one is restarted onto the new file (the supervisor restarts it).
   # powos-units: /data/powos/root/usr/lib/powos/devices
