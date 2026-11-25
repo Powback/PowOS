@@ -229,6 +229,14 @@ async function statusChromeCheck() {
   return fail;
 }
 
+/** The ring's mock holes per screen: [label, strip width, hole] (CSS px). */
+const RING_HOLES = [
+  ["folded", 404, { x: 189.32, y: 10.5, width: 25.7, height: 25.7 }],
+  ["unfolded", 821, { x: 776.11, y: 16.65, width: 27.51, height: 27.51 }],
+  ["s25", 384, { x: 185.6, y: 11.4, width: 12.8, height: 12.8 }],
+  ["razr", 412, { x: 197.5, y: 10, width: 17, height: 17 }],
+];
+
 /**
  * The recording light (ui/chrome.tsx RecordingRing, StatusChrome.kt's AppOps watch): with the camera / mic / screen in
  * use, a ring sits centred on the camera's cutout on this screen - [hole] the cover's centred punch-hole folded, the
@@ -247,14 +255,19 @@ async function recordingRingCheck(hole) {
     el.remove();
     return c;
   };
-  /** The ring's box [r]: centred on the cutout, round, bigger than it. */
-  const placeFails = (kind, r) => {
-    const cx = hole.x + hole.width / 2, cy = hole.y + hole.height / 2;
-    const off = Math.abs(r.x + r.width / 2 - cx) > 1 || Math.abs(r.y + r.height / 2 - cy) > 1;
-    const small = r.width < Math.max(hole.width, hole.height) + 2 || Math.abs(r.width - r.height) > 0.5;
+  /**
+   * The ring's box [r] (its stroke [css]): concentric with the hole and hugging it (11-25 "the camera ring is too big
+   * compared to the camera size") - its inner edge RING_GAP clear of the hole (+-1 px), a stroke of 1.5-3 px, round.
+   */
+  const placeFails = (kind, r, css, RING_GAP = 2) => {
+    const cx = hole.x + hole.width / 2, cy = hole.y + hole.height / 2, off = Math.abs(r.x + r.width / 2 - cx) > 1 || Math.abs(r.y + r.height / 2 - cy) > 1;
+    const stroke = parseFloat(css.borderTopWidth), inner = r.width / 2 - stroke, want = hole.width / 2 + RING_GAP;
+    const round = Math.abs(r.width - r.height) <= 0.5 && parseFloat(css.borderTopLeftRadius) >= r.width / 2 - 0.5;
     return [
       off ? `${kind}: ring centred at ${r.x + r.width / 2},${r.y + r.height / 2}, the camera at ${cx},${cy}` : "",
-      small ? `${kind}: ring ${r.width}x${r.height} doesn't go round the ${hole.width}x${hole.height} cutout` : "",
+      Math.abs(inner - want) > 1 ? `${kind}: ring inner radius ${inner.toFixed(2)}, want hole ${hole.width / 2} + gap ${RING_GAP} = ${want} (+-1)` : "",
+      stroke >= 1.5 && stroke <= 3 ? "" : `${kind}: ring stroke ${stroke}px, want 1.5-3`,
+      round ? "" : `${kind}: ring ${r.width}x${r.height} radius ${css.borderTopLeftRadius} isn't a circle round the ${hole.width}x${hole.height} hole`,
     ];
   };
   /**
@@ -267,7 +280,7 @@ async function recordingRingCheck(hole) {
     for (const a of ring.getAnimations()) a.finish(); // its entry (a spring scale-in): measured where it settles
     const css = getComputedStyle(ring);
     return [
-      ...placeFails(kind, ring.getBoundingClientRect()),
+      ...placeFails(kind, ring.getBoundingClientRect(), css),
       css.borderTopColor === colour(token) ? "" : `${kind}: ring ${css.borderTopColor}, want ${token} ${colour(token)}`,
       ...tapFails(kind, ring, css),
       ring.getAttribute("aria-label")?.includes("org.example.rec") ? "" : `${kind}: ring doesn't say who uses it`,
@@ -15243,8 +15256,9 @@ try {
   }
   for (const [mode, width, height] of [["windowbar", 280, 27], ["statusbar", 404, 46]])
     runs.push(open(browser, `${ORIGIN}/index.html?mode=${mode}`, `chrome-${mode}`, { width, height }).then((r) => whenReady(r, () => r.page.evaluate(mode === "windowbar" ? windowChromeCheck : statusChromeCheck))));
-  // The recording light at the camera folded (the cover's centred hole) and unfolded (the inner screen's, top right).
-  for (const [label, width, hole] of [["folded", 404, { x: 190, y: 10, width: 24, height: 24 }], ["unfolded", 821, { x: 752, y: 9, width: 22, height: 22 }]])
+  // The recording light round the camera's hole (CSS px, what StatusChrome.kt CameraHole sends): the OnePlus Open's
+  // cover (OEM hole [523,29:594,100] px, DPR 2.7625) and inner ([2144,46:2220,122]), and S25 / razr-shaped mocks.
+  for (const [label, width, hole] of RING_HOLES)
     runs.push(open(browser, `${ORIGIN}/index.html?mode=statusbar`, `rec-light-${label}`, { width, height: 46 }).then((r) => whenReady(r, () => r.page.evaluate(recordingRingCheck, hole))));
   // The pill (bar.tsx, grow.tsx): every empty pill on home is one --pill-height tall - the foot's, PowOS AI's compose,
   // and the search widget at every size (one row, two rows, narrow), also after it was measured narrow and widened

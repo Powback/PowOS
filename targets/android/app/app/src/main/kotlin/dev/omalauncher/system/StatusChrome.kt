@@ -162,7 +162,7 @@ class StatusChrome(private val context: Context, private val changed: () -> Unit
 
     private var cameraLogged = ""
 
-    /** The recording light's camera on this strip ("camera", CSS px; none: the dot) - [CameraCutout.onStrip]. */
+    /** The recording light's camera hole on this strip ("camera", CSS px; none: the dot) - [CameraCutout.onStrip], [CameraHole]. */
     private fun camera(
         insets: WindowInsets,
         d: Float,
@@ -174,11 +174,12 @@ class StatusChrome(private val context: Context, private val changed: () -> Unit
         val strip = insets.getInsetsIgnoringVisibility(WindowInsets.Type.statusBars()).top.takeIf { it > 0 } ?: web.height
         val shown = cutout?.boundingRects.orEmpty().map { BarRect(it.left, it.top, it.right, it.bottom) }
         val whole = runCatching { context.display?.cutout?.boundingRects }.getOrNull().orEmpty().map { BarRect(it.left, it.top, it.right, it.bottom) }
-        val camera = CameraCutout.onStrip(shown, whole, strip)
+        // The ring hugs the camera's own hole, not the padded cutout box round it ([CameraHole]; 11-25 "too big").
+        val camera = CameraCutout.onStrip(shown, whole, strip)?.let { CameraHole.read(context, it) }
         val key = "$camera/$whole/$strip"
         if (key != cameraLogged) {
             cameraLogged = key
-            android.util.Log.i("PowosStatus", "camera cutout on the strip: ${camera ?: "none (the light is a dot)"}; window's $shown, display's $whole, strip $strip px, rotation ${runCatching { context.display?.rotation }.getOrNull()}")
+            android.util.Log.i("PowosStatus", "camera hole on the strip: ${camera ?: "none (the light is a dot)"}; window's $shown, display's $whole, strip $strip px, rotation ${runCatching { context.display?.rotation }.getOrNull()}")
         }
         if (camera != null) {
             data.put("camera", JSONObject().put("x", camera.l / d).put("y", camera.t / d).put("width", (camera.r - camera.l) / d).put("height", (camera.b - camera.t) / d))

@@ -114,10 +114,12 @@ function RecordingLight({ state, action }: { state: ChromeState; action: ChromeA
  * (data-action "privacy": the host makes it touchable on the strip, StatusChrome.action).
  */
 export function RecordingRing({ kind, camera, apps, action }: { kind: NonNullable<ChromeState["recording"]>; camera: NonNullable<ChromeState["camera"]>; apps?: string[]; action?: ChromeAction }) {
-  const size = Math.max(camera.width, camera.height) + 6;
+  // [camera] is the hole itself (StatusChrome.kt CameraHole: the OEM's hole / the cutout path's shape, not the padded
+  // cutout box - a ring from the box was twice the camera, 11-25). The ring hugs it: --rec-gap clear of the hole, then
+  // --rec-stroke, concentric (a pill hole gets a pill ring). Sizes live in chrome.css; the box is laid out by CSS calc.
   return <button type="button" class="status-rec-ring" data-kind={kind} data-action="privacy" aria-label={`${recordingLabel(kind, apps)}. Show who`}
     onClick={() => action?.("privacy")}
-    style={{ left: `${camera.x + camera.width / 2 - size / 2}px`, top: `${camera.y + camera.height / 2 - size / 2}px`, width: `${size}px`, height: `${size}px` }} />;
+    style={{ "--hole-x": `${camera.x}px`, "--hole-y": `${camera.y}px`, "--hole-w": `${camera.width}px`, "--hole-h": `${camera.height}px` }} />;
 }
 
 /** No camera cutout on this screen (a desktop, a tablet without one): the light as a dot before the status icons. */

@@ -417,6 +417,9 @@ const DEVICES_REMOVED = DEVICES_MOCK + " document.querySelector('[data-removed-f
 
 const SCENES = [
   ["chrome-status", "statusbar", "E.emit('chrome.changed', {kind:'status', battery:74, charging:true, network:'wifi', vpn:true, left:44});", "blurred", null, { folded: {width:404,height:46,insets:{top:0,bottom:0}}, unfolded: {width:821,height:46,insets:{top:0,bottom:0}} }],
+  // The recording ring round the camera's hole (chrome.tsx RecordingRing; 11-25 "too big"): the OnePlus Open's cover and
+  // inner holes (CSS px, from the OEM's declared hole) and S25 / razr-shaped mocks - the same holes as gate.mjs RING_HOLES.
+  ["chrome-rec-ring", "statusbar", "const H = {404: [189.32, 10.5, 25.7], 821: [776.11, 16.65, 27.51], 384: [185.6, 11.4, 12.8], 412: [197.5, 10, 17]}[innerWidth]; E.emit('chrome.changed', {kind:'status', battery:74, network:'wifi', left:8, recording:'camera', recordingApps:['org.example.cam'], camera: {x:H[0], y:H[1], width:H[2], height:H[2]}}); await sleep(400);", "blurred", null, { folded: {width:404,height:46,insets:{top:0,bottom:0}}, unfolded: {width:821,height:46,insets:{top:0,bottom:0}}, s25: {width:384,height:46,insets:{top:0,bottom:0}}, razr: {width:412,height:46,insets:{top:0,bottom:0}} }],
   // A maximised web window's bar merged under the status bar (StatusChrome.merge): the clock after its title, the icons before its controls.
   ["chrome-status-merged", "statusbar", "E.emit('chrome.changed', {kind:'status', clock:'18:40', battery:88, network:'wifi', left:8, mergeLeft:150, mergeRight:120});", "blurred", null, { folded: {width:404,height:46,insets:{top:0,bottom:0}}, unfolded: {width:821,height:46,insets:{top:0,bottom:0}} }],
   ["chrome-window", "windowbar", "E.emit('chrome.changed', {kind:'window', title:'Calculator'});", "blurred", null, { narrow: {width:280,height:27,insets:{top:0,bottom:0}}, wide: {width:650,height:27,insets:{top:0,bottom:0}} }],

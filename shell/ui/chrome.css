@@ -42,8 +42,14 @@ html:root .chrome-surface { --frost-fill: color-mix(in srgb, var(--frost-base) m
 .status-rec-ring[data-kind="mic"], .status-rec-dot[data-kind="mic"] { --rec: var(--privacy-mic); }
 .status-rec-ring[data-kind="screen"], .status-rec-dot[data-kind="screen"] { --rec: var(--privacy-screen); }
 /* A button (its tap opens the control center): over .status-chrome button's reset, so the ring keeps its border. */
-.status-chrome .status-rec-ring { pointer-events: auto; appearance: none; background: none; padding: 0; margin: 0; min-height: 0; cursor: pointer;
-  position: fixed; border: 2px solid var(--rec); border-radius: 50%; animation: status-rec-in var(--spring-fast-ms) var(--spring-fast); }
+/* It hugs the camera's hole (--hole-*: the hole itself, chrome.tsx): --rec-gap clear of it, a --rec-stroke line,
+   concentric; 999px = half the short side, so a pill hole gets a pill ring. Stock-like proportions. */
+.status-chrome .status-rec-ring { --rec-gap: 2px; --rec-stroke: 2px; --rec-out: calc(var(--rec-gap) + var(--rec-stroke));
+  pointer-events: auto; appearance: none; background: none; padding: 0; margin: 0; min-height: 0; min-width: 0; cursor: pointer;
+  position: fixed; left: calc(var(--hole-x) - var(--rec-out)); top: calc(var(--hole-y) - var(--rec-out));
+  width: calc(var(--hole-w) + 2 * var(--rec-out)); height: calc(var(--hole-h) + 2 * var(--rec-out));
+  border: var(--rec-stroke) solid var(--rec); border-radius: 999px;
+  animation: status-rec-in var(--spring-fast-ms) var(--spring-fast); }
 .status-rec-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--rec); flex: none; }
 @keyframes status-rec-in { from { opacity: 0; scale: .6; } }
 .fps-meter canvas { width: 45px; height: 16px; display: block; }

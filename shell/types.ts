@@ -547,7 +547,7 @@ export interface ChromeState {
   mergeRight?: number;
   /** A centred camera hole's left edge (CSS px; the folded cover screen). */
   holeLeft?: number;
-  /** The camera's cutout on this screen (CSS px, the strip's own coordinates): folded the cover's, unfolded the inner's. */
+  /** The camera's hole on this screen (CSS px, the strip's own coordinates; the hole itself, not the padded cutout box - StatusChrome.kt CameraHole): folded the cover's, unfolded the inner's. */
   camera?: { x: number; y: number; width: number; height: number };
   /** The recording light (StatusChrome.kt RecordingWatcher, AppOps active ops): what's in use - camera, screen capture, mic. */
   recording?: "camera" | "screen" | "mic" | null;
