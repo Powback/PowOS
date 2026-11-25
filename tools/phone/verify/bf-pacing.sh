@@ -117,20 +117,36 @@ gus_set || { restore; exit 5; }
 # stopper TERMs the running adb call too, so bash runs this at once instead of after that call. Not for the queue's
 # kill itself: that TERMs the whole tree and gives 10 s, under restore's ~25 s (its game_left closes the game then).
 restored=0 BF_STEP=start
-stopped_mac() { trap '' TERM INT HUP; echo "FAIL timeout: stopped from outside $(date +%T) at step \"$BF_STEP\" - closing the game"
-  [ "$restored" = 1 ] || restore; echo "FAIL timeout at step: $BF_STEP"; exit 124; }
+# Who stopped it decides the verdict (11-25 20:38:23 "stopped from outside ... comparing play" was this script's OWN
+# deadline watcher, mid ffmpeg decode, reported as if someone else had stopped it): its own deadline = FAIL timeout
+# with the step; a real touch on the phone since the start = SKIP (rc 3, "user input", as abort); any other stop from
+# outside (the queue, a kill by hand) = FAIL timeout, named as such.
+stopped_mac() { trap '' TERM INT HUP; local why=outside
+  if [ -f "$OUT/.deadline" ]; then why=deadline; elif [ -n "${i0:-}" ] && touched; then why=touch; fi
+  case $why in
+    deadline) echo "FAIL timeout: own deadline ($DL_S s of the ${BUDGET_S} s budget) hit $(date +%T) at step \"$BF_STEP\" - closing the game" ;;
+    touch) echo "user input: the phone was touched; stopped $(date +%T) at step \"$BF_STEP\" - closing the game (SKIP)" ;;
+    *) echo "FAIL timeout: stopped from outside (not the deadline, no touch) $(date +%T) at step \"$BF_STEP\" - closing the game" ;;
+  esac
+  [ "$restored" = 1 ] || restore
+  [ "$why" = touch ] && { echo "SKIP: touched at step: $BF_STEP"; exit 3; }
+  echo "FAIL timeout at step: $BF_STEP"; exit 124; }
 trap stopped_mac TERM INT HUP
 # Its own deadline (the game-input-alive pattern, a7821623), for a job queued as bf-pacing.sh itself: at BUDGET_S - 50 s
 # (BF_DEADLINE_S; 0 = none, a caller with its own deadline) a watcher TERMs what this script waits on (adb.sh -> docker
 # exec) and then this script, whose trap above closes the game (~25 s) and ends with the step - never the queue's
 # kill with the game up and no reason (broforce-fps 11-10 02:21: "into a level" took 89 s, killed while measuring).
 DL_S=${BF_DEADLINE_S:-$(( BUDGET_S - 50 ))}
+# END: what every "does it still fit" estimate below counts to - the own deadline when there is one (it fires first),
+# else the budget. They counted to the budget, 50 s past the deadline: 11-25 the decode started with 134 s of budget but
+# 84 s to the deadline, and the deadline TERMed it mid-decode.
+END=$(( T0 + (DL_S > 0 ? DL_S : BUDGET_S) )); rm -f "$OUT/.deadline"
 if [ "$DL_S" -gt 0 ]; then
   # Its own process (bash -c: $$ there is the watcher, never TERMed with the rest; bash 3.2 has no BASHPID). The TERM
   # goes first (bash holds it until the adb call returns), then that call's tree: the other order let the script run on.
   /bin/bash -c 'kids() { local c; for c in $(pgrep -P "$1"); do kids "$c"; done; kill -TERM "$1" 2>/dev/null; }
     sleep "$2"; kill -0 "$1" 2>/dev/null || exit 0
-    kill -TERM "$1"; for c in $(pgrep -P "$1"); do [ "$c" = $$ ] || kids "$c"; done' _ $$ "$(( T0 + DL_S - $(date +%s) ))" </dev/null >/dev/null 2>&1 &
+    : > "$3/.deadline"; kill -TERM "$1"; for c in $(pgrep -P "$1"); do [ "$c" = $$ ] || kids "$c"; done' _ $$ "$(( T0 + DL_S - $(date +%s) ))" "$OUT" </dev/null >/dev/null 2>&1 &
   WATCH=$!; trap 'trap "" TERM; c=$(pgrep -P $WATCH); kill $WATCH $c 2>/dev/null' EXIT  # its sleep too
 fi
 i0=$(irq); touched() { [ "$(irq)" != "$i0" ]; }
@@ -197,7 +213,7 @@ for mode in "$@"; do
   pill "$lbl: waiting for the game window"
   # The window, waited for only while the rest of this mode still fits the budget (WIN_S overrides).
   w0=$(date +%s); extra=0; [ "$mode" = play ] && extra=35  # play: keys + grabs + 10 s in the level
-  left=${WIN_S:-$(( T0 + BUDGET_S - AFTER_WIN_S - extra - w0 ))}; [ "$left" -ge 20 ] || left=20
+  left=${WIN_S:-$(( END - AFTER_WIN_S - extra - w0 ))}; [ "$left" -ge 20 ] || left=20
   win=$(asuser bf-window.sh wait "$left" "$i0" | tail -1)
   case $win in touched) abort ;; win=[0-9]*) ;; *) ask=$(asuser bf-ask.sh | tail -1)
     echo "FAIL no game window: $NAME showed none in $left s ($win)$([ "${ask:-ask none}" != "ask none" ] && echo "; Steam waits on the user for its launch: ${ask#ask }")"; restore; exit 5 ;; esac
@@ -230,8 +246,8 @@ for mode in "$@"; do
   # 11-10 07:21 (abz-has-low-fps, TU_DEBUG=startup): measuring at 99 s, collecting took 85 s, comparing started at 248 s
   # and the queue killed it at 300 s mid-decode. BF_REC_S set = that, whatever the budget.
   rec=${BF_REC_S:-}
-  if [ -z "$rec" ]; then rec=20; rl=$(( T0 + BUDGET_S - $(date +%s) )); need=$(( 110 + ${REC_COST_S:-110} ))
-    [ "$rl" -ge "$need" ] || { rec=0; echo "$mode: no screen recording: ${rl} s of the ${BUDGET_S} s budget left, it needs ${need} s (dup/stale frames not measured)"; }; fi
+  if [ -z "$rec" ]; then rec=20; rl=$(( END - $(date +%s) )); need=$(( 110 + ${REC_COST_S:-110} ))
+    [ "$rl" -ge "$need" ] || { rec=0; echo "$mode: no screen recording: ${rl} s left before the deadline, it needs ${need} s (dup/stale frames not measured)"; }; fi
   # The measurement fits what's left before the deadline: collecting ~25 + restore ~30 + comparing ~25 s after it; 30 s
   # when it fits, down to 10 s (a verdict on fewer frames, said so) - a slow "into a level" no longer costs the verdict.
   ms=30; if [ "$DL_S" -gt 0 ]; then ml=$(( T0 + DL_S - $(date +%s) - 80 ))
@@ -266,9 +282,10 @@ pill "comparing $(echo "$*" | sed 's/ / vs /g')"
 python3 -I "$here/bf-layers.py" "$OUT" "$@"
 # The recordings' decode (docker ffmpeg, ~60 s for 20 s of 2440x2268) only while it still fits: a mode measured with
 # BF_REC_S set, or a slow restore, otherwise ran past the queue's budget kill (rec.mp4 kept, renamed: decode it by hand).
-cl=$(( T0 + BUDGET_S - $(date +%s) ))
-if [ "$cl" -lt "${REC_DECODE_S:-75}" ]; then for r in "$OUT"/*/rec.mp4; do [ -f "$r" ] || continue
-  mv "$r" "$r.undecoded"; echo "comparing: $(basename "$(dirname "$r")")'s screen recording not decoded: ${cl} s of the budget left (kept as rec.mp4.undecoded)"; done; fi
+# REC_DECODE_S: the decode + bf-frames run; 11-25 a 22 MB rec.mp4 hadn't decoded after 84 s.
+cl=$(( END - $(date +%s) ))
+if [ "$cl" -lt "${REC_DECODE_S:-120}" ]; then for r in "$OUT"/*/rec.mp4; do [ -f "$r" ] || continue
+  mv "$r" "$r.undecoded"; echo "comparing: $(basename "$(dirname "$r")")'s screen recording not decoded: ${cl} s left before the deadline (kept as rec.mp4.undecoded)"; done; fi
 # BF_APP: bf-frames.py compares the fps with this game's last PASSes (its history) and FAILs a measurement that isn't
 # the game on the screen (11-08 02:02: "PASS ... 2.3 fps ... front HomeShell" while the game made 37/s).
 BF_APP=$APP uv run --quiet --script "$here/bf-frames.py" "$OUT" "$@"
