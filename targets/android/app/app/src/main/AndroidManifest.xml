@@ -473,6 +473,25 @@
                 android:resource="@xml/keyboard_shot_accessibility" />
         </service>
 
+        <!-- No root, no setting: the keyboard AI button's screen share (system/KeyboardShare.kt). The keyboard starts the
+             activity from its own panel; it has no window - only Android's screen-capture consent dialog shows. -->
+        <activity
+            android:name=".system.KeyboardShareConsentActivity"
+            android:theme="@android:style/Theme.Translucent.NoTitleBar"
+            android:excludeFromRecents="true"
+            android:noHistory="true"
+            android:taskAffinity=""
+            android:exported="true">
+            <intent-filter>
+                <action android:name="com.powos.app.action.KEYBOARD_SCREEN_SHARE" />
+                <category android:name="android.intent.category.DEFAULT" />
+            </intent-filter>
+        </activity>
+        <service
+            android:name=".system.KeyboardShareService"
+            android:foregroundServiceType="mediaProjection"
+            android:exported="false" />
+
         <provider
             android:name="androidx.core.content.FileProvider"
             android:authorities="${applicationId}.files"

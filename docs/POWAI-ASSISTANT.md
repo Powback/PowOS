@@ -396,9 +396,9 @@ need no privileges at all.
 The swipe keyboard (android-app-dev `projects/swipe-keyboard`, `ReplyController.java`) has a ✨ button in its
 candidate bar. Tap: PowOS screenshots the app being typed into and PowOS AI drafts ~3 replies from it and the field.
 Hold: the same plus a voice note (transcribed by the keyboard on the fleet voice path, `voiceagent.pow/ws` - the
-protocol GpuSpeech's GPU engine uses) saying what to reply. Chips above the keys: tap replaces the field's text,
+protocol GpuSpeech's GPU engine uses) saying what to reply. Chips in the keys' place (the panel swaps the keys out at their height): tap replaces the field's text,
 "More" asks for different ones (the shown ones go back as `avoid`), ✕ cancels at any point. Optimistic UI: the
-button lights and the bar says "Capturing screen" on the touch-down; "Listening" + live transcript while held;
+button lights and the panel says "Capturing screen" on the touch-down; "Listening" + live transcript while held;
 placeholder chips while drafting.
 
 - **Door:** `content://com.powos.app.keyboardai` (`system/KeyboardAiProvider.kt`, contract v1 in `KeyboardAi.kt`):
@@ -411,10 +411,46 @@ placeholder chips while drafting.
   persisted. The keyboard holds no key and never sees the model.
 - **Screenshot, rooted:** PowOS's su (`RootShell`) runs `dumpsys window windows` (focused window FLAG_SECURE ->
   refused) then `screencap` into the app's cache, read and deleted at once.
-- **Screenshot, no root (S25):** `KeyboardShotService`, PowOS's AccessibilityService that only takes screenshots
-  (`takeScreenshot`, API 30+, no window content); the user turns it on once - the keyboard's "Allow PowOS screen
-  access" opens its settings page. Without it, live mode's MediaProjection frame (`LiveCapture.latest()`, a third of
-  the screen, its own one-time consent) when live mode is on; else "needs-access".
+- **Screenshot, no root (S25, razr):** best first (`KeyboardAccess.via`): `KeyboardShotService`, PowOS's
+  AccessibilityService that only takes screenshots (`takeScreenshot`, API 30+, no window content), shown in Android's
+  settings as "PowOS keyboard screenshots"; else a screen share the user granted from the keyboard
+  (`system/KeyboardShare.kt`, MediaProjection); else live mode's MediaProjection frame (`LiveCapture.latest()`) when
+  live mode is on; else "needs-access" with `"access": "restricted" | "off"` (the probe says the same up front).
+- **Getting screen access, all inside the keyboard (11-25).** The user hit Android 13+'s *restricted settings*: the
+  switch was blocked, Android's notice sent them to a Google help page, and they couldn't find the setting. Now no PowOS
+  sheet or overlay opens over the app and no web page is ever linked: the keyboard's AI panel takes the keys' place at
+  their height (the app above never moves; long content scrolls; back or ✕ returns to the keys) and shows every step
+  (`ScreenAccess.java` in swipe-keyboard). Capturing / listening / drafting progress and the draft chips with More and
+  ✕ live in that same panel.
+  - *Detection* (PowOS, `KeyboardAccess.restricted`): PowOS's own appop `android:access_restricted_settings`
+    (ALLOWED -> fine, ERRORED -> blocked), else the install source (`getInstallSourceInfo().packageSource` LOCAL_FILE /
+    DOWNLOADED_FILE -> blocked). Android 12 and older: never.
+  - *Steps when restricted*: 1. "Try the switch" opens the service's own page (`ACCESSIBILITY_DETAILS_SETTINGS` with
+    the component); Android blocks it once - the panel says tap OK, not "Learn more". 2. Back in the keyboard (it
+    re-probes), "Open PowOS App info" (`ACTION_APPLICATION_DETAILS_SETTINGS`, package:com.powos.app): Settings → Apps →
+    PowOS → ⋮ (top right) → "Allow restricted settings" - PowOS's menu, not the keyboard's, and only there after step 1
+    (the user's own finding, 11-25). 3. Back with the restriction lifted, the keyboard opens the switch straight away;
+    back with the service on, it takes the capture and drafts without another tap (a trip counts for 5 min).
+    Still restricted after App info, or "No such item? Share the screen": the share becomes the main button - some
+    ROMs (Android 15 / One UI 7 variants) have no such item, so it's never a dead end.
+  - *Screen share, no setting*: always offered beside the steps - "Share screen for this session" or "Just this once".
+    The keyboard starts PowOS's `KeyboardShareConsentActivity` (no window: only Android's consent dialog, entire screen
+    on Android 14+); `KeyboardShareService` (mediaProjection FGS, a notification with Stop) holds the projection with
+    its virtual display paused (no surface) and attaches an ImageReader for one frame per press. Once: stopped after
+    that frame, or 60 s without one. Session: until Stop, Android ending it (screen lock on newer releases) or PowOS
+    restarting - Android 14+ asks again for each new session.
+  - While one of Android's screens is up the panel shows "Waiting for permission: …"; an older PowOS without the share
+    activity gets the steps without share buttons.
+- **Why PowOS was restricted, and the fix (11-25):** PowApps installed every app with `ACTION_VIEW` on the downloaded
+  file, which Android's package installer records as a local-file install -> restricted settings on Android 13+. PowApps
+  now installs through a PackageInstaller session as an app store does (android-app-dev `powapps`
+  `install/SessionInstaller.kt`, package source STORE, first install confirmed by the user, updates silent on API 31+),
+  so apps it installs from now on aren't restricted. PowOS's own updater (`PowosUpdates`) and its keyboard install
+  (`DefaultKeyboard`) already used sessions; the razr's `nonroot-sync.sh` uses `adb install` (not restricted either).
+  *Already-installed copies keep the restriction* - a later session update doesn't lift it. For those: the user's one
+  "Allow restricted settings" (the steps above), or, with adb, `adb shell appops set com.powos.app
+  ACCESS_RESTRICTED_SETTINGS allow`; or just the screen share. Uninstall + reinstall would also clear it but loses
+  PowOS's data - not offered.
 - **Privacy:** captured only on the button's press; the keyboard rows are cropped off (`imeTop`); the JPEG lives in
   PowOS's memory only (`KeyboardAi.Shots`) until the chips are dismissed or 3 min, goes to the guest on stdin, and
   claude keeps no session. Off for password and incognito fields (keyboard side); secure windows are refused
@@ -451,8 +487,9 @@ placeholder chips while drafting.
 - **Checks:** `test/tier1/test-reply-drafts.py` (contract + parsing), `test/tier1/test-reply-learn.py` (ranking,
   prompt block, offer/outcome recording, edit distance, privacy exclusions, off switch, profile regeneration
   trigger, end to end over a stand-in SpacetimeDB), `KeyboardAiTest.kt` (permission check incl. `outcome`,
-  secure-window parse, crop, contract, outcome request), the keyboard's `ReplyDraftsTest.java` (incl. rid, outcome
-  arg, sent detection), device `tools/phone/verify/keyboard-ai-reply.sh` (provider end to end with a canned
+  secure-window parse, crop, contract, outcome request), `KeyboardAccessTest.kt` (restricted detection, path order,
+  share modes), the keyboard's `ReplyDraftsTest.java` (incl. rid, outcome arg, sent detection, access) and
+  `ScreenAccessTest.java` (step flow, the exact "Allow restricted settings" wording, share fallback, resume), device `tools/phone/verify/keyboard-ai-reply.sh` (provider end to end with a canned
   voice-note transcript).
 
 ## 4. Risks and limits

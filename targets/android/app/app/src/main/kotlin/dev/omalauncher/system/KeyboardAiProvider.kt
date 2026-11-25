@@ -1,5 +1,6 @@
 package dev.omalauncher.system
 
+import android.app.AppOpsManager
 import android.content.ContentProvider
 import android.content.ContentValues
 import android.content.Context
@@ -9,6 +10,7 @@ import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import android.net.Uri
 import android.os.Binder
+import android.os.Build
 import android.os.Bundle
 import android.os.Process
 import android.provider.Settings
@@ -57,7 +59,7 @@ class KeyboardAiProvider : ContentProvider() {
         ask: JSONObject,
     ): JSONObject =
         when (method) {
-            "probe" -> probe()
+            "probe" -> probe(c)
             "capture" -> capture(c, ask)
             "drafts" -> drafts(ask)
             "outcome" -> outcome(ask)
@@ -69,20 +71,36 @@ class KeyboardAiProvider : ContentProvider() {
     private fun answer(o: JSONObject) = Bundle().apply { putString("json", o.toString()) }
 
     /** Which screenshot path this phone has, whether PowOS AI can run, and (rooted) whether the focused window is secure. */
-    private fun probe(): JSONObject =
-        KeyboardAi.ok()
+    private fun probe(c: Context): JSONObject {
+        val via = captureVia()
+        return KeyboardAi.ok()
             .put("contract", KeyboardAi.CONTRACT)
-            .put("capture", captureVia())
+            .put("capture", via)
+            .put("access", if (via == "none") KeyboardAccess.why(restricted(c)) else JSONObject.NULL)
             .put("ai", Guest.enabled)
             .put("secure", if (andro.marchy.RootMode.enabled()) rootFocusSecure() ?: JSONObject.NULL else JSONObject.NULL)
+    }
 
     private fun captureVia(): String =
-        when {
-            andro.marchy.RootMode.enabled() -> "root"
-            KeyboardShotService.instance != null -> "accessibility"
-            LiveCapture.running -> "live"
-            else -> "none"
-        }
+        KeyboardAccess.via(
+            root = andro.marchy.RootMode.enabled(),
+            accessibility = KeyboardShotService.instance != null,
+            share = KeyboardShare.available(),
+            live = LiveCapture.running,
+        )
+
+    /**
+     * Whether Android blocks the "PowOS keyboard screenshots" toggle (restricted settings, [KeyboardAccess.restricted]):
+     * PowOS's own appop, else its install source.
+     */
+    private fun restricted(c: Context): Boolean {
+        val mode =
+            runCatching {
+                c.getSystemService(AppOpsManager::class.java).unsafeCheckOpNoThrow(KeyboardAccess.OP_RESTRICTED_SETTINGS, Process.myUid(), c.packageName)
+            }.getOrNull()
+        val source = if (Build.VERSION.SDK_INT >= 33) runCatching { c.packageManager.getInstallSourceInfo(c.packageName).packageSource }.getOrNull() else null
+        return KeyboardAccess.restricted(Build.VERSION.SDK_INT, mode, source)
+    }
 
     private fun capture(
         c: Context,
@@ -90,7 +108,7 @@ class KeyboardAiProvider : ContentProvider() {
     ): JSONObject {
         val via = captureVia()
         if (via == "root" && rootFocusSecure() == true) return KeyboardAi.error("secure", "this screen is private (FLAG_SECURE)")
-        if (via == "none") return KeyboardAi.error("needs-access", "allow PowOS's screen access: Accessibility > PowOS keyboard screenshots")
+        if (via == "none") return KeyboardAi.error("needs-access", "PowOS needs to see the screen - tap ✨ to set it up").put("access", KeyboardAccess.why(restricted(c)))
         val full = grab(c, via) ?: return KeyboardAi.error("failed", "the $via screenshot failed")
         val keep = KeyboardAi.cropBottom(full.height, ask.optInt("imeTop"), ask.optInt("screenH"))
         val cropped = if (keep < full.height) Bitmap.createBitmap(full, 0, 0, full.width, keep) else full
@@ -112,6 +130,7 @@ class KeyboardAiProvider : ContentProvider() {
         when (via) {
             "root" -> rootScreencap(c)
             "accessibility" -> accessibilityShot()
+            "share" -> KeyboardShare.grab()
             "live" -> LiveCapture.latest()
             else -> null
         }

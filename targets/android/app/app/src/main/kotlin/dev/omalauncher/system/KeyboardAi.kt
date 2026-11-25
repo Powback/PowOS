@@ -13,10 +13,13 @@ import org.json.JSONObject
  *
  * Contract v1 - every call's arg is a JSON object, every answer a Bundle with one string "json" ({"ok": true, ...} or
  * {"ok": false, "error": <word>, "why": <text>}):
- *  - probe   {}                                    -> {"capture": "root"|"accessibility"|"live"|"none", "ai": bool,
- *                                                      "secure": bool|null}
- *  - capture {"imeTop": px, "screenH": px}         -> {"shot": id, "w", "h", "via"}; errors secure / needs-access /
- *                                                      failed. Taken only on this explicit call; the image is kept in
+ *  - probe   {}                                    -> {"capture": "root"|"accessibility"|"share"|"live"|"none",
+ *                                                      "access": "restricted"|"off"|null, "ai": bool,
+ *                                                      "secure": bool|null}; "access" (capture "none" only): whether
+ *                                                      Android's restricted settings block PowOS's accessibility
+ *                                                      toggle ([KeyboardAccess]) - the keyboard's setup steps follow it
+ *  - capture {"imeTop": px, "screenH": px}         -> {"shot": id, "w", "h", "via"}; errors secure / needs-access
+ *                                                      (+ "access") / failed. Taken only on this explicit call; kept in
  *                                                      memory only ([Shots], never written to disk) for [SHOT_TTL_MS]
  *  - drafts  {"shot", "transcript", "text", "app", "hint", "inputType", "imeOptions", "n", "avoid": [..]}
  *                                                   -> {"variations": [...], "model", "learn": bool, "rid"?}; errors
@@ -35,7 +38,8 @@ import org.json.JSONObject
  *
  * Screenshot paths ([KeyboardAiProvider.capture]): rooted - PowOS's su runs `screencap` (after `dumpsys window` says the
  * focused window isn't FLAG_SECURE); no root - PowOS's accessibility service [KeyboardShotService]
- * (AccessibilityService.takeScreenshot, API 30+, enabled once by the user in Android's accessibility settings), else the
+ * (AccessibilityService.takeScreenshot, API 30+, enabled once by the user in Android's accessibility settings), else a
+ * screen share the user granted from the keyboard ([KeyboardShare], once or for the session), else the
  * live mode's MediaProjection frame when live mode is on ([dev.omalauncher.assist.LiveCapture], its own one-time
  * consent). The keyboard's own rows are cropped off ([cropBottom]); a blacked-out capture (a secure window) is refused.
  */
