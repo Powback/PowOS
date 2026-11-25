@@ -89,20 +89,33 @@ say "state: $cs"
 sh_ "dumpsys activity activities" > "$OUT/activities.txt" 2>/dev/null
 sh_ "dumpsys window windows" > "$OUT/windows.txt" 2>/dev/null
 sh_ "dumpsys activity containers" > "$OUT/containers.txt" 2>/dev/null
-frames=$(python3 - "$OUT/windows.txt" "$C" "$K" <<'PY2'
+sh_ "dumpsys input" > "$OUT/input.txt" 2>/dev/null
+# Each app's frame ON THE SCREEN: input's window list (InputDispatcher's frames are display space, from SurfaceFlinger).
+# Not dumpsys window: Open Canvas places its sides by their surfaces, so WM's frames and task bounds are each side's
+# own size at 0,0 (11-25 run: Calculator and Chrome both [0,0][1123,2440] while the shot showed Calculator left,
+# Chrome right - the check's misread, not a missing split). dumpsys window only when input has no frame for an app.
+frames=$(python3 - "$OUT/input.txt" "$OUT/windows.txt" "$C" "$K" <<'PY2'
 import re, sys
-txt = open(sys.argv[1], errors="replace").read()
-out = {}
-for blk in re.split(r"\n\s*Window #\d+ ", txt)[1:]:
+inp = open(sys.argv[1], errors="replace").read()
+win = open(sys.argv[2], errors="replace").read()
+out, src = {}, {}
+for line in inp.splitlines():
+    for pkg in sys.argv[3:]:
+        if pkg in out or not re.search(r"name='[0-9a-f]+ " + re.escape(pkg) + "/", line): continue
+        if re.search(r"visible=false|NOT_VISIBLE", line): continue
+        m = re.search(r"frame=\[(-?\d+),(-?\d+)\]\[(-?\d+),(-?\d+)\]", line)
+        if m and int(m.group(3)) > int(m.group(1)): out[pkg] = [int(v) for v in m.groups()]; src[pkg] = "input"
+for blk in re.split(r"\n\s*Window #\d+ ", win)[1:]:
     head = blk.split("\n", 1)[0]
-    for pkg in sys.argv[2:]:
+    for pkg in sys.argv[3:]:
         if pkg + "/" in head and pkg not in out and "isVisible=true" in blk.replace("mViewVisibility=0x0", "isVisible=true"):
             m = re.search(r"(?:mFrame|frame)=\[(-?\d+),(-?\d+)\]\[(-?\d+),(-?\d+)\]", blk)
-            if m: out[pkg] = [int(v) for v in m.groups()]
-print(";".join(f"{k}={','.join(map(str, v))}" for k, v in out.items()))
+            if m: out[pkg] = [int(v) for v in m.groups()]; src[pkg] = "window"
+print(";".join(f"{k}={','.join(map(str, v))}" for k, v in out.items()) + " " + ",".join(f"{k.rsplit('.',1)[-1]}:{v}" for k, v in src.items()))
 PY2
 )
-say "frames: ${frames:-none read} (dumpsys window, visible app windows)"
+fsrc=${frames##* } frames=${frames% *}
+say "frames: ${frames:-none read} (from $fsrc: input = on screen, window = WM's own, unplaced)"
 say "top: $(sh_ "dumpsys activity activities" | grep -m1 topResumedActivity | cut -c1-160)"
 while IFS= read -r l; do say "log: $l"; done < <(pagelog 12)
 # 11-23 "it's like hiding the app": PowOS's window adopt took Open Canvas's container into a web window (off the screen).
@@ -121,6 +134,10 @@ ld = s.get("lastDock") or {}
 print("MEASURE " + str(ld.get("verdict", "no measurement")))
 fr = dict((k, [int(x) for x in v.split(",")]) for k, v in (p.split("=") for p in frames.split(";") if "=" in p))
 c, k = fr.get("com.android.chrome"), fr.get("com.oneplus.calculator")
+if c and k:
+    if c[:2] == k[:2]:
+        out.append(f"FAIL sides unreadable: Chrome and Calculator both at {c[:2]} ({c} / {k}) - see input.txt, windows.txt, canvas.png")
+        c = None
 if c and k:
     ok = c[0] < k[0] if side == "left" else c[0] > k[0]
     if c[2] - c[0] >= 1.5 * (k[2] - k[0]) or k[2] - k[0] >= 1.5 * (c[2] - c[0]): print(f"MEASURE uneven sides: Chrome {c}, Calculator {k}")
@@ -143,9 +160,12 @@ cs=$(hcall tasks.canvasState "[]" "v=>JSON.stringify(v)")
 case $cs in *'"inCanvas":true'*) bad "close: still in a canvas after Home + removing its task: $cs" ;; *) say "close: canvas gone" ;; esac
 SID=$(start $S); say "start: settings task ${SID:-none}"
 if [ -n "$SID" ]; then
+  # Every note the switcher shows from here on, caught as it mounts: it lives 2.4 s (recents-note animation), and the
+  # 11-25 run read the DOM once ~20 s after the drag (a slow page eval + the shot) - '' whatever had been shown.
+  ev "(()=>{globalThis.__dockNotes=[];globalThis.__dockNoteObs?.disconnect();const o=new MutationObserver(()=>{for(const e of document.querySelectorAll('.recents-note')){const t=e.textContent||'';if(t&&!__dockNotes.includes(t))__dockNotes.push(t)}});o.observe(document.body,{childList:true,subtree:true,characterData:true});globalThis.__dockNoteObs=o;return 'ok'})()" >/dev/null
   g=$(drag_card "$SID"); say "drag: settings' card $g"
-  sleep 0.4
-  n=$(ev "document.querySelector('.recents-note')?.textContent??''" | tr -d '"')
+  sleep 3
+  n=$(ev "(()=>{const n=(globalThis.__dockNotes||[]).join(' | ');globalThis.__dockNoteObs?.disconnect();return n})()" | tr -d '"')
   "$T/shot.sh" "$OUT/settings-note.png" >/dev/null 2>&1
   say "note: $n"
   case $n in *"can't be used in split view"*) ;; *) bad "settings: no \"can't be used in split view\" note after the drag (note: '$n')" ;; esac
