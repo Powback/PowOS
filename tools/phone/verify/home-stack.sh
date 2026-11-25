@@ -97,8 +97,16 @@ echo "stack: $r; store home.stacks: $store; $(q "$LIFT")" | tee -a "$OUT/log.txt
 "$T/shot.sh" "$OUT/stacked-edit.png" 2>&1 | tail -1
 
 step "out of edit mode: a swipe on the stack shows the other widget, home's page stays"
-sh_ "input keyevent 4"; sleep 1.2
-[ "$(q '!!document.querySelector(".stack-strip[data-swipe]")')" = true ] || fail "the stack can't swipe out of edit mode"
+# Leave edit mode the user's way: the bar's "done" (editsheet.tsx). One Back isn't enough - after the drop the stack
+# is still the selected tile, and Back closes that first (state.ts back()); the 11-25 run sent one Back, stayed in edit
+# mode ("done" still on screen in swiped.png) and failed "can't swipe out of edit mode" on a stack that was fine.
+p=$(btn ".edit-act.done" "done")
+if [ -n "$p" ]; then sh_ "input tap $p"; else sh_ "input keyevent 4"; fi
+for i in 1 2 3 4 5 6; do [ "$(q '!!document.querySelector(".home.editing")')" = false ] && break; sleep 0.4; [ "$i" = 3 ] && sh_ "input keyevent 4"; done
+chk done
+[ "$(q '!!document.querySelector(".home.editing")')" = false ] || { fail "'done' (and Back) didn't leave edit mode"; "$T/shot.sh" "$OUT/still-editing.png" 2>&1 | tail -1; exit 1; }
+sleep 0.6
+[ "$(q '!!document.querySelector(".stack-strip[data-swipe]")')" = true ] || fail "the stack can't swipe out of edit mode (edit mode is off)"
 T0=$(q 'document.querySelector(".stack-page.top")?.dataset.member||""'); P0=$(q 'document.querySelector(".page-track")?.style.transform||""')
 f=$(px ".stack-strip" 0.85 0.5); t=$(px ".stack-strip" 0.1 0.5)
 [ "$T0" = "$KA" ] && dir=1 || dir=0

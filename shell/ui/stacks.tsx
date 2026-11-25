@@ -122,6 +122,10 @@ export function dropOnStack(carried: HomeItem, target: HomeItem): Promise<unknow
   if (!r) return Promise.resolve();
   tick();
   const moving = stackKeysFor(carried.key);
+  // The carried tile was selected at its pick-up (grid.tsx); in the stack it's no tile of its own any more, so its
+  // selection goes too - else the first Back after a stack drop only cleared an invisible selection and edit mode
+  // stayed (the 11-25 OnePlus run of home-stack.sh: one Back, still editing, "the stack can't swipe").
+  if (selected.peek() === carried.key) selected.value = null;
   return optimistic(
     () => void (stacks.value = r.stacks),
     async () => {
