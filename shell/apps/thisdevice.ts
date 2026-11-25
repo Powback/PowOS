@@ -23,7 +23,7 @@ export interface ThisDevice {
    * This phone's own enrollment as an approver (PowStation.kt): the Devices app's "New device wants to join" card and
    * Revoke on a phone, with no server command. Rejects on an APK without it (the card then stays hidden).
    */
-  realm(op: "state" | "pending" | "devices" | "approve" | "revoke", body?: object): Promise<any>;
+  realm(op: "state" | "pending" | "devices" | "approve" | "revoke" | "rename", body?: object): Promise<any>;
 }
 
 const none = () => Promise.reject(new Error("this PowOS app can't do that yet"));

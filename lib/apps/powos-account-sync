@@ -337,7 +337,17 @@ class Agent:
         for k in known:
             out["tables"].setdefault(k, "ok")
         out["ok"] = True
+        self.report(e, out)
         return self.finish(out)
+
+    def report(self, e, out):
+        """The round's outcome to the realm (POST /v1/account/status): every device's AI page Devices tab shows it
+        ("synced 2 min ago", "3 apps missing"). Best effort: an older realm without it (404) or a blip changes nothing."""
+        body = {k: out.get(k) for k in ("at", "ok", "offline", "why", "missing") if out.get(k) is not None}
+        try:
+            self.account(e, "/v1/account/status", body)
+        except (RuntimeError, Unreachable, Revoked, OSError, ValueError):
+            pass
 
     def pull(self, e, local, out):
         token, applied = stdb_token(), set()

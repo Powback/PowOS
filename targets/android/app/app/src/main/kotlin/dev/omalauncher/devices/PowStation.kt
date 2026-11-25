@@ -439,8 +439,9 @@ object PowStation {
     /**
      * The Devices app's realm calls (bridge "devices.realm", off the main thread): this phone approves and revokes with
      * its own enrollment, as powos-deviced does on a desktop (its /v1/enroll calls) - the token never reaches a page. "state"
-     * -> {enrolled, approver}; "pending" / "devices" / "approve" {code, decision, tenant?} / "revoke" {id} -> the
-     * realm's answer; a refusal throws with the realm's words (the bridge rejects with them).
+     * -> {enrolled, approver, id}; "devices" (the account's devices, "self" on this one) and "rename" {name} (this phone's
+     * name in the account) for any enrolled phone - the AI page's Devices tab; "pending" / "approve" {code, decision,
+     * tenant?} / "revoke" {id} for an approver -> the realm's answer; a refusal throws with the realm's words (the bridge rejects with them).
      */
     fun realm(
         c: Context,
@@ -449,18 +450,29 @@ object PowStation {
     ): JSONObject {
         val e = enrollment(c)
         val approver = e?.optJSONObject("device")?.optBoolean("approver") == true
-        if (op == "state") return JSONObject().put("enrolled", e != null).put("approver", approver)
+        if (op == "state") {
+            val id = e?.optJSONObject("device")?.optString("id").orEmpty()
+            return JSONObject().put("enrolled", e != null).put("approver", approver).put("id", id)
+        }
         val call = realmCall(op, body ?: JSONObject())
         checkNotNull(e) { "this phone hasn't joined a PowStation - Settings > powstation" }
-        check(approver) { "this phone joined without the right to approve devices" }
+        check(approver || op in ANY_ENROLLED) { "this phone joined without the right to approve devices" }
         val realm = e.optString("realm")
         val (st, r) =
             runCatching { http(call.first, realm + call.second, call.third, e.optString("device_token")) }
                 .getOrElse { throw IllegalStateException("the hub (${hostOf(realm)}) isn't reachable") }
         // a realm 401 is about this phone's enrollment (revoked or left), never a pairing
         check(st == 200) { refusal(r, "the hub answered $st") }
+        val renamed = if (op == "rename") r.optJSONObject("device")?.optString("name").orEmpty() else ""
+        if (renamed.isNotBlank()) {
+            e.optJSONObject("device")?.put("name", renamed)
+            writeEnrollment(c, e)
+        }
         return r
     }
+
+    /** Realm calls any enrolled phone may make (its own account's list, its own name); the rest need an approver. */
+    private val ANY_ENROLLED = setOf("devices", "rename")
 
     /** [op]'s method, realm path and body (pure: PowStationTest); only the fields the realm takes are passed on. */
     fun realmCall(
@@ -478,6 +490,11 @@ object PowStation {
                 val out = JSONObject().put("code", code).put("decision", decision).put("approver", b.optBoolean("approver", true))
                 b.optString("tenant").takeIf { it.isNotBlank() }?.let { out.put("tenant", it.take(64)) }
                 Triple("POST", "/v1/devices/approve", out)
+            }
+            "rename" -> {
+                val name = b.optString("name").trim().take(64)
+                require(name.isNotEmpty()) { "a name, please" }
+                Triple("POST", "/v1/devices/self/rename", JSONObject().put("name", name))
             }
             "revoke" -> {
                 val id = b.optString("id").trim().take(64)
@@ -502,6 +519,7 @@ object PowStation {
             .put("name", deviceName(c))
             .put("kind", "phone")
             .put("platform", "android ${android.os.Build.VERSION.RELEASE} (${android.os.Build.MODEL})")
+            .put("model", android.os.Build.MODEL)
             .put("caps", JSONArray(listOf("status", "screen_on", "ring")))
             .put("agent", if (ip != null) "https://$ip:${DeviceAgentCore.PORT}" else "")
     }

@@ -399,6 +399,22 @@ const FRICTION =
 /** The Friction page with more rows than a screen holds (the foot fade's scenes). */
 const FRICTION_LONG = FRICTION.replace(" A.friction.value = rows;", " for (let i = 0; i < 12; i++) rows.push(f('fl' + i, ['ship', 'gate', 'adb', 'git'][i % 4], 'flaky-check', `Check ${i} failed once while the phone was busy`, 12 - i, 'open', (i + 1) * H)); A.friction.value = rows;");
 
+/**
+ * The AI page's Devices tab (aidevices.tsx) with a mock realm (devices.realm, PowStation.kt's answers): this device,
+ * another phone online, an offline desktop with apps missing, a removed one; this phone an approver. DEVICES_CONFIRM:
+ * Remove tapped on the desktop (the confirm in its row); DEVICES_REMOVED: the Removed fold open.
+ */
+const DEVICES_MOCK =
+  "const now = Math.floor(Date.now() / 1000); const B = (await U('./bridge.ts')).powos;" +
+  " const list = [{ id: 'fold', name: 'Razr Fold', kind: 'phone', model: 'XT2651-1', self: true, approver: true, enrolled: now - 20 * 86400, last_seen: now - 5, sync: { at: now - 120, ok: true, missing_n: 0 } }," +
+  " { id: 's25', name: 'Galaxy S25', kind: 'phone', model: 'SM-S931B', enrolled: now - 9 * 86400, last_seen: now - 40, sync: { at: now - 40, ok: true, missing_n: 0 } }," +
+  " { id: 'desk', name: 'Desk', kind: 'desktop', platform: 'bazzite', enrolled: now - 30 * 86400, last_seen: now - 2 * 86400, sync: { at: now - 2 * 86400, ok: true, missing_n: 3, missing: ['lights', 'notes', 'keyboard-ai'] } }," +
+  " { id: 'oneplus', name: 'OnePlus Open', kind: 'phone', model: 'CPH2551', enrolled: now - 60 * 86400, last_seen: now - 6 * 86400, revoked: now - 5 * 86400 }];" +
+  " B.devices = { ...(B.devices || {}), realm: async (op) => op === 'state' ? { enrolled: true, approver: true, id: 'fold' } : op === 'devices' ? { devices: list } : {} };" +
+  " S.page.value = -1; await sleep(400); S.aiScreen.value = 'devices'; await sleep(700);";
+const DEVICES_CONFIRM = DEVICES_MOCK + " document.querySelector('[data-device=desk] [data-remove]')?.click(); await sleep(400);";
+const DEVICES_REMOVED = DEVICES_MOCK + " document.querySelector('[data-removed-fold] .ais-toggle')?.click(); await sleep(600);";
+
 const SCENES = [
   ["chrome-status", "statusbar", "E.emit('chrome.changed', {kind:'status', battery:74, charging:true, network:'wifi', vpn:true, left:44});", "blurred", null, { folded: {width:404,height:46,insets:{top:0,bottom:0}}, unfolded: {width:821,height:46,insets:{top:0,bottom:0}} }],
   // A maximised web window's bar merged under the status bar (StatusChrome.merge): the clock after its title, the icons before its controls.
@@ -575,7 +591,10 @@ const SCENES = [
   // OE1 (the user, 11-03 21:14: "Why is the search [bar] just under the chat here?"): every tab, the bar where home's is.
   ["ai-tab-agents", "home", "S.page.value = -1; await sleep(400); S.aiScreen.value = 'fleet';", "wallpaper", undefined, AI_TAB_SIZES],
   ["ai-tab-progress", "home", "S.page.value = -1; await sleep(400); S.aiScreen.value = 'progress';", "wallpaper", undefined, AI_TAB_SIZES],
-  ["ai-tab-devices", "home", "S.page.value = -1; await sleep(400); S.aiScreen.value = 'devices';", "wallpaper", undefined, AI_TAB_SIZES],
+  ["ai-tab-devices", "home", DEVICES_MOCK, "wallpaper", undefined, AI_TAB_SIZES],
+  // The Devices tab's signed-in devices: Remove's confirm on the offline desktop; the Removed fold open.
+  ["ai-devices-confirm", "home", DEVICES_CONFIRM, "wallpaper", undefined, SIZES],
+  ["ai-devices-removed", "home", DEVICES_REMOVED, "wallpaper", undefined, SIZES],
   ["chat", "home", `S.chat.value = { busy: false, items: ${CHAT_SAMPLE} }; S.chatting.value = true; S.drawer.value = 1;`, "wallpaper"],
   ["chat-open", "home", `S.chat.value = { busy: false, items: ${CHAT_SAMPLE} }; S.chatting.value = true; S.drawer.value = 1; await sleep(300); document.querySelector('.chat .tl-row')?.click(); await sleep(100); document.querySelectorAll('.chat .tl-row.has-out')[0]?.click(); document.querySelectorAll('.chat .tl-row.has-out')[2]?.click();`, "wallpaper"],
   ["present", "home", `S.chat.value = { busy: false, items: ${PRESENT_SAMPLE} }; S.chatting.value = true; S.drawer.value = 1;`, "wallpaper"],

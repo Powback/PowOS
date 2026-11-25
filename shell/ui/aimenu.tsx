@@ -17,6 +17,7 @@ import type { AgentHost } from "../types.ts";
 import { SessionRow, hostOf, hosts, localHost, sessions, sessionsOn, useSessions } from "./terms.tsx";
 import { ago } from "./time.ts";
 import { HOSTS, Units } from "./units.tsx";
+import { AccountDevices } from "./aidevices.tsx";
 import { WorkFeed, board, type WorkRow } from "./aiboard.tsx";
 import { FrictionPage } from "./aifriction.tsx";
 import { ProgressView } from "./aiprogress.tsx";
@@ -177,10 +178,19 @@ function FrictionScreen({ shown }: { shown: boolean }) {
   );
 }
 
-/** Devices: installed & running per host, each host's terminals under its name (the sessions read while it shows). */
+/**
+ * Devices: the owner's devices signed in to the Pow account first (aidevices.tsx; the user, 11-25: "The devices page
+ * should show the paired devices which are signed in"), then installed & running per host with each host's terminals
+ * under its name (the sessions read while it shows).
+ */
 function Devices({ shown }: { shown: boolean }) {
   useSessions(shown);
-  return <Units shown={shown} />;
+  return (
+    <>
+      <AccountDevices shown={shown} />
+      <Units shown={shown} />
+    </>
+  );
 }
 
 /** The screen [s] (not the chat), [shown]: on screen - its feeds run only then; [beside]: next to the status column. */

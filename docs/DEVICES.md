@@ -277,6 +277,23 @@ curl -H 'Host: enroll.pow' http://192.168.50.100/healthz                       #
   deployed authority; `--apply-ai` / `ai-apply` are not available), PowAuth device principals / forwardAuth (those
   branches are superseded, unmerged) and OpenBao.
 
+## The account's devices on the AI page (Devices tab, 2026-11-25)
+
+The user, 11-25: "The devices page should show the paired devices which are signed in". The AI page's Devices tab
+(shell/ui/aidevices.tsx, pure parts devicesview.ts) lists the account's devices above Installed & running: kind icon,
+name, "This device", online (called the realm within 3 min) or "seen 2 days ago", the device's account sync ("synced 2
+min ago" / "3 apps missing"), model; removed devices folded under "Removed".
+- Realm (PowStation 7753ccd): `GET /v1/devices` (any enrolled device's token) adds `model`, `last_seen` (each
+  authenticated call; persisted every 120 s), `sync` and `self`; `POST /v1/devices/self/rename {name}`;
+  `POST /v1/account/status` - powos-account-sync reports each finished round there. Never a token or hash.
+- Phone: bridge `devices.realm` ops "devices" and "rename" for any enrolled phone (PowStation.kt ANY_ENROLLED),
+  "pending"/"approve"/"revoke" still approver-only. The page reads every 30 s while the tab shows.
+- Actions: rename this device (pencil, in place); Remove another device only on an approver - a confirm in the row,
+  then optimistic (under Removed at once, back with why if the realm refuses) through `POST /v1/devices/revoke`.
+- No desktop path yet: the desktop shell has no `devices.realm` (it says so on the tab); powos-deviced's
+  `/v1/enroll/devices` is the place to add it. Gate `ai-devices-{folded,unfolded}` (dev/ai-devices-check.js); shots
+  ai-tab-devices, ai-devices-confirm, ai-devices-removed (mock realm in shots.mjs DEVICES_MOCK).
+
 ## Devices in Dolphin's sidebar (`powos-places`)
 
 Dolphin (and every KDE file dialog) shows this device's storage and the owner's other devices in its Places panel

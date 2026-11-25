@@ -15,6 +15,7 @@ import { ThinBar } from "./aiprogress.tsx";
 import { TermButton } from "./terms.tsx";
 import { AtWork, areas, dailyDriver, type AiScreen } from "./aimenu.tsx";
 import { Feed as UnitsFeed, units } from "./units.tsx";
+import { accountCounts } from "./aidevices.tsx";
 import { Reveal } from "./reveal.tsx";
 
 /** The agent open in the right column's Agents view (null: the list); agents.ts's, so the folded page's screen shares it. */
@@ -202,15 +203,25 @@ function FleetRows({ f, foot }: { f: Fleet; foot?: preact.ComponentChildren }) {
   );
 }
 
-/** A tab screen's glance beside its name: Progress its daily-driver figure (or open tasks), Devices how many hosts. */
+/**
+ * A tab screen's glance beside its name: Progress its daily-driver figure (or open tasks), Devices its signed-in devices
+ * and how many are online (how many hosts until the account was read).
+ */
 function glanceOf(s: AiScreen) {
   if (s === "progress") {
     const dd = dailyDriver();
     const open = areas().reduce((n, [, a, b]) => n + a + b, 0);
     return dd != null ? `Daily driver ${dd}%` : open ? `${open} open` : "";
   }
+  return s === "devices" ? devicesGlance() : "";
+}
+
+/** Devices' glance: "3 signed in · 2 online", or how many hosts until the account was read. */
+function devicesGlance() {
+  const c = accountCounts.value;
+  if (c) return `${c.signedIn} signed in${c.online ? ` · ${c.online} online` : ""}`;
   const hosts = new Set(units.value.map((u) => u.host)).size;
-  return s === "devices" && hosts ? `${hosts} host${hosts === 1 ? "" : "s"}` : "";
+  return hosts ? `${hosts} host${hosts === 1 ? "" : "s"}` : "";
 }
 
 /**
@@ -245,9 +256,9 @@ const SEGS: [AiScreen, string][] = [
 function segCounts(f: Fleet): string[] {
   const dd = dailyDriver();
   const open = areas().reduce((n, [, a, b]) => n + a + b, 0);
-  const hosts = new Set(units.value.map((u) => u.host)).size;
+  const devices = accountCounts.value?.signedIn ?? new Set(units.value.map((u) => u.host)).size;
   const busy = f.working.length + f.attention.length;
-  return [chat.value.busy ? "…" : "", busy ? String(busy) : "", dd != null ? `${dd}%` : open ? String(open) : "", hosts ? String(hosts) : ""];
+  return [chat.value.busy ? "…" : "", busy ? String(busy) : "", dd != null ? `${dd}%` : open ? String(open) : "", devices ? String(devices) : ""];
 }
 
 /**

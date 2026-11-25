@@ -2151,6 +2151,29 @@ html:root .ai-screen .ai-unit-card .ai-session.tile { --frost-fill: transparent;
 .ag-row-state, .ag-row-ago { flex: 0 1 auto; max-width: 45%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: var(--text-small); font-variant-numeric: tabular-nums; color: var(--color-foreground); opacity: 0.86; }
 .ag-row-ago { flex: none; order: 9; }
 .ag-row .ag-act { padding: 4px 10px; box-shadow: none; }
+/* The AI page's Devices tab, signed-in devices (aidevices.tsx): the kind's icon with a presence dot at its corner, the
+   name (+ This device), a muted line (online / seen, sync, model); the row's action at its end; Remove's confirm under it. */
+.dv-account { display: flex; flex-direction: column; gap: 6px; margin-bottom: 14px; }
+.dv-line { display: flex; align-items: center; gap: 12px; padding-block: 8px; cursor: default; }
+.dv-kind { position: relative; flex: none; display: inline-flex; width: 22px; height: 22px; color: var(--color-foreground); }
+.dv-dot { position: absolute; right: -3px; bottom: -2px; width: 9px; height: 9px; border-radius: 50%; background: var(--status-stalled);
+  box-shadow: 0 0 0 2px var(--color-background); }
+.dv-dot.on { background: var(--status-working); }
+.dv-main { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 3px; }
+.dv-name { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.dv-this { color: var(--accent-text); }
+.dv-sub { display: flex; flex-wrap: wrap; column-gap: 10px; row-gap: 2px; font-size: var(--text-small); color: var(--color-muted); }
+.dv-sub > * { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 100%; }
+.dv-row[data-online] [data-presence] { color: var(--color-foreground); }
+.dv-warn { color: var(--color-foreground); font-weight: 600; }
+.dv-edit { display: inline-flex; padding: 6px; }
+.dv-rename input { padding-block: 4px; }
+.dv-confirm { display: flex; flex-direction: column; gap: 8px; padding: 0 12px 10px 46px; font-size: var(--text-small); color: var(--color-foreground); }
+.dv-confirm .ag-actions { justify-content: flex-end; }
+.dv-note { padding: 2px 4px; font-size: var(--text-small); color: var(--color-muted); }
+.dv-removed { display: flex; align-items: center; gap: 10px; color: var(--color-muted); }
+.dv-skel-icon { border-radius: 8px; background: var(--soft-fill); }
+.dv-main.pending-skel-rows { gap: 7px; }
 .ag-fold .ais-toggle { min-height: 48px; padding: 0 14px; text-transform: none; letter-spacing: 0; }
 .ag-rest-line { display: flex; align-items: center; gap: 10px; width: 100%; min-height: 36px; padding: 0; border: 0; background: none; font: inherit; font-size: var(--text-body); color: var(--color-foreground); text-align: start; white-space: nowrap; }
 .ag-mail-body { padding: 0 0 10px 18px; font-size: var(--text-small); line-height: 1.4; white-space: pre-wrap; overflow-wrap: anywhere; color: var(--color-foreground); opacity: 0.86; }

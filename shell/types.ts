@@ -974,7 +974,7 @@ export interface Bridge {
      * "state" -> {enrolled, approver}; "pending" / "devices" / "approve" {code, decision, tenant?} / "revoke" {id} ->
      * the realm's answer; a refusal rejects with the realm's words. Off the main thread (network).
      */
-    realm(op: "state" | "pending" | "devices" | "approve" | "revoke", body?: object): Promise<any>;
+    realm(op: "state" | "pending" | "devices" | "approve" | "revoke" | "rename", body?: object): Promise<any>;
   };
   /** The phone's notifications, for the launcher's own panel; "notifications.changed" brings the list again. */
   /**

@@ -15719,6 +15719,18 @@ try {
         const fails = await r.page.evaluate(async (d, t) => (await importShim("./dev/ai-tab-head-check.js")).aiTabHeadCheck(d, t), dock, top);
         return fails.map((f) => `ai-tab-head-${label}: ${f}`);
       })));
+  // The Devices tab's signed-in devices against a mock realm, folded and unfolded: order, This device, presence, sync,
+  // Removed folded, Remove only for an approver behind a confirm, rename/remove optimistic with rollback
+  // (dev/ai-devices-check.js; the user, 11-25: "The devices page should show the paired devices which are signed in").
+  if (process.env.SHELL_PAGES !== "0")
+    for (const [label, view] of [
+      ["folded", { width: 404, height: 899 }],
+      ["unfolded", { width: 821, height: 883 }],
+    ])
+      runs.push(open(browser, `${ORIGIN}/index.html`, `ai-devices-${label}`, view).then((r) => whenReady(r, async () => {
+        const fails = await r.page.evaluate(async () => (await importShim("./dev/ai-devices-check.js")).aiDevicesCheck());
+        return fails.map((f) => `ai-devices-${label}: ${f}`);
+      })));
   // Try cards show before | after, the after an emulator shot of the fix (the user, 2026-11-01).
   if (process.env.SHELL_PAGES !== "0")
     runs.push(open(browser, `${ORIGIN}/index.html`, "try-pair", { width: 404, height: 900 }).then((r) => whenReady(r, () => aiTryPairCheck(r.page))));

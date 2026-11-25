@@ -50,6 +50,9 @@ class PowStationTest {
     @Test fun approvingFromThePhoneSendsOnlyWhatTheRealmTakes() {
         assertEquals(Triple("GET", "/v1/devices/pending", null), PowStation.realmCall("pending", JSONObject()))
         assertEquals("/v1/devices", PowStation.realmCall("devices", JSONObject()).second)
+        val rename = PowStation.realmCall("rename", JSONObject("""{"name": "  Fold  ", "id": "other"}"""))
+        assertEquals("/v1/devices/self/rename", rename.second)
+        assertEquals("""{"name":"Fold"}""", rename.third.toString())
         val (m, path, body) = PowStation.realmCall("approve", JSONObject("""{"code": " BCDF-GHJK ", "tenant": "default", "token": "x"}"""))
         assertEquals("POST" to "/v1/devices/approve", m to path)
         assertEquals(setOf("code", "decision", "approver", "tenant"), body!!.keys().asSequence().toSet())
@@ -59,7 +62,7 @@ class PowStationTest {
         assertFalse(deny.has("tenant"))
         val revoke = PowStation.realmCall("revoke", JSONObject("""{"id": "phone9"}""")).third!!
         assertEquals("phone9" to 1, revoke.getString("id") to revoke.length())
-        for ((op, b) in listOf("approve" to """{"code": "X", "decision": "maybe"}""", "approve" to "{}", "revoke" to "{}", "drop" to "{}")) {
+        for ((op, b) in listOf("approve" to """{"code": "X", "decision": "maybe"}""", "approve" to "{}", "revoke" to "{}", "rename" to """{"name": " "}""", "drop" to "{}")) {
             assertTrue("$op $b refused", runCatching { PowStation.realmCall(op, JSONObject(b)) }.isFailure)
         }
     }
