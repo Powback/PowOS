@@ -63,7 +63,13 @@ for i in $(seq 1 15); do [ "$(wwel "$id" "e=>e.querySelector('.webwindow-body.li
 place() { ev "importShim('./ui/webwindows.tsx').then(m=>{const a=m.workArea(),W=Math.round((a.right-a.left)*0.5),H=Math.round((a.bottom-a.top)*0.5);m.placeWindow(${id#w},{x:a.right-W-56,y:a.bottom-H-64,w:W,h:H});return 'ok'},e=>'ERR '+e)"; }
 SW=$(sh_ "wm size" | grep -oE '[0-9]+x[0-9]+' | tail -1)
 clampx() { local v=$1 m=$(( ${SW%x*} - 8 )); [ "$v" -lt 8 ] && v=8; [ "$v" -gt "$m" ] && v=$m; echo "$v"; }
-clampy() { local v=$1 m=$(( ${SW#*x} - 8 )); [ "$v" -lt 8 ] && v=8; [ "$v" -gt "$m" ] && v=$m; echo "$v"; }
+# The bottom clamp stays above the system's gesture strip (11-25: s's way back began at y 2432, inside NavGesture.kt's
+# strip, and the slow swipe up from there was "swipe up and hold" - PowOS's switcher opened over the window, so w then
+# grabbed a .task-shot and se the .recents-menu-scrim, neither resized anything): home's bottom inset (24 CSS px at
+# least, as fullScreenAppRegion) in device px, twice over for SystemUI's reported region, 48 px at least.
+BOT=$(ev "Math.round(Math.max(24,parseFloat(getComputedStyle(document.documentElement).getPropertyValue('--inset-bottom'))||0)*devicePixelRatio*2)")
+case $BOT in ''|*[!0-9]*) BOT=200 ;; esac; [ "$BOT" -lt 48 ] && BOT=48
+clampy() { local v=$1 m=$(( ${SW#*x} - BOT )); [ "$v" -lt 8 ] && v=8; [ "$v" -gt "$m" ] && v=$m; echo "$v"; }
 sheet() { ffmpeg -v error -y -i "$OUT/$1.mp4" -vf "fps=10,scale=360:-1,tile=6x4" -frames:v 1 "$OUT/$1-sheet.png" 2>/dev/null; }
 
 # gesture <name> <zone> <dx> <dy> [rec]: one drag there and back on that zone, the sampler over both ways.
@@ -74,6 +80,8 @@ gesture() {
   sleep 0.8
   read -r px py <<<"$(wwpt "$id" ".ww-edge-$zone")"
   [ -n "${py:-}" ] || { bad "$name: no .ww-edge-$zone on screen"; return; }
+  # PowOS's switcher over the window (a stray edge swipe) would take the grab: said as such, not as a resize failure.
+  [ "$(ev "document.querySelector('.recents.open,.recents.live')?'up':'no'")" = up ] && { bad "$name: not run - PowOS's switcher is up over the window (an earlier drag's swipe from the gesture strip)"; return; }
   f0=$(wwrect "$id")
   # What a finger there hits (11-23: w and nw grabbed over Chrome's body, RZ7 raised Chrome - RZ8 since).
   hit=$(ev "(()=>{const d=devicePixelRatio,t=document.elementFromPoint($px/d,$py/d);return (t?.className?.toString?.()||'none')+' in '+(t?.closest('.webwindow[data-wwid]')?.dataset.wwid??'-')})()")
@@ -103,7 +111,7 @@ gesture() {
   chk "$name"
 }
 
-log "window $id ($key), screen $SW"
+log "window $id ($key), screen $SW, bottom clamp ${BOT} px"
 gesture n n 0 -600
 gesture s s 0 600 rec
 gesture w w -400 0
