@@ -682,6 +682,10 @@ class ShellBridge(
             "ai.sessions" -> aiSessions()
             "ai.attach" -> aiAttach(a.getString(0))
             "lock.unlock" -> lock?.unlock()
+            // The face's corner shortcuts (LockShortcuts): what this phone has, the torch switched, the camera over the lock.
+            "lock.shortcuts" -> requireNotNull(lock) { "not the lock face" }.shortcuts.state()
+            "lock.torch" -> requireNotNull(lock) { "not the lock face" }.shortcuts.torch(a.optBoolean(0, true))
+            "lock.camera" -> requireNotNull(lock) { "not the lock face" }.shortcuts.camera()
             "lock.mark" -> UnlockLog.mark("page ${a.getString(0)}")
             "qs.destinations" -> SettingsSearch(context).destinations { broadcast("qs.destinations", "null") }
             "qs.state" -> quick.state()
@@ -702,9 +706,10 @@ class ShellBridge(
             "pad.overlay" -> ControllerPad.show(context, a.getBoolean(0))
             "pad.edit" -> ControllerPad.edit()
             "media.state" -> media.state()
-            "media.control" -> media.control(a.getString(0), a.optString(1).takeIf { it.isNotEmpty() })
+            "media.control" -> mediaControl(a.getString(0), a.optString(1).takeIf { it.isNotEmpty() })
             "media.seek" -> media.seek(a.optString(0).takeIf { it.isNotEmpty() }, a.getDouble(1))
-            "media.output" -> media.output(a.optString(0).takeIf { it.isNotEmpty() })
+            // On the lock face the picker, as the app, waits for the unlock (stock's lock screen player does the same).
+            "media.output" -> a.optString(0).takeIf { it.isNotEmpty() }.let { pkg -> lock?.unlockThen { media.output(pkg) } ?: media.output(pkg) }
             "chrome.state" -> requireNotNull(chrome) { "not a chrome page" }.state()
             "chrome.ready" -> requireNotNull(chrome) { "not a chrome page" }.ready()
             "chrome.action" -> requireNotNull(chrome) { "not a chrome page" }.action(a.getString(0))
@@ -1430,6 +1435,18 @@ class ShellBridge(
     /** Which apps run, key -> "running" | "frozen" (RunningApps). */
     private fun running(): JSONObject = RunningApps.shellMap(runtime.androidApps.apps.map { it.key to it.component.packageName }, runtime.linuxApps)
 
+    /**
+     * A media card's control: play/pause/skip/custom act at once, also on the lock face (as stock's lock screen player);
+     * "open" (the card's body: its app) asks for the unlock there first.
+     */
+    private fun mediaControl(
+        command: String,
+        pkg: String?,
+    ) {
+        val slot = lock
+        if (command == "open" && slot != null) slot.unlockThen { media.control(command, pkg) } else media.control(command, pkg)
+    }
+
     /** The notification panel's list: { available, items: [notificationJson] }. */
     private fun notificationList(): JSONObject {
         val n = runtime.widgets.notifications
@@ -1475,7 +1492,9 @@ class ShellBridge(
                 // A Plasma one groups by its Linux app (not with PowOS's own notifications, which share the app's package).
                 .put("pkg", item.linuxEntry?.let { "linux:" + it.ifEmpty { item.app } } ?: item.pkg)
                 .put("group", item.group ?: JSONObject.NULL)
-                .put("conversation", item.conversation),
+                .put("conversation", item.conversation)
+                // A media player's own (MediaStyle with a session): the lock face shows its media card instead.
+                .put("media", item.media),
         )
     }
 

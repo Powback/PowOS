@@ -379,6 +379,17 @@ const LOCK_GROUP =
 const LOCK_TAP_CARD =
   " { const c = document.querySelector('.lock-notes .notif:has(.notif-text.lines)'); const b = c.getBoundingClientRect(); const ev = (t) => c.dispatchEvent(new PointerEvent(t, { bubbles: true, clientX: b.left + 40, clientY: b.top + 12, pointerId: 3, isPrimary: true })); ev('pointerdown'); ev('pointerup'); await sleep(900); }";
 const LOCK_TAP_MORE = " document.querySelector('.lock-notes .notif-show-more').click(); await sleep(900);";
+/**
+ * What's playing on the lock face (lock.tsx LockMedia): [sessions] as the host sends them (media.changed), with the
+ * player's own notification beside the others (it must not show: its card stands for it).
+ */
+const LOCK_MEDIA_ONE = "{ available: true, playing: true, title: 'Teardrop', artist: 'Massive Attack', app: 'Spotify', package: 'spotify', position: 42, duration: 330, art: 'cover', seekable: true, output: { kind: 'bluetooth', name: 'WH-1000XM4' }, actions: [{ id: 'like', name: 'Like' }, { id: 'shuffle', name: 'Shuffle' }], idle: null }";
+const LOCK_MEDIA_TWO = "{ available: true, playing: false, title: 'Persona - Live at Printworks', artist: 'Rival Consoles', app: 'YouTube', package: 'youtube', position: 1312, duration: 2710, art: 'cover2', seekable: true, output: { kind: 'phone' }, actions: [], idle: 40 }";
+const LOCK_MEDIA = (sessions) =>
+  LOCK_NOTES +
+  ` const ss = [${sessions}]; const st = { ...ss[0], sessions: ss }; const B = (await U('./bridge.ts')).powos; B.media.state = async () => st; E.emit('media.changed', st);` +
+  " await sleep(900);";
+
 /** The battery the lock face reads (lock.tsx: system.battery on lock.shown, then "battery.changed"), as the host sends it. */
 const CHARGE = (v) => ` await sleep(800); const B = (await U('./bridge.ts')).powos; const v = ${v}; B.system.battery = async () => v; E.emit('lock.shown', null); E.emit('battery.changed', v); await sleep(600);`;
 /**
@@ -853,6 +864,14 @@ const SCENES = [
   ["lock-card-open", "lock", LOCK_GROUP + LOCK_TAP_CARD, "wallpaper"],
   ["lock-group-open", "lock", LOCK_GROUP + LOCK_TAP_MORE, "wallpaper"],
   // Charging on the lock face (charge.ts): a 25 W charger with Android's estimate, then a wireless pad with no estimate.
+  // What's playing on the lock face (LockMedia): one playing (art, Bluetooth chip, the app's like/shuffle), one paused,
+  // two (the dots; then swiped to the second). The corner shortcuts: the torch on; the camera held (grown, mid-hold).
+  ["lock-media-playing", "lock", LOCK_MEDIA(LOCK_MEDIA_ONE), "wallpaper"],
+  ["lock-media-paused", "lock", LOCK_MEDIA(LOCK_MEDIA_TWO), "wallpaper"],
+  ["lock-media-two", "lock", LOCK_MEDIA(`${LOCK_MEDIA_ONE}, ${LOCK_MEDIA_TWO}`), "wallpaper"],
+  ["lock-media-swiped", "lock", LOCK_MEDIA(`${LOCK_MEDIA_ONE}, ${LOCK_MEDIA_TWO}`) + " { const t = document.querySelector('.lock-media-track'); t.scrollTo({ left: t.clientWidth }); } await sleep(900);", "wallpaper"],
+  ["lock-torch-on", "lock", " await sleep(600); await (await U('./bridge.ts')).powos.lock.torch(true); await sleep(500);", "wallpaper"],
+  ["lock-camera-hold", "lock", " await sleep(600); { const c = document.querySelector('.lock-shortcut[data-shortcut=\"camera\"]'); c.classList.add('holding'); } await sleep(500);", "wallpaper"],
   ["lock-charging", "lock", LOCK_NOTES + CHARGE("{ level: 64, charging: true, plugged: 'ac', full: false, held: false, speed: 'superfast', watts: 25, wattsFrom: 'charger', fullInMs: 3540000 }"), "wallpaper"],
   ["lock-charging-wireless", "lock", CHARGE("{ level: 31, charging: true, plugged: 'wireless', full: false, held: false, speed: 'normal', watts: 5, wattsFrom: 'charger', fullInMs: null }"), "wallpaper"],
   // The screen-off display (aod.tsx): black, the time and date dimmed in the theme's colours, an icon per app.

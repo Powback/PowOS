@@ -205,8 +205,23 @@ export interface MediaState {
   art?: string | null;
   /** The session takes seeking (PlaybackState.ACTION_SEEK_TO). */
   seekable?: boolean;
-  /** Every active session with a track, playing first, at most two (one per app): the control center's cards. Older hosts: absent. */
+  /** It takes skipping back / on (PlaybackState's actions); older hosts: absent (both shown). */
+  canPrevious?: boolean;
+  canNext?: boolean;
+  /** Its own actions (PlaybackState.CustomAction: like, shuffle...), at most two: control("custom:" + id). Icon: an id for /_media/<id>. */
+  actions?: { id: string; name: string; icon?: string | null }[];
+  /** Where it plays: the phone, a Bluetooth device (its name), wired headphones, a cast. */
+  output?: { kind: "phone" | "bluetooth" | "wired" | "cast"; name?: string | null } | null;
+  /** Paused or stopped: seconds since (stock's lock screen drops a player paused for 10 minutes); null while it plays. */
+  idle?: number | null;
+  /** Every active session with a track, playing first, at most four (one per app): the media cards. Older hosts: absent (two at most). */
   sessions?: MediaState[];
+}
+
+/** The lock face's corner shortcuts (LockShortcuts.kt): the torch (null: no flash), whether a camera opens over the lock. */
+export interface LockShortcutState {
+  torch: boolean | null;
+  camera: boolean;
 }
 
 /** One control center tile: a switch (on true/false) or an action/page (on null). */
@@ -299,6 +314,8 @@ export interface PhoneNotification {
   group?: string | null;
   /** A conversation (a messaging-style one): shown on its own, above the groups. */
   conversation?: boolean;
+  /** A media player's own (it names a MediaSession): the lock face shows that session's media card in its place. */
+  media?: boolean;
   /** MessagingStyle's messages, oldest first (the last few): [sender] "" is the phone's own user, [time] Unix ms. */
   messages?: { sender: string; text: string; time: number }[];
   /** MessagingStyle's conversation title (a group's or a channel's name), null for one-to-one. */
@@ -1069,6 +1086,12 @@ export interface Bridge {
     unlock(): Promise<void>;
     /** One step of an unlock, logged natively under PowosUnlock with the phone's uptime (LockFace.kt UnlockLog). */
     mark(step: string): Promise<void>;
+    /** The corner shortcuts this phone has (an older APK rejects: none shown). "lock.torch" ({ on }) follows the torch. */
+    shortcuts(): Promise<LockShortcutState>;
+    /** Switches the torch; resolves to what it is now. */
+    torch(on: boolean): Promise<boolean>;
+    /** The camera over the lock (its secure mode); false: none. */
+    camera(): Promise<boolean>;
   };
   /**
    * The control center (and the notification panel's row): every tile the phone's own control center has, switched
@@ -1087,7 +1110,7 @@ export interface Bridge {
   media: {
     state(): Promise<MediaState>;
     /** On [pkg]'s session when named (a card's), else the one shown. */
-    control(command: "toggle" | "play" | "pause" | "next" | "previous" | "open", pkg?: string): Promise<void>;
+    control(command: "toggle" | "play" | "pause" | "next" | "previous" | "open" | `custom:${string}`, pkg?: string): Promise<void>;
     /** Moves [pkg]'s session to [seconds] in. */
     seek(pkg: string | undefined, seconds: number): Promise<void>;
     /** The phone's output picker (speaker, Bluetooth, cast) for that app's audio. */

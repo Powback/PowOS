@@ -9859,6 +9859,151 @@ async function lockExpandScene(r, label) {
 }
 
 /**
+ * LM1 (lock-screen-media-controls / lock-screen-camera-flashlight-shortcuts; the user 11-25: "we are missing basic
+ * features such as a media control on the lockscreen if media is playing", "lock screen camera button or whatever?"):
+ * two sessions on the lock face (lock.tsx LockMedia, media.tsx MediaCard locked). Play/pause flips at once (before the
+ * host says so) and acts without the unlock; a sideways swipe on the cards brings the second in (no unlock, no lift);
+ * a swipe up starting on a card is still the face's unlock; the player's own notification isn't listed beside its card.
+ * The corners: a tap on the torch only hints, a hold switches it (shown on at once), a hold on the camera opens it.
+ */
+function lmSetup() {
+  const { powos } = window.__gwBridge;
+  const E = window.__mockEvents;
+  window.__lm = { unlock: 0, control: [], torch: [], camera: 0 };
+  powos.lock.unlock = async () => void window.__lm.unlock++;
+  // The host never confirms (no "media.changed"): what shows right after the press is the page's own (optimistic).
+  powos.media.control = async (c, pkg) => void window.__lm.control.push(`${c}:${pkg}`);
+  powos.lock.torch = async (on) => (window.__lm.torch.push(on), on);
+  powos.lock.camera = async () => (window.__lm.camera++, true);
+  powos.lock.shortcuts = async () => ({ torch: false, camera: true });
+  const one = { available: true, playing: true, title: "Teardrop", artist: "Massive Attack", app: "Spotify", package: "spotify", position: 42, duration: 330, art: null, seekable: true, output: { kind: "bluetooth", name: "WH-1000XM4" }, actions: [{ id: "like", name: "Like" }], idle: null };
+  const two = { ...one, playing: false, title: "Persona", artist: "Rival Consoles", app: "YouTube", package: "youtube", idle: 30, output: { kind: "phone" }, actions: [] };
+  const st = { ...one, sessions: [one, two] };
+  powos.media.state = async () => st;
+  E.emit("media.changed", st);
+  const list = { available: true, items: [{ key: "gate.lm.player", app: "Spotify", pkg: "spotify", title: "Teardrop", text: "Massive Attack", time: Date.now(), clearable: true, media: true }, { key: "gate.lm.mail", app: "Mail", pkg: "dev.gate.mail", title: "Your order has shipped", text: "It arrives Thursday.", time: Date.now() - 30000, icon: "./icons/powos.svg", clearable: true }] };
+  powos.notifications.list = async () => list;
+  E.emit("notifications.changed", list);
+  E.emit("lock.shown", null);
+}
+/** Where a finger presses [el] (its middle), or null when it isn't laid out. */
+function lmAt(el) {
+  const b = el?.getBoundingClientRect();
+  return b?.width > 0 ? [Math.round(b.left + b.width / 2), Math.round(b.top + b.height / 2)] : null;
+}
+/** The media cards: how many, the one in view (scroll and dots), the first's play button, whether the player is listed. */
+function lmCards() {
+  const cards = [...document.querySelectorAll(".lock-media-slide")];
+  const track = document.querySelector(".lock-media-track");
+  const play = cards[0]?.querySelector(".cc-play");
+  const titles = [...document.querySelectorAll(".lock-notes .notif-title")].map((t) => t.textContent);
+  return {
+    cards: cards.length,
+    index: track ? Math.round(track.scrollLeft / Math.max(1, track.clientWidth)) : -1,
+    dotOn: [...document.querySelectorAll(".lock-media-dots i")].findIndex((d) => parseFloat(d.style.getPropertyValue("--on")) > 0.5),
+    play: play?.getAttribute("aria-label") ?? null,
+    playAt: lmAt(play),
+    // The card in view's title (a swiped track puts the first one off to the left).
+    titleAt: lmAt(cards.find((c) => Math.abs(c.getBoundingClientRect().left - (track?.getBoundingClientRect().left ?? 0)) < 4)?.querySelector(".cc-label")),
+    playerListed: titles.includes("Teardrop"),
+    mailListed: titles.includes("Your order has shipped"),
+  };
+}
+/** The corners and the hint line. */
+function lmCorners() {
+  const torch = document.querySelector('.lock-shortcut[data-shortcut="torch"]');
+  return {
+    torchOn: torch?.classList.contains("on") ?? null,
+    torchAt: lmAt(torch),
+    cameraAt: lmAt(document.querySelector('.lock-shortcut[data-shortcut="camera"]')),
+    hint: document.querySelector(".lock-hint")?.textContent ?? "",
+  };
+}
+function lmState() {
+  return { lm: window.__lm, ...lmCards(), ...lmCorners() };
+}
+/** LM1's driver on [r]'s page: a real finger, the state (lmState), a wait for a state, a press held [ms]. */
+async function lmDriver(r) {
+  const f = await fingerOf(r.page);
+  await r.page.evaluate(async () => (window.__gwBridge = await window.__gw.mod("./bridge.ts")));
+  await r.page.evaluate(lmSetup);
+  await r.page.evaluate([lmAt, lmCards, lmCorners].map(String).join("\n"));
+  const st = () => r.page.evaluate(lmState);
+  const until = async (ok, ms = 3000) => {
+    const end = Date.now() + ms;
+    let s = await st();
+    while (!ok(s) && Date.now() < end) await f.wait(60), (s = await st());
+    return s;
+  };
+  const hold = async ([x, y], ms) => {
+    await f.touch("touchStart", [{ x, y }]);
+    await f.wait(ms);
+    await f.touch("touchEnd", []);
+    await f.wait(120);
+  };
+  return { f, r, st, until, hold };
+}
+/** LM1, play/pause: flipped at once (the host never confirms here), sent without the unlock, back when unconfirmed. */
+async function lmPlaySteps({ f, st, until }, label, fails) {
+  let s = await st();
+  if (s.play !== "pause") fails.push(`LM1 ${label}: the playing card's button says "${s.play}", not pause`);
+  await f.tap(s.playAt);
+  s = await st();
+  if (s.play !== "play") fails.push(`LM1 ${label}: play/pause didn't flip at once (still "${s.play}" before the host answered)`);
+  if (!s.lm.control.includes("pause:spotify")) fails.push(`LM1 ${label}: pause wasn't sent to the session (${s.lm.control})`);
+  s = await until((x) => x.play === "pause", 3500);
+  if (s.play !== "pause") fails.push(`LM1 ${label}: a press the session never followed stayed flipped (no rollback)`);
+}
+/** LM1, sideways on the cards: the second session in view (and its dot), no unlock. */
+async function lmSwipeStep({ f, r, until }, label, fails) {
+  const s0 = await until((x) => x.titleAt);
+  const [x0, y0] = s0.titleAt;
+  const W = await r.page.evaluate(() => document.querySelector(".lock-media-track").clientWidth);
+  await f.swipe(Array.from({ length: 10 }, (_, i) => ({ x: Math.round(x0 + W * 0.3 - (W * 0.6 * i) / 9), y: y0 + i })));
+  const s = await until((x) => x.index === 1 && x.dotOn === 1);
+  if (s.index !== 1) fails.push(`LM1 ${label}: a sideways swipe on the media card didn't bring the second session in (index ${s.index})`);
+  if (s.dotOn !== 1) fails.push(`LM1 ${label}: the dots don't follow the card in view (${s.dotOn})`);
+}
+/** LM1, the corners: a tap on the torch only hints, a hold switches it (shown on at once), a hold opens the camera. */
+async function lmCornerSteps({ f, st, hold }, label, fails) {
+  let s = await st();
+  await f.tap(s.torchAt);
+  s = await st();
+  if (s.lm.torch.length) fails.push(`LM1 ${label}: a tap (not a hold) switched the torch`);
+  if (!/hold/.test(s.hint)) fails.push(`LM1 ${label}: a tap on the torch didn't say to hold it (hint "${s.hint}")`);
+  await hold(s.torchAt, 650);
+  s = await st();
+  if (s.lm.torch[0] !== true) fails.push(`LM1 ${label}: holding the torch didn't switch it on (${JSON.stringify(s.lm.torch)})`);
+  if (!s.torchOn) fails.push(`LM1 ${label}: the torch button doesn't show it on`);
+  await hold(s.cameraAt, 650);
+  s = await st();
+  if (s.lm.camera !== 1) fails.push(`LM1 ${label}: holding the camera didn't open it (${s.lm.camera})`);
+}
+/** LM1, up from a card: still the face's unlock. */
+async function lmUnlockStep({ f, r, st, until }, label, fails) {
+  const [x0, y0] = (await st()).titleAt ?? [200, 300];
+  const H = (await r.page.evaluate(() => innerHeight)) * 0.5;
+  await f.swipe(Array.from({ length: 13 }, (_, i) => ({ x: x0, y: Math.round(y0 - (H * i) / 12) })));
+  if (!(await until((x) => x.lm.unlock > 0)).lm.unlock) fails.push(`LM1 ${label}: a swipe up starting on the media card didn't unlock`);
+}
+async function lockMediaScene(r, label) {
+  const d = await lmDriver(r);
+  // The cards in, and the list re-filtered by them (a render after).
+  const s = await d.until((x) => x.cards === 2 && x.playAt && x.torchAt && x.mailListed && !x.playerListed);
+  if (s.cards !== 2) return [`LM1 ${label}: the lock face shows ${s.cards} media cards for two sessions`];
+  const fails = [];
+  if (s.playerListed) fails.push(`LM1 ${label}: the player's own notification is listed beside its media card`);
+  if (!s.mailListed) fails.push(`LM1 ${label}: the other notifications went with the player's`);
+  await lmPlaySteps(d, label, fails);
+  await lmSwipeStep(d, label, fails);
+  await lmCornerSteps(d, label, fails);
+  if ((await d.st()).lm.unlock) fails.push(`LM1 ${label}: a press or sideways swipe asked the unlock (media and corners act on the lock)`);
+  await lmUnlockStep(d, label, fails);
+  console.log(`     lock-media-${label}: ${JSON.stringify({ ...(await d.st()), playAt: undefined, titleAt: undefined, torchAt: undefined, cameraAt: undefined })}`);
+  return fails;
+}
+
+/**
  * WS1 (10-31 15:37: home's surface re-made, then no "w.f" for ~9 s until the watchdog reloaded home): with the page's
  * rAF held (a WebView that paused it while hidden), a visibilitychange to hidden and back sends the windows' geometry
  * within 500 ms, and so does the host's "webwindows.resend" alone - neither waits for a frame.
@@ -15741,6 +15886,10 @@ try {
   if (process.env.SHELL_PAGES !== "0")
     for (const [label, viewport] of [["folded", { width: 404, height: 900 }], ["unfolded", { width: 821, height: 883 }]])
       runs.push(open(browser, `${ORIGIN}/index.html?mode=lock`, `lock-expand-${label}`, viewport).then((r) => whenReady(r, () => lockExpandScene(r, label))));
+  // LM1: media cards on the lock face (play/pause at once, swipe between sessions, still unlocks) + the corner shortcuts.
+  if (process.env.SHELL_PAGES !== "0")
+    for (const [label, viewport] of [["folded", { width: 404, height: 900 }], ["unfolded", { width: 821, height: 883 }]])
+      runs.push(open(browser, `${ORIGIN}/index.html?mode=lock`, `lock-media-${label}`, viewport).then((r) => whenReady(r, () => lockMediaScene(r, label))));
   // TI1: tiled windows' bars, the w.f touch rects, the divider's pill (the user's layout, 10-31 15:08, unfolded).
   if (process.env.SHELL_PAGES !== "0")
     runs.push(open(browser, `${ORIGIN}/index.html`, "tile-bars-unfolded", { width: 821, height: 883 }).then((r) => whenReady(r, () => tileBarsScene(r))));

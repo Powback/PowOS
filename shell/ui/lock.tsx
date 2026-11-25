@@ -17,6 +17,13 @@
  * "+N more" unfolds the rest and its head folds it again (the user, 11-24: "Update installed · 18 changes ... and 14
  * more" couldn't be opened). The face takes the finger only once it moves (SLOP): it used to capture every touch at
  * pointerdown, so no tap ever reached a card. Opening the app is still the unlock's.
+ *
+ * What's playing is the shade's media card (media.tsx MediaCard, locked) under the date, as stock's lock screen
+ * player: play/pause, skip, seek and the app's own actions without unlocking; the app itself after the unlock. Several
+ * sessions: the most recent first, the rest a sideways swipe away (a scroll-snapped track and the page dots; a
+ * sideways move on it is the track's, not the face's). A paused one stays 10 minutes (stock's). A media player's own
+ * notification isn't listed while its card shows. The bottom corners hold the torch and the camera (lockshortcuts.tsx:
+ * press and hold).
  */
 import { useEffect, useLayoutEffect, useRef, useState } from "preact/hooks";
 import { powos } from "../bridge.ts";
@@ -25,6 +32,10 @@ import type { Battery, NotificationList } from "../types.ts";
 import { chargeLine } from "./charge.ts";
 import { foldAll, grouped, Stack, type Group, type GroupedNotification } from "./notifications.tsx";
 import { arrive, leave } from "./notifmotion.ts";
+import { signal } from "@preact/signals";
+import { MediaCard, askAppIcons, askMedia, lockSessions, media, mediaSeen, refreshMedia, useCardDots } from "./media.tsx";
+import { PageDots } from "./pagedots.tsx";
+import { LockShortcuts, askShortcuts } from "./lockshortcuts.tsx";
 
 /** Lifted this far (of the height) when let go, it unlocks. */
 const UNLOCK = 0.33;
@@ -54,8 +65,13 @@ export function lockRows(prev: Row[], items: Group[]): Row[] {
   return out;
 }
 
+/** The packages with a media card on the face (LockMedia): their players' own notifications aren't listed. */
+const mediaShown = signal("");
+
 /** The shade's grouping, one row each, in its order: the conversations, the singles, then the groups. */
-function lockGroups(items: GroupedNotification[]): Group[] {
+function lockGroups(all: GroupedNotification[], playing: string): Group[] {
+  const cards = new Set(playing.split(","));
+  const items = all.filter((n) => !(n.media && cards.has(n.pkg ?? "")));
   const { convos, singles, groups } = grouped(items);
   return [...convos, ...singles, ...groups].slice(0, SHOWN);
 }
@@ -68,6 +84,48 @@ function lift(p: number, settling: boolean) {
   const root = document.documentElement;
   root.classList.toggle("lock-settling", settling);
   root.style.setProperty("--lock-lift", String(p));
+}
+
+/**
+ * What's playing (media.tsx), under the date: one card per session, the most recent first; with several, a track that
+ * swipes sideways between them and a dot per card. Re-rendered by the media state alone (its one-second ticks repaint
+ * this card's line and times, nothing else on the face); the face hears only which apps have a card (mediaShown).
+ */
+function LockMedia() {
+  useEffect(askMedia, []);
+  // Each minute: a paused card's 10 minutes are counted with no tick from the host.
+  const now = useMinuteClock();
+  const shown = lockSessions(media.value, mediaSeen.at, Math.max(now.getTime(), Date.now()));
+  const pkgs = shown.map((m) => m.package ?? "").join();
+  const [track, dots] = useCardDots(shown.length);
+  useEffect(() => {
+    mediaShown.value = pkgs;
+    if (pkgs) askAppIcons();
+  }, [pkgs]);
+  // Shown again: the most recent session in view.
+  useEffect(() => powos.on("lock.shown", () => track.current?.scrollTo({ left: 0 })), []);
+  if (!shown.length) return null;
+  return (
+    <div class="lock-media">
+      <div class={`lock-media-track${shown.length > 1 ? " several" : ""}`} ref={track}>
+        {shown.map((m) => (
+          <div class="lock-media-slide" key={m.package ?? m.title}>
+            <MediaCard m={m} locked />
+          </div>
+        ))}
+      </div>
+      {shown.length > 1 && <PageDots count={shown.length} dotsRef={dots} class="lock-media-dots" />}
+    </div>
+  );
+}
+
+/** Pressed where the finger is the control's own (a seek line, a corner shortcut): never the face's swipe. */
+const OWN = ".cc-seek, .lock-shortcut";
+
+/** A move that is the media track's sideways swipe (several cards, past SLOP, more sideways than up): the face lets it go. */
+function sideways(d: { x0: number; y0: number; track: boolean }, e: PointerEvent): boolean {
+  const dx = Math.abs(e.clientX - d.x0);
+  return d.track && Math.hypot(dx, e.clientY - d.y0) > SLOP && dx > Math.abs(e.clientY - d.y0);
 }
 
 /**
@@ -112,6 +170,8 @@ export function Lock() {
     v: number;
     /** Moved past SLOP: the face's swipe (captured); until then a tap may be a card's. */
     moved: boolean;
+    /** Went down on the media track with several cards: a sideways move is the track's. */
+    track: boolean;
   } | null>(null);
   /** The face on its way out (unlock asked): no new swipe until it is shown again. */
   const going = useRef(false);
@@ -120,7 +180,15 @@ export function Lock() {
   const notes = useRef<HTMLDivElement>(null);
   const seen = useRef(new WeakSet<Element>());
   const [rows, setRows] = useState<Row[]>([]);
-  useEffect(() => setRows((prev) => lockRows(prev, lockGroups(list.items as GroupedNotification[]))), [list]);
+  const playing = mediaShown.value;
+  useEffect(() => setRows((prev) => lockRows(prev, lockGroups(list.items as GroupedNotification[], playing))), [list, playing]);
+  /** The face's hint line, for a moment something else (a corner shortcut tapped instead of held). */
+  const [hint, setHint] = useState<string | null>(null);
+  useEffect(() => {
+    if (!hint) return;
+    const t = window.setTimeout(() => setHint(null), 1600);
+    return () => clearTimeout(t);
+  }, [hint]);
   /** The cards leaving, by key: each one's cancel (it came back before it was gone). */
   const leaving = useRef(new Map<string, () => void>());
   useLayoutEffect(() => {
@@ -162,6 +230,9 @@ export function Lock() {
       requestAnimationFrame(() => void powos.lock.mark("ready"));
       powos.system.battery().then(setBattery);
       powos.notifications.list().then(setList);
+      // The media cards and the torch as they are now (neither is told while the screen is off).
+      refreshMedia();
+      askShortcuts();
     };
     refresh();
     const offShown = powos.on("lock.shown", refresh);
@@ -193,6 +264,8 @@ export function Lock() {
       class="lock"
       onPointerDown={(e) => {
         if (drag.current || going.current) return;
+        const at = e.target as Element;
+        if (at.closest?.(OWN)) return;
         // Not captured yet: a tap on a card or a group's head is theirs (captured here, no tap ever reached them).
         drag.current = {
           id: e.pointerId,
@@ -201,12 +274,15 @@ export function Lock() {
           last: [e.clientY, performance.now()],
           v: 0,
           moved: false,
+          track: !!at.closest?.(".lock-media-track.several"),
         };
         lift(0, false);
       }}
       onPointerMove={(e) => {
         const d = drag.current;
         if (!d || d.id !== e.pointerId) return;
+        // The media track's sideways swipe: the face lets the finger go (the track scrolls).
+        if (!d.moved && sideways(d, e)) return void (drag.current = null);
         if (!d.moved && !claim(d, e)) return;
         const t = performance.now();
         const [ly, lt] = d.last;
@@ -230,6 +306,7 @@ export function Lock() {
           .toLowerCase()}
         {battery.level != null && ` · ${battery.charging ? "⚡" : ""}${battery.level}%`}
       </div>
+      <LockMedia />
       {/* The shade's cards, locked (notifications.tsx Stack/Card): K2's icons are the shade's (the small icon in its app's
           color, else the app's), each card wears THE backdrop (.lock-note, shell.css K3). It scrolls only once it's
           taller than the room it has (lockScroll); else a swipe on it is the face's. */}
@@ -245,8 +322,9 @@ export function Lock() {
       {/* How it charges, as the stock lock screen says it: "Super fast charging · 1 h until full" (charge.ts). */}
       <div class="lock-foot">
         {charge && <div class="lock-charge">{charge}</div>}
-        <div class="lock-hint muted">swipe up to unlock</div>
+        <div class="lock-hint muted">{hint ?? "swipe up to unlock"}</div>
       </div>
+      <LockShortcuts hint={setHint} />
     </div>
   );
 }

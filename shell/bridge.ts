@@ -50,6 +50,7 @@ import type {
   ThemeColors,
   WidgetScreen,
   MediaState,
+  LockShortcutState,
   NativeSetting,
   GlassesState,
   SystemStatus,
@@ -287,7 +288,13 @@ function native(host: NonNullable<Window["PowosHost"]>): Bridge {
       access: () => call("notifications.access"),
       action: (key, index, text) => call("notifications.action", key, index, text ?? null),
     },
-    lock: { unlock: () => call("lock.unlock"), mark: (step) => call("lock.mark", step).catch(() => {}) }, // detect: lock.mark - timing only, an older APK lacks it
+    lock: {
+      unlock: () => call("lock.unlock"),
+      mark: (step) => call("lock.mark", step).catch(() => {}), // detect: lock.mark - timing only, an older APK lacks it
+      shortcuts: () => call<LockShortcutState>("lock.shortcuts"), // detect: no shortcuts shown until the APK has them
+      torch: (on) => call<boolean>("lock.torch", on), // detect
+      camera: () => call<boolean>("lock.camera"), // detect
+    },
     pad: {
       state: () => call<boolean>("pad.state"),
       overlay: (on) => call<boolean>("pad.overlay", on),
@@ -879,7 +886,20 @@ function mock(): Bridge {
     },
     remote: mockRemote(events),
     glasses: mockGlasses(events),
-    lock: { unlock: async () => console.log("[mock] unlock"), mark: async () => {} },
+    lock: (() => {
+      let torch = false;
+      return {
+        unlock: async () => console.log("[mock] unlock"),
+        mark: async () => {},
+        shortcuts: async () => ({ torch, camera: true }),
+        torch: async (on: boolean) => {
+          torch = on;
+          events.emit("lock.torch", { on });
+          return on;
+        },
+        camera: async () => (console.log("[mock] secure camera"), true),
+      };
+    })(),
     pad: (() => {
       let on = false;
       return {
@@ -902,11 +922,14 @@ function mock(): Bridge {
         art: null,
         seekable: true,
       };
-      let st: MediaState = { ...one, sessions: [one] };
+      // The lock face's scenes start with nothing playing (a phone at rest; the lock-media scenes emit their own).
+      const lockFace = new URLSearchParams(location.search).get("mode") === "lock";
+      let st: MediaState = lockFace ? { available: true, playing: false, sessions: [] } : { ...one, sessions: [one] };
       return {
         state: async () => st,
         control: async (command: string, pkg?: string) => {
-          const of = (s: MediaState) => (command === "toggle" && (!pkg || s.package === pkg) ? { ...s, playing: !s.playing } : s);
+          const to = (s: MediaState) => (command === "toggle" ? !s.playing : command === "play" ? true : command === "pause" ? false : s.playing);
+          const of = (s: MediaState) => (!pkg || s.package === pkg ? { ...s, playing: to(s) } : s);
           st = { ...of(st), sessions: st.sessions?.map(of) };
           events.emit("media.changed", st);
         },

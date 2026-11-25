@@ -1,8 +1,11 @@
 package dev.omalauncher.shell
 
+import android.content.BroadcastReceiver
 import android.content.ComponentName
 import android.content.Context
 import android.content.Intent
+import android.content.IntentFilter
+import android.os.PowerManager
 import android.util.Log
 import dev.omalauncher.Runtime
 import dev.omalauncher.widgets.lang.Bool
@@ -30,15 +33,24 @@ class ShellMedia(
     private val emit: (String, Any?) -> Unit,
 ) {
     private val media get() = runtime.widgets.media
+    private val power = context.getSystemService(PowerManager::class.java)
     private var listening: Job? = null
 
-    /** The session shown (as before), with every active one up to two under "sessions": the control center's cards. */
+    /**
+     * The session shown (as before), with every active one up to [SESSIONS] under "sessions": the control center's cards
+     * (it shows two) and the lock face's (it swipes between them all).
+     */
     fun state(): JSONObject {
-        if (listening == null) listening = scope.launch { media.updates(::read).drop(1).collect { emit("media.changed", json(it)) } }
+        if (listening == null) {
+            // Screen off, the page isn't told each second's position (the lock face's page stays warm all night); the
+            // screen back on, it's told what it missed at once (screenOn), whatever changed meanwhile (a headset's pause).
+            listening = scope.launch { media.updates { if (power.isInteractive) read() else null }.drop(1).collect { v -> v?.let { emit("media.changed", json(it)) } } }
+            context.registerReceiver(screenOn, IntentFilter(Intent.ACTION_SCREEN_ON))
+        }
         return json(read()) as JSONObject
     }
 
-    private fun read(): Value = Obj(((media.value() as? Obj)?.fields ?: emptyMap()) + ("sessions" to media.sessions(2)))
+    private fun read(): Value = Obj(((media.value() as? Obj)?.fields ?: emptyMap()) + ("sessions" to media.sessions(SESSIONS)))
 
     /** "toggle", "play", "pause", "next", "previous", "open" (the playing app); on [pkg]'s session when named. */
     fun control(
@@ -65,7 +77,18 @@ class ShellMedia(
         runCatching { context.sendBroadcast(intent) }.onFailure { Log.w(TAG, "can't open the output picker", it) }
     }
 
+    private val screenOn =
+        object : BroadcastReceiver() {
+            override fun onReceive(
+                c: Context,
+                intent: Intent,
+            ) {
+                scope.launch { emit("media.changed", json(read())) }
+            }
+        }
+
     fun close() {
+        if (listening != null) runCatching { context.unregisterReceiver(screenOn) }
         listening?.cancel()
     }
 
@@ -86,6 +109,7 @@ class ShellMedia(
 
     companion object {
         private const val TAG = "PowosMedia"
+        private const val SESSIONS = 4
         private const val ACTION_OUTPUT = "com.android.systemui.action.LAUNCH_MEDIA_OUTPUT_DIALOG"
     }
 }

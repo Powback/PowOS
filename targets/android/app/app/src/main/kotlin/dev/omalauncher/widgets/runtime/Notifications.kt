@@ -94,6 +94,8 @@ class Notifications(
         val smallIcon: Boolean = false,
         /** Notification.color, the app's tint for that icon: COLOR_DEFAULT (0) when it set none. */
         val color: Int = Notification.COLOR_DEFAULT,
+        /** A media player's (it names a MediaSession): the lock face shows that session's media card in its place. */
+        val media: Boolean = false,
     )
 
     data class Action(
@@ -155,6 +157,7 @@ class Notifications(
             NotificationPicture.has(sbn.notification.extras),
             sbn.notification.smallIcon != null,
             sbn.notification.color,
+            sbn.notification.extras.containsKey(Notification.EXTRA_MEDIA_SESSION),
         )
 
     /** [key]'s big picture as a JPEG (NotificationPicture.jpeg), null: no such notification, or none. */

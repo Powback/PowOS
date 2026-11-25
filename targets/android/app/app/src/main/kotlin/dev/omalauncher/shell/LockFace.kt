@@ -152,7 +152,11 @@ class PowosLockActivity : Activity() {
         (h.web.parent as? ViewGroup)?.removeView(h.web)
         h.bridge.lock =
             object : LockSlot {
-                override fun unlock() {
+                override val shortcuts = LockShortcuts(this@PowosLockActivity) { e, v -> h.bridge.emit(e, v) }
+
+                override fun unlock() = unlockThen {}
+
+                override fun unlockThen(then: () -> Unit) {
                     UnlockLog.mark("dismiss requested")
                     UnlockLog.awaitHome = true
                     getSystemService(KeyguardManager::class.java).requestDismissKeyguard(
@@ -160,6 +164,7 @@ class PowosLockActivity : Activity() {
                         object : KeyguardManager.KeyguardDismissCallback() {
                             override fun onDismissSucceeded() {
                                 UnlockLog.mark("keyguard dismissed (face finishing)")
+                                runCatching(then).onFailure { Log.w("PowosLock", "after the unlock", it) }
                                 finish()
                             }
 
@@ -251,6 +256,7 @@ class PowosLockActivity : Activity() {
         if (current === this) current = null
         val h = LockFace.host(this)
         (h.web.parent as? ViewGroup)?.removeView(h.web)
+        h.bridge.lock?.shortcuts?.close()
         h.bridge.lock = null
         super.onDestroy()
     }
@@ -295,4 +301,10 @@ object UnlockLog {
 /** What the lock screen's page reaches (lock.unlock). */
 interface LockSlot {
     fun unlock()
+
+    /** Asks for the unlock (PIN pad, fingerprint), then runs [then] once it's done - a media card's app, its output picker. */
+    fun unlockThen(then: () -> Unit)
+
+    /** The face's corner shortcuts (LockShortcuts): the camera over the lock, the torch. */
+    val shortcuts: LockShortcuts
 }

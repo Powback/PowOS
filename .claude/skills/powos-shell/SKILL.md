@@ -794,6 +794,19 @@ strip only - not the cause when a drag in a tile fails.
   while hidden, defer while shown, poll with a hard 8 s deadline (an evaluateJavascript during navigation never answers).
 - The shade pull maps the finger as the page does (`PanelPull`: q = dy*1.5/--drop, open > 0.15 or a flick); ShadeHost
   reads the page's `--drop` once per height.
+- Lock face media + corners (11-25, boards lock-screen-media-controls / lock-screen-camera-flashlight-shortcuts):
+  ui/media.tsx is THE media card (control center: control.tsx MediaCards; lock: lock.tsx LockMedia, `locked`). State
+  from Media.kt -> MediaShape.kt (pure, JVM MediaShapeTest: playing incl. buffering, canPrevious/Next, custom actions
+  <=2 with /_media/media:act:<pkg>:<res> icons, output kind from AudioManager devices, idle s) -> ShellMedia (4
+  sessions; no emits while the screen is off - the face re-asks on lock.shown). On the lock page ShellBridge routes
+  media "open"/output through LockSlot.unlockThen; transport acts locked. Play/pause is optimistic (usePlaying, 2 s
+  rollback). Face gesture exceptions: `.cc-seek`/`.lock-shortcut` never start the swipe; a sideways move on a
+  `.lock-media-track.several` drops it (the track scrolls, pan-x). Corners: ui/lockshortcuts.tsx LOCK_SHORTCUTS
+  ([left, right], one place for a future setting), hold 400 ms + confirm() haptic, a tap only hints; native
+  shell/LockShortcuts.kt (torch via CameraManager, camera = INTENT_ACTION_STILL_IMAGE_CAMERA_SECURE from the face's
+  activity). Mock: the lock page starts with nothing playing. Gate LM1 lock-media-folded/unfolded; shots
+  lock-media-*, lock-torch-on, lock-camera-hold; device tools/phone/verify/lock-media.sh (plays a silent tone via
+  MediaStore in the phone's own player, SKIPs if the user's media plays).
 - Home has NO notification panel of its own: home.tsx sends `shade.homePull(on)`; the host's monitor takes a down-drag
   on home within 250 ms of the finger-down.
 

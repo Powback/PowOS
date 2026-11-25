@@ -5,6 +5,10 @@ import android.content.ComponentName
 import android.content.Context
 import android.content.Intent
 import android.graphics.Bitmap
+import android.graphics.Canvas
+import android.media.AudioDeviceCallback
+import android.media.AudioDeviceInfo
+import android.media.AudioManager
 import android.media.MediaMetadata
 import android.media.session.MediaController
 import android.media.session.MediaSession
@@ -20,10 +24,7 @@ import android.service.notification.NotificationListenerService.Ranking
 import android.service.notification.NotificationListenerService.RankingMap
 import android.service.notification.StatusBarNotification
 import dev.omalauncher.widgets.lang.Lst
-import dev.omalauncher.widgets.lang.Null
-import dev.omalauncher.widgets.lang.Num
 import dev.omalauncher.widgets.lang.Obj
-import dev.omalauncher.widgets.lang.Str
 import dev.omalauncher.widgets.lang.Value
 import dev.omalauncher.widgets.lang.bool
 import kotlinx.coroutines.channels.awaitClose
@@ -113,7 +114,8 @@ class Media(
     private class Art(val track: List<Any?>, val src: String, val bitmap: Bitmap)
     private var artSerial = 0
 
-    fun art(src: String): Bitmap? = synchronized(arts) { arts.values.firstOrNull { it.src == src }?.bitmap }
+    fun art(src: String): Bitmap? =
+        if (src.startsWith(ACTION_ICON)) actionIcon(src) else synchronized(arts) { arts.values.firstOrNull { it.src == src }?.bitmap }
 
     private fun active(): List<MediaController> =
         if (!granted) emptyList() else runCatching { sessions.getActiveSessions(component) }.getOrNull().orEmpty()
@@ -122,7 +124,7 @@ class Media(
     private fun controller(pkg: String? = null): MediaController? {
         val all = active()
         if (pkg != null) return all.firstOrNull { it.packageName == pkg }
-        return all.firstOrNull { it.playbackState?.state == PlaybackState.STATE_PLAYING } ?: all.firstOrNull()
+        return all.firstOrNull { MediaShape.active(it.playbackState?.state ?: PlaybackState.STATE_NONE) } ?: all.firstOrNull()
     }
 
     fun value(): Value {
@@ -136,41 +138,80 @@ class Media(
      */
     fun sessions(max: Int = 2): Value {
         val all = active()
-        val ordered = all.filter { it.playbackState?.state == PlaybackState.STATE_PLAYING } + all.filter { it.playbackState?.state != PlaybackState.STATE_PLAYING }
-        val shown = ordered.distinctBy { it.packageName }.map(::describe).filter { (it.fields["title"] ?: Null) != Null }.take(max)
+        val now = SystemClock.elapsedRealtime()
+        val shown = MediaShape.order(all.map(::snap), max).map { MediaShape.describe(it, now) }
         val pkgs = all.mapTo(HashSet()) { it.packageName }
         synchronized(arts) { arts.keys.retainAll(pkgs) }
         return Lst(shown)
     }
 
-    private fun describe(c: MediaController): Obj {
+    private fun describe(c: MediaController): Obj = MediaShape.describe(snap(c), SystemClock.elapsedRealtime())
+
+    /** [c] read once (each getter is a binder call): what MediaShape maps to the page's state. */
+    private fun snap(c: MediaController): MediaShape.Snap {
         val m = c.metadata
         val s = c.playbackState
-        fun text(vararg keys: String): Value = keys.firstNotNullOfOrNull { k -> m?.getString(k)?.takeIf { it.isNotBlank() } }?.let(::Str) ?: Null
-        return Obj(
-            mapOf(
-                "available" to bool(true),
-                "playing" to bool(s?.state == PlaybackState.STATE_PLAYING),
-                "title" to text(MediaMetadata.METADATA_KEY_TITLE, MediaMetadata.METADATA_KEY_DISPLAY_TITLE),
-                "artist" to text(MediaMetadata.METADATA_KEY_ARTIST, MediaMetadata.METADATA_KEY_ALBUM_ARTIST),
-                "album" to text(MediaMetadata.METADATA_KEY_ALBUM),
-                "app" to Str(label(c.packageName)),
-                "package" to Str(c.packageName),
-                "position" to (positionOf(s)?.let { Num(Math.floor(it)) } ?: Null),
-                "duration" to (m?.getLong(MediaMetadata.METADATA_KEY_DURATION)?.takeIf { it > 0 }?.let { Num(Math.floor(it / 1000.0)) } ?: Null),
-                "art" to (artOf(c.packageName, m)?.let(::Str) ?: Null),
-                "seekable" to bool(s != null && s.actions and PlaybackState.ACTION_SEEK_TO != 0L),
-            ),
+        fun text(vararg keys: String) = keys.firstNotNullOfOrNull { k -> m?.getString(k)?.takeIf { it.isNotBlank() } }
+        return MediaShape.Snap(
+            pkg = c.packageName,
+            app = label(c.packageName),
+            state = s?.state ?: PlaybackState.STATE_NONE,
+            positionMs = s?.position,
+            updatedAt = s?.lastPositionUpdateTime ?: 0,
+            speed = s?.playbackSpeed ?: 1f,
+            actions = s?.actions ?: 0,
+            title = text(MediaMetadata.METADATA_KEY_TITLE, MediaMetadata.METADATA_KEY_DISPLAY_TITLE),
+            artist = text(MediaMetadata.METADATA_KEY_ARTIST, MediaMetadata.METADATA_KEY_ALBUM_ARTIST),
+            album = text(MediaMetadata.METADATA_KEY_ALBUM),
+            durationMs = m?.getLong(MediaMetadata.METADATA_KEY_DURATION),
+            art = artOf(c.packageName, m),
+            custom =
+                s?.customActions.orEmpty().map {
+                    MediaShape.Custom(it.action, it.name?.toString().orEmpty(), if (it.icon != 0) "$ACTION_ICON${c.packageName}:${it.icon}" else null)
+                },
+            output = MediaShape.output(runCatching { c.playbackInfo?.playbackType == MediaController.PlaybackInfo.PLAYBACK_TYPE_REMOTE }.getOrDefault(false), outputs()),
         )
     }
 
-    /** Where playback is, in seconds: the last reported position moved on by the time since, while it plays. */
-    private fun positionOf(s: PlaybackState?): Double? {
-        if (s == null) return null
-        val playing = s.state == PlaybackState.STATE_PLAYING
-        val drift = if (playing && s.lastPositionUpdateTime > 0) (SystemClock.elapsedRealtime() - s.lastPositionUpdateTime) * s.playbackSpeed else 0f
-        return ((s.position + drift) / 1000.0).coerceAtLeast(0.0)
-    }
+    /** The phone's audio outputs (type, product name), kept up to date by a callback instead of a binder call per tick. */
+    @Volatile private var outputList: List<Pair<Int, String?>>? = null
+
+    private fun outputs(): List<Pair<Int, String?>> =
+        outputList ?: run {
+            val audio = context.getSystemService(AudioManager::class.java)
+            fun read() = audio.getDevices(AudioManager.GET_DEVICES_OUTPUTS).map { it.type to it.productName?.toString() }
+            audio.registerAudioDeviceCallback(
+                object : AudioDeviceCallback() {
+                    override fun onAudioDevicesAdded(added: Array<out AudioDeviceInfo>?) {
+                        outputList = read()
+                    }
+
+                    override fun onAudioDevicesRemoved(removed: Array<out AudioDeviceInfo>?) {
+                        outputList = read()
+                    }
+                },
+                main,
+            )
+            read().also { outputList = it }
+        }
+
+    /** Custom actions' icons (a drawable of the app's own, "media:act:<pkg>:<resId>"), drawn once and kept. */
+    private val actionIcons = HashMap<String, Bitmap?>()
+
+    private fun actionIcon(src: String): Bitmap? =
+        synchronized(actionIcons) {
+            actionIcons.getOrPut(src) {
+                val rest = src.removePrefix(ACTION_ICON)
+                runCatching {
+                    val d = context.packageManager.getResourcesForApplication(rest.substringBeforeLast(':')).getDrawable(rest.substringAfterLast(':').toInt(), null)
+                    val px = (24 * context.resources.displayMetrics.density).toInt()
+                    Bitmap.createBitmap(px, px, Bitmap.Config.ARGB_8888).also { b ->
+                        d.setBounds(0, 0, px, px)
+                        d.draw(Canvas(b))
+                    }
+                }.getOrNull()
+            }
+        }
 
     /**
      * [pkg]'s art id. Every c.metadata is a fresh parcel with a fresh Bitmap, and this runs every second while playing:
@@ -318,11 +359,27 @@ class Media(
         when (command) {
             "play" -> t.play()
             "pause" -> t.pause()
-            "toggle" -> if (c.playbackState?.state == PlaybackState.STATE_PLAYING) t.pause() else t.play()
+            "toggle" -> toggle(c)
             "next" -> t.skipToNext()
             "previous" -> t.skipToPrevious()
             "open" -> open(c)
+            else -> custom(c, command)
         }
+    }
+
+    /** Pauses [c] while it plays (buffering counts: MediaShape.active), else plays it. */
+    private fun toggle(c: MediaController) {
+        if (MediaShape.active(c.playbackState?.state ?: PlaybackState.STATE_NONE)) c.transportControls.pause() else c.transportControls.play()
+    }
+
+    /** The session's own action (like, shuffle, repeat...): "custom:<action>", sent with its extras as stock's player does. */
+    private fun custom(
+        c: MediaController,
+        command: String,
+    ) {
+        if (!command.startsWith("custom:")) return
+        val action = command.removePrefix("custom:")
+        c.playbackState?.customActions?.firstOrNull { it.action == action }?.let { c.transportControls.sendCustomAction(it, it.extras) }
     }
 
     /** The session's app: its own activity for the session, else its launcher activity. */
@@ -355,4 +412,8 @@ class Media(
 
     /** App labels by package: the lookup is a binder call, and value() runs every second while playing. */
     private val labels = HashMap<String, String>()
+
+    private companion object {
+        const val ACTION_ICON = "media:act:"
+    }
 }

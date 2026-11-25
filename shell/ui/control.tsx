@@ -21,7 +21,8 @@ import { openRemote } from "../remote.ts";
 import { openQuickPage, TILE_PAGES } from "./quickpage.tsx";
 import { openGlasses } from "../glasses/open.ts";
 import { useMinuteClock } from "./time.ts";
-import { Launchers, apps } from "./launchers.tsx";
+import { Launchers } from "./launchers.tsx";
+import { MediaCard, askMedia, media, sessionsOf } from "./media.tsx";
 import { PAD_ID, askPad, editPad, padTile, togglePad } from "./padtile.ts";
 import { FPS_ID, askFps, fpsTile, toggleFps } from "./fpstile.ts";
 import { TESTS_ID, askTests, testsTile, toggleTests } from "./tests.ts";
@@ -425,120 +426,6 @@ function Clock() {
   );
 }
 
-/** What's playing: asked for once a control center is shown, then kept up to date ("media.changed"). */
-const media = signal<MediaState | null>(null);
-let mediaAsked = false;
-function askMedia() {
-  if (mediaAsked) return;
-  mediaAsked = true;
-  powos.on("media.changed", (m: MediaState) => (media.value = m));
-  powos.media.state().then((m) => (media.value = m));
-}
-
-/** The sessions to show a card for: each one with a track, at most two (an older host sends only the one: [m] itself). */
-function sessionsOf(m: MediaState | null): MediaState[] {
-  if (!m?.available) return [];
-  return (m.sessions ?? [m]).filter((x) => x.title).slice(0, 2);
-}
-
-/** A session's app icon: its app in the list the quick launchers read (an Android key is "a:<package>/<activity>"). */
-function appIcon(pkg?: string): string | null {
-  if (!pkg) return null;
-  return apps.value.find((a) => a.key === `a:${pkg}` || a.key.startsWith(`a:${pkg}/`))?.icon ?? null;
-}
-
-const clock = (sec: number) => `${Math.floor(sec / 60)}:${String(Math.floor(sec % 60)).padStart(2, "0")}`;
-
-/**
- * Previous, play/pause (the filled disc), next - on this session - centred on the card, each a 44 px target; the elapsed
- * time [at] and what's left at the row's two ends, only while the card is wide enough for them (shell.css container query).
- */
-function Transport({ m, at }: { m: MediaState; at: number }) {
-  const pkg = m.package;
-  const duration = m.duration ?? 0;
-  return (
-    <span class="cc-transport">
-      <span class="cc-time">{duration ? clock(at) : ""}</span>
-      <button type="button" aria-label="previous" onClick={() => powos.media.control("previous", pkg)}>
-        <Icon name="skipPrevious" />
-      </button>
-      <button type="button" class="cc-play" aria-label={m.playing ? "pause" : "play"} onClick={() => powos.media.control("toggle", pkg)}>
-        <Icon name={m.playing ? "pause" : "play"} />
-      </button>
-      <button type="button" aria-label="next" onClick={() => powos.media.control("next", pkg)}>
-        <Icon name="skipNext" />
-      </button>
-      <span class="cc-time">{duration ? `−${clock(Math.max(0, duration - at))}` : ""}</span>
-    </span>
-  );
-}
-
-/**
- * The transport row and the progress line under it (the card 110 px): the times small at the row's two ends, not under
- * it; the line is a range input drawn 3 px thin, no knob till it's dragged (a drag seeks; the elapsed time follows the
- * finger). While it plays the line glides between the host's one-second ticks (shell.css .cc-seek.live, --p registered);
- * keyed by the track, so a new one starts from its own place instead of sweeping back. A session that doesn't take
- * seeking: the line only shows where it is.
- */
-function Playback({ m }: { m: MediaState }) {
-  const [drag, setDrag] = useState<number | null>(null);
-  const duration = m.duration ?? 0;
-  const at = drag ?? Math.min(duration, m.position ?? 0);
-  const value = (e: Event) => Number((e.target as HTMLInputElement).value);
-  return (
-    <>
-      <Transport m={m} at={at} />
-      <input
-        type="range"
-        key={m.title ?? ""}
-        class={`cc-seek ${drag === null ? (m.playing ? "live" : "") : "dragging"}`}
-        aria-label="seek"
-        min={0}
-        max={duration || 1}
-        step={1}
-        value={at}
-        style={{ "--p": String(duration ? at / duration : 0) }}
-        disabled={!duration || m.seekable === false}
-        onInput={(e) => setDrag(value(e))}
-        onChange={(e) => {
-          powos.media.seek(m.package, value(e)).catch(() => {});
-          // The host's next tick brings the new position; the line stays where it was let go till then.
-          window.setTimeout(() => setDrag(null), 1200);
-        }}
-      />
-    </>
-  );
-}
-
-/**
- * One session's card (the user, 2026-10-30: "surely there's some better way to do the media"; 10-31 board: "blurred
- * artwork background, proper font, centred controls, thin progress"). 110 px, folded and unfolded:
- * - its ground is the art itself, heavily blurred and dimmed by the shade's own tint (--shade-tint) over the card's
- *   shared glass (shell.css .cc-media.has-art ::before/::after); no art: the glass with a faint accent tint;
- * - the art as a small rounded tile, the track beside it on one line each (title semibold --text-item, artist secondary
- *   --text-body, ellipsised; a tap opens the app), the app's icon at the corner (its output picker: speaker, Bluetooth,
- *   cast);
- * - the transport centred under them (44 px targets), the times at its ends if they fit, the 3 px progress line under it.
- * Every control acts on this session (its package), not whichever plays.
- */
-function MediaCard({ m }: { m: MediaState }) {
-  const icon = appIcon(m.package);
-  const art = m.art ? `/_media/${encodeURIComponent(m.art)}` : null;
-  return (
-    <div class={`cc-media tile ${art ? "has-art" : "no-art"} ${m.playing ? "" : "paused"}`} style={art ? { "--art": `url("${art}")` } : undefined}>
-      {art ? <img class="cc-art" src={art} alt="" /> : <span class="cc-art cc-art-none"><Icon name="musicNote" /></span>}
-      <button type="button" class="cc-track" onClick={() => (shut(), powos.media.control("open", m.package))}>
-        <span class="cc-label">{m.title}</span>
-        {m.artist ? <span class="cc-detail">{m.artist}</span> : null}
-      </button>
-      <button type="button" class="cc-media-app" aria-label={`output: ${m.app ?? "this app"}`} onClick={() => (shut(), powos.media.output(m.package))}>
-        {icon ? <img src={icon} alt="" /> : <Icon name="speakerWireless" />}
-      </button>
-      <Playback m={m} />
-    </div>
-  );
-}
-
 /**
  * The media cards (the user, 2026-10-30: "under the quick launcher ... a media player controller thing if we're playing
  * any media"): one per active session, at most two; none when nothing plays. A card coming or going opens or closes its
@@ -568,7 +455,7 @@ function MediaCards({ i = 0 }: { i?: number }) {
       {[...kept.current].map(([k, c]) => (
         <div key={k} class={`cc-media-slot ${c.out ? "out" : ""}`}>
           <div>
-            <MediaCard m={c.m} />
+            <MediaCard m={c.m} leave={shut} />
           </div>
         </div>
       ))}

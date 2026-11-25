@@ -2931,8 +2931,75 @@ html.glass:root .lock .lock-note.tile {
     linear-gradient(var(--backdrop-tint), var(--backdrop-tint)) border-box,
     var(--glass-image) calc(-1 * var(--gx)) calc(-1 * var(--gy)) / var(--glass-w) var(--glass-h) no-repeat border-box;
 }
-/* The foot: the charging line (lock.tsx chargeLine) over the hint, both at the bottom. */
-.lock-foot { margin-top: auto; display: flex; flex-direction: column; align-items: center; gap: 6px; }
+/* The foot: the charging line (lock.tsx chargeLine) over the hint, both at the bottom, clear of the corner shortcuts. */
+.lock-foot { margin-top: auto; display: flex; flex-direction: column; align-items: center; justify-content: flex-end; gap: 6px; min-height: 48px; padding: 8px 64px 0; text-align: center; }
+/*
+ * What's playing on the face (lock.tsx LockMedia; media.tsx MediaCard, locked): the shade's card a step taller, as
+ * stock's lock screen player - art + track + where it plays; the line with its times under it; the session's own
+ * actions at the transport's ends. Several sessions: a track that swipes sideways between them (scroll-snapped; its
+ * sideways pan is the browser's, an up-swipe on it stays the face's: touch-action pan-x), a dot per card.
+ */
+.lock-media { width: 100%; margin-top: 24px; flex: none; }
+.lock-media-track { display: flex; touch-action: none; }
+.lock-media-track.several { overflow-x: auto; scroll-snap-type: x mandatory; overscroll-behavior-x: contain; touch-action: pan-x; }
+.lock-media-slide { flex: 0 0 100%; min-width: 0; scroll-snap-align: center; scroll-snap-stop: always; }
+.page-dots.lock-media-dots { margin-top: 8px; }
+html:root .lock .cc-media.tile { --glass-blur-native: var(--backdrop-blur-native); background: var(--backdrop-tint); }
+html.glass:root .lock .cc-media.tile {
+  background:
+    linear-gradient(var(--backdrop-tint), var(--backdrop-tint)) border-box,
+    var(--glass-image) calc(-1 * var(--gx)) calc(-1 * var(--gy)) / var(--glass-w) var(--glass-h) no-repeat border-box;
+}
+.cc-media.locked {
+  height: auto;
+  grid-template-columns: 56px minmax(0, 1fr) auto;
+  grid-template-rows: 56px 12px 16px 56px;
+  grid-template-areas: "art track app" "seek seek seek" "times times times" "transport transport transport";
+  row-gap: 6px;
+  padding: 14px 14px 8px;
+}
+.cc-media.locked .cc-art { width: 56px; height: 56px; border-radius: var(--radius); }
+.cc-media.locked .cc-seek { margin: 0; align-self: center; }
+/* The app's icon as a badge on the art's corner; the app opens from the track (after the unlock). */
+.cc-media.locked .cc-media-app { grid-area: art; align-self: end; justify-self: end; width: 22px; height: 22px; margin: 0 -5px -5px 0; font-size: 14px; color: var(--color-foreground); }
+.cc-media.locked .cc-media-app img { width: 22px; height: 22px; border-radius: 50%; }
+.cc-output { grid-area: app; align-self: start; display: flex; align-items: center; gap: 4px; max-width: 132px; height: 28px; padding: 0 10px; border: 0; border-radius: 999px; background: var(--soft-fill); color: var(--color-foreground); font: var(--text-small) var(--font-ui); }
+.cc-output > span { overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+.cc-times { grid-area: times; display: flex; justify-content: space-between; align-self: start; }
+/* The row keeps a phone's width on the unfolded screen too (its ends don't drift to the card's far edges). */
+.cc-media.locked .cc-transport { grid-template-columns: minmax(0, 1fr) 48px 56px 48px minmax(0, 1fr); justify-items: center; column-gap: 12px; justify-self: center; width: 100%; max-width: 400px; }
+.cc-media.locked .cc-transport .cc-play { width: 56px; height: 56px; font-size: 26px; }
+.cc-transport button:disabled { opacity: 0.35; }
+.cc-custom { width: 44px; height: 44px; color: var(--color-foreground); }
+.cc-custom-icon { width: 22px; height: 22px; background: currentColor; -webkit-mask: var(--icon) center / contain no-repeat; mask: var(--icon) center / contain no-repeat; }
+.cc-custom-letter { font: 600 var(--text-body) var(--font-ui); }
+/*
+ * The corner shortcuts (lockshortcuts.tsx): the torch and the camera in the bottom corners, the face's material,
+ * round. Held, the button grows under the finger for HOLD_MS (400 ms) and acts as it gets there; let go sooner, it
+ * shrinks back. The torch on: filled, as every switch that's on.
+ */
+.lock-shortcut.tile {
+  position: absolute;
+  bottom: calc(var(--inset-bottom, 0px) + 22px);
+  width: 52px;
+  height: 52px;
+  padding: 0;
+  border: 0;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 24px;
+  color: var(--color-foreground);
+  touch-action: none;
+  transition: transform var(--spring-fast-ms) var(--spring-fast);
+}
+.lock-shortcut.left { left: var(--edge); }
+.lock-shortcut.right { right: var(--edge); }
+/* --lock-hold: the hold's length, set on the button from lockshortcuts.tsx HOLD_MS (one number for both). */
+.lock-shortcut.holding { transform: scale(1.2); transition: transform var(--lock-hold) linear; }
+html:root .lock .lock-shortcut.tile { --glass-blur-native: var(--backdrop-blur-native); background: var(--backdrop-tint); }
+html:root .lock .lock-shortcut.tile.on { background: var(--color-foreground); color: var(--color-background); }
 .lock-charge { color: var(--color-foreground); font-size: var(--text-small); }
 .lock-hint { font-size: var(--text-small); }
 
