@@ -27,16 +27,25 @@ from powos_py.common import owner_conf, token  # noqa: E402
 # the Mac just finished validating for itself, and that parse error reads as a real bug. __cli_version__
 # (below) lets the Mac tell "phone copy is stale" apart from "the command itself is wrong" before passing
 # an error through.
-CLI_VERSION = 6   # 4: status queued (Up next); 5: friction link/--task, task set --friction, sweep --full; 6: janitor
+CLI_VERSION = 7   # 4: status queued (Up next); 5: friction link/--task, task set --friction, sweep --full; 6: janitor;
+#                   7: statuses backlog | stale
 
 DB = "powos-agents"
 SERVER = os.environ.get("POWOS_STDB", "http://127.0.0.1:3410")
-STATES = ("working", "queued", "blocked", "waiting", "done")
+STATES = ("working", "queued", "blocked", "waiting", "done", "backlog", "stale")
+# Parked (the user, 11-25: "move stale reports to stale and the backlog to the backlog"): never open work - not in the
+# queue, never an orphan, no claim expiry, no severity mail; the janitor and the sweep leave them alone.
+#   backlog - accepted but not now, parked by the user or the coordinator;
+#   stale   - an old report that may no longer apply (unverified, the reporter's device/setup changed, no recurrence),
+#             kept for reference: a new friction or ask linked to it, a recurrence of its friction or a check result
+#             newer than the move reopens it (status queued).
+PARKED = ("backlog", "stale")
 ALIASES = {
     "doing": "working", "in_progress": "working", "in-progress": "working", "active": "working", "wip": "working",
     "wait": "waiting", "waiting-on-user": "waiting", "waiting_on_user": "waiting", "needs_you": "waiting",
     "needs-you": "waiting", "user": "waiting", "stuck": "blocked", "finished": "done", "landed": "done",
     "queue": "queued", "up-next": "queued", "next": "queued", "accepted": "queued",
+    "parked": "backlog", "later": "backlog", "someday": "backlog", "old": "stale", "outdated": "stale",
 }
 
 HELP = """powos agents - the work board: every task the agents are on, in plain words
@@ -130,7 +139,16 @@ How far along (the page shows a bar, the steps done / now / next, the commits an
   powos agents task infer [--all]  Give every task without a project the inferred one; --all: every open
                                    task whose project is not an area gets its area.
 
-Statuses (what you set): working | queued | blocked | waiting (on the user) | done.
+Statuses (what you set): working | queued | blocked | waiting (on the user) | done | backlog | stale.
+  backlog: accepted but not now - parked by the user or the coordinator. Not in the queue, never an orphan or
+  "stalled", no claim expiry, no severity mail. `task set <id> --status backlog --note "<why>"`.
+  stale: an old report that may no longer apply (unverified, the reporter's device or setup changed, no recurrence).
+  Kept for reference, never counted as open work, left alone like backlog. Reopened (back to queued, note says why)
+  by a new friction or ask linked to it, a recurrence of its linked friction, or a phone check result newer than the
+  move (its queued checks stay queued and run if the device returns). Reopen by hand: --status queued.
+  Taking either by moving it (--step/--progress/--plan) sets it working, like a queued one.
+  `task list` leaves both out (a count line says how many); --state backlog|stale or --all shows them. The AI page
+  folds them under open work: "Backlog · N", "Stale · N"; its counts leave them out.
   queued: accepted, not started - it waits for a free agent slot. The AI page lists the queue as "Up next",
   oldest accepted first (`task set <id> --status queued`; `task add ... --status queued` to accept a new one).
   The agent that takes it moves it (--step/--progress/--plan): that sets it working and it leaves the queue.
@@ -144,6 +162,8 @@ The board shows each task's TRUE state, computed from facts - never from the sta
   stalled         nobody on it and no check at all - it needs an owner
   queued          up next: accepted, waiting for an agent slot - never an orphan (#N: its place in line)
   blocked         status blocked or waiting (on the user), with the note as the reason
+  backlog         parked: accepted, not now (the note says why)
+  stale           parked: an old report kept for reference (the note says why)
   done            closed (its check passed, or --no-check)
 `powos agents janitor [--dry-run]` (powos-agentsd every 10 min, and every `task list`): the stored status follows
 the truth - a "working" claim needs a live owner (an agent whose work is the task, or the owner role's agent while
@@ -342,6 +362,16 @@ def _fs_follow(db, wid, done):
             f.update(status="open", task="")
 
 
+def _fs_reopen(db, wid, why):
+    """The module's reopen_stale: a stale task with new evidence (a friction or ask newly linked to it, its friction seen
+    again) is open again - queued, the note says why (its old note kept after it)."""
+    w = db["work"].get(wid)
+    if w and w["status"] == "stale":
+        now = _fs_now()
+        w.update(status="queued", note=_cut(f"reopened from stale: {why}; {w['note']}".rstrip("; "), 280), updated=now,
+                 activity=now)
+
+
 def _fs_work(db, name, wid):
     w = db["work"].get(wid)
     if w is None:
@@ -445,6 +475,7 @@ def _fs_reduce(db, reducer, a):
                      status="open" if back or o["status"] == "quiet" else o["status"], reopened=o["reopened"] + int(back))
             if o["task"]:
                 _fs_score(db, o["task"])
+                _fs_reopen(db, o["task"], f"friction {o['id']} seen again")
         else:
             n = max([int(i[1:]) for i in F if i[1:].isdigit()] or [0]) + 1
             fixed = bool(f.get("fixed"))
@@ -471,6 +502,8 @@ def _fs_reduce(db, reducer, a):
         F[fid]["task"] = _cut(task, 64)
         for t in {was, task} - {""}:
             _fs_score(db, t)
+        if task and task != was:
+            _fs_reopen(db, task, f"friction {fid} linked")
     elif reducer == "friction_quiet":
         if a[0] in F and F[a[0]]["status"] == "open":
             F[a[0]]["status"] = "quiet"
@@ -488,8 +521,11 @@ def _fs_reduce(db, reducer, a):
         if not task and not none.strip():
             raise Refused("user_ask_link: a task, or why it isn't work")
         if task:
+            was = A[aid]["task"]
             A[aid]["task"] = _cut(task, 64)
             _fs_score(db, task)
+            if task != was:
+                _fs_reopen(db, task, f"ask {aid} linked")
         if none:
             A[aid]["none"] = _one(none, 280)
     elif reducer == "unit_sync":
@@ -1075,6 +1111,9 @@ def task(argv):
         if dup:
             print(f"powos agents: already on the board: {dup['title']!r} [{dup['id']}] (task set to change it)",
                   file=sys.stderr)
+            if dup["status"] == "stale":   # reported again: the old report applies after all
+                call("work_set", dup["id"], "", "", "queued", f"reopened from stale: added again ({title})"[:280], "")
+                print(f"powos agents: {dup['id']} was stale - reopened (queued)", file=sys.stderr)
             link_ask(o, dup["id"])
             print(dup["id"])
             return
@@ -1104,8 +1143,8 @@ def task(argv):
             die("usage: powos agents task set <task> [--status S] [--owner ROLE] [--title T] [--note TEXT]")
         w = find(" ".join(rest))
         st = status_of(o.get("status"))
-        # Taking a queued task (an agent moves it): it leaves the queue and is working.
-        if not st and w["status"] == "queued" and any(o.get(k) for k in ("step", "progress", "plan")):
+        # Taking a queued or parked task (an agent moves it): it leaves the queue / the fold and is working.
+        if not st and w["status"] in ("queued",) + PARKED and any(o.get(k) for k in ("step", "progress", "plan")):
             st = "working"
         project, tl = project_opt(o), try_line(o)
         need_after(w.get("images", ""), project or w.get("project", ""), o, tl)
@@ -1223,7 +1262,11 @@ def task(argv):
         ids = set(o.get("id") or [])
         if os.environ.get("POWOS_JANITOR", "1") != "0":
             janitor(quiet=bool(o.get("json")))   # every list: the stored status follows the truth first
-        ws = [w for w in board_truth() if (ids or o.get("all") or w["status"] != "done")
+        every = board_truth()
+        # Parked rows (backlog, stale) aren't open work: listed only when asked for (--all, --state, --id).
+        parked = [w for w in every if w["status"] in PARKED]
+        ws = [w for w in every if (ids or o.get("all") or w["status"] not in ("done",) + PARKED
+                                   or (o.get("state") in PARKED))
               and (not ids or w["id"] in ids)
               and (not o.get("state") or w["truth"] == o["state"])
               and (not o.get("project") or w.get("project") == (area_of(o["project"]) or o["project"]))
@@ -1265,6 +1308,10 @@ def task(argv):
                 print(f"           {c.get('sha', '')[:9]} {c.get('subject', '')}")
         if more:
             print(f"... {more} more (lowest severity; --all for every row)")
+        if parked and not (o.get("all") or o.get("state") or ids):
+            n = {s: sum(1 for w in parked if w["status"] == s) for s in PARKED}
+            print("parked, not listed: " + ", ".join(f"{n[s]} {s}" for s in PARKED if n[s])
+                  + " (--state backlog | --state stale)")
     else:
         die(f"unknown: task {verb} (powos agents help)")
 
@@ -1273,7 +1320,7 @@ def task(argv):
 # only 4 agents run"; the status column is what someone once typed, not what is happening) ---------------------------
 
 # The states, in the order the board lists them.
-TRUTH = ("working", "awaiting-check", "no-check", "stalled", "queued", "blocked", "done")
+TRUTH = ("working", "awaiting-check", "no-check", "stalled", "queued", "blocked", "backlog", "stale", "done")
 LIVE_MS = 30 * 60_000          # agentsd's own staleness: an agent heard from in the last 30 min is live
 CHECK_RESULTS = ("PASS", "FAIL", "SKIP", "INVALID", "none")
 QUEUED_STEP = "phone check queued"   # tools/phone/verify/queue.sh's marker (the board's fallback before a sync)
@@ -1346,6 +1393,10 @@ def truth(w, held, idle_roles, checks, now_ms=None, ws=()):
     status, owner = w.get("status") or "working", (w.get("owner") or "")
     if status == "done":
         return "done", w.get("note") or ""
+    if status in PARKED:
+        # Parked: what the owner's word says, whatever else is true (a queued check of a stale task waits for its device;
+        # the janitor reopens it on a result).
+        return status, w.get("note") or ("parked: not now" if status == "backlog" else "an old report, kept for reference")
     if status == "queued":
         # Accepted, not started: it waits for an agent slot, so it's nobody's orphan (an owner's idle agent doesn't
         # hold it either - the agent that takes it moves it, which sets it working; `task set` below).
@@ -1428,16 +1479,27 @@ def janitor_decide(ws, checks, agents, now_ms=None):
       expired - status working, no live claim (no agent holds it, no check queued or running) and no heartbeat for
                 claim_expire_ms(): back to queued, note "claim expired: <owner> silent since <t>" (+ "needs a check"
                 when its fix is pushed with no check at all).
-    awaiting-check rows keep their claim: the verify queue holds them until the result, which then decides."""
+      reopen  - status stale and a phone check result (PASS / FAIL) came after the move (its device came back and the queued check
+                ran): back to queued, note "reopened: check <name> <state>" - the result then decides like on any task.
+    awaiting-check rows keep their claim: the verify queue holds them until the result, which then decides. Parked rows
+    (backlog, stale) are otherwise left alone: no claim expiry, no closing, no requeue."""
     now_ms = now_ms or int(time.time() * 1000)
     held, idle_roles = holders(agents)
     by = checks_by_task(checks)
     out = []
     for w in ws:
         st, owner = w.get("status") or "working", (w.get("owner") or "")
-        if st in ("done", "blocked") or owner == "manager":
-            continue
         cs = by.get(w["id"], [])
+        if st == "stale":
+            # A real result only (PASS / FAIL): a SKIP or INVALID means the check didn't run (its device still away).
+            new = [c for c in cs if c.get("state") in ("PASS", "FAIL") and int(c.get("at") or 0) > heartbeat(w)]
+            if new:
+                c = new[-1]
+                note = f"reopened from stale: check {_check_name(c)} {c['state']} {_when(c.get('at'))}; {w.get('note') or ''}"
+                out.append(("reopen", w["id"], note.rstrip("; "), ("work_set", w["id"], "", "", "queued", note.rstrip("; ")[:280], "")))
+            continue
+        if st in ("done", "blocked") + PARKED or owner == "manager":
+            continue
         if st in ("working", "queued", "waiting") and not held.get(w["id"]):
             # The facts alone: the row as if nobody held it and it were open (queued/waiting is someone's word on
             # what comes next, not evidence against what already passed).
@@ -1953,6 +2015,11 @@ def sweep_state_file():
         os.environ.get("XDG_STATE_HOME") or os.path.expanduser("~/.local/state"), "powos", "board-sweep.json")
 
 
+def is_open(w):
+    """Open work: not done and not parked (backlog, stale) - what the sweep, its counts and the digest look at."""
+    return w.get("status") not in ("done",) + PARKED
+
+
 def orphans(ws, now_ms):
     """The rows nobody is on: stalled or no-check (a FAIL/INVALID/SKIP nobody picked up, a pass not closed, a fix
     with no check), and blocked ones without a reason; each past SWEEP_GRACE_MS since it last moved."""
@@ -1960,6 +2027,8 @@ def orphans(ws, now_ms):
     for w in ws:
         moved = int(w.get("activity") or 0) or int(w.get("updated") or 0)
         if now_ms - moved < SWEEP_GRACE_MS:
+            continue
+        if w.get("status") in PARKED:
             continue
         if w["truth"] in ("stalled", "no-check") or (w["truth"] == "blocked" and w["why"].endswith("no reason given")):
             out.append(w)
@@ -2000,9 +2069,11 @@ def sweep_decide(ws, frictions, checks, asks, now_ms):
         dead-owner - stalled, its owner isn't running
         requeue    - anything else nobody is on (a fix with no check, a PASS not closed, blocked with no reason)
       quiet    - a one-off friction (x1) unseen for 7 days: leaves the live list (reopens when logged again)
-    Nothing is closed without evidence, and never over the user's own "still broken" verdict."""
+    Nothing is closed without evidence, and never over the user's own "still broken" verdict. Parked tasks (backlog,
+    stale) aren't open work: not scored, closed, merged, trimmed or requeued (the janitor reopens a stale one on new
+    evidence)."""
     out = []
-    open_ = [w for w in ws if w.get("status") != "done"]
+    open_ = [w for w in ws if is_open(w)]
     # The manager's own tasks (it builds some itself, e.g. the progress widget): never re-owned, closed, merged or
     # trimmed - only listed under "manager" in the mail (the manager, 11-01).
     mine = [w for w in open_ if (w.get("owner") or "") == "manager"]
@@ -2139,7 +2210,7 @@ def sweep(now_ms=None, mail=True, to="coder", full=False):
     while True:
         ws, frictions, checks, asks = _board_facts(now_ms)
         if before is None:
-            before = (len([w for w in ws if w.get("status") != "done"]), len(orphans([w for w in ws if w["truth"] != "done"], now_ms)),
+            before = (len([w for w in ws if is_open(w)]), len(orphans([w for w in ws if w["truth"] != "done"], now_ms)),
                       len([f for f in frictions if f.get("status") == "open"]))
         ds = sweep_decide(ws, frictions, checks, asks, now_ms)
         if orph0 is None:   # what nobody was on when the sweep started (scored by sweep_decide): the digest's list
@@ -2169,7 +2240,8 @@ def sweep(now_ms=None, mail=True, to="coder", full=False):
     for w in ws:   # a dry run's view: the recomputed severity (applied for real, it's the stored one now)
         ev = evidence(w["id"], frictions, checks, asks)
         w["_ev"], w["severity"], w["score"], w["user_score"] = ev, severity(w, ev), ev["score"], ev["user"]
-    open_ = [w for w in ws if w["truth"] != "done"]
+    open_ = [w for w in ws if w["truth"] != "done" and is_open(w)]
+    parked = {s: sum(1 for w in ws if w.get("status") == s) for s in PARKED}
     sf = sweep_state_file()
     try:
         with open(sf) as f:
@@ -2194,7 +2266,7 @@ def sweep(now_ms=None, mail=True, to="coder", full=False):
         if int(f["count"]) > int(prev.get("friction", {}).get(f["id"], 0)):
             new_fr.append(f)
     loud = [d for d in decided if not d.get("quiet")]
-    after = (len([w for w in ws if w.get("status") != "done"]), len(orph), len(live_fr))
+    after = (len([w for w in ws if is_open(w)]), len(orph), len(live_fr))
     if not mail:   # predicted: what applying the decisions would leave
         gone = {d["id"] for d in decided if d["kind"] in ("close", "merge")}
         moved = gone | {d["id"] for d in decided if d["kind"] in REQUEUE_KINDS}
@@ -2206,10 +2278,11 @@ def sweep(now_ms=None, mail=True, to="coder", full=False):
     qline = os.environ["POWOS_QUEUE_PAUSED_LINE"] if "POWOS_QUEUE_PAUSED_LINE" in os.environ else queue_paused_line(
         now_s=now_ms / 1000)
     digest = digest_text(open_, new_tasks, new_asks, new_fr, len(orph), len(seen["asks"]), loud, passes, before, after,
-                         stale_q, sorted(orph0, key=rank_key), live_fr, qline=qline)
+                         stale_q, sorted(orph0, key=rank_key), live_fr, qline=qline, parked=parked)
     if full:
         digest = (digest or digest_text(open_, [], [], [], len(orph), len(seen["asks"]), loud, passes, before, after,
-                                        stale_q, sorted(orph0, key=rank_key), live_fr, force=True, qline=qline)) + full_text(open_, decided)
+                                        stale_q, sorted(orph0, key=rank_key), live_fr, force=True, qline=qline,
+                                        parked=parked)) + full_text(open_, decided)
     mgr = [d["id"] for d in decided if d["kind"] == "manager"]
     if digest and mgr:   # the manager's own tasks: listed, never acted on (the manager, 11-01)
         digest += f"\n\nManager's own (left alone): {len(mgr)}: " + ", ".join(mgr[:10]) + (" ..." if len(mgr) > 10 else "")
@@ -2233,11 +2306,13 @@ def _sev_tag(w):
 
 
 def digest_text(open_, tasks, asks, fr, n_orphans, n_asks, decided=(), passes=1, before=None, after=None, stale_q=(),
-                ranked=(), live_fr=(), force=False, qline=""):
+                ranked=(), live_fr=(), force=False, qline="", parked=None):
     if not (tasks or asks or fr or decided or force or qline):
         return ""
     c = counts(open_)
-    head = ", ".join(f"{c[s]} {s}" for s in TRUTH if s != "done" and c[s])
+    head = ", ".join(f"{c[s]} {s}" for s in TRUTH if s not in ("done",) + PARKED and c[s])
+    park = ", ".join(f"{n} {s}" for s, n in (parked or {}).items() if n)
+    head += f"; parked, left alone: {park}" if park else ""
     out = [f"Board sweep: {len(tasks)} task(s), {len(asks)} ask(s), {len(fr)} friction new or changed "
            f"(open {len(open_)}: {head}; orphans {n_orphans}, asks without a task {n_asks}). Staff them: "
            f"`powos agents task set <id> --owner <expert>` + a fresh agent that claims it with --step."]

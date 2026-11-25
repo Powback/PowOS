@@ -4263,6 +4263,8 @@ html:root .ai-screen .aip-area.tile { --glass-blur-native: var(--backdrop-blur-n
 .aip-dot.stuck { background: var(--status-stalled); }
 @keyframes aip-pulse { 50% { opacity: 0.45; transform: scale(0.8); } }
 .aip-empty { padding: 16px 4px; font-size: var(--text-body); color: var(--color-foreground); opacity: 0.86; }
+/* Parked work (aiprogress.tsx Parked): "Backlog · N", "Stale · N" under the areas - the same card, quieter, folded. */
+.aip-parked .aip-area-name { font-weight: 500; opacity: 0.86; }
 @keyframes aip-fill { from { transform: scaleX(0); } }
 @keyframes aip-open { from { opacity: 0; transform: translateY(-6px) scaleY(0.96); } }
 @keyframes aip-pop { from { opacity: 0; transform: scale(0.9); } }

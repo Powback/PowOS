@@ -9,7 +9,7 @@ import { memo, sameContent } from "./memo.ts";
 import { useEffect, useState } from "preact/hooks";
 import { computed, signal } from "@preact/signals";
 import { boardState, QUEUED_STEP, type BoardCheck } from "../agents.ts";
-import { board, boardSeen, checks, SevChip, WorkFeed, type WorkRow } from "./aiboard.tsx";
+import { board, boardSeen, checks, isParked, PARKED, SevChip, WorkFeed, type WorkRow } from "./aiboard.tsx";
 import { needIds, needsYou, NeedsYouCard } from "./needsyou.tsx";
 import { upNext, UpNext } from "./upnext.tsx";
 import { Reveal } from "./reveal.tsx";
@@ -49,11 +49,26 @@ export function areaOf(w: WorkRow) {
 const doneAt = (w: WorkRow) => Number(w.done || w.updated || 0);
 const inMonth = (w: WorkRow, now: number) => w.status !== "done" || now - doneAt(w) < MONTH_MS;
 
-/** The board per area: the most waiting on the user first, then the most open. */
+/**
+ * The board's counts, the ONE place they are worked out (every header and glance reads these, so a parked task is
+ * never counted as open work anywhere): [open] - not done and not parked; [done] - closed (the board keeps a week);
+ * [backlog] / [stale] - parked, shown only in their folds.
+ */
+export function boardCounts(rows: WorkRow[] = board.value): { open: number; done: number; backlog: number; stale: number } {
+  const c = { open: 0, done: 0, backlog: 0, stale: 0 };
+  for (const w of rows) {
+    if (w.status === "done") c.done++;
+    else if (w.status === "backlog" || w.status === "stale") c[w.status]++;
+    else c.open++;
+  }
+  return c;
+}
+
+/** The board per area: the most waiting on the user first, then the most open. Parked tasks (backlog, stale) aren't in it. */
 export function areaStats(rows: WorkRow[] = board.value, now = Date.now(), you: Set<string> = needIds(needsYou(rows))): AreaStat[] {
   const by = new Map<string, AreaStat>();
   for (const w of rows) {
-    if (!inMonth(w, now)) continue;
+    if (isParked(w) || !inMonth(w, now)) continue;
     const name = areaOf(w);
     const a = by.get(name) ?? { name, done: 0, total: 0, you: 0, open: [] };
     a.total++;
@@ -217,6 +232,42 @@ export function AreaRow({ a, open, toggle }: { a: AreaStat; open: boolean; toggl
   );
 }
 
+/**
+ * Parked work under the areas (the user, 11-25: "move stale reports to stale and the backlog to the backlog"): one folded
+ * card each, "Backlog · N" and "Stale · N" (none: not drawn); a tap opens its tasks, each with its note (why it's parked).
+ */
+export function Parked({ rows = board.value }: { rows?: WorkRow[] }) {
+  const [opened, setOpened] = useState<string | null>(null);
+  const folds = PARKED.map(([s, label]) => [s, label, rows.filter((w) => w.status === s)] as const).filter(([, , r]) => r.length);
+  if (!folds.length) return null;
+  return (
+    <ul class="aip-areas aip-parked">
+      {folds.map(([s, label, r]) => (
+        <li key={s} class={`aip-area tile ${opened === s ? "open" : ""}`} data-parked={s}>
+          <button type="button" class="aip-area-row" aria-expanded={opened === s} onClick={() => setOpened(opened === s ? null : s)}>
+            <span class="aip-area-name">
+              {label} · {r.length}
+            </span>
+            <span class="aip-count" aria-hidden="true">{opened === s ? "▾" : "▸"}</span>
+          </button>
+          <Reveal open={opened === s}>
+            <ul class="aip-tasks">
+              {r.map((w) => (
+                <li key={w.id} class="aip-task" data-task={w.id}>
+                  <span class="aip-task-text">
+                    <span class="aip-task-title">{w.title}</span>
+                    {w.note?.trim() && <span class="aip-task-why">{w.note.trim()}</span>}
+                  </span>
+                </li>
+              ))}
+            </ul>
+          </Reveal>
+        </li>
+      ))}
+    </ul>
+  );
+}
+
 /** "3 need you · 42 open": the ring's line under its label. */
 function subLine(stats: AreaStat[]) {
   const you = stats.reduce((n, a) => n + a.you, 0);
@@ -258,6 +309,7 @@ export function ProgressView({ shown, areasOnly = false }: { shown: boolean; are
         ))}
       </ul>
       {!stats.length && <div class="aip-empty">{boardSeen.value ? "Nothing in progress" : "…"}</div>}
+      <Parked />
     </section>
   );
 }

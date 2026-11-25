@@ -174,9 +174,19 @@ class FakeStdb(http.server.BaseHTTPRequestHandler):
         if aid not in self.db["user_ask"]:
             raise ValueError("no ask")
         a = self.db["user_ask"][aid]
+        was = a["task"]
         a["task"] = task or a["task"]
         a["none"] = none or a["none"]
         self.score(task)
+        if task and task != was:
+            self.reopen(task, f"ask {aid} linked")
+
+    def reopen(self, wid, why):
+        # as the module's reopen_stale
+        o = self.db["work"].get(wid)
+        if o and o["status"] == "stale":
+            o.update(status="queued", note=f"reopened from stale: {why}; {o['note']}".rstrip("; ")[:280],
+                     updated=self.clock[0], activity=self.clock[0])
 
     def r_friction_add(self, item):
         f = json.loads(item)
@@ -188,6 +198,8 @@ class FakeStdb(http.server.BaseHTTPRequestHandler):
             o.update(count=o["count"] + 1, last=now, status="open" if back or o["status"] == "quiet" else o["status"],
                      reopened=o["reopened"] + int(back), details=f.get("details") or o["details"])
             self.score(o.get("task", ""))
+            if o.get("task"):
+                self.reopen(o["task"], f"friction {o['id']} seen again")
             return
         fid = f"f{len(self.db['friction']) + 1}"
         self.db["friction"][fid] = {
@@ -231,6 +243,8 @@ class FakeStdb(http.server.BaseHTTPRequestHandler):
         self.db["friction"][fid]["task"] = task
         for t in (was, task):
             self.score(t)
+        if task and task != was:
+            self.reopen(task, f"friction {fid} linked")
 
     def r_friction_quiet(self, fid):
         if self.db["friction"][fid]["status"] == "open":
@@ -405,6 +419,93 @@ class JanitorTest(unittest.TestCase):
         old = dict(activity=NOW - 50 * self.H, updated=NOW - 50 * self.H)
         self.assertEqual(self.d([row("a", status="done", **old), row("b", status="blocked", **old),
                                  row("c", status="queued", **old), row("d", status="waiting", **old)]), {})
+
+
+class ParkedTest(unittest.TestCase):
+    """Parked statuses (the user, 11-25: "move stale reports to stale and the backlog to the backlog"): backlog and stale
+    are never open work - truth says so, the janitor and the sweep leave them alone, new evidence reopens a stale one."""
+
+    H = 3600_000
+    OLD = dict(activity=NOW - 50 * 3600_000, updated=NOW - 50 * 3600_000)
+
+    def test_truth_is_the_parked_status(self):
+        q = {"job": "j1", "task": "a", "name": "razr widgets", "state": "queued", "at": NOW - 7 * 86400_000}
+        for st in cli.PARKED:
+            w = row("a", status=st, note=f"moved to {st} 11-25 per user", owner="board-nonroot", **self.OLD)
+            # even with a queued check of a device that's away, or an owner role that isn't running
+            self.assertEqual(cli.truth(w, {}, {}, [q], NOW), (st, f"moved to {st} 11-25 per user"))
+            self.assertEqual(cli.truth(dict(w, note=""), {}, {}, [], NOW)[0], st)
+        self.assertEqual(cli.status_of("parked"), "backlog")
+        self.assertEqual(cli.status_of("stale"), "stale")
+        self.assertIn("backlog", cli.TRUTH)
+        self.assertIn("stale", cli.TRUTH)
+
+    def test_janitor_no_expiry_no_close(self):
+        landed = json.dumps([{"sha": "abc1234", "subject": "fix"}])
+        old_pass = {"task": "a", "job": "j2", "name": "x", "state": "PASS", "at": NOW - 60 * self.H, "shipped": True}
+        for st in cli.PARKED:
+            w = row("a", status=st, owner="powos-games", commits=landed, **self.OLD)
+            # silent 50 h with a landed fix and a PASS from before the move: no expiry, no close, no reopen
+            self.assertEqual(cli.janitor_decide([w], [old_pass], [], NOW), [], st)
+
+    def test_janitor_reopens_stale_on_a_new_result(self):
+        moved = NOW - 2 * self.H
+        w = row("a", status="stale", note="moved to stale 11-25 per user", activity=moved, updated=moved)
+        q = {"task": "a", "job": "j1", "name": "razr widgets", "state": "queued", "at": NOW - 7 * 86400_000}
+        self.assertEqual(cli.janitor_decide([w], [q], [], NOW), [], "a queued check waits for its device")
+        skip = dict(q, job="j3", state="SKIP", at=NOW - self.H)
+        self.assertEqual(cli.janitor_decide([w], [q, skip], [], NOW), [], "a SKIP didn't run: still stale")
+        for res in ("PASS", "FAIL"):
+            r = dict(q, state=res, at=NOW - self.H, line="x")
+            [(kind, wid, why, c)] = cli.janitor_decide([w], [r], [], NOW)
+            self.assertEqual((kind, wid), ("reopen", "a"))
+            self.assertEqual(c[:5], ("work_set", "a", "", "", "queued"))
+            self.assertIn(f"reopened from stale: check razr widgets {res}", c[5])
+            self.assertIn("moved to stale 11-25 per user", c[5], "the old note kept")
+        # backlog is never reopened by a result (it's parked on purpose, not an old report)
+        self.assertEqual(cli.janitor_decide([dict(w, status="backlog")], [dict(q, state="PASS", at=NOW - self.H)], [], NOW), [])
+
+    def test_sweep_leaves_parked_alone(self):
+        rows_ = []
+        for st in cli.PARKED:
+            for kind in ("stalled", "failed", "passed"):
+                w = row(f"{st}-{kind}", status=st, owner="coordinator", truth=st, why="", **self.OLD)
+                rows_.append(w)
+        rows_.append(dict(rows_[0], id="twin", title=rows_[0]["title"]))   # a same-title twin: never merged into
+        checks = [{"task": "stale-failed", "job": "f", "name": "you", "state": "FAIL", "at": NOW - 60 * self.H},
+                  {"task": "backlog-passed", "job": "p", "name": "x", "state": "PASS", "at": NOW - 60 * self.H, "shipped": True}]
+        fr = [{"id": "f1", "task": "stale-stalled", "count": 900, "status": "open", "last": NOW}]
+        self.assertEqual(cli.orphans(rows_[:-1], NOW), [])
+        ds = cli.sweep_decide(rows_[:-1], fr, checks, [], NOW)
+        self.assertEqual(ds, [], "no score, close, merge, requeue or orphan decision on a parked task")
+        self.assertTrue(all(not cli.is_open(w) for w in rows_))
+        c = cli.counts(rows_)
+        self.assertEqual((c["backlog"], c["stale"]), (4, 3))
+        text = cli.digest_text([], [], [], [], 0, 0, force=True, parked={"backlog": 3, "stale": 4})
+        self.assertIn("parked, left alone: 3 backlog, 4 stale", text)
+        self.assertIn("(open 0: ;", text.replace("(open 0: ; ", "(open 0: ;"))
+
+    def test_file_store_reopens_stale_on_link(self):
+        """The CLI's file store (a device without the module) mirrors the module's reopen_stale."""
+        db = {t: {} for t in cli.TABLES}
+        cli._fs_reduce(db, "work_set", ("old", "Old report", "", "stale", "moved to stale 11-25 per user", ""))
+        cli._fs_reduce(db, "work_set", ("park", "Parked work", "", "backlog", "moved to backlog 11-25 per user", ""))
+        cli._fs_reduce(db, "user_ask_add", (json.dumps({"id": "a1", "text": "it's broken again"}),))
+        cli._fs_reduce(db, "user_ask_link", ("a1", "park", ""))
+        self.assertEqual(db["work"]["park"]["status"], "backlog", "backlog stays parked")
+        cli._fs_reduce(db, "user_ask_link", ("a1", "old", ""))
+        self.assertEqual(db["work"]["old"]["status"], "queued")
+        self.assertEqual(db["work"]["old"]["note"], "reopened from stale: ask a1 linked; moved to stale 11-25 per user")
+        cli._fs_reduce(db, "work_set", ("old", "", "", "stale", "stale again", ""))
+        cli._fs_reduce(db, "friction_add", (json.dumps({"area": "games", "kind": "slow", "title": "ABZU low fps"}),))
+        cli._fs_reduce(db, "friction_link", ("f1", "old"))
+        self.assertTrue(db["work"]["old"]["note"].startswith("reopened from stale: friction f1 linked"))
+        cli._fs_reduce(db, "work_set", ("old", "", "", "stale", "stale again", ""))
+        cli._fs_reduce(db, "friction_link", ("f1", "old"))   # the same link again is no new evidence
+        self.assertEqual(db["work"]["old"]["status"], "stale")
+        cli._fs_reduce(db, "friction_add", (json.dumps({"area": "games", "kind": "slow", "title": "ABZU low fps"}),))
+        self.assertEqual(db["work"]["old"]["status"], "queued", "its friction recurred")
+        self.assertIn("friction f1 seen again", db["work"]["old"]["note"])
 
 
 class AgentsdJanitorTest(unittest.TestCase):
@@ -914,6 +1015,43 @@ class HygieneCliTest(BoardTest):
         self.assertIn("Plan leftover", mail)
         self.assertIn("d1 build the dock; d2 animate the dock", mail)
         self.assertNotIn("nothing", mail.split("Decided")[1].split("\n")[0])
+
+    def test_parked_end_to_end(self):
+        """task set --status backlog|stale: hidden from task list (a count line), no sweep action or mail line, reopened
+        by a linked ask; a parked task moved by an agent is working again."""
+        self.run_cli("task", "add", "ABZU has low fps", "--id", "abz", "--owner", "board-games")
+        self.run_cli("task", "add", "Web terminal", "--id", "term", "--owner", "coordinator")
+        self.run_cli("task", "add", "Live task", "--id", "live")
+        self.run_cli("task", "set", "abz", "--status", "stale", "--note", "moved to stale 11-25 per user")
+        self.run_cli("task", "set", "term", "--status", "backlog", "--note", "moved to backlog 11-25 per user")
+        for w in ("abz", "term", "live"):
+            self.old(w, 600)
+        out = self.run_cli("task", "list").stdout
+        self.assertNotIn("[abz]", out)
+        self.assertNotIn("[term]", out)
+        self.assertIn("[live]", out)
+        self.assertIn("parked, not listed: 1 backlog, 1 stale", out)
+        stale = json.loads(self.run_cli("task", "list", "--state", "stale", "--json").stdout)
+        self.assertEqual([(w["id"], w["truth"]) for w in stale], [("abz", "stale")])
+        self.assertEqual({w["id"] for w in json.loads(self.run_cli("task", "list", "--all", "--json").stdout)}, {"abz", "term", "live"})
+        self.run_cli("sweep", "--full")   # --full: the digest is mailed with the whole ranking and every decision
+        W = FakeStdb.db["work"]
+        self.assertEqual((W["abz"]["status"], W["abz"]["owner"]), ("stale", "board-games"), "never requeued or re-owned")
+        self.assertEqual((W["term"]["status"], W["term"]["owner"]), ("backlog", "coordinator"))
+        mail = "".join(self.mails_sent())
+        self.assertIn("parked, left alone: 1 backlog, 1 stale", mail)
+        self.assertNotIn("(abz)", mail, "a parked task is in no ranking, orphan list or decision")
+        self.assertNotIn("(term)", mail)
+        self.assertNotIn(" abz ", mail)
+        self.assertEqual(W["live"]["status"], "queued", "open work is still decided")
+        # a new ask linked to the stale task reopens it; the backlog one stays parked
+        self.run_cli("ask", "add", "--id", "u1", "-", stdin="abzu is still slow")
+        self.run_cli("ask", "link", "u1", "abz")
+        self.assertEqual(W["abz"]["status"], "queued")
+        self.assertIn("reopened from stale: ask u1 linked", W["abz"]["note"])
+        # an agent moving a parked task takes it
+        self.run_cli("task", "set", "term", "--step", "write the terminal")
+        self.assertEqual(W["term"]["status"], "working")
 
     def test_sweep_never_acts_on_manager_tasks(self):
         # The manager builds some tasks itself: a PASS, a stalled owner or a twin title never closes/re-owns/merges

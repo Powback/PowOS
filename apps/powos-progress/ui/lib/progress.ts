@@ -37,14 +37,18 @@ export interface WorkRow {
 }
 
 /** What a board task means for the user right now. */
-export type Lane = "you" | "try" | "on" | "blocked" | "done";
+export type Lane = "you" | "try" | "on" | "blocked" | "backlog" | "stale" | "done";
 export const LANES: { key: Lane; name: string }[] = [
   { key: "you", name: "Needs you" },
   { key: "try", name: "Ready to try" },
   { key: "on", name: "Being worked on" },
   { key: "blocked", name: "Blocked" },
+  { key: "backlog", name: "Backlog" },
+  { key: "stale", name: "Stale" },
   { key: "done", name: "Done" },
 ];
+/** Parked (the board's statuses backlog / stale, 11-25): not open work - never counted, folded at the board's foot. */
+export const isParked = (w: WorkRow) => w.status === "backlog" || w.status === "stale";
 
 /** The board's areas, in the AI page's order (lib/ai/agents/powos-agents-cli AREAS). */
 export const AREAS = ["Windows", "Home & launcher", "Shade & lock", "Games", "Performance", "Kernel & system", "AI page", "Apps", "Agents & tooling"];
@@ -60,11 +64,12 @@ export function laneOf(w: WorkRow): Lane {
   if (w.status === "done") return "done";
   if (w.status === "waiting") return "you";
   if (w.status === "blocked") return "blocked";
+  if (w.status === "backlog" || w.status === "stale") return w.status;
   return w.tryLine?.trim() ? "try" : "on";
 }
 
 /** A P0: the board marks the must-fix ones "P0" in their title, note or step. */
-export const isP0 = (w: WorkRow) => w.status !== "done" && /\bP0\b/.test(`${w.title} ${w.note} ${w.step}`);
+export const isP0 = (w: WorkRow) => w.status !== "done" && !isParked(w) && /\bP0\b/.test(`${w.title} ${w.note} ${w.step}`);
 
 const n = (v: bigint | number | undefined) => Number(v ?? 0);
 
@@ -177,7 +182,7 @@ export function useProgress(host: Host) {
   // No bindings of our own: the shell's (shell/apps/stdb.ts SHARED), so `work` decodes exactly as the AI page reads it.
   const agents = host.useDb("powos-agents", undefined);
   const work = host.useRows<WorkRow>(agents, "work", BOARD_QUERY);
-  const open = work.filter((w) => w.status !== "done");
+  const open = work.filter((w) => w.status !== "done" && !isParked(w));
   return {
     status: app.useStatus(),
     boardStatus: agents.status,

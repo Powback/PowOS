@@ -26,8 +26,11 @@ export interface WorkRow {
   id: string;
   title: string;
   owner: string;
-  /** "queued": accepted, not started - waits for an agent slot (the status page's Up next). */
-  status: "working" | "queued" | "blocked" | "waiting" | "done";
+  /**
+   * "queued": accepted, not started - waits for an agent slot (the status page's Up next). "backlog" / "stale": parked
+   * (isParked) - accepted but not now / an old report kept for reference; never open work.
+   */
+  status: "working" | "queued" | "blocked" | "waiting" | "done" | "backlog" | "stale";
   /** One line: for a "waiting" item, what the user is to do ("Plug the phone into the Mac for the kernel test"). */
   note: string;
   created: bigint | number;
@@ -58,6 +61,14 @@ export interface WorkRow {
   score?: number;
   userScore?: number;
 }
+
+/** The parked statuses, in the order their folds show (the user, 11-25: "move stale reports to stale and the backlog to the backlog"). */
+export const PARKED = [
+  ["backlog", "Backlog"],
+  ["stale", "Stale"],
+] as const;
+/** Parked (backlog, stale): not open work - left out of every count, shown only in its own folded section. */
+export const isParked = (w: Pick<WorkRow, "status">) => w.status === "backlog" || w.status === "stale";
 
 /** The P0/P1 chip on a task with that severity (none: nothing drawn); infra-only (no user evidence) says so. */
 // Memo by content: its row is rebuilt equal on every board render (render scan: w~).
@@ -810,6 +821,9 @@ export function Work({ shown }: { shown: boolean }) {
       ))}
       {!open.length && <div class="ai-work-empty muted">{boardSeen.value ? "nothing in progress" : "…"}</div>}
       <Fold label="paused" rows={paused} opened={opened} tap={tap} />
+      {PARKED.map(([s, label]) => (
+        <Fold key={s} label={label} rows={all.filter((w) => w.status === s)} opened={opened} tap={tap} />
+      ))}
       <Fold label="done recently" rows={done} opened={opened} tap={tap} />
       <Friction />
     </section>

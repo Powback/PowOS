@@ -250,6 +250,9 @@ widened first; out of scope here. `tools/emu/emu.sh` otherwise needed no change 
   --plan/--commit`; `--owner` claims nothing), `awaiting-check` (a phone check queued), `no-check` (nobody on it, no
   check queued, but a FAIL/INVALID/SKIP, an unclosed pass or a pushed fix), `stalled` (nothing: it needs an owner),
   `blocked` (blocked/waiting + the note as the reason), `done`. The status column is only what someone typed.
+- Parked (11-25): `--status backlog` (accepted, not now) and `--status stale` (an old report that may no longer apply)
+  are never open work - no claim expiry, no orphan, no sweep mail, hidden from `task list` (--state backlog|stale), folded
+  on the AI page. A new friction/ask linked to a stale task, its friction seen again or a check result reopens it.
 - The status follows the truth (the user, 11-09: "the board becomes stale" - 51 rows working, 4 moved in 6 h): the
   janitor (`powos agents janitor`, run by powos-agentsd every 10 min and by every `task list`) puts a `working` row
   with no live claim and no heartbeat (task set / step / commit link) for POWOS_CLAIM_EXPIRE_H (default 4 h) back to

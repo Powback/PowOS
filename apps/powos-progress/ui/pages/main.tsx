@@ -7,7 +7,7 @@
 import { useEffect, useState } from "preact/hooks";
 import type { Props } from "../lib/app";
 import {
-  AREAS, LANES, OTHER, STATE_COLOR, STATE_NAME, age, areaOf, byAge, clock, doneToday, hackLine, isP0, laneOf, taskIds,
+  AREAS, LANES, OTHER, STATE_COLOR, STATE_NAME, age, areaOf, byAge, clock, doneToday, hackLine, isP0, isParked, laneOf, taskIds,
   takeFocus, useProgress, type Hack, type Item, type Lane, type WorkRow,
 } from "../lib/progress";
 
@@ -15,7 +15,8 @@ const soft = "color-mix(in srgb, currentColor 7%, transparent)";
 
 function TaskLine({ w, focus }: { w: WorkRow; focus: string | null }) {
   const lane = LANES.find((l) => l.key === laneOf(w))?.name.toLowerCase() ?? w.status;
-  const detail = laneOf(w) === "try" ? w.tryLine : laneOf(w) === "you" ? w.note : w.step || w.note;
+  // Needs you and parked (backlog / stale): the note says what to do / why it's parked.
+  const detail = laneOf(w) === "try" ? w.tryLine : laneOf(w) === "you" || isParked(w) ? w.note : w.step || w.note;
   return (
     <div id={`task-${w.id}`} style={{ ...S.task, ...(focus === w.id ? S.focused : null) }}>
       <div style={S.taskHead}>

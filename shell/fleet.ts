@@ -187,7 +187,9 @@ function askTrouble(a: Agent): Pick<Worker, "reason" | "action"> {
 }
 
 /** Idle on a task that waits for its phone check. */
-const awaitsCheck = (a: Agent, w: WorkLite | undefined) => a.state === "idle" && !!w && w.status !== "done" && w.step === QUEUED_STEP;
+// Parked (backlog, stale) isn't open work: a stale task's queued check waits for its device, not for this agent.
+const awaitsCheck = (a: Agent, w: WorkLite | undefined) =>
+  a.state === "idle" && !!w && !["done", "backlog", "stale"].includes(w.status) && w.step === QUEUED_STEP;
 
 /** Why [a] needs the user, plainly, and what to do ("" : it doesn't). */
 function trouble(a: Agent, w: WorkLite | undefined, now: number): Pick<Worker, "reason" | "action"> | null {

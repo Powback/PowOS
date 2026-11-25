@@ -5826,6 +5826,68 @@ const aiToCheckWideFails = (f) => failsOf([
 
 const aiToCheckFails = (f) => (f.label === "folded" ? aiToCheckFoldedFails(f) : aiToCheckWideFails(f)).map((x) => `ai-to-check ${f.label}: ${x}`);
 
+/**
+ * Parked work (the user, 11-25: "move stale reports to stale and the backlog to the backlog"): a mocked board with two
+ * open tasks, one backlog and two stale. Progress shows the parked ones only as folded cards under the areas, "Backlog · 1"
+ * and "Stale · 2"; they're in no area and no count (the ring's "N open", the areas' cards: boardCounts / areaStats); a tap
+ * opens a card in place - its tasks, each with its note.
+ */
+async function aiParkedFacts() {
+  const G = window.__gw;
+  const S = await G.mod("./state.ts");
+  const P = await G.mod("./ui/powai.tsx");
+  const A = await G.mod("./ui/aiprogress.tsx");
+  const now = Date.now();
+  const t = (id, title, more) => ({ id, title, owner: "coder", status: "working", note: "", project: "Windows", created: now - 9e6, updated: now - 6e4, done: 0, steps: "", commits: "", images: "", step: "writing the fix", activity: now - 6e4, ...more });
+  P.board.value = [
+    t("op1", "Snap a window to the left half"),
+    t("op2", "Dock bounce", { project: "Home & launcher" }),
+    t("bk1", "Web terminal in the shell", { status: "backlog", note: "moved to backlog 11-25 per user", project: "Apps" }),
+    t("st1", "ABZU has low fps", { status: "stale", note: "moved to stale 11-25 per user", project: "Games" }),
+    t("st2", "X signs in", { status: "stale", note: "moved to stale 11-25 per user", project: "Apps" }),
+  ];
+  P.checks.value = [];
+  P.boardSeen.value = true;
+  A.progressFocus.value = null;
+  S.page.value = -1;
+  S.aiScreen.value = "progress";
+  const wait = (ms) => new Promise((r) => setTimeout(r, ms));
+  await wait(1200);
+  const txt = (e) => e?.textContent?.replace(/\s+/g, " ").trim() ?? "";
+  const tall = (e) => (e?.getBoundingClientRect().height ?? 0) > 0;
+  const card = (s) => document.querySelector(`.aip-parked [data-parked="${s}"]`);
+  const names = [...document.querySelectorAll(".aip-parked .aip-area-name")].map(txt);
+  const inAreas = [...document.querySelectorAll(".aip-areas:not(.aip-parked) .aip-area-name")].map(txt);
+  const sub = txt(document.querySelector(".aip-ring-sub"));
+  const counts = A.boardCounts(P.board.value);
+  const below = (() => {
+    const areas = document.querySelector(".aip-areas:not(.aip-parked)")?.getBoundingClientRect();
+    const parked = document.querySelector(".aip-parked")?.getBoundingClientRect();
+    return !!areas && !!parked && parked.top >= areas.bottom;
+  })();
+  const foldedShut = !tall(card("backlog")?.querySelector(".aip-task")) && !tall(card("stale")?.querySelector(".aip-task"));
+  card("stale")?.querySelector(".aip-area-row")?.click();
+  await wait(900);
+  const opened = [...(card("stale")?.querySelectorAll(".aip-task") ?? [])].filter(tall).map((e) => ({ id: e.dataset.task, why: txt(e.querySelector(".aip-task-why")) }));
+  return { names, inAreas, sub, counts, below, foldedShut, expanded: card("stale")?.querySelector(".aip-area-row")?.getAttribute("aria-expanded"), opened };
+}
+
+const aiParkedFails = (f) => failsOf([
+  [JSON.stringify(f.names) === JSON.stringify(["Backlog · 1", "Stale · 2"]), `the folded sections aren't "Backlog · 1", "Stale · 2": ${JSON.stringify(f.names)}`],
+  [JSON.stringify(f.inAreas) === JSON.stringify(["Home & launcher", "Windows"]) || JSON.stringify(f.inAreas) === JSON.stringify(["Windows", "Home & launcher"]), `parked tasks show up as areas: ${JSON.stringify(f.inAreas)}`],
+  [/(^|· )2 open$/.test(f.sub), `the header counts parked tasks as open: "${f.sub}"`],
+  [JSON.stringify(f.counts) === JSON.stringify({ open: 2, done: 0, backlog: 1, stale: 2 }), `boardCounts: ${JSON.stringify(f.counts)}`],
+  [f.below, "the parked sections aren't below the open work"],
+  [f.foldedShut, "the parked sections aren't folded at first"],
+  [f.expanded === "true" && JSON.stringify(f.opened) === JSON.stringify([{ id: "st1", why: "moved to stale 11-25 per user" }, { id: "st2", why: "moved to stale 11-25 per user" }]), `a tap doesn't open Stale's tasks with their notes: ${JSON.stringify(f)}`],
+]).map((x) => `ai-parked: ${x}`);
+
+async function aiParkedCheck(page) {
+  const f = await page.evaluate(aiParkedFacts);
+  await page.screenshot({ path: "/cache/ai-parked-folded.png" });
+  return aiParkedFails(f);
+}
+
 /** Exercise the remaining counts after the active-task regression has populated the real UI. */
 async function aiIdleAreaFacts() {
   const S = await window.__gw.mod("./state.ts");
@@ -15876,6 +15938,9 @@ try {
   if (process.env.SHELL_PAGES !== "0")
     for (const [label, viewport] of [["unfolded", { width: 821, height: 883 }], ["folded", { width: 404, height: 900 }]])
       runs.push(open(browser, `${ORIGIN}/index.html`, `ai-to-check-${label}`, viewport).then((r) => whenReady(r, () => aiToCheckCheck(r.page, label))));
+  // Backlog and stale fold under open work, out of every count (the user, 11-25: "move stale reports to stale and the backlog to the backlog").
+  if (process.env.SHELL_PAGES !== "0")
+    runs.push(open(browser, `${ORIGIN}/index.html`, "ai-parked", { width: 404, height: 900 }).then((r) => whenReady(r, () => aiParkedCheck(r.page))));
   // Unfolded, no keyboard: the newest message and "thinking…" end over the shared bar (the user, 11-01 22:1x: "smh").
   if (process.env.SHELL_PAGES !== "0")
     runs.push(open(browser, `${ORIGIN}/index.html`, "ai-wide-clear", { width: 821, height: 883 }).then((r) => whenReady(r, () => aiWideClearCheck(r.page))));

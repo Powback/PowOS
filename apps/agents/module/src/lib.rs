@@ -17,7 +17,9 @@ const TASKS_PER_AGENT: usize = 50;
 const WORK_DONE_KEEP_MS: u64 = 7 * 24 * 3600 * 1000;
 const WORK_MAX: usize = 200;
 /// "queued": accepted, not started - it waits for an agent slot (the AI page's Up next; `task set --status queued`).
-const WORK_STATES: [&str; 5] = ["working", "queued", "blocked", "waiting", "done"];
+/// "backlog" / "stale" (the user, 11-25): parked - accepted but not now / an old report kept for reference; never open
+/// work. A stale one reopens (queued) on new evidence: a friction or ask newly linked to it, its friction seen again.
+const WORK_STATES: [&str; 7] = ["working", "queued", "blocked", "waiting", "done", "backlog", "stale"];
 
 #[spacetimedb::table(accessor = reporter)]
 pub struct Reporter {
@@ -118,7 +120,8 @@ pub struct Work {
     title: String,
     /// The agent's role ("switcher", "manager"), or "" when nobody has it yet.
     owner: String,
-    /// "working" | "queued" (up next, waits for an agent slot) | "blocked" | "waiting" (on the user) | "done".
+    /// "working" | "queued" (up next, waits for an agent slot) | "blocked" | "waiting" (on the user) | "done" |
+    /// "backlog" (parked: not now) | "stale" (parked: an old report, reopened on new evidence).
     status: String,
     /// One line of detail: what it's blocked on, what's next, what landed.
     note: String,
@@ -908,6 +911,26 @@ fn board_score(ctx: &ReducerContext, id: &str) {
     ctx.db.work().insert(Work { score, user_score: user, severity, ..o });
 }
 
+/// A stale task with new evidence (a friction or ask newly linked to it, its friction seen again) applies after all: back
+/// to queued, the note says why (the old note kept after it). Anything else is left as it is. The CLI's file store
+/// (powos-agents-cli _fs_reopen) does the same.
+fn reopen_stale(ctx: &ReducerContext, id: &str, why: &str) {
+    let Some(o) = ctx.db.work().id().find(id.to_string()) else { return };
+    if o.status != "stale" {
+        return;
+    }
+    let now = now_ms(ctx);
+    let note = format!("reopened from stale: {why}; {}", o.note);
+    ctx.db.work().id().delete(id.to_string());
+    ctx.db.work().insert(Work {
+        status: "queued".into(),
+        note: cut(note.trim_end_matches([';', ' ']).to_string(), 280),
+        updated: now,
+        activity: now,
+        ..o
+    });
+}
+
 /// Recomputes [id]'s severity (the board sweep, each pass, for every task with evidence).
 #[spacetimedb::reducer]
 pub fn work_score(ctx: &ReducerContext, id: String) -> Result<(), String> {
@@ -946,8 +969,11 @@ pub fn friction_link(ctx: &ReducerContext, id: String, task: String) -> Result<(
         return Err(format!("friction_link: no task '{task}'"));
     }
     let was = o.task.clone();
-    ctx.db.friction().id().delete(id);
+    ctx.db.friction().id().delete(id.clone());
     ctx.db.friction().insert(Friction { task: cut(task.clone(), 64), ..o });
+    if !task.is_empty() && task != was {
+        reopen_stale(ctx, &task, &format!("friction {id} linked"));
+    }
     for t in [was, task] {
         if !t.is_empty() {
             board_score(ctx, &t);
@@ -1316,12 +1342,14 @@ pub fn friction_add(ctx: &ReducerContext, item: String) -> Result<(), String> {
     let key = friction_key(&f);
     let have = ctx.db.friction().key().filter(&key).next();
     let linked = have.as_ref().map(|o| o.task.clone()).unwrap_or_default();
+    let fid = have.as_ref().map(|o| o.id.clone()).unwrap_or_default();
     match have {
         Some(o) => friction_again(ctx, o, f, now),
         None => friction_new(ctx, f, key, now),
     }
     if !linked.is_empty() {
         board_score(ctx, &linked);
+        reopen_stale(ctx, &linked, &format!("friction {fid} seen again"));
     }
     let mut fixed: Vec<(u64, String)> =
         ctx.db.friction().iter().filter(|r| r.status == "fixed").map(|r| (r.last, r.id)).collect();
@@ -1421,7 +1449,8 @@ pub fn user_ask_link(ctx: &ReducerContext, id: String, task: String, none: Strin
     if task.is_empty() && none.trim().is_empty() {
         return Err("user_ask_link: a task, or why it isn't work".into());
     }
-    ctx.db.user_ask().id().delete(id);
+    let was = o.task.clone();
+    ctx.db.user_ask().id().delete(id.clone());
     ctx.db.user_ask().insert(UserAsk {
         task: if task.is_empty() { o.task.clone() } else { cut(task.clone(), 64) },
         none: if none.is_empty() { o.none.clone() } else { one_line(none, 280) },
@@ -1429,6 +1458,9 @@ pub fn user_ask_link(ctx: &ReducerContext, id: String, task: String, none: Strin
     });
     if !task.is_empty() {
         board_score(ctx, &task);
+        if task != was {
+            reopen_stale(ctx, &task, &format!("ask {id} linked"));
+        }
     }
     Ok(())
 }

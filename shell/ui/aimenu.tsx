@@ -18,7 +18,7 @@ import { SessionRow, hostOf, hosts, localHost, sessions, sessionsOn, useSessions
 import { ago } from "./time.ts";
 import { HOSTS, Units } from "./units.tsx";
 import { AccountDevices } from "./aidevices.tsx";
-import { WorkFeed, board, type WorkRow } from "./aiboard.tsx";
+import { WorkFeed, board, isParked, type WorkRow } from "./aiboard.tsx";
 import { FrictionPage } from "./aifriction.tsx";
 import { ProgressView } from "./aiprogress.tsx";
 
@@ -107,7 +107,7 @@ export function dailyDriver(): number | null {
   return w ? Math.round((100 * Math.min(w.progressDone ?? 0, w.progressTotal!)) / w.progressTotal!) : null;
 }
 
-const open = (w: WorkRow) => w.status !== "done";
+const open = (w: WorkRow) => w.status !== "done" && !isParked(w);
 /** Open tasks per area, most first: [area, in progress, waiting on the user]. */
 export function areas(): [string, number, number][] {
   const by = new Map<string, [number, number]>();

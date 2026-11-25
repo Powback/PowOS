@@ -183,7 +183,19 @@ Shell tsc: a fresh worktree has no shell/node_modules - the gate skips tsc; syml
   Off the phone the CLI relays to the phone (remote(), HACK via powos-vadb); POWOS_AGENTS_REMOTE=0 disables.
 - Reducers: work_set(id,title,owner,status,note,project) - "" keeps a field; work_track(id, progress_done,
   progress_total, step, steps, commits, images) writes the progress columns WHOLE (the CLI computes them from the
-  row); work_drop(id). Statuses working|blocked|waiting|done.
+  row); work_drop(id). Statuses working|queued|blocked|waiting|done|backlog|stale.
+- Parked (11-25, the user: "move stale reports to stale and the backlog to the backlog"): `backlog` = accepted, not now
+  (parked by the user/coordinator); `stale` = an old report that may no longer apply, kept for reference. Both: truth
+  = the status itself (truth() returns before claims/checks), never open work - the janitor skips them (no claim
+  expiry, no done-close), the sweep's open_ (is_open) leaves them out (no score, close, merge, requeue, orphan, mail
+  line beyond a "parked, left alone" count), `task list` hides them (count line; --state backlog|stale / --all shows).
+  Reopen (stale -> queued, note "reopened from stale: <why>; <old note>"): module reopen_stale on friction_link /
+  user_ask_link to it, its linked friction logged again (friction_add) - the CLI file store mirrors it (_fs_reopen);
+  the janitor on a PASS/FAIL check whose `at` is after the row's heartbeat (its queued checks stay queued meanwhile);
+  `task add` of a similar title. Moving a parked task (--step/--progress/--plan) sets it working, like queued.
+  Shell: aiboard.tsx PARKED/isParked; aiprogress.tsx boardCounts (THE count function: open/done/backlog/stale),
+  areaStats skips parked, Parked = folded cards "Backlog · N" / "Stale · N" under the areas (gate ai-parked); the
+  fallback board (aiboard Work) folds them too; powos-progress lanes backlog/stale. Tier-1: test-board-truth.py.
 - Progress columns (after `project`, all #[default]): progress_done/progress_total u32 (0/0 = no bar), step, steps
   (JSON [{text, state: done|current|next}]), commits (JSON [{sha(12), subject}]), images (JSON [path]; an after image
   is "after:<path>", HACK until the module stores {path, kind}: aiboard.tsx reviewImages), activity u64
@@ -213,7 +225,8 @@ Shell tsc: a fresh worktree has no shell/node_modules - the gate skips tsc; syml
   Bash `task set <id> --step/--progress/--plan/--commit`, cleared by `task done`/`queue.sh add .. <id>` - or a live
   agent whose role == owner holding nothing; live = working|needs_you heard < 30 min), else awaiting-check (a
   work_check row queued/running; the step marker QUEUED_STEP before a sync), no-check (a result FAIL/INVALID/SKIP/
-  PASS/none or commits linked), stalled (nothing), blocked (blocked|waiting + note), done. Holders come from the spool:
+  PASS/none or commits linked), stalled (nothing), blocked (blocked|waiting + note), backlog / stale (parked), done.
+  Holders come from the spool:
   `$XDG_RUNTIME_DIR/agents/state.json` + `mirror/*.json` (the Mac's agents; POWOS_AGENTS_SPOOLS overrides in tests).
   `task list --json` adds truth/why; `--state S`; `--raw` the typed status. No 20-min stall timer any more.
 - Tables beside `work` (apps/agents, additive: `work` itself unchanged, so old shells still decode it):
