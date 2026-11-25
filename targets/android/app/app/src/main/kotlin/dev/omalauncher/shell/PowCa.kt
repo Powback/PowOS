@@ -90,13 +90,24 @@ object WebAppTls {
         val known = prefs(context).getString(host, null)
         if (known != null) then(if (known == "https") https else url)
         io.execute {
-            val now = if (probe(context, https)) "https" else "http"
-            if (now != known) {
-                prefs(context).edit().putString(host, now).apply()
-                Log.i(TAG, "$host: $now")
-            }
+            val now = recheck(context, host, https, known)
             if (known == null) then(if (now == "https") https else url)
         }
+    }
+
+    /** Probes [https] and remembers the answer for [host] ("https" | "http"). */
+    private fun recheck(
+        context: Context,
+        host: String,
+        https: String,
+        known: String?,
+    ): String {
+        val now = if (probe(context, https)) "https" else "http"
+        if (now != known) {
+            prefs(context).edit().putString(host, now).apply()
+            Log.i(TAG, "$host: $now")
+        }
+        return now
     }
 
     private fun probe(

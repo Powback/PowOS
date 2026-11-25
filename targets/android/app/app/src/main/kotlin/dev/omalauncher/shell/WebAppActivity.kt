@@ -55,59 +55,70 @@ class WebAppActivity : Activity() {
     private var custom: View? = null
     private var customDone: WebChromeClient.CustomViewCallback? = null
 
-    @SuppressLint("SetJavaScriptEnabled")
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         val url = intent.dataString ?: return finish()
         id = WebApps.idOf(url) ?: return finish()
-        val app = WebApps.get(this, id)
-        label = app?.name ?: id
-        val color = app?.theme?.let { runCatching { Color.parseColor(it) }.getOrNull() }
-        setTaskDescription(ActivityManager.TaskDescription.Builder().setLabel(label).apply { if (color != null) setPrimaryColor(color) }.build())
-        web = WebView(this)
-        web.settings.javaScriptEnabled = true
-        web.settings.domStorageEnabled = true
-        web.settings.databaseEnabled = true
-        web.settings.mediaPlaybackRequiresUserGesture = false
-        web.settings.setGeolocationEnabled(true)
-        web.webChromeClient = Chrome()
-        web.webViewClient =
-            object : WebViewClient() {
-                override fun shouldOverrideUrlLoading(
-                    view: WebView,
-                    request: WebResourceRequest,
-                ): Boolean {
-                    val to = request.url
-                    if (mine(to.host)) return false
-                    // Another site (a login provider, a link out): the browser, not this app's window.
-                    runCatching { startActivity(Intent(Intent.ACTION_VIEW, to).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)) }
-                    return true
-                }
-
-                // The PowStation CA, for this app's own .pow hosts only (PowCa): an unknown issuer and nothing else.
-                @SuppressLint("WebViewClientOnReceivedSslError")
-                override fun onReceivedSslError(
-                    view: WebView,
-                    handler: SslErrorHandler,
-                    error: SslError,
-                ) {
-                    val host = WebAppSync.hostOf(error.url)
-                    val ca = WebAppTls.ca(this@WebAppActivity)
-                    if (mine(host) && error.primaryError == SslError.SSL_UNTRUSTED && ca != null && PowCa.trusts(ca, host, error.certificate.x509Certificate)) {
-                        handler.proceed()
-                    } else {
-                        Log.w(TAG, "$id: TLS error ${error.primaryError} on ${error.url}: refused")
-                        handler.cancel()
-                    }
-                }
-            }
+        describe()
+        web = webView()
         root = FrameLayout(this).apply { addView(web, FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT)) }
         setContentView(root)
         if (savedInstanceState != null && web.restoreState(savedInstanceState) != null) return
         WebAppTls.url(this, url) { to -> runOnUiThread { if (!isDestroyed) web.loadUrl(to) } }
     }
 
+    /** The task's name and colour: the app's. */
+    private fun describe() {
+        val app = WebApps.get(this, id)
+        label = app?.name ?: id
+        val color = app?.theme?.let { runCatching { Color.parseColor(it) }.getOrNull() }
+        setTaskDescription(ActivityManager.TaskDescription.Builder().setLabel(label).apply { if (color != null) setPrimaryColor(color) }.build())
+    }
+
     private fun mine(host: String?) = host != null && (host == id || host.endsWith(".$id"))
+
+    @SuppressLint("SetJavaScriptEnabled")
+    private fun webView() =
+        WebView(this).apply {
+            settings.javaScriptEnabled = true
+            settings.domStorageEnabled = true
+            settings.databaseEnabled = true
+            settings.mediaPlaybackRequiresUserGesture = false
+            settings.setGeolocationEnabled(true)
+            webChromeClient = Chrome()
+            webViewClient = Client()
+        }
+
+    /** The PowStation CA, for this app's own .pow hosts only (PowCa): an unknown issuer and nothing else. */
+    private fun trusted(error: SslError): Boolean {
+        val host = WebAppSync.hostOf(error.url)
+        val ca = WebAppTls.ca(this) ?: return false
+        return mine(host) && error.primaryError == SslError.SSL_UNTRUSTED && PowCa.trusts(ca, host, error.certificate.x509Certificate)
+    }
+
+    private inner class Client : WebViewClient() {
+        override fun shouldOverrideUrlLoading(
+            view: WebView,
+            request: WebResourceRequest,
+        ): Boolean {
+            val to = request.url
+            if (mine(to.host)) return false
+            // Another site (a login provider, a link out): the browser, not this app's window.
+            runCatching { startActivity(Intent(Intent.ACTION_VIEW, to).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)) }
+            return true
+        }
+
+        @SuppressLint("WebViewClientOnReceivedSslError")
+        override fun onReceivedSslError(
+            view: WebView,
+            handler: SslErrorHandler,
+            error: SslError,
+        ) {
+            if (trusted(error)) return handler.proceed()
+            Log.w(TAG, "$id: TLS error ${error.primaryError} on ${error.url}: refused")
+            handler.cancel()
+        }
+    }
 
     private inner class Chrome : WebChromeClient() {
         override fun onPermissionRequest(request: PermissionRequest) {
