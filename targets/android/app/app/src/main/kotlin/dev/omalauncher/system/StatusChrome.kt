@@ -47,6 +47,8 @@ class StatusChrome(private val context: Context, private val changed: () -> Unit
     /** The recording light (chrome.tsx RecordingRing): "recording" camera|screen|mic|null, "recordingApps". */
     private val recording = RecordingWatcher.shared(context)
     private val recordingChanged: () -> Unit = { recordingState(recording.state()); publish() }
+    /** The stock status bar's icons (SIMs, Wi-Fi strength, Bluetooth, alarm...): their own event, so only they redraw. */
+    private val signals = StatusSignals(context) { host.bridge.emit("system.status", it.json()) }
     private val watchdog = PageWatchdog(web, "PowOS status bar", skip = {
         !context.getSystemService(android.os.PowerManager::class.java).isInteractive
     }) { ready = false; web.visibility = View.INVISIBLE; changed() }
@@ -72,6 +74,7 @@ class StatusChrome(private val context: Context, private val changed: () -> Unit
         } }
     }
     override fun state() = data
+    override fun status() = signals.now().json()
     override fun ready() {
         ready = true
         changed()
@@ -198,6 +201,7 @@ class StatusChrome(private val context: Context, private val changed: () -> Unit
     }
     fun destroy() {
         watchdog.stop()
+        signals.destroy()
         recording.unwatch(recordingChanged)
         scope.cancel()
         context.unregisterReceiver(receiver)

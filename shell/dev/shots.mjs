@@ -415,11 +415,25 @@ const DEVICES_MOCK =
 const DEVICES_CONFIRM = DEVICES_MOCK + " document.querySelector('[data-device=desk] [data-remove]')?.click(); await sleep(400);";
 const DEVICES_REMOVED = DEVICES_MOCK + " document.querySelector('[data-removed-fold] .ais-toggle')?.click(); await sleep(600);";
 
+/** A status bar scene: [status] (status-mock.ts as M) pushed as "system.status", the strip's cutouts as on the phone. */
+const STATUS_SCENE = (status, chrome) =>
+  `const M = await U('./status-mock.ts'); E.emit('system.status', ${status});` +
+  ` const folded = innerWidth < 500; E.emit('chrome.changed', {kind:'status', clock:'09:41', network:'wifi', ${chrome}, left:8,` +
+  ` right: folded ? 8 : 54, ...(folded ? { holeLeft: 188.6, camera: { x: 188.6, y: 0, width: 26.8, height: 45.6 } } : { camera: { x: 776, y: 0, width: 45.6, height: 45.6 } })}); await sleep(300);`;
+const STATUS_SIZES = { folded: { width: 404, height: 46, insets: { top: 0, bottom: 0 } }, unfolded: { width: 821, height: 46, insets: { top: 0, bottom: 0 } } };
+
 const SCENES = [
   ["chrome-status", "statusbar", "E.emit('chrome.changed', {kind:'status', battery:74, charging:true, network:'wifi', vpn:true, left:44});", "blurred", null, { folded: {width:404,height:46,insets:{top:0,bottom:0}}, unfolded: {width:821,height:46,insets:{top:0,bottom:0}} }],
   // The recording ring round the camera's hole (chrome.tsx RecordingRing; 11-25 "too big"): the OnePlus Open's cover and
   // inner holes (CSS px, from the OEM's declared hole) and S25 / razr-shaped mocks - the same holes as gate.mjs RING_HOLES.
   ["chrome-rec-ring", "statusbar", "const H = {404: [189.32, 10.5, 25.7], 821: [776.11, 16.65, 27.51], 384: [185.6, 11.4, 12.8], 412: [197.5, 10, 17]}[innerWidth]; E.emit('chrome.changed', {kind:'status', battery:74, network:'wifi', left:8, recording:'camera', recordingApps:['org.example.cam'], camera: {x:H[0], y:H[1], width:H[2], height:H[2]}}); await sleep(400);", "blurred", null, { folded: {width:404,height:46,insets:{top:0,bottom:0}}, unfolded: {width:821,height:46,insets:{top:0,bottom:0}}, s25: {width:384,height:46,insets:{top:0,bottom:0}}, razr: {width:412,height:46,insets:{top:0,bottom:0}} }],
+  // The stock status icons (ui/statusicons.tsx, "system.status"): every icon on at once - the cover screen beside its
+  // centred camera (OnePlus Open: hole [521,595) of 1116 px, DPR 2.76) wraps the lowest-priority ones out (the overflow
+  // dot), the inner screen (camera top right) shows them all; a phone with no SIM in airplane mode, Wi-Fi without
+  // internet, the battery low; the typical one SIM on 5G with Wi-Fi.
+  ["chrome-status-all", "statusbar", STATUS_SCENE("M.allStatus", "battery:64, charging:false, vpn:true"), "blurred", null, STATUS_SIZES],
+  ["chrome-status-nosim", "statusbar", STATUS_SCENE("{ ...M.typicalStatus, cells: [{ slot: 0, sim: 'absent', bars: null, service: 'in', type: null, roaming: false, activity: null, data: false, carrier: null }], airplane: true, wifi: 1, wifiInternet: false }", "battery:9, charging:false"), "blurred", null, STATUS_SIZES],
+  ["chrome-status-typical", "statusbar", STATUS_SCENE("{ ...M.typicalStatus, notifications: M.allStatus.notifications.slice(0, 2), alarm: M.allStatus.alarm }", "battery:81, charging:true"), "blurred", null, STATUS_SIZES],
   // A maximised web window's bar merged under the status bar (StatusChrome.merge): the clock after its title, the icons before its controls.
   ["chrome-status-merged", "statusbar", "E.emit('chrome.changed', {kind:'status', clock:'18:40', battery:88, network:'wifi', left:8, mergeLeft:150, mergeRight:120});", "blurred", null, { folded: {width:404,height:46,insets:{top:0,bottom:0}}, unfolded: {width:821,height:46,insets:{top:0,bottom:0}} }],
   ["chrome-window", "windowbar", "E.emit('chrome.changed', {kind:'window', title:'Calculator'});", "blurred", null, { narrow: {width:280,height:27,insets:{top:0,bottom:0}}, wide: {width:650,height:27,insets:{top:0,bottom:0}} }],

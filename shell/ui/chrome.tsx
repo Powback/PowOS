@@ -2,6 +2,7 @@
 import { useEffect, useState } from "preact/hooks";
 import type { ChromeState } from "../types.ts";
 import { FpsMeter } from "./fpsmeter.tsx";
+import { NotificationIcons, SystemIcons, statusWords, useSystemStatus } from "./statusicons.tsx";
 
 export type ChromeAction = (action: string) => void;
 
@@ -56,8 +57,8 @@ function useClock() {
   return new Date();
 }
 
-function statusLabel(state: ChromeState, battery: number | null) {
-  const parts = ["System controls", state.network];
+function statusLabel(state: ChromeState, battery: number | null, words: string[]) {
+  const parts = ["System controls", ...(words.length ? words : [state.network])];
   if (battery != null) parts.push(`battery ${battery}%`);
   if (state.charging) parts.push("charging");
   return parts.filter(Boolean).join(", ");
@@ -86,13 +87,13 @@ export function StatusBar({ state, action }: { state: ChromeState; action: Chrom
   const { merged, left, right } = sides(state);
   return <div class={`status-chrome${hole != null ? " has-hole" : ""}${merged ? " merged" : ""}`} style={{ paddingLeft: `${left}px`, paddingRight: `${right}px`, ...(hole != null ? { "--hole-left": `${hole}px` } : {}) }}>
     {/* data-action: the host makes only these touchable on the strip (chrome.regions -> ShadeHost edgeRegion). */}
-    <button class="status-clock" data-action="notifications" aria-label={`Notifications${state.notifications ? `, ${state.notifications} new` : ""}, ${time}`} onClick={() => action("notifications")}>
+    <button class="status-clock" data-action="notifications" aria-label={`Notifications${state.notifications ? `, ${state.notifications} new` : ""}, ${time}`} onClick={() => action("notifications")}
+      style={hole != null ? { maxWidth: `${Math.max(0, hole - left - 6)}px` } : undefined}>
       <time dateTime={now.toISOString()}>{time}</time>
+      <Notifs />
     </button>
     <FpsMeter />
-    <button class="status-indicators" data-action="controls" aria-label={statusLabel(state, battery)} onClick={() => action("controls")}>
-      <Indicators state={state} battery={battery} />
-    </button>
+    <Controls state={state} battery={battery} action={action} right={right} />
     <RecordingLight state={state} action={action} />
   </div>;
 }
@@ -127,12 +128,40 @@ function RecordingDot({ kind, apps }: { kind: NonNullable<ChromeState["recording
   return <span class="status-rec-dot" data-kind={kind} role="img" aria-label={recordingLabel(kind, apps)} />;
 }
 
+/** The notification icons after the clock: their own reader, so a status change doesn't redraw the clock. */
+function Notifs() {
+  return <NotificationIcons status={useSystemStatus()} />;
+}
+
+/**
+ * The control button: the recording dot, then the system icons (statusicons.tsx; the stock set when the host sends
+ * "system.status", else ChromeState's network kind and VPN), the battery rightmost. Beside a centred camera hole its
+ * width ends at the hole, and the icons that don't fit go (lowest priority first).
+ */
+function Controls({ state, battery, action, right }: { state: ChromeState; battery: number | null; action: ChromeAction; right: number }) {
+  const status = useSystemStatus();
+  // The hole's right edge: the camera's cutout on the strip, else the hole's left edge and a punch-hole's width.
+  const holeRight = state.holeLeft == null ? null : state.camera ? state.camera.x + state.camera.width : state.holeLeft + 28;
+  const maxWidth = holeRight != null ? `${Math.max(0, innerWidth - right - holeRight - 6)}px` : undefined;
+  return <button class="status-indicators" data-action="controls" aria-label={statusLabel(state, battery, statusWords(status))} onClick={() => action("controls")} style={maxWidth ? { maxWidth } : undefined}>
+    {state.recording && !state.camera && <RecordingDot kind={state.recording} apps={state.recordingApps} />}
+    {status ? <SystemIcons status={status} vpn={!!state.vpn} first={battery != null ? <Battery state={state} battery={battery} saver={status.batterySaver} /> : null} />
+      : <Indicators state={state} battery={battery} />}
+  </button>;
+}
+
+function Battery({ state, battery, saver }: { state: ChromeState; battery: number; saver?: boolean }) {
+  // Stock: amber in battery saver, red when low (15% and below) and not charging.
+  const tone = saver ? "saver" : battery <= 15 && !state.charging ? "low" : undefined;
+  return <span class="status-battery" data-tone={tone}><svg viewBox="0 0 28 16" aria-hidden="true"><rect x="1" y="2" width="22" height="12" rx="3" /><path d="M26 6v4" /><rect class="battery-level" x="3" y="4" width={18 * battery / 100} height="8" rx="1" /></svg>{state.charging && <Mark kind="charging" />}<span>{battery}%</span></span>;
+}
+
+/** A host without "system.status" (desktop, an older APK): ChromeState's own network kind and VPN. */
 function Indicators({ state, battery }: { state: ChromeState; battery: number | null }) {
   return <>
-      {state.recording && !state.camera && <RecordingDot kind={state.recording} apps={state.recordingApps} />}
       {state.vpn && <span title="VPN connected"><Mark kind="vpn" /></span>}
       {state.network && <span title={state.network}><Mark kind={state.network} /></span>}
-      {battery != null && <span class="status-battery"><svg viewBox="0 0 28 16" aria-hidden="true"><rect x="1" y="2" width="22" height="12" rx="3" /><path d="M26 6v4" /><rect class="battery-level" x="3" y="4" width={18 * battery / 100} height="8" rx="1" /></svg>{state.charging && <Mark kind="charging" />}<span>{battery}%</span></span>}
+      {battery != null && <Battery state={state} battery={battery} />}
       {state.network == null && battery == null && <span>Controls</span>}
   </>;
 }

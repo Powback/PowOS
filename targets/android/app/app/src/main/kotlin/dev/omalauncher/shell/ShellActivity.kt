@@ -224,6 +224,8 @@ class ShellActivity : Activity() {
         ShellWallpaper.refresh(this)
         ShellWallpaper.refresh(this, WALLPAPER_SETTLE_MS)
         checkStuckSoon("resumed")
+        // PowOS draws the status bar: its SIM icons need the phone permission - asked once, not rooted only.
+        dev.omalauncher.system.StatusPermission.askOnce(this)
     }
 
     private val main = android.os.Handler(android.os.Looper.getMainLooper())
@@ -469,6 +471,9 @@ class ShellActivity : Activity() {
     ) {
         super.onRequestPermissionsResult(requestCode, permissions, grantResults)
         if (requestCode == ShellBridge.MIC_REQUEST) host.bridge.micPermission(grantResults.firstOrNull() == PackageManager.PERMISSION_GRANTED)
+        if (requestCode == dev.omalauncher.system.StatusPermission.REQUEST) {
+            dev.omalauncher.system.StatusPermission.answered(grantResults.firstOrNull() == PackageManager.PERMISSION_GRANTED)
+        }
     }
 
     override fun onDestroy() {

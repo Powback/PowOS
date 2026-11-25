@@ -9,4 +9,7 @@ interface ChromeSlot {
     fun ready() {}
     fun action(name: String)
     fun regions(regions: JSONArray) {}
+
+    /** The status bar's system icons ("system.status"; StatusSignals), null on a page that has none. */
+    fun status(): JSONObject? = null
 }

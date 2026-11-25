@@ -823,6 +823,7 @@ class ShellBridge(
             "system.display" -> display()
             "system.notifications" -> notifications(a.optBoolean(0, true))
             "system.battery" -> battery()
+            "system.status" -> chrome?.status() ?: JSONObject.NULL
             // The pet over apps: on or off (null: just read it) - system/PetOverlay.
             "pet.overlay" -> dev.omalauncher.system.PetOverlay.enabled(context, if (a.length() == 0 || a.isNull(0)) null else a.optBoolean(0))
             // The shade's window blurs what's behind it itself (ShadeHost): its page only tints.

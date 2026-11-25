@@ -60,3 +60,40 @@ html:root .chrome-surface { --frost-fill: color-mix(in srgb, var(--frost-base) m
 .fps-meter .fps-rs.on { opacity: 1; color: var(--color-accent); font-weight: 600; }
 .fps-meter.rec .fps-rec { color: var(--color-red); font-weight: 600; }
 .fps-meter.rec { box-shadow: inset 0 0 0 1.5px var(--color-red); border-radius: 8px; }
+
+/*
+ * The stock status icons (ui/statusicons.tsx). Both buttons shrink to their side (beside a camera hole: up to it, the
+ * inline max-width); a row of icons that doesn't fit wraps its last ones out of sight: the system row is row-reverse,
+ * so the battery (first) sits rightmost and the lowest-priority toggles go first. .status-over shows the overflow dot.
+ */
+.status-chrome .status-clock { flex: 0 1 auto; min-width: 0; overflow: hidden; }
+.status-chrome .status-clock time { flex: none; }
+.status-chrome .status-indicators { flex: 0 1 auto; min-width: 0; overflow: hidden; justify-content: flex-end; }
+.status-sys, .status-notifs { display: flex; align-items: center; gap: 4px; min-width: 0; height: 18px; }
+.status-row { display: flex; flex-wrap: wrap; align-items: center; column-gap: 6px; min-width: 0; height: 18px; overflow: hidden; }
+.status-sys .status-row { flex-direction: row-reverse; }
+.status-row > * { flex: none; height: 18px; display: flex; align-items: center; }
+.status-more { display: none; width: 4px; height: 4px; border-radius: 50%; background: currentColor; flex: none; }
+.status-over > .status-more { display: block; }
+.status-icon { position: relative; display: flex; align-items: center; gap: 1px; }
+.status-icon svg { width: 16px; height: 16px; }
+.status-chrome .status-icon .dim { opacity: .3; }
+.status-chrome .status-icon .mark { stroke-width: 2.2; }
+/* Signal bars are filled (no stroke): crisp at every DPR. */
+.status-chrome .status-cell rect { fill: currentColor; stroke: none; }
+.status-cell.dual svg { width: 13px; }
+.status-type { display: flex; align-items: center; gap: 1px; font: 600 9.5px/1 var(--font-body); letter-spacing: -.02em; font-variant-numeric: tabular-nums; }
+.status-arrows { display: flex; flex-direction: column; gap: 1px; }
+.status-arrows i { width: 5px; height: 3px; background: currentColor; opacity: .3; }
+.status-arrows .up { clip-path: polygon(50% 0, 100% 100%, 0 100%); }
+.status-arrows .down { clip-path: polygon(0 0, 100% 0, 50% 100%); }
+.status-arrows:is([data-activity="in"], [data-activity="inout"]) .down, .status-arrows:is([data-activity="out"], [data-activity="inout"]) .up { opacity: 1; }
+.status-roam, .status-slot { font: 700 7.5px/1 var(--font-body); align-self: flex-start; margin-top: 1px; }
+/* A headset's battery: a thin bar under the Bluetooth rune, filled to its level. */
+.status-btbat { position: absolute; right: -3px; bottom: 2px; width: 2.5px; height: 9px;
+  background: linear-gradient(to top, currentColor var(--level), color-mix(in srgb, currentColor 30%, transparent) var(--level)); }
+/* Notification icons: each app's small icon is an alpha mask in the bar's ink (as stock tints them). */
+.status-notifs { margin-left: 6px; }
+.status-nicon { width: 15px; height: 15px; background: currentColor; -webkit-mask: var(--icon) center / contain no-repeat; mask: var(--icon) center / contain no-repeat; }
+.status-battery[data-tone="saver"] { color: var(--status-needs); }
+.status-battery[data-tone="low"] { color: var(--color-red); }

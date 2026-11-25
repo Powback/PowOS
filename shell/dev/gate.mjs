@@ -238,6 +238,72 @@ const RING_HOLES = [
 ];
 
 /**
+ * The stock status icons (ui/statusicons.tsx, "system.status"; the user 11-25: "the statusbar doesnt contain all the
+ * icons it should like the sim card status"): with every icon on (status-mock.ts allStatus) each one is drawn - both
+ * SIMs with the data SIM's network type, Wi-Fi, Bluetooth, DND, vibrate, alarm, hotspot, cast, data saver, location,
+ * NFC, VPN, the notifications' icons. Unfolded (821 px) all fit; folded beside the cover's camera the battery, SIMs and
+ * Wi-Fi stay, nothing reaches under the camera, and the overflow dot says some went. A status change redraws the icons
+ * only: the clock's node is not touched.
+ */
+async function statusIconsCheck(folded) {
+  const M = await importShim("./status-mock.ts");
+  const frame = () => new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)));
+  const cam = folded ? { x: 188.6, y: 0, width: 26.8, height: 45.6 } : { x: 776, y: 0, width: 45.6, height: 45.6 };
+  const hole = folded ? { holeLeft: cam.x } : {};
+  window.__mockEvents.emit("chrome.changed", { kind: "status", clock: "09:41", battery: 64, network: "wifi", vpn: true, left: 8, right: folded ? 8 : 54, camera: cam, ...hole });
+  window.__mockEvents.emit("system.status", M.allStatus);
+  await frame();
+  const row = document.querySelector(".status-sys .status-row");
+  if (!row) return ["no .status-sys row: the system icons aren't drawn"];
+  const top = row.firstElementChild.offsetTop;
+  const shown = (el) => !!el && el.closest(".status-row > *").offsetTop <= top + 2;
+  const icon = (label) => [...document.querySelectorAll(".status-indicators [aria-label]")].find((e) => e.getAttribute("aria-label").startsWith(label));
+  const all = ["Telia, 4 of 4 bars, 5G", "Roam, 2 of 4 bars", "Wi-Fi, 3 of 4 bars", "VPN connected", "Bluetooth connected, headset battery 70%",
+    "Do not disturb", "Vibrate", "Alarm", "Hotspot on", "Casting screen", "Data saver on", "Location in use", "NFC on"];
+  const where = folded ? "folded" : "unfolded";
+  const drawn = () => [
+    ...all.filter((label) => !icon(label)).map((label) => `no "${label}" icon`),
+    ...(document.querySelectorAll(".status-nicon").length < 2 ? ["no notification icons after the clock"] : []),
+    ...(folded ? ["Telia", "Roam", "Wi-Fi"] : all).filter((label) => icon(label) && !shown(icon(label))).map((label) => `"${label}" wrapped out of sight ${where}`),
+    ...(shown(row.querySelector(".status-battery")) ? [] : ["the battery isn't on the first line"]),
+  ];
+  const fits = () => {
+    const over = !!document.querySelector(".status-sys.status-over");
+    const b = document.querySelector(".status-indicators").getBoundingClientRect();
+    const c = document.querySelector(".status-clock").getBoundingClientRect();
+    if (!folded) return over ? ["unfolded: the overflow dot with room for all"] : [];
+    return [
+      ...(over ? [] : ["folded: icons hidden without the overflow dot"]),
+      ...(b.left < cam.x + cam.width ? [`folded: the icons start at ${b.left}, under the camera (ends ${cam.x + cam.width})`] : []),
+      ...(c.right > cam.x ? [`folded: the clock side ends at ${c.right}, under the camera (starts ${cam.x})`] : []),
+    ];
+  };
+  // Own layer: a status change leaves the clock alone.
+  const ownLayer = async () => {
+    const clock = document.querySelector(".status-clock time");
+    const seen = [];
+    const mine = (t) => t.closest?.(".status-indicators, .status-notifs");
+    const mo = new MutationObserver((ms) => seen.push(...ms.filter((m) => !mine(m.target))));
+    mo.observe(document.body, { subtree: true, childList: true, attributes: true, characterData: true });
+    window.__mockEvents.emit("system.status", { ...M.allStatus, wifi: 1, dnd: false });
+    await frame();
+    mo.disconnect();
+    return [
+      ...(document.querySelector(".status-clock time") === clock ? [] : ["a status change rebuilt the clock"]),
+      ...(seen.length ? [`a status change touched outside the icons: ${seen.slice(0, 3).map((m) => m.target.className || m.target.nodeName).join(", ")}`] : []),
+      ...(icon("Wi-Fi, 1 of 4 bars") && !icon("Do not disturb") ? [] : ["the change didn't reach the icons"]),
+    ];
+  };
+  const noSim = async () => {
+    window.__mockEvents.emit("system.status", { ...M.typicalStatus, cells: [{ slot: 0, sim: "absent", bars: null, service: "in", type: null, roaming: false, activity: null, data: false, carrier: null }] });
+    await frame();
+    return icon("No SIM") ? [] : ["no SIM: no no-SIM icon"];
+  };
+  const fail = [...drawn(), ...fits()];
+  return [...fail, ...(await ownLayer()), ...(await noSim())];
+}
+
+/**
  * The recording light (ui/chrome.tsx RecordingRing, StatusChrome.kt's AppOps watch): with the camera / mic / screen in
  * use, a ring sits centred on the camera's cutout on this screen - [hole] the cover's centred punch-hole folded, the
  * inner screen's top-right one unfolded - in that op's colour; gone when nothing records; a dot without a cutout.
@@ -15260,6 +15326,8 @@ try {
   // cover (OEM hole [523,29:594,100] px, DPR 2.7625) and inner ([2144,46:2220,122]), and S25 / razr-shaped mocks.
   for (const [label, width, hole] of RING_HOLES)
     runs.push(open(browser, `${ORIGIN}/index.html?mode=statusbar`, `rec-light-${label}`, { width, height: 46 }).then((r) => whenReady(r, () => r.page.evaluate(recordingRingCheck, hole))));
+  for (const [label, width] of [["folded", 404], ["unfolded", 821]])
+    runs.push(open(browser, `${ORIGIN}/index.html?mode=statusbar`, `status-icons-${label}`, { width, height: 46 }).then((r) => whenReady(r, () => r.page.evaluate(statusIconsCheck, label === "folded"))));
   // The pill (bar.tsx, grow.tsx): every empty pill on home is one --pill-height tall - the foot's, PowOS AI's compose,
   // and the search widget at every size (one row, two rows, narrow), also after it was measured narrow and widened
   // again (2026-10-22: a pill measured narrow kept that height - three rows of placeholder - once wide again).

@@ -52,8 +52,10 @@ import type {
   MediaState,
   NativeSetting,
   GlassesState,
+  SystemStatus,
 } from "./types.ts";
 import { mockScreens } from "./screens-mock.ts";
+import { mockStatus } from "./status-mock.ts";
 import { homeLayout } from "./hosts/layout.ts";
 import { desktop } from "./hosts/desktop.ts";
 import { wide } from "./hosts/wide.ts";
@@ -457,6 +459,7 @@ function native(host: NonNullable<Window["PowosHost"]>): Bridge {
       display: () => call("system.display"),
       notifications: (open = true) => call("system.notifications", open),
       battery: () => call("system.battery"),
+      status: () => call<SystemStatus | null>("system.status"),
       glass: () => call<GlassSource>("system.glass"),
     },
     on: (event, handler) => events.on(event, handler),
@@ -1280,6 +1283,7 @@ function mock(): Bridge {
       }),
       notifications: async (open = true) => (console.log(`[mock] notification shade ${open ? "down" : "up"}`), true),
       battery: async () => ({ level: 76, charging: false, plugged: null, full: false, held: false, speed: null, watts: null, wattsFrom: null, fullInMs: null }),
+      status: async () => mockStatus(),
       // No wallpaper to frost in a browser: the plain fills (ui/glass.ts's __glass.use() tries one by hand).
       glass: async () => ({ wallpaper: null, blurBehind: false }),
     },

@@ -46,6 +46,9 @@
     <uses-permission android:name="android.permission.MODIFY_AUDIO_SETTINGS" />
     <uses-permission android:name="android.permission.WRITE_SETTINGS" />
     <uses-permission android:name="android.permission.EXPAND_STATUS_BAR" />
+    <!-- The status bar's SIM icons (system/StatusSignals.kt): the active subscriptions (a second SIM), the 5G / LTE+
+         display override, the carrier's "4G" naming. Rooted: granted by PowOS itself; else asked once (StatusPermission). -->
+    <uses-permission android:name="android.permission.READ_PHONE_STATE" />
 
     <!-- PowOS as the recents provider (docs/NATIVE-SYSTEM-UI.md; the system module's recents overlay): granted by the
          recents role, not asked for - STATUS_BAR and START_TASKS_FROM_RECENTS are also privileged, so they're on the

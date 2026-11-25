@@ -554,6 +554,47 @@ export interface ChromeState {
   /** The apps using it (package names). */
   recordingApps?: string[];
 }
+/** One SIM slot's icon on the status bar (StatusIcons.Cell, StatusSignals.kt). */
+export interface StatusCell {
+  slot: number;
+  sim: "ready" | "absent" | "locked" | "error" | "unknown";
+  /** Signal bars 0-4, null: no reading yet. */
+  bars: number | null;
+  service: "in" | "none" | "emergency" | "off";
+  /** "5G", "LTE", "4G+", "H+"... - the data SIM's only. */
+  type: string | null;
+  roaming: boolean;
+  activity: "in" | "out" | "inout" | null;
+  data: boolean;
+  carrier: string | null;
+}
+/**
+ * The status bar's system icons, the stock set ("system.status", StatusSignals.kt: every one pushed by Android, never
+ * polled). A host without it (desktop, an older APK) has none: the bar shows what ChromeState carries.
+ */
+export interface SystemStatus {
+  cells: StatusCell[];
+  airplane: boolean;
+  /** Wi-Fi connected: bars 0-4; null: not on Wi-Fi. */
+  wifi: number | null;
+  wifiInternet: boolean;
+  hotspot: boolean;
+  bluetooth: "off" | "on" | "connected";
+  bluetoothBattery: number | null;
+  nfc: boolean;
+  location: boolean;
+  dnd: boolean;
+  ringer: "normal" | "vibrate" | "silent";
+  /** The next alarm, epoch ms. */
+  alarm: number | null;
+  dataSaver: boolean;
+  batterySaver: boolean;
+  cast: boolean;
+  /** No phone permission: only the first SIM, no 5G/LTE+ override. */
+  limited: boolean;
+  /** One per app, newest first: its small icon (an alpha mask, tinted by the bar). */
+  notifications: { key: string; pkg: string; url: string }[];
+}
 /** What an app uses that the shade's privacy row names (RecordingOps.Kind). */
 export type PrivacyKind = "camera" | "screen" | "mic" | "location";
 /** One app in the shade's privacy row (ShellBridge privacyList). */
@@ -1428,6 +1469,8 @@ export interface Bridge {
     display?(): Promise<{ widthDp: number; heightDp: number; displayId: number; rotation: number; folded: boolean }>;
     /** The battery: level 0-100 (null when unknown), whether it's charging and how (Battery; "battery.changed" while the lock face is up). */
     battery(): Promise<Battery>;
+    /** The status bar's system icons (the status bar page only; "system.status" pushes changes). Other hosts: none. */
+    status?(): Promise<SystemStatus | null>;
     /** Pulls Android's notification shade down ([open], the default) or puts it away. */
     notifications(open?: boolean): Promise<boolean>;
     /**
