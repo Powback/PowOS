@@ -387,13 +387,39 @@ class JanitorTest(unittest.TestCase):
 
     def test_pushed_fix_without_a_check_is_flagged(self):
         silent = row("a", owner="coder", commits=self.LANDED, activity=NOW - 5 * self.H, updated=NOW - 5 * self.H)
-        kind, why, _ = self.d([silent])["a"]
+        kind, why, c = self.d([silent])["a"]
         self.assertEqual(kind, "expired")
-        self.assertIn("needs a check: fix pushed (1 commit)", why)
+        self.assertIn(cli.SHIPPED_WHY, why)
+        self.assertEqual(c[4], "working", "shipped: never back to queued")
         # On a queued row too (truth's why), so nothing waits forever.
         q = cli.truth(dict(silent, status="queued"), {}, {}, [], NOW)
         self.assertEqual(q[0], "queued")
         self.assertIn("needs a check", q[1])
+
+    def test_shipped_and_expired_is_no_check_not_queued(self):
+        """11-25: nine finished tasks came back "queued" on claim expiry ("a lot of this shit is already done")."""
+        old = dict(owner="powos-games", activity=NOW - 5 * self.H, updated=NOW - 5 * self.H)
+        held, roles = cli.holders([agent(role="powos-games")])
+        steps = json.dumps([{"text": "land + ship", "state": "done"}])
+        for shipped in (row("a", commits=self.LANDED, **old), row("a", steps=steps, **old),
+                        row("a", step="landed in 0.9", **old)):
+            kind, why, c = self.d([shipped], agents=[agent(role="powos-games")])["a"]
+            self.assertEqual((kind, c[4]), ("expired", "working"), shipped)
+            self.assertTrue(why.startswith("claim expired: powos-games silent since "), why)
+            self.assertTrue(why.endswith(cli.SHIPPED_WHY), why)
+            # Applied (the write refreshes the heartbeat): the mark releases the role's idle claim -> no-check.
+            after = dict(shipped, note=c[5], activity=NOW, updated=NOW)
+            self.assertEqual(cli.truth(after, held, roles, [], NOW), ("no-check", cli.SHIPPED_WHY))
+            self.assertEqual(self.d([after]), {}, "nothing more to write")
+            self.assertEqual(self.d([dict(after, activity=NOW - 5 * self.H, updated=NOW - 5 * self.H)]), {})
+            # A PASS of a shipped build closes it.
+            self.assertEqual(self.d([after], [self.PASS])["a"][0], "done")
+            self.assertEqual(self.d([after], [dict(self.PASS, shipped=False)]), {})
+        # Unshipped (no commit, no ship/landed step) and expired: back to queued.
+        unshipped = row("a", steps=json.dumps([{"text": "ship it", "state": "next"}]), step="shipping", **old)
+        kind, why, c = self.d([unshipped])["a"]
+        self.assertEqual((kind, c[4]), ("expired", "queued"))
+        self.assertNotIn(cli.SHIPPED_WHY, why)
 
     def test_done_by_the_facts_closes_itself(self):
         for st in ("working", "queued", "waiting"):

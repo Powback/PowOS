@@ -168,7 +168,9 @@ The board shows each task's TRUE state, computed from facts - never from the sta
 `powos agents janitor [--dry-run]` (powos-agentsd every 10 min, and every `task list`): the stored status follows
 the truth - a "working" claim needs a live owner (an agent whose work is the task, or the owner role's agent while
 the row's heartbeat - any task set, step or commit link - is under POWOS_CLAIM_EXPIRE_H, default 4 h); past that
-with no check queued it goes back to queued, note "claim expired: <owner> silent since <t>"; a task the facts say
+with no check queued it goes back to queued, note "claim expired: <owner> silent since <t>" - unless it shipped (a
+linked commit on origin/main, or a ship/landed step done): then it stays out of the queue as no-check "shipped, needs
+a check or close" (a PASS of a shipped build closes it); a task the facts say
 is done (a PASS of a shipped build, its fix landed, nothing else open) closes itself with that evidence. A pushed
 fix with no check reads "needs a check" everywhere until one is queued.
 `powos agents sweep [--dry-run] [--full]` (every 10 min from the Mac: launchd com.powos.board-sweep ->
@@ -1409,7 +1411,10 @@ def truth(w, held, idle_roles, checks, now_ms=None, ws=()):
     # the claim window (the user, 11-09: 51 rows "working", 4 moved in 6 h - any live agent of the owner's role kept
     # every task of that role "working" forever).
     fresh = now_ms - heartbeat(w) < claim_expire_ms()
-    h = held.get(w["id"]) or (idle_roles.get(owner) if fresh and owner and owner not in GENERIC_OWNERS else None)
+    # The janitor's own "claim expired" mark releases the role's claim: only an agent whose work is the task holds it.
+    released = (w.get("note") or "").startswith(EXPIRED_MARK)
+    h = held.get(w["id"]) or (idle_roles.get(owner) if fresh and owner and owner not in GENERIC_OWNERS and not released
+                              else None)
     if h:
         return "working", f"{h} has it"
     if status in ("blocked", "waiting"):
@@ -1437,16 +1442,35 @@ def truth(w, held, idle_roles, checks, now_ms=None, ws=()):
         # A newer PASS of a shipped build supersedes every older FAIL (results[-1] is the latest by time); with the fix
         # landed (commits recorded) that is the done rule's evidence - the board no longer waits for someone to close
         # it.
-        if last.get("shipped", True) and _jl(w.get("commits", "")):
+        if last.get("shipped", True) and work_shipped(w):
             return "done", f"fix landed, check {_check_name(last)} PASSED {ago(int(last.get('at') or now_ms))} ago"
         return "no-check", f"check {_check_name(last)} PASSED {ago(int(last.get('at') or now_ms))} ago - close it or queue the next check"
     if last and last["state"] == "none":
         return "no-check", f"no device check possible ({last.get('line', '')[:80]}) - close it"
     commits = _jl(w.get("commits", ""))
+    if work_shipped(w) and (released or not commits):
+        return "no-check", SHIPPED_WHY
     if commits:
         return "no-check", f"needs a check: fix pushed ({len(commits)} commit{'s' if len(commits) != 1 else ''}), no phone check queued"
     gone = f"; owner {owner} isn't running" if owner and owner not in GENERIC_OWNERS else ""
     return "stalled", f"nobody on it and no check{gone}"
+
+
+EXPIRED_MARK = "claim expired:"
+SHIPPED_WHY = "shipped, needs a check or close"
+SHIP_WORD = re.compile(r"\b(ship|shipped|ships|land|landed|lands)\b", re.I)
+
+
+def work_shipped(w):
+    """The row's work is out (the user, 11-25: nine finished tasks came back "queued" - "a lot of this shit is already
+    done"): a linked commit (recorded at land/push time: on origin/main) or a ship/landed step done (a plan step marked
+    done, or the current step saying shipped/landed)."""
+    if _jl(w.get("commits", "")):
+        return True
+    if re.search(r"\b(shipped|landed)\b", w.get("step") or "", re.I):
+        return True
+    return any(isinstance(s, dict) and s.get("state") == "done" and SHIP_WORD.search(s.get("text") or "")
+               for s in _jl(w.get("steps", "")))
 
 
 CLAIM_EXPIRE_H = 4.0            # a "working" claim with no heartbeat this long expires (POWOS_CLAIM_EXPIRE_H)
@@ -1477,8 +1501,9 @@ def janitor_decide(ws, checks, agents, now_ms=None):
                 build with the fix landed): closed with that evidence in the note - never over the user's own latest
                 "still broken" (check `you` FAIL), never a manager-owned row (the manager's own, left alone);
       expired - status working, no live claim (no agent holds it, no check queued or running) and no heartbeat for
-                claim_expire_ms(): back to queued, note "claim expired: <owner> silent since <t>" (+ "needs a check"
-                when its fix is pushed with no check at all).
+                claim_expire_ms(): with no commit and no ship/landed step, back to queued, note "claim expired: <owner>
+                silent since <t>"; shipped (work_shipped()), it stays working with that note + "shipped, needs a check or
+                close" - the mark releases the role's claim, so truth says no-check, never queued (11-25).
       reopen  - status stale and a phone check result (PASS / FAIL) came after the move (its device came back and the queued check
                 ran): back to queued, note "reopened: check <name> <state>" - the result then decides like on any task.
     awaiting-check rows keep their claim: the verify queue holds them until the result, which then decides. Parked rows
@@ -1515,7 +1540,13 @@ def janitor_decide(ws, checks, agents, now_ms=None):
         if t in ("working", "awaiting-check", "done") or now_ms - beat < claim_expire_ms():
             continue
         who = owner or "nobody"
-        note = f"claim expired: {who} silent since {_when(beat)}"
+        note = f"{EXPIRED_MARK} {who} silent since {_when(beat)}"
+        if work_shipped(w):
+            if (w.get("note") or "").startswith(EXPIRED_MARK):
+                continue            # already released: truth says no-check, nothing to write
+            note += f"; {SHIPPED_WHY}"
+            out.append(("expired", w["id"], note, ("work_set", w["id"], "", "", "working", note[:280], "")))
+            continue
         if why.startswith("needs a check"):
             note += f"; {why}"
         elif t == "no-check":
