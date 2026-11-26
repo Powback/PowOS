@@ -92,6 +92,11 @@ services:
     build:
       context: ${POW_JOB_SRC:?set by tools/jobs/job.sh}
       dockerfile: .jobs/Dockerfile
+      labels:
+        powos.job: tier1
+        powos.job.checkout: ${POW_JOB_TAG:-local}
+        powos.job.run: ${POW_JOB_RUN:-manual}
+        powos.job.t0: ${POW_JOB_T0:-0}
     image: powos-jobs-tier1:${POW_JOB_TAG:-local}
     cgroup_parent: nomad.slice
     cpus: 6
@@ -120,6 +125,11 @@ services:
     build:
       context: ${POW_JOB_SRC:?set by tools/jobs/job.sh}
       dockerfile: .jobs/Dockerfile
+      labels:
+        powos.job: gate
+        powos.job.checkout: ${POW_JOB_TAG:-local}
+        powos.job.run: ${POW_JOB_RUN:-manual}
+        powos.job.t0: ${POW_JOB_T0:-0}
     image: powos-jobs-gate:${POW_JOB_TAG:-local}
     cgroup_parent: nomad.slice
     cpus: 10
@@ -139,6 +149,11 @@ services:
     build:
       context: ${POW_JOB_SRC:?set by tools/jobs/job.sh}
       dockerfile: .jobs/Dockerfile
+      labels:
+        powos.job: apk
+        powos.job.checkout: ${POW_JOB_TAG:-local}
+        powos.job.run: ${POW_JOB_RUN:-manual}
+        powos.job.t0: ${POW_JOB_T0:-0}
     image: powos-jobs-apk:${POW_JOB_TAG:-local}
     cgroup_parent: nomad.slice
     cpus: 8

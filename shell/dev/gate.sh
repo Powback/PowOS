@@ -36,7 +36,8 @@
 #      SHOTS_THEME / SHOTS_ONLY / SHOTS_SCALE / SHOTS_PROBE / SHOTS_STRICT pass through (STRICT=1: overlapping tiles
 #      or missing glyphs fail it).
 # Exit 0: pass. 1: failed (the reasons on stdout). 2: couldn't run - a usage/environment error (no docker, no such
-# shell file): a hard failure, fix it. 75 (EX_TEMPFAIL): NO VERDICT - only the job machine not answering (below); the
+# shell file): a hard failure, fix it. 75 (EX_TEMPFAIL): NO VERDICT - only the job machine not answering (below) or
+# under 50 GB free (tools/jobs/job.sh job_disk_guard); the
 # ship path defers on it (tools/phone/ship.sh gate_deferred) and never on 2. Time: ~5-10 s, the image cached.
 # The browser runs (scenes, retries, --shots) are the gate job of tools/jobs/compose.yml on the Docker context
 # POW_JOB_CONTEXT names (default pow58; not answering: waits GATE_JOB_WAIT_S (900), then exit 75 - the hub can't pass the
@@ -376,6 +377,8 @@ if [ -n "${GATE_STUB_SLEEP:-}" ]; then :; else
     echo "gate: NO VERDICT - ${POW_JOB_CONTEXT:-pow58} did not answer within ${JOB_WAIT_S:-0} s, and the hub cannot pass the full gate (false timing FAILs under its load); bring it back, or GATE_HUB_FALLBACK=1 / POW_JOB_CONTEXT=hub to gate on the hub anyway"
     exit 75
   fi
+  # A full job machine (11-26: .58's /var at 98% from job images) - no build there, no verdict: exit 75, the ship defers.
+  job_disk_guard || { echo "gate: NO VERDICT - $JOB_CTX is short of disk (above); free space there, or POW_JOB_CONTEXT=hub"; exit 75; }
   jc=$work/job
   mkdir -p "$jc/shell" "$jc/app" "$jc/apps" "$jc/fonts" "$jc/in"
   (cd "$S" && COPYFILE_DISABLE=1 tar --exclude ./node_modules -cf - .) | tar -xf - -C "$jc/shell"

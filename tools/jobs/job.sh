@@ -16,6 +16,12 @@
 #
 # Images are tagged powos-jobs-<svc>:<checkout>; a rebuild removes the previous tag's image when nothing else uses it
 # (its own image only - shared base layers, the build cache and every other image stay: nothing is pruned).
+# Every built image carries labels powos.job=<svc>, powos.job.checkout, powos.job.run (the run's compose project) and
+# powos.job.t0 (build start, epoch s); job_gc keeps the newest JOB_KEEP_IMAGES (8) per svc on the machine and removes
+# the rest with the per-run steps their build made (untagged parents created after t0: the COPY-the-tree layers that
+# no later build can hit). Base images, the cached steps before the tree (apt, npm ci, sdkmanager) and every other
+# project's image stay; rmi --no-prune, never a prune (11-26: .58 held ~900 such images of 5,035, /var at 98%).
+# The guard: gate and tier1 refuse to start when the job machine's /var has under JOB_MIN_FREE_GB (50) free.
 # Builds use the engine's own builder (DOCKER_BUILDKIT=0): .58's buildx builder is a docker-container one, which would
 # send every finished image back through this machine to load it (GBs for the APK builder).
 JOBS_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
@@ -95,7 +101,7 @@ job_engine_sock() {
 }
 
 job_dc() {
-  DOCKER_BUILDKIT=0 POW_JOB_TAG=$JOB_TAG POW_JOB_SRC=${JOB_SRC:-/nonexistent} POW_JOB_ENGINE_SOCK=$(job_engine_sock) \
+  DOCKER_BUILDKIT=0 POW_JOB_TAG=$JOB_TAG POW_JOB_RUN=$JOB_PROJECT POW_JOB_T0=${JOB_T0:-0} POW_JOB_SRC=${JOB_SRC:-/nonexistent} POW_JOB_ENGINE_SOCK=$(job_engine_sock) \
     docker --context "$JOB_CTX" compose -f "$JOBS_COMPOSE" -p "$JOB_PROJECT" "$@"
 }
 job_docker() { docker --context "$JOB_CTX" "$@"; }
@@ -126,12 +132,67 @@ job_build() {
   mkdir -p "$JOB_SRC/.jobs" && cp "$JOBS_DIR/$svc.Dockerfile" "$JOB_SRC/.jobs/Dockerfile"
   old=$(job_docker image inspect -f '{{.Id}}' "powos-jobs-$svc:$JOB_TAG" 2>/dev/null) || old=""
   log=$(mktemp)
+  JOB_T0=$(date +%s)
   job_dc build ${JOB_NO_CACHE:+--no-cache} "$svc" > "$log" 2>&1 || rc=$?
   [ $rc = 0 ] || { tail -40 "$log" >&2; rm -f "$log"; echo "job: building $svc on $JOB_CTX failed" >&2; return $rc; }
   rm -f "$log"
   new=$(job_docker image inspect -f '{{.Id}}' "powos-jobs-$svc:$JOB_TAG" 2>/dev/null) || new=""
   # The previous image of this tag: its own top layers only (in use by another run: kept).
   [ -z "$old" ] || [ "$old" = "$new" ] || job_docker rmi "$old" >/dev/null 2>&1 || true
+  # The bounded LRU, in the background: a run never waits on another checkout's image removal.
+  [ -n "${JOB_NO_GC:-}" ] || { job_gc "$svc" "$new" </dev/null >/dev/null 2>&1 & }
+}
+
+# job_gc SVC [KEEP_ID]: SVC's labelled images on JOB_CTX beyond the newest JOB_KEEP_IMAGES (default 8) go, each with
+# the untagged parents its own build created (Created >= its powos.job.t0: the per-run layers). Skipped: KEEP_ID, the
+# gradle pool's image, anything a container uses (rmi refuses it) and any parent another image builds on (rmi refuses
+# it). --no-prune: a removal never cascades into the cached steps below. Prints one line per image removed.
+job_gc() {
+  local svc=$1 keep_id=${2:-} keep=${JOB_KEEP_IMAGES:-8} ids list t0 id tags n=0 iso p next created ntags tag removed
+  ids=$(job_bounded 60 docker --context "$JOB_CTX" images -q --no-trunc --filter "label=powos.job=$svc" 2>/dev/null | sort -u) || return 0
+  [ -n "$ids" ] || return 0
+  # shellcheck disable=SC2086
+  list=$(job_bounded 60 docker --context "$JOB_CTX" image inspect -f '{{index .Config.Labels "powos.job.t0"}} {{.Id}} {{join .RepoTags ","}}' $ids 2>/dev/null | sort -rn) || return 0
+  # The list on fd 3, the loop's stdin /dev/null: docker's ssh connection helper would eat the list otherwise.
+  while read -r t0 id tags <&3; do
+    n=$((n + 1))
+    [ "$n" -gt "$keep" ] || continue
+    case "$id" in "$keep_id"|sha256:"$keep_id") continue ;; esac
+    case ",$tags," in *:gradle-pool,*) continue ;; esac
+    p=$(job_docker image inspect -f '{{.Parent}}' "$id" 2>/dev/null) || p=""
+    removed=""
+    if [ -n "$tags" ]; then
+      for tag in ${tags//,/ }; do job_docker rmi --no-prune "$tag" >/dev/null 2>&1 && removed=1; done
+    else job_docker rmi --no-prune "$id" >/dev/null 2>&1 && removed=1; fi
+    # In use by a container (or another tag left): still there, and so are its parents.
+    [ -n "$removed" ] && ! job_docker image inspect "$id" >/dev/null 2>&1 || continue
+    echo "job gc: removed $svc image ${id#sha256:} (${tags:-untagged})"
+    iso=$(date -u -r "${t0:-0}" +%Y-%m-%dT%H:%M:%S 2>/dev/null || date -u -d "@${t0:-0}" +%Y-%m-%dT%H:%M:%S)
+    # Its build's own steps: untagged parents created at/after its t0. The first older or tagged one is a cached
+    # step (or the base) - kept, and so is everything under it.
+    while [ -n "$p" ]; do
+      read -r created ntags next < <(job_docker image inspect -f '{{.Created}} {{len .RepoTags}} {{.Parent}}' "$p" 2>/dev/null) || break
+      [ "${ntags:-1}" = 0 ] && [[ ! "${created:0:19}" < "$iso" ]] || break
+      job_docker rmi --no-prune "$p" >/dev/null 2>&1 || break
+      p=$next
+    done
+  done 3<<< "$list" < /dev/null
+}
+
+# job_disk_guard: 0 when the job machine has JOB_MIN_FREE_GB (default 50) free on /var (where its engine keeps images
+# and volumes), or when that can't be measured (the hub; ssh not answering in 10 s - no false refusals). Else 1, with a
+# line saying so. Read over the context's own ssh endpoint (ssh://user@host); docker info has no free-space figure.
+job_disk_guard() {
+  local min=${JOB_MIN_FREE_GB:-50} ep host kb gb
+  [ -z "$JOB_ON_HUB" ] || return 0
+  ep=$(docker context inspect "$JOB_CTX" --format '{{.Endpoints.docker.Host}}' 2>/dev/null) || return 0
+  case "$ep" in ssh://*) host=${ep#ssh://}; host=${host%%/*} ;; *) return 0 ;; esac
+  kb=$(job_bounded 10 ssh -o BatchMode=yes -o ConnectTimeout=5 "$host" df -Pk /var 2>/dev/null | awk 'NR==2 {print $4}') || return 0
+  [ -n "$kb" ] || return 0
+  gb=$((kb / 1048576))
+  [ "$gb" -lt "$min" ] || return 0
+  echo "job: REFUSED - $JOB_CTX ($host) has ${gb} GB free on /var, under the ${min} GB floor (JOB_MIN_FREE_GB); free space there first (podman system df; tools/jobs/job.sh gc <svc> drops old PowOS job images) - nothing ran" >&2
+  return 1
 }
 
 # job_run SVC [compose-run args...] [-- CMD...]: one run of SVC's built image (--rm); its output here, its status ours.
@@ -159,6 +220,8 @@ if [ "${BASH_SOURCE[0]}" = "$0" ]; then
   case "${1:-}" in
     context) job_context; echo "$JOB_CTX" ;;
     capacity) job_capacity; echo "$JOB_CTX hub=${JOB_ON_HUB:-0} cpus=${JOB_CPUS:-?} load=${JOB_LOAD:-?}" ;;
-    *) sed -n '2,22p' "$0"; exit 2 ;;
+    gc) job_context; for s in ${2:-tier1 gate apk}; do job_gc "$s"; done ;;
+    disk) job_context; job_disk_guard && echo "$JOB_CTX: /var has room" ;;
+    *) sed -n '2,28p' "$0"; exit 2 ;;
   esac
 fi

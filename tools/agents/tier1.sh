@@ -31,6 +31,8 @@ done
 git rev-parse --show-toplevel >/dev/null 2>&1 || { echo "tier1.sh: cd into a PowOS checkout (any worktree) first" >&2; exit 1; }
 t0=$(date +%s)
 job_init tier1
+# A full job machine: refused before anything is staged or built (exit 75, EX_TEMPFAIL - no verdict, not a failure).
+job_disk_guard || { echo "tier1.sh: not run - $JOB_CTX is short of disk (above)" >&2; exit 75; }
 src=$(mktemp -d "${XDG_CACHE_HOME:-$HOME/.cache}/powos-jobs-src.XXXXXX")
 trap 'job_cleanup; rm -rf "$src"' EXIT
 trap 'exit 130' INT TERM HUP
