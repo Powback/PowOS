@@ -52,9 +52,15 @@ STUB = textwrap.dedent("""
         for b in ev.get('message', {}).get('content', []):
             if b.get('type') == 'text':
                 text = b['text']
+        ctx = int(os.environ.get('STUB_CTX', '0'))
         emit({'type': 'assistant',
-              'message': {'content': [{'type': 'text', 'text': 'echo: ' + text[:80]}]}})
-        emit({'type': 'result', 'subtype': 'success',
+              'message': {'content': [{'type': 'tool_use', 'id': 'tu1', 'name': 'Bash', 'input': {'command': 'true'}}],
+                          'usage': {'input_tokens': 10, 'cache_read_input_tokens': ctx}}})
+        emit({'type': 'user', 'message': {'content': [{'type': 'tool_result', 'tool_use_id': 'tu1', 'content': 'ok'}]}})
+        emit({'type': 'assistant',
+              'message': {'content': [{'type': 'text', 'text': 'echo: ' + text[:80]}],
+                          'usage': {'input_tokens': 10, 'cache_read_input_tokens': ctx}}})
+        emit({'type': 'result', 'subtype': 'success', 'num_turns': 2, 'duration_api_ms': 1200,
               'session_id': sid, 'total_cost_usd': 0.0})
 """)
 
@@ -208,6 +214,44 @@ class OnceModeTests(unittest.TestCase):
             del os.environ['STUB_STALE_RESULT']
         texts = [e.get("text", "") for e in evs if e["kind"] == "assistant"]
         self.assertTrue(any("echo: answer me" in t for t in texts), evs)
+
+    def _turns(self):
+        with open(os.path.join(self.store, "turns.jsonl")) as f:
+            return [json.loads(l) for l in f if l.strip()]
+
+    def test_turn_log_measures_each_turn(self):
+        os.environ["STUB_CTX"] = "5000"
+        try:
+            self._once("measure me")
+        finally:
+            del os.environ["STUB_CTX"]
+        r = self._turns()[-1]
+        self.assertEqual((r["calls"], r["tools"], r["ctx_last"], r["api_s"], r["num_turns"]),
+                         (2, {"Bash": 1}, 5010, 1.2, 2), r)
+        self.assertGreaterEqual(r["wall_s"], r["startup_s"])
+        self.assertIsNone(r["rolled_from"])
+
+    def test_big_session_rolls_over_with_a_handoff(self):
+        # A session past POWOS_MANAGER_CTX_MAX isn't resumed: the next turn is a fresh session whose first message is a
+        # bounded note of what was said, and the log says which session it rolled from.
+        os.environ["STUB_CTX"] = "200000"
+        try:
+            self._once("first, big")
+        finally:
+            del os.environ["STUB_CTX"]
+        old = self._turns()[-1]["session"]
+        argv = os.path.join(self.tmp, "argv")
+        os.environ["STUB_ARGV_FILE"] = argv
+        try:
+            evs = self._once("second")
+        finally:
+            del os.environ["STUB_ARGV_FILE"]
+        self.assertNotIn("--resume", open(argv).read())
+        said = " ".join(e.get("text", "") for e in evs if e["kind"] == "assistant")
+        self.assertIn("echo: [context: this chat continues in a fresh session", said)
+        self.assertEqual(self._turns()[-1]["rolled_from"], old)
+        user = next(e for e in evs if e["kind"] == "user")
+        self.assertEqual(user["text"], "second")      # the chat shows the user's words, not the note
 
     def test_cwd_gives_separate_thread(self):
         d1 = os.path.join(self.tmp, "projA"); os.makedirs(d1)

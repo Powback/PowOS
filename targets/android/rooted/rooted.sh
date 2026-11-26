@@ -27,6 +27,7 @@
 set -euo pipefail
 # A step that fails under set -e names itself in the deploy's log (adb pushes are -q: 11-25 a failing one left the
 # ship's log with only its header line and "rc 141").
+# shellcheck disable=SC2154  # rc is assigned inside the trap string itself
 trap 'rc=$?; echo "rooted.sh: line $LINENO failed (rc $rc): $BASH_COMMAND" >&2' ERR
 HERE=$(cd "$(dirname "$0")" && pwd)
 NOTE="" SILENT="" ARGS=()
@@ -153,6 +154,16 @@ deploy)
   # The manager (lib/ai/manager: PowOS AI's chat runs a turn of it per message, so a new one takes the next turn).
   adb shell rm -rf /data/local/tmp/powos-manager
   adb push -q "$HERE/../../../lib/ai/manager" /data/local/tmp/powos-manager
+  # Code retrieval for the manager and the agents it briefs (tools/agents/where, unit ai-manager): the phone's source
+  # (/var/lib/powos/src) is a git archive, so the index goes over as one pack of this commit (history, tree, symbols;
+  # ~1.6 MB) and the script runs from it as powos-where. A pack that fails to build leaves the phone's old one.
+  adb push -q "$HERE/../../../tools/agents/where" /data/local/tmp/powos-where
+  # The manager's persona (config/ai/agents/manager/agent.conf): the image ships /etc/powos/ai, so without this an edit
+  # to it reached the phone only with a new rootfs (its 10-29 change never had).
+  adb push -q "$HERE/../../../config/ai/agents/manager/agent.conf" /data/local/tmp/manager-agent.conf
+  wpk=$(mktemp "${TMPDIR:-/tmp}/powos-where.XXXXXX") && python3 "$HERE/../../../tools/agents/where" --pack "$wpk" >/dev/null &&
+    adb push -q "$wpk" /data/local/tmp/where.pack || echo "rooted.sh: the where pack didn't build - the phone keeps its old one"
+  rm -f "$wpk"
   # The manager's TypeScript sandbox (lib/ai/sandbox, unit ai-sandbox): its sources plus its deps, which stay inside
   # the app (never on the phone's host). The deps are built HERE from its lock (package-lock.json: quickjs-emscripten +
   # typescript, JavaScript and WebAssembly only - the same files on arm64; no install scripts) by the sandbox's own

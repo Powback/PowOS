@@ -3,13 +3,15 @@
   "name": "PowOS manager agent",
   "kind": "system",
   "owner": "system:powos-deploy",
-  "purpose": "the standing manager agent (powos ai manager) and its config",
+  "purpose": "the standing manager agent (powos ai manager), its config, and powos-where (code retrieval over the phone's source)",
   "installedBy": "targets/android/rooted/powos-deploy.sh",
   "files": [
     "/usr/lib/powos/ai/manager",
     "/usr/lib/powos/ai",
     "/etc/powos/ai/agents",
-    "/etc/powos/ai"
+    "/etc/powos/ai",
+    "/usr/bin/powos-where",
+    "/usr/share/powos/where.pack"
   ],
   "processes": [
     {

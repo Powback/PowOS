@@ -28,6 +28,7 @@ substitute a hermetic stub speaking the same protocol).
 import argparse
 import json
 import os
+import re
 import queue
 import signal
 import subprocess
@@ -93,6 +94,90 @@ class SessionStore:
         with open(tmp, "w") as f:
             f.write(session_id)
         os.replace(tmp, self._path(cwd))
+
+
+# Per-turn measurements (the session store's turns.jsonl, one line per answered turn): wall time, claude's own startup,
+# model (API) time vs tool time, calls, the context it ran at, subagent calls. The Mac agents' efficiency numbers
+# (tools/agents/efficiency.py) come from their transcripts; this is the phone manager's equivalent, cheap to read
+# over adb (11-26: nothing measured the device agents at all).
+TURNS_LOG = "turns.jsonl"
+# The context a resumed session may carry into a turn (tokens: the last call's input + cache). Past it the next turn
+# starts a fresh session with a short hand-off note instead of resuming: every turn of a resumed session re-sends its
+# whole history, so a home thread resumed for weeks paid ~its compaction limit per call. Same budget as the Mac
+# agents' "hand back by 120k" (docs/AGENT-HANDBOOK.md Efficiency). 0 = never roll over.
+CTX_MAX = int(os.environ.get("POWOS_MANAGER_CTX_MAX", "120000"))
+# Output caps for the manager's claude (env it reads), unless the caller set them: a `powos agents task list` or a log
+# dump into context is paid again on every later call of the session (the Mac's tool output cap, same reason).
+CLAUDE_CAPS = {"BASH_MAX_OUTPUT_LENGTH": "12000", "MAX_MCP_OUTPUT_TOKENS": "10000"}
+HANDOFF_ITEMS = 8
+HANDOFF_CHARS = 3000
+
+
+def _ctx_tokens(usage):
+    if not isinstance(usage, dict):
+        return 0
+    return sum(int(usage.get(k) or 0) for k in ("input_tokens", "cache_read_input_tokens",
+                                                 "cache_creation_input_tokens"))
+
+
+def last_turn(store_dir, session_id):
+    """The last turns.jsonl record of [session_id], or None."""
+    try:
+        with open(os.path.join(store_dir, TURNS_LOG), "rb") as f:
+            f.seek(0, 2)
+            f.seek(max(0, f.tell() - 65536))
+            lines = f.read().decode("utf-8", "replace").splitlines()
+    except OSError:
+        return None
+    for ln in reversed(lines):
+        try:
+            r = json.loads(ln)
+        except ValueError:
+            continue
+        if r.get("session") == session_id:
+            return r
+    return None
+
+
+def claude_transcript(cwd, session_id):
+    """Claude Code's transcript of [session_id] (~/.claude/projects/<cwd, non-alphanumerics -> '-'>/<id>.jsonl)."""
+    base = os.environ.get("CLAUDE_CONFIG_DIR") or os.path.expanduser("~/.claude")
+    return os.path.join(base, "projects", re.sub(r"[^A-Za-z0-9]", "-", cwd), session_id + ".jsonl")
+
+
+def handoff_note(cwd, session_id):
+    """The first message of a rolled-over session: the old one's last few things said (text only, bounded), and where
+    the rest lives. Never tool output."""
+    said = []
+    try:
+        with open(claude_transcript(cwd, session_id), encoding="utf-8", errors="replace") as f:
+            for ln in f:
+                try:
+                    ev = json.loads(ln)
+                except ValueError:
+                    continue
+                if ev.get("type") not in ("user", "assistant") or ev.get("isSidechain"):
+                    continue
+                content = (ev.get("message") or {}).get("content")
+                if isinstance(content, str):
+                    text = content
+                else:
+                    text = " ".join(b.get("text", "") for b in content or [] if isinstance(b, dict)
+                                    and b.get("type") == "text")
+                text = " ".join(text.split())
+                if text:
+                    said.append(("user" if ev["type"] == "user" else "you") + ": " + text[:400])
+    except OSError:
+        pass
+    tail, n = [], 0
+    for line in reversed(said[-HANDOFF_ITEMS:]):
+        if n + len(line) > HANDOFF_CHARS:
+            break
+        tail.insert(0, line)
+        n += len(line)
+    return ("[context: this chat continues in a fresh session (the previous one, %s, passed %dk tokens, and every turn "
+            "re-sent all of it). The board is the memory: `powos agents task list` for open work. The last things "
+            "said there:\n%s]\n\n" % (session_id[:8], CTX_MAX // 1000, "\n".join(tail) or "(nothing readable)"))
 
 
 # The running one-shot turn's pid (the phone's chat runs one at a time per session store): `--stop` reads it.
@@ -171,6 +256,13 @@ class Manager:
         self._comms_root = os.environ.get("COMMS_ROOT", "")
         self._agent_id = args.agent_id
         self._log = None
+        self._t = {}                       # the turn's measurements (turns.jsonl)
+        self._preamble = None
+        self.rolled_from = None
+        last = last_turn(args.session_store, self.session_id) if self.session_id and CTX_MAX else None
+        if last and int(last.get("ctx_last") or 0) >= CTX_MAX:
+            self.rolled_from, self.session_id = self.session_id, None
+            self._preamble = handoff_note(self.cwd, self.rolled_from)
 
     # -- process launch ------------------------------------------------------
 
@@ -198,6 +290,10 @@ class Manager:
     def start(self):
         cmd = self._build_cmd()
         env = dict(os.environ, COMMS_AGENT_ID=self._agent_id)
+        for k, v in CLAUDE_CAPS.items():
+            env.setdefault(k, v)
+        self._t = {"t0": time.time(), "calls": 0, "tools": {}, "open": {}, "tool_s": 0.0, "ctx_last": 0,
+                   "ctx_max": 0, "sub_calls": 0, "sub_ctx_max": 0}
         # Keep claude's stderr in a log so a failed session is diagnosable
         # (silent DEVNULL once cost me an afternoon), not lost.
         log_path = os.path.join(self.args.session_store, "manager.log")
@@ -246,6 +342,8 @@ class Manager:
         msg = {"type": "user", "message": {"role": "user",
                "content": [{"type": "text", "text": text}]}}
         try:
+            if self._t and self._t.get("t0") is None:
+                self._t["t0"] = time.time()
             self.proc.stdin.write(json.dumps(msg) + "\n")
             self.proc.stdin.flush()
             self.busy.set()
@@ -267,6 +365,8 @@ class Manager:
             else:
                 self._emit({"kind": "user", "text": text})
                 text = self._ask_turn(text)
+            if self._preamble:
+                text, self._preamble = self._preamble + text, None
             self._send_event(text)
 
     def _ask_turn(self, text):
@@ -352,6 +452,7 @@ class Manager:
 
     def _parse_raw(self, ev):
         t = ev.get("type")
+        self._measure(t, ev)
         if t == "system" and ev.get("subtype") == "init":
             sid = ev.get("session_id")
             if sid:
@@ -388,6 +489,65 @@ class Manager:
                 self.session_id = ev["session_id"]
                 self.store.save(self.cwd, ev["session_id"])
             self._emit({"kind": "turn_done", "cost": ev.get("total_cost_usd")})
+
+    # -- measurements (turns.jsonl) -----------------------------------------
+
+    def _measure(self, t, ev):
+        m = self._t
+        if not m:
+            return
+        now = time.time()
+        if t == "system" and ev.get("subtype") == "init":
+            m.setdefault("t_init", now)
+        elif t == "assistant":
+            m.setdefault("t_first", now)
+            msg = ev.get("message") or {}
+            ctx = _ctx_tokens(msg.get("usage"))
+            uses = [b for b in msg.get("content", []) if isinstance(b, dict) and b.get("type") == "tool_use"]
+            if ev.get("parent_tool_use_id"):           # a subagent's call (the Agent tool), not the manager's
+                m["sub_calls"] += 1
+                m["sub_ctx_max"] = max(m["sub_ctx_max"], ctx)
+            else:
+                m["calls"] += 1
+                if ctx:
+                    m["ctx_last"], m["ctx_max"] = ctx, max(m["ctx_max"], ctx)
+                for b in uses:
+                    name = b.get("name", "?").rsplit("__", 1)[-1]
+                    m["tools"][name] = m["tools"].get(name, 0) + 1
+            for b in uses:
+                m["open"][b.get("id")] = (now, b.get("name", ""))
+        elif t == "user":
+            for b in (ev.get("message") or {}).get("content", []):
+                if isinstance(b, dict) and b.get("type") == "tool_result" and b.get("tool_use_id") in m["open"]:
+                    started, name = m["open"].pop(b["tool_use_id"])
+                    if not ev.get("parent_tool_use_id"):
+                        m["tool_s"] += now - started
+                        if name in ("Agent", "Task"):   # what a subagent handed back, paid on every later call
+                            n = len(self._result_out(b.get("content", ""), limit=10 ** 7))
+                            m["sub_result_max"] = max(m.get("sub_result_max", 0), n)
+        elif t == "result" and self.saw_reply:
+            self._log_turn(ev, now)
+
+    def _log_turn(self, ev, now):
+        m = self._t
+        rec = {"at": int(m["t0"] * 1000), "session": ev.get("session_id") or self.session_id, "cwd": self.cwd,
+               "wall_s": round(now - m["t0"], 1),
+               "startup_s": round(m.get("t_init", now) - m["t0"], 1),
+               "api_s": round((ev.get("duration_api_ms") or 0) / 1000, 1),
+               "tool_s": round(m["tool_s"], 1), "calls": m["calls"], "num_turns": ev.get("num_turns"),
+               "tools": m["tools"], "ctx_last": m["ctx_last"], "ctx_max": m["ctx_max"],
+               "sub_calls": m["sub_calls"], "sub_ctx_max": m["sub_ctx_max"],
+               "sub_result_max": m.get("sub_result_max", 0),
+               "cost": ev.get("total_cost_usd"), "rolled_from": self.rolled_from}
+        self.rolled_from = None
+        try:
+            with open(os.path.join(self.args.session_store, TURNS_LOG), "a", encoding="utf-8") as f:
+                f.write(json.dumps(rec) + "\n")
+        except OSError:
+            pass
+        # the next turn (the repl's) is timed from its own send, not from this one's end
+        self._t = dict(m, t0=None, calls=0, tools={}, tool_s=0.0, sub_calls=0, sub_ctx_max=0, sub_result_max=0,
+                       ctx_max=m["ctx_last"], t_init=now)
 
     @staticmethod
     def _tool_hint(inp):

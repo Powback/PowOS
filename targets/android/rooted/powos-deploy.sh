@@ -255,7 +255,12 @@ if [ -d $T/powos-manager ]; then
   # 16:55 deploy put a manager.sh that runs it next to no such file -> every PowAI turn "exit 127" (11-09 22:20).
   for f in $T/powos-manager/*; do [ -f "$f" ] && install -m 644 "$f" $R/usr/lib/powos/ai/manager/; done
 fi
-rm -rf $T/powos-agents $T/comms-mcp.py $T/powos-manager
+# powos-where (tools/agents/where) + its pack: the manager's code retrieval over the phone's source (unit ai-manager).
+[ -f $T/powos-where ] && install -m 755 $T/powos-where $R/usr/bin/powos-where
+[ -f $T/where.pack ] && mkdir -p $R/usr/share/powos && install -m 644 $T/where.pack $R/usr/share/powos/where.pack
+[ -f $T/manager-agent.conf ] && mkdir -p $R/etc/powos/ai/agents/manager &&
+  install -m 644 $T/manager-agent.conf $R/etc/powos/ai/agents/manager/agent.conf
+rm -rf $T/powos-agents $T/comms-mcp.py $T/powos-manager $T/powos-where $T/where.pack $T/manager-agent.conf
 # The manager's TypeScript sandbox (unit ai-sandbox): its sources plus its deps from its lock, which rooted.sh built
 # (sandbox.sh setup, stamped) - unpacked beside the old one, then swapped in whole (a running sandbox server keeps
 # what it loaded). PowOS's bun runs it; manager.sh wires it in when `powos sandbox status` says deps ok.

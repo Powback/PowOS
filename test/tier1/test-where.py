@@ -72,6 +72,20 @@ def main():
         hits += bool(got)
         print("  %-4s %-22s recall@8 %d/%d  top: %s" % ("hit" if got else "MISS", q, len(got), min(8, len(expect)),
                                                         ", ".join(os.path.basename(f) for f in top)))
+    # The phone's mode (powos-where): a pack of HEAD, read with no repo in sight, ranks like the repo does.
+    import tempfile
+    with tempfile.TemporaryDirectory() as td:
+        pk = os.path.join(td, "where.pack")
+        q = "manager session resume"
+        a = subprocess.run([sys.executable, WHERE, "--pack", pk], capture_output=True, text=True)
+        env = dict(os.environ, POWOS_WHERE_PACK=pk, POWOS_WHERE_ROOT=ROOT)
+        b = subprocess.run([sys.executable, WHERE, "--json", q], capture_output=True, text=True, cwd=td, env=env)
+        c = subprocess.run([sys.executable, WHERE, "--json", q], capture_output=True, text=True, cwd=ROOT)
+        same = (a.returncode == 0 and b.returncode == 0 and c.returncode == 0 and
+                [r["file"] for r in json.loads(b.stdout)] == [r["file"] for r in json.loads(c.stdout)])
+        passed, failed = (passed + 1, failed) if same else (passed, failed + 1)
+        print("  %s pack mode (no repo) ranks as the repo does%s" % ("PASS" if same else "FAIL",
+                                                                   "" if same else ": " + (a.stderr + b.stderr)[-300:]))
     mean = sum(recalls) / max(1, len(recalls))
     print("  where eval: %d/%d tasks hit, mean recall@8 %.0f%%" % (hits, len(CASES), 100 * mean))
     for name, cond in (("task hits >= %d" % MIN_TASK_HITS, hits >= MIN_TASK_HITS),

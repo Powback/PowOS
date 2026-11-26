@@ -673,6 +673,11 @@ widened first; out of scope here. `tools/emu/emu.sh` otherwise needed no change 
 - Deploy notes/errors to the user: deploy notes = targets/android/tools/deploy-note.sh -> notification; shell errors
   are captured in shell/index.html (boot.report) and sent to the manager; manager mail = ai.mail events.
 - Agents/board: `powos agents task list|add|done`, spool /run/powos-app/agents (agentsd).
+- The phone's own manager (PowOS AI, lib/ai/manager): one line per turn in `~/.local/state/powos/ai/manager/turns.jsonl`
+  (wall/startup/api/tool seconds, calls, tools, ctx_last, subagent calls + result size); past
+  120k context (POWOS_MANAGER_CTX_MAX) the next turn starts a fresh session with a short hand-off note. It finds code
+  with `powos-where` (tools/agents/where over a pack of the deployed commit, /usr/share/powos/where.pack - the phone's
+  /var/lib/powos/src has no git). Its persona (config/ai/agents/manager/agent.conf) ships with the rooted deploy.
 - In the shell, deploy notes and agents' mail to the user both arrive as "ai.mail" (AgentMail[], deploy notes `from: "deploy"`);
   the page's own errors are window error/unhandledrejection events (index.html's boot.report also keeps them in window.__powosBoot.errors).
 - SpacetimeDB: a shell layer that needs a PowOS app's tables vendors its bindings (`apps/vendor.sh <app>` ->

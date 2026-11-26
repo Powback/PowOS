@@ -6,6 +6,8 @@
   tools/agents/where --files shell/ui/lock.tsx   tests, gate scenes and verify scripts that cover a file
   tools/agents/where --before <rev> "..."     rank as of <rev> (history up to <rev>, the tree at <rev>): the eval
   tools/agents/where --json "..."
+  tools/agents/where --pack OUT                  HEAD's index as one file, for a host with no repo (the phone:
+                                                 powos-where, POWOS_WHERE_PACK / /usr/share/powos/where.pack)
 
 WHY: on 11-25 (tools/agents/efficiency.py) agents made 100-150 calls a task and 30% were orientation reads; powgraph
 was disabled on 10-24 and nothing replaced it. This combines three signals, ranked together:
@@ -262,6 +264,68 @@ class Index:
         return {p: blobs.get(b, []) for p, b in tree.items()}
 
 
+class PackIndex(Index):
+    """The same index without git: a pack `where --pack` wrote (the Mac, at the phone's rooted deploy) - the history,
+    the tree and its symbols at one commit. For a host with the source but no repo (the phone: /var/lib/powos/src is
+    a git archive), so PowOS's own manager and its agents find code in one call too. Anchors for history/doc-only
+    matches are read from POWOS_WHERE_ROOT when that file is there, else line 1."""
+
+    def __init__(self, pack):
+        import gzip
+        with gzip.open(pack, "rb") as f:
+            d = pickle.load(f)
+        if d.get("v") != VERSION:
+            raise SystemExit("where: %s is from another version (%s, want %s): redeploy" % (pack, d.get("v"), VERSION))
+        self.head, self.rev, self.dirty = d["head"], None, set()
+        self.top = os.environ.get("POWOS_WHERE_ROOT") or "/var/lib/powos/src"
+        self._commits, self._tree, self._syms = d["commits"], d["tree"], d["syms"]
+
+    def commits(self):
+        return self._commits
+
+    def tree(self):
+        return self._tree
+
+    def symbols(self, tree):
+        return {p: self._syms.get(p, []) for p in tree}
+
+    def save(self):
+        pass
+
+
+def pack(out):
+    """--pack OUT: HEAD's index as one gzip file for PackIndex (history, tree, symbols at HEAD)."""
+    import gzip
+    idx = Index(git("rev-parse", "HEAD").decode().strip())
+    commits, tree = idx.commits(), idx.tree()
+    syms = {p: s for p, s in idx.symbols(tree).items() if s}
+    idx.save()
+    tmp = out + ".tmp%d" % os.getpid()
+    with gzip.open(tmp, "wb", compresslevel=6) as f:
+        pickle.dump({"v": VERSION, "head": idx.head, "commits": commits, "tree": tree, "syms": syms}, f, protocol=4)
+    os.replace(tmp, out)
+    return idx.head
+
+
+def open_index(rev=None):
+    """A repo -> Index; no repo (or POWOS_WHERE_PACK set) -> the pack."""
+    pk = os.environ.get("POWOS_WHERE_PACK")
+    if not pk and os.path.basename(sys.argv[0]) == "powos-where":   # installed on a device: PowOS's pack, any cwd
+        pk = "/usr/share/powos/where.pack"
+    if not pk:
+        try:
+            git("rev-parse", "--git-dir")
+        except (subprocess.CalledProcessError, OSError):
+            pk = "/usr/share/powos/where.pack"
+    if pk:
+        if rev:
+            raise SystemExit("where: --before needs the repo, not a pack")
+        if not os.path.exists(pk):
+            raise SystemExit("where: no repo here and no pack at %s (the rooted deploy writes it)" % pk)
+        return PackIndex(pk)
+    return Index(rev)
+
+
 # ---------------------------------------------------------------- ranking
 
 def match_strength(q, w):
@@ -280,7 +344,7 @@ def is_hub(path):
 
 
 def rank(query, rev=None, n=8):
-    idx = Index(rev)
+    idx = open_index(rev)
     qw = []
     for w in words(query):
         if w not in qw:
@@ -468,7 +532,7 @@ def anchor(top, path, qw, rev):
 # ---------------------------------------------------------------- --files
 
 def covers(path, rev=None):
-    idx = Index(rev)
+    idx = open_index(rev)
     commits = idx.commits()
     tree = idx.tree()
     idx.save()
@@ -530,6 +594,9 @@ def main(argv):
             js = True
         elif a == "--files":
             files = next(it)
+        elif a == "--pack":
+            print("where: packed %s -> %s" % (pack(next(it))[:10], argv[argv.index("--pack") + 1]))
+            return 0
         elif a in ("-h", "--help"):
             print(__doc__)
             return 0

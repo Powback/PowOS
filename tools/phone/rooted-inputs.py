@@ -37,6 +37,7 @@ GENERATED = {
     "sbx_tgz": ["lib/ai/sandbox"],        # sandbox_bundle (node_modules excluded by ship.sh)
     "gc": ["tools/phone/owner.json"],     # the ship gate's url
     "oc": ["tools/phone/owner.json", "lib/devices/powos-deviced"],  # owner.conf, rendered by owner-apply
+    "wpk": ["tools/agents/where"],        # the where pack (`where --pack`): refreshed with every rooted deploy
     "gs": [],                             # the ship gate's secret (~/.config, not the repo)
     "src_tar": [],                        # git archive HEAD: seeds /var/lib/powos/src only when absent
 }
