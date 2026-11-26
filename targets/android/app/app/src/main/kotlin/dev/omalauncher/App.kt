@@ -9,8 +9,8 @@ class App : Application() {
 
     override fun onCreate() {
         super.onCreate()
-        // The web windows' ring log (files/window-log.txt): their events outlive logcat's ~30 s (shell/WindowLog.kt).
-        if (Application.getProcessName() == packageName) dev.omalauncher.shell.WindowLog.init(filesDir)
+        // The device window check's own app (shell/WindowCheckActivity.kt) runs in its own process: nothing of PowOS's.
+        if (Application.getProcessName().endsWith(dev.omalauncher.shell.WindowCheckActivity.PROCESS_SUFFIX)) return
         // PowOS windows (KWin's, WindowTasks) float on the unfolded home like Android apps. Set here, before the
         // session's service connects to KWin - set lazily (by Runtime) KWin's "caps" could come first and it was never
         // told to open new windows as tasks.
@@ -18,6 +18,8 @@ class App : Application() {
         // state in run/powos-updates.json, a run on android-request's "update". Set before the session's service
         // writes the verbs file, like the launcher's.
         if (Application.getProcessName() == packageName) {
+            // The web windows' ring log (files/window-log.txt): their events outlive logcat's ~30 s (shell/WindowLog.kt).
+            dev.omalauncher.shell.WindowLog.init(filesDir)
             floatingWindows()
             powosUpdates()
             // Every .pow site as a launcher app, kept in sync with PowStation's catalog (WebApps; the user 11-23).

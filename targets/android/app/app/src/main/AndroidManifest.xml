@@ -315,6 +315,21 @@
             android:stateNotNeeded="true"
             android:windowSoftInputMode="adjustNothing" />
 
+        <!-- The device window check's own app (shell/WindowCheckActivity.kt; tools/phone/verify/window-render.sh --hidden):
+             a counter + a Tap button the check launches as root on its hidden display. No launcher entry, not exported,
+             its own process (App.onCreate returns at once there). -->
+        <activity
+            android:name=".shell.WindowCheckActivity"
+            android:label="Window check"
+            android:process=":windowcheck"
+            android:theme="@android:style/Theme.DeviceDefault.Light.NoActionBar"
+            android:taskAffinity="com.powos.app.windowcheck"
+            android:configChanges="orientation|screenSize|screenLayout|smallestScreenSize|keyboard|keyboardHidden|navigation|density|uiMode"
+            android:documentLaunchMode="always"
+            android:excludeFromRecents="true"
+            android:exported="false"
+            android:resizeableActivity="true" />
+
         <!-- The lock screen's face (shell/LockFace.kt): over Android's lock screen, which keeps the lock. -->
         <activity
             android:name=".shell.PowosLockActivity"

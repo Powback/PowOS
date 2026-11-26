@@ -36,11 +36,31 @@ $PY calcjudge "$FX/calc-scrolled.xml" "$FX/calc-scrolled.xml" 127 $P changed >/d
 $PY calcjudge "$FX/calc-scrolled.xml" "$FX/calc-scrolled.xml" 127 $P same >/dev/null; ok "undo: same" "$?" 0
 $PY calcjudge "$FX/calc-scrolled.xml" "$FX/calc-scrolled-tapped.xml" 0 $P changed >/dev/null; ok "judged on its display only" "$?" 1
 $PY calcjudge "$FX/calc-scrolled.xml" "$FX/calc-other-display.xml" 127 $P changed >/dev/null; ok "app gone: unreadable (2)" "$?" 2
-# The shell side: no fixed-fraction tap or pixel judgement left in the hidden check.
+# 11-26 (f1dfea35, 11-23 d38c773e: the user's Calculator formula held ~130 chars of old checks' residue, unreadable
+# after the tap -> false WINDOWS BROKEN): the hidden check runs on its OWN app (PowOS's WindowCheckActivity, a counter
+# fresh at 0 each launch + a Tap button, by content description), never a user's. Fixtures: display 76 the check's,
+# display 0 home with a decoy counter that must never be read.
+W=com.powos.app
+ok "wcplan: Tap centre + fresh counter" "$($PY wcplan "$FX/wc-fresh.xml" 76 $W | paste -sd'|' -)" "540 880|0"
+$PY wcplan "$FX/wc-no-button.xml" 76 $W >/dev/null; ok "wcplan: no visible Tap button: exit 1" "$?" 1
+$PY wcplan "$FX/wc-fresh.xml" 77 $W >/dev/null; ok "wcplan: no app on the display: exit 1" "$?" 1
+$PY wcplan "$FX/wc-fresh.xml" 76 $P >/dev/null; ok "wcplan: another package (Calculator) is never read" "$?" 1
+$PY wcjudge "$FX/wc-fresh.xml" "$FX/wc-tapped.xml" 76 $W >/dev/null; ok "wcjudge: 0 -> 1 passes" "$?" 0
+$PY wcjudge "$FX/wc-fresh.xml" "$FX/wc-fresh.xml" 76 $W >/dev/null; ok "wcjudge: unchanged fails" "$?" 1
+$PY wcjudge "$FX/wc-fresh.xml" "$FX/wc-twice.xml" 76 $W >/dev/null; ok "wcjudge: +2 (a double tap) fails" "$?" 1
+$PY wcjudge "$FX/wc-fresh.xml" "$FX/calc-full.xml" 76 $W >/dev/null; ok "wcjudge: app gone: unreadable (2)" "$?" 2
+ok "wcjudge: judged on its display only (home's decoy 9 ignored)" "$($PY wcjudge "$FX/wc-fresh.xml" "$FX/wc-tapped.xml" 76 $W)" "counter 0 -> 1"
+# The shell side: the hidden check judges only its own app - no Calculator, no fixed tap, no pixel judgement.
 S=$ROOT/tools/phone/verify/window-render.sh
-ok "no WR_TAP/WR_CLEAR in the hidden check" "$(sed -n '/^hidden() {/,/^}/p' "$S" | grep -c 'WR_TAP\|WR_CLEAR')" 0
-ok "the hidden check uses calc + calcjudge" "$(sed -n '/^hidden() {/,/^}/p' "$S" | grep -c '\$PY calc')" 3
-ok "a full formula is NOT JUDGED, never a FAIL, in the hidden check" "$(sed -n '/^hidden() {/,/^}/p' "$S" | grep -c 'NOT JUDGED (\$APP.s formula full')" 1
+H=$(sed -n '/^hidden() {/,/^}/p' "$S")
+ok "no WR_TAP/WR_CLEAR in the hidden check" "$(echo "$H" | grep -c 'WR_TAP\|WR_CLEAR')" 0
+ok "the hidden check uses wcplan + wcjudge, never calc" "$(echo "$H" | grep -c '\$PY wcplan\|\$PY wcjudge') $(echo "$H" | grep -c '\$PY calc')" "2 0"
+ok "the hidden check's app is PowOS's WindowCheckActivity" "$(echo "$H" | grep -c '^  local APP=com.powos.app comp=com.powos.app/dev.omalauncher.shell.WindowCheckActivity$')" 1
+ok "the hidden check never names the user's Calculator" "$(echo "$H" | grep -v '^ *#' | grep -ci 'calculator')" 0
+M=$ROOT/targets/android/app/app/src/main/AndroidManifest.xml
+ok "WindowCheckActivity: in the manifest, own process, not exported, no launcher entry" "$(sed -n '/\.shell\.WindowCheckActivity"/,/\/>/p' "$M" | grep -c 'android:process=":windowcheck"\|android:exported="false"\|documentLaunchMode="always"') $(sed -n '/\.shell\.WindowCheckActivity"/,/\/>/p' "$M" | grep -c LAUNCHER)" "3 0"
+K=$ROOT/targets/android/app/app/src/main/kotlin/dev/omalauncher/shell/WindowCheckActivity.kt
+ok "the activity's descriptions are the ones window-render.py reads" "$(grep -c '"powos-window-check-count"\|"powos-window-check-tap"' "$K") $(grep -c 'desc:powos-window-check-count\|desc:powos-window-check-tap' "$ROOT/tools/phone/verify/window-render.py")" "2 1"
 ok "the visible check plans its tap and undoes it" "$(grep -c 'PY calcdisp\|input -d \$VD tap \$ux' "$S")" 2
 echo "Results: $pass passed, $fail failed"
 [ $fail = 0 ]

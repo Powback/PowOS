@@ -17,6 +17,11 @@ The rect is device px, sampled every STEP (2) px each way.
                                               when the formula ends in a char with a visible key (UNDO = that key: the
                                               char typed back), else digit_7/op_add (UNDO = del). Exit 1 (a reason)
                                               when the display has no such app or key.
+  window-render.py wcplan UI.xml DISPLAY PKG  the hidden check's tap plan on its own app (WindowCheckActivity): line 1
+                                              "X Y" (the Tap button's centre), line 2 the counter (0 on a fresh launch);
+                                              exit 1 (a reason) when the display has no such counter/button
+  window-render.py wcjudge A.xml B.xml DISPLAY PKG   exit 0 when the counter went up by exactly 1 from A to B
+                                              ("counter a -> b" printed either way), 1 not, 2 unreadable
   window-render.py calcdisp UI.xml PKG        "DISPLAY W H": the display PKG's nodes are on and its size (the visible
                                               check's own window: it refuses to run while the app has a task), exit 1 none
   window-render.py calcjudge A.xml B.xml DISPLAY PKG changed|same   exit 0 when the formula text went from A to B as
@@ -148,6 +153,8 @@ def ui_nodes(path, display, pkg):
                 out.setdefault(rid, (b, text))
             if text and n.get("clickable") == "true":
                 out.setdefault("text:" + text, (b, text))
+            if n.get("content-desc"):
+                out.setdefault("desc:" + n.get("content-desc"), (b, text))
     return out
 
 
@@ -223,6 +230,37 @@ def calc_judge(a, b, display, pkg, want):
     return (0 if (fa != fb) == (want == "changed") else 1), msg
 
 
+# The hidden check's own app (PowOS's WindowCheckActivity, 11-26): a counter that starts at 0 in every launch and a Tap
+# button, found by content description. The check never taps or judges a user's app (11-26: the user's Calculator held
+# ~130 chars of old checks' residue, its formula unreadable after the tap -> false "WINDOWS BROKEN" twice).
+WC_COUNT, WC_TAP = "desc:powos-window-check-count", "desc:powos-window-check-tap"
+
+
+def wc_count(nodes):
+    v = nodes.get(WC_COUNT)
+    return int(v[1]) if v and re.fullmatch(r"\d+", v[1] or "") else None
+
+
+def wc_plan(path, display, pkg):
+    nodes = ui_nodes(path, display, pkg)
+    if not nodes:
+        return 1, f"no {pkg} node on display {display} in the accessibility dump"
+    n = wc_count(nodes)
+    if n is None:
+        return 1, f"no window check counter of {pkg} on display {display} (keys: {' '.join(sorted(nodes)[:12])})"
+    if WC_TAP not in nodes or not visible(nodes[WC_TAP][0]):
+        return 1, f"no visible Tap button of {pkg} on display {display}"
+    x, y = centre(nodes[WC_TAP][0])
+    return 0, f"{x} {y}\n{n}"
+
+
+def wc_judge(a, b, display, pkg):
+    na, nb = (wc_count(ui_nodes(p, display, pkg)) for p in (a, b))
+    if na is None or nb is None:
+        return 2, f"counter unreadable (before {na!r}, after {nb!r})"
+    return (0 if nb == na + 1 else 1), f"counter {na} -> {nb}"
+
+
 def main(a):
     global STEP
     if len(a) >= 3 and a[0] == "png":
@@ -268,6 +306,20 @@ def main(a):
     elif len(a) == 6 and a[0] == "calcjudge" and a[5] in ("changed", "same"):
         try:
             rc, msg = calc_judge(*a[1:])
+        except (OSError, ET.ParseError) as e:
+            rc, msg = 2, f"dump unreadable: {e}"
+        print(msg)
+        return rc
+    elif len(a) == 4 and a[0] in ("wcplan",):
+        try:
+            rc, msg = wc_plan(*a[1:])
+        except (OSError, ET.ParseError) as e:
+            rc, msg = 1, f"dump unreadable: {e}"
+        print(msg)
+        return rc
+    elif len(a) == 5 and a[0] == "wcjudge":
+        try:
+            rc, msg = wc_judge(*a[1:])
         except (OSError, ET.ParseError) as e:
             rc, msg = 2, f"dump unreadable: {e}"
         print(msg)

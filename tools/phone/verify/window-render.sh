@@ -124,22 +124,22 @@ shot() {   # shot NAME: raw screencap gzipped on the phone -> $OUT/NAME.raw.gz
 # --hidden: the ship gate's check (tools/phone/ship.sh window_gate), run on EVERY window-touching ship whatever the user
 # is doing - nothing on their screen, no wait, no skip. The host path of a web window without the page's half: the
 # APK's own WebWindowsHost (the shell-uid display maker WebWindows.kt runs: `create` -> a trusted virtual display, its
-# touchscreen) is started here from adb, Calculator launched on that display (the root `am start --display` launch()
-# falls back to), and the display is never mirrored (no element, no hole, no mirror under home). Checked:
-#   task     Calculator's task is on that display (`am stack list`);
+# touchscreen) is started here from adb, the check's own app (PowOS's hidden WindowCheckActivity, never a user's app)
+# launched on that display (the root `am start --display` launch() falls back to), and the display is never mirrored
+# (no element, no hole, no mirror under home). Checked:
+#   task     the check app's task is on that display (`am stack list`);
 #   content  `screencap -d <that display>` is the app, not a flat fill (dominant colour < 97%, edges >= 0.3%), within 15 s;
-#   tap      `input -d <that display> tap` on its delete key (a formula ending in a typeable char) or "7" (found by id
-#            in `uiautomator dump --windows`, any layout/width) changes its formula's text (the accessibility dump before
-#            vs after); the keystroke is then undone (the char typed back / deleted) - see the 11-11 rule at (b).
+#   tap      `input -d <that display> tap` on its Tap button (found by content description in `uiautomator dump
+#            --windows`, any width) makes its counter go 0 -> 1 (the accessibility dump before vs after) - see (b).
 #   linux    a Linux app (WR_LINUX_APP, foot) through the host's KWin -> web-window consumer path into an offscreen
 #            ImageReader, never offered to the page (webwindows.selftestLinux, LinuxSelftest.kt; see linux_step).
-# Then its task removed (`am stack remove`; a Calculator task the user had before is moved back to display 0, never
+# Then its task removed (`am stack remove`; a task of the app from before the check is moved back to display 0, never
 # removed), the display released and the helper ended (its stdin closed: it releases what's left and exits; a holder
 # that keeps stdin open ends by itself after WR_HOLD_S (default WR_TIMEOUT_S + 60, plus the hold: never before the
 # check's own deadline), so a killed check leaves nothing either; every write to its stdin is fput's, never blocking). Exit 0 PASS, 1 FAIL;
 # the whole run is bounded by WR_TIMEOUT_S (210: the Linux step adds up to ~50 s; plus the hold): a timeout is a FAIL. Shots in WR_OUT/<stamp>/.
 # --hold S (HOLD): after content+tap pass, the PASS line is logged at once (ship.sh window_gate waits for it, then runs
-# its passive render_watch) and the display stays up S s with Calculator on it: every ~5 s its content is measured again
+# its passive render_watch) and the display stays up S s with the check app on it: every ~5 s its content is measured again
 # and logged to the phone's logcat (tag PowosWrHidden: "hold display D ..." - the helper's display geometry first),
 # so render_watch sees a live window across its watch. Gone flat or its task gone during the hold: FAIL (exit 1, a
 # "window-render: FAIL" line after the PASS one). The display is the adb-started helper's, never in WebWindows.kt's
@@ -155,7 +155,10 @@ windows_same() {
 }
 HOLD=0
 hidden() {
-  local tag=wrh$$ dir=/data/local/tmp/powos-wr-hidden-$$ W=${WR_W:-1080} H=${WR_H:-1500} dpi D= S= comp t0 pre task= st dom edg d1 noise fx fy wd
+  # The check's own app (shell/WindowCheckActivity.kt, 11-26): a counter fresh at 0 each launch. Never the user's apps -
+  # f1dfea35 / d38c773e: the user's Calculator formula full of old checks' residue read unreadable -> false WINDOWS BROKEN.
+  local APP=com.powos.app comp=com.powos.app/dev.omalauncher.shell.WindowCheckActivity
+  local tag=wrh$$ dir=/data/local/tmp/powos-wr-hidden-$$ W=${WR_W:-1080} H=${WR_H:-1500} dpi D= S= t0 pre task= st dom edg d1 noise fx fy wd
   t0=$(date +%s)
   # hnj STEP: the phone isn't Awake - nothing on the hidden display can be judged (exit 2, cleaned up as a FAIL is).
   hnj() { log "$1: the phone is $WAKE - not judged"; hclean; log "window-render: NOT JUDGED (the phone is $WAKE) - $OUT"; exit 2; }
@@ -227,7 +230,7 @@ hidden() {
   }
   # tasks_on DISPLAY: the task ids on a display; app_tasks: every task of $APP (any display).
   tasks_on() { sh_ "am stack list" | awk -v d="$1" '/^RootTask id=/{on=($0 ~ ("displayId=" d " "))} on && /^ *taskId=/{sub(/^ *taskId=/,"");sub(/:.*/,"");print}' | sort -u | paste -sd' ' -; }
-  app_tasks() { sh_ "am stack list" | awk -v p="$APP/" '/^ *taskId=/ && index($0, " " p){x=$0;sub(/^ *taskId=/,"",x);sub(/:.*/,"",x);print x}' | sort -u | paste -sd' ' -; }
+  app_tasks() { sh_ "am stack list" | awk -v p="$comp" '/^ *taskId=/ && index($0, " " p){x=$0;sub(/^ *taskId=/,"",x);sub(/:.*/,"",x);print x}' | sort -u | paste -sd' ' -; }
   # hb METHOD 'JS args array': one bridge call of home's page (as the page's own PowosHost calls), its answer as text.
   hb() { ev "new Promise(ok=>{const h=window.__powosHost,P=window.PowosHost;if(!h||!P)return ok('no bridge');const r=h.resolve,j=h.reject,id=931700+Math.floor(Math.random()*900);const done=v=>{h.resolve=r;h.reject=j;ok(typeof v==='string'?v:JSON.stringify(v))};h.resolve=(i,v)=>i===id?done(v):r(i,v);h.reject=(i,m)=>i===id?done('ERR '+m):j(i,m);setTimeout(()=>done('no answer'),8000);P.postMessage(JSON.stringify([id,'$1',JSON.stringify($2)]))})"; }
   # jf JSON FIELD: one field of the selftest's JSON.
@@ -285,13 +288,13 @@ except Exception: print('')"; }
   awake_or_nj "start"
   dpi=$(sh_ "wm density" | sed -n 's/^Override density: //p'); [ -n "$dpi" ] || dpi=$(sh_ "wm density" | sed -n 's/^Physical density: //p')
   apk=$(sh_ "pm path com.powos.app" | sed -n '1s/^package://p'); [ -n "$apk" ] || hfail "PowOS isn't installed (pm path com.powos.app)"
-  comp=$(sh_ "cmd package resolve-activity --brief -c android.intent.category.LAUNCHER $APP" | tail -1); case $comp in "$APP"/*) ;; *) hfail "no launcher activity for $APP ($comp)" ;; esac
+  r=$(sh_ "cmd package resolve-activity --brief -n $comp" | tail -1); [ "$r" = "$comp" ] || hfail "the installed PowOS has no window check app ($comp: ${r:-no answer}) - an APK before 11-26?"
   pre=" $(app_tasks) "
   # The user's page's windows (count + ids) before; the same after the check or FAIL - the check never opens,
   # closes or moves one of theirs.
   wlist() { ev "(()=>{const w=[...document.querySelectorAll('.webwindow')];return w.length+':'+w.map(e=>e.dataset.wwid||'?').join(',')})()"; }
   local wl0 wl1; wl0=$(wlist); log "the user's page's windows before: ${wl0:-unreadable}"
-  log "hidden check: $comp on a ${W}x$H display at $dpi dpi from $apk (the user's $APP tasks before:${pre% })"
+  log "hidden check: $comp on a ${W}x$H display at $dpi dpi from $apk (its tasks before:${pre% })"
   # The helper (WebWindowsHost from the installed APK, as WebWindows.kt starts it: su 2000, group uhid), stdin a fifo a
   # holder keeps open for WR_HOLD_S; "selftest": own display group/focus/lock state (an older helper ignores it).
   cat > "$OUT/wrh.sh" <<EOF
@@ -340,48 +343,30 @@ EOF
     to=$(sh_ "am stack list" | awk -v t="taskId=${task%% *}:" '/^RootTask id=/{d=$0;sub(/.*displayId=/,"",d);sub(/ .*/,"",d)} index($0,t){print d;exit}')
     for t in $task; do case "$pre" in *" $t "*) ;; *) sh_ "am stack remove $t" >/dev/null; log "task $t removed where it went (display ${to:-?})" ;; esac; done
     hfail "$APP's task $task left display $D $1 (to display ${to:-?}: PowOS's adopt of a full-screen task on another display - fixed in FreeformTasks.onMainDisplay)"; }
-  # (b) a tap on THAT display reaches the app, judged on the app's own text. The key is read from the app's real layout
-  # (`uiautomator dump --windows`: every display's accessibility tree, this display's Calculator in it), its formula
-  # text before vs after. 11-11 ea2933b3: a fixed tap (0.14,0.69 of the display) hit the scientific layout's "log" key
-  # (the layout depends on the display width), the formula already held a long "log(log(..." of earlier checks, the
-  # appended text was off-screen and a pixel diff of the number area read 0.0005 -> a false "WINDOWS BROKEN". Nothing
-  # is cleared: the app's own formula (it may be the user's) gets one keystroke, undone after.
-  # 11-11 (rule): the judged keystroke is the DELETE key whenever the formula ends in a char that has a visible key -
-  # a delete changes ANY non-empty formula, even one at the app's max length (21:28 FAIL: the formula was full of the
-  # old fixed-fraction tap's "cos(log(log(..." leftovers, so a 7 changed nothing -> a false "WINDOWS BROKEN"); that char
-  # is typed back by its key after, and the formula judged equal to before. An empty formula (or one ending in a char
-  # with no key in this layout) gets "7" ("+" after a long number: the digit limit), undone with delete. Never cleared,
-  # never AC: the formula may be the user's. If that "7" changes nothing on a NON-empty formula, the formula may be at
-  # its max length with no restorable last char: NOT JUDGED (exit 2, a reason), not WINDOWS BROKEN - wiping it to judge
-  # would lose the user's text. window-render.py calc makes the plan from the app's layout on this display.
+  # (b) a tap on THAT display reaches the app, judged on the app's own counter: the Tap button found by content
+  # description in `uiautomator dump --windows` (every display's accessibility tree, this display's app in it), the
+  # counter before (0: a fresh document task each launch) vs after (must be exactly +1). Nothing to undo: the state is
+  # the check's own and dies with its task. History: 11-11 ea2933b3 (a fixed-fraction tap on Calculator's scientific
+  # "log" key) and 11-23 d38c773e / 11-26 f1dfea35 (the user's Calculator formula full of old checks' residue, unreadable
+  # after the tap) were false "WINDOWS BROKEN" - judging a user's app state is never reliable, nor theirs to touch.
   uidump() {   # uidump NAME: the accessibility dump of every display -> $OUT/NAME.xml (retried: the dump can miss idle)
     local i; for i in 1 2 3; do
       sh_ "uiautomator dump --windows $dir/ui.xml >/dev/null 2>&1 && cat $dir/ui.xml" > "$OUT/$1.xml"
       grep -q "</displays>" "$OUT/$1.xml" && return 0; sleep 1
     done; return 1; }
-  local plan key kx ky ukey dx dy jr f0
+  local plan kx ky n0 jr
   sleep 1; stayed "after its content showed"; awake_or_nj "layout"
   uidump ui-pre || hfail "no accessibility dump of display $D (uiautomator dump --windows)"
-  plan=$($PY calc "$OUT/ui-pre.xml" "$D" "$APP") || hfail "no key to tap in $APP's layout: $plan"
-  read -r key kx ky ukey dx dy <<< "$(echo "$plan" | head -1)"; f0=$(echo "$plan" | sed -n 2p)
-  log "layout: $key at $kx,$ky, undo by $ukey at $dx,$dy; formula before: $f0"
-  awake_or_nj "tap"; sh_ "input -d $D tap $kx $ky" >/dev/null; log "tap: input -d $D tap $kx $ky ($key)"
+  plan=$($PY wcplan "$OUT/ui-pre.xml" "$D" "$APP") || hfail "no Tap button / counter of the check app on display $D: $plan"
+  read -r kx ky <<< "$(echo "$plan" | head -1)"; n0=$(echo "$plan" | sed -n 2p)
+  log "layout: Tap at $kx,$ky; counter before: $n0$([ "$n0" = 0 ] || echo ' (not a fresh launch)')"
+  awake_or_nj "tap"; sh_ "input -d $D tap $kx $ky" >/dev/null; log "tap: input -d $D tap $kx $ky (Tap)"
   sleep 1; "$A" exec-out "su -c 'screencap -d $S | gzip -1'" > "$OUT/tap.raw.gz" 2>/dev/null
   stayed "by the tap"
   for n in display tap; do $PY png "$OUT/$n.raw.gz" "$OUT/$n.png" 2>/dev/null && rm -f "$OUT/$n.raw.gz"; done
   uidump ui-tap || hfail "no accessibility dump of display $D after the tap"
-  if ! jr=$($PY calcjudge "$OUT/ui-pre.xml" "$OUT/ui-tap.xml" "$D" "$APP" changed); then
-    [ "$key" != del ] && [ "$f0" != '""' ] && [ "${#f0}" -gt 40 ] && { log "the $key tap changed nothing on a long formula that ends in a char with no key here ($jr): may be at the app's max length - not judged (clearing it would lose it)"
-      hclean; log "window-render: NOT JUDGED ($APP's formula full, last char not restorable) - $OUT"; exit 2; }
-    hfail "the tap changed nothing in the app ($key: $jr)"
-  fi
-  log "tap: reached the app ($key: $jr)"
-  # Undo the keystroke (the formula as it was; not judged - the tap's proof is above, but a failed undo is loud).
-  if [ "$dx" != - ]; then
-    awake_or_nj "undo"; sh_ "input -d $D tap $dx $dy" >/dev/null; sleep 1
-    if uidump ui-undo && jr=$($PY calcjudge "$OUT/ui-pre.xml" "$OUT/ui-undo.xml" "$D" "$APP" same); then log "undo: $ukey tapped, formula as before"
-    else log "WARNING: the undo ($ukey) didn't restore the formula (${jr:-no dump})"; fi
-  fi
+  jr=$($PY wcjudge "$OUT/ui-pre.xml" "$OUT/ui-tap.xml" "$D" "$APP") || hfail "the tap changed nothing in the app ($jr)"
+  log "tap: reached the app ($jr)"
   # (c) a resize through the helper (as WebWindows.resizeContent sends it): dumpsys display shows the new size at the
   # SAME density (a window's density is fixed for its life, WindowDpi - 10-31 Chrome lost its desktop layout).
   vdinfo() { sh_ "dumpsys display" | grep -m1 "DisplayDeviceInfo{\"powos-ww-$tag\"" | sed -n 's/.*", \([0-9]*\) x \([0-9]*\),.* density \([0-9]*\),.*/\1 \2 \3/p'; }
