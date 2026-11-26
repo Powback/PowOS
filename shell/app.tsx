@@ -17,11 +17,14 @@ import "./ui/spring.ts";
 import "./ui/uifont.ts";
 import "./ui/refresh.ts";
 import { handOff, keepSnapshots, restored } from "./ui/snapshot.ts";
+import { setHomeKeyboard } from "./ui/kbhome.ts";
 
 /** The host's insets (system bars, cutout, keyboard) as --inset-* custom properties, kept current. */
 function applyInsets(i: Partial<Insets> | null) {
   const root = document.documentElement.style;
-  for (const side of ["top", "bottom", "left", "right", "keyboard"] as const) root.setProperty(`--inset-${side}`, `${i?.[side] ?? 0}px`);
+  for (const side of ["top", "bottom", "left", "right"] as const) root.setProperty(`--inset-${side}`, `${i?.[side] ?? 0}px`);
+  // KB2: the keyboard's inset is home's only while home types (ui/kbhome.ts): typing into a web window, home stays put.
+  setHomeKeyboard(i?.keyboard ?? 0);
 }
 powos.on("system.insets", applyInsets);
 applyInsets(await powos.system.insets());

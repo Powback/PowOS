@@ -558,6 +558,12 @@ up to keep MIN_H). The body is the app's size in `w.f`, so the host resizes the 
 room left and the app relayouts there. The stored frame is untouched: keyboard down, the old size is back. Gate
 `ww-keyboard-fit`, device check `tools/phone/verify/ww-keyboard.sh` (emu: tools/emu/testwin's Chat).
 
+Home stays put (KB2, 11-26; the user: "it just bugs the page, it doesn't deal with actual windows, it's like scrolling
+the wrong thing"): `--inset-keyboard` (home's bar/dock lift, its stage and pages shortened) went to home on every
+keyboard, so typing into a window also shrank home's stage by the keyboard's height under it (767 -> 447 px, tiles
+re-laid out). `shell/ui/kbhome.ts` now sets it only while home itself types; while a window is typed into it is 0 and
+only that window fits. The gate scene asserts home's stage, pages, dock, bar and tiles keep their rects.
+
 ### 3.2 Child surfaces: popups, menus, tooltips, transients (Z3)
 
 - **Linux** (new KWin work, S7). For a web window, KWin stops rendering popups into the toplevel's buffer and stops

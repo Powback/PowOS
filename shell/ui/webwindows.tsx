@@ -18,6 +18,7 @@ import { Mark } from "./chrome.tsx";
 import { forgetQuickReturn, QuickBar, quickGone, quickIconKeys, quickPlace, quickShown, QUICK, type QuickInfo, type QuickRect } from "./quickpage.tsx";
 import { memo } from "./memo.ts";
 import { fitAboveKeyboard, keyboardTop } from "./kbfit.ts";
+import { applyHomeKeyboard, setWindowTyping } from "./kbhome.ts";
 import { barReveal, edgeDown, edgeEnd, edgeMove, holdReveal, releaseReveal, revealGone, revealKept } from "./barreveal.ts";
 import { usePresence } from "./reveal.tsx";
 import { confirm as hapticConfirm, tick as hapticTick } from "./haptics.ts";
@@ -4316,7 +4317,20 @@ function typingWindow(): number | null {
 function blurHomeField() {
   const el = document.activeElement as HTMLElement | null;
   if (el?.matches?.("input, textarea, [contenteditable]") && !el.closest(".webwindow")) el.blur();
+  applyHomeKeyboard();
 }
+
+// KB2 (ui/kbhome.ts): home takes the keyboard's inset only while it types itself - typing into a window, home stays
+// put and that window alone fits. Again whenever who types changes with the keyboard up: the keyboard, the windows, the
+// page on screen (the effect), a field focused or left (focus moves no signal).
+setWindowTyping(() => typingWindow() != null);
+effect(() => {
+  void kbTop.value;
+  void webWins.value;
+  applyHomeKeyboard();
+});
+addEventListener("focusin", applyHomeKeyboard);
+addEventListener("focusout", () => queueMicrotask(applyHomeKeyboard));
 
 /** [w]'s frame as shown: its own, or (KB1) fitted above the keyboard while it is the window being typed into. */
 export function fitted(w: WebWin): { x: number; y: number; w: number; h: number } {

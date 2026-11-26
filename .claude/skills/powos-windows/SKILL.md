@@ -74,6 +74,9 @@ description: Use when working on PowOS window tasks - floating Android windows (
   adjustResize never fires. Fix lives in the page: shell/ui/kbfit.ts + webwindows.tsx `fitted()` - the window typed
   into ends at home's `system.insets` keyboard top, so `w.f`'s app size shrinks and the host resizes the VD/KWin window.
   Gate `ww-keyboard-fit`; check `verify/ww-keyboard.sh` (emu: testwin Chat activity logs `PowosTestChat field ...`).
+- KB2: home's `--inset-keyboard` is set only while HOME types (shell/ui/kbhome.ts, app.tsx feeds it, webwindows.tsx
+  says whether a window types); typing into a window it is 0 so home's stage/dock/bar never move - never set it
+  straight from `system.insets` again.
 
 ## Page after going home (manager decision 2026-10-21, launcher standard)
 - From an app: page kept (home launched with Switcher.EXTRA_RECENTS: no "system.home"). Home while home shows:

@@ -3018,7 +3018,13 @@ function kbFitKit() {
   };
   const want = (ok, msg) => ok || fails.push(`KB1 ${msg}`);
   const up = async (kb) => (insets(kb), await frame(), await frame());
-  return { fails, KB, insets, body, sentH, want, up, top: () => innerHeight - KB };
+  // KB2: home's own elements (the pages, the dock, the bar, the tiles): the keyboard typing into a window leaves them be.
+  const home = () =>
+    [...document.querySelectorAll(".home > .stage, .home .pages, .home > .dock, .home > .bar, .home .page .tile")].slice(0, 24).map((el) => {
+      const r = el.getBoundingClientRect();
+      return `${el.className.split(" ")[0]} ${Math.round(r.left)},${Math.round(r.top)} ${Math.round(r.width)}x${Math.round(r.height)}`;
+    });
+  return { fails, KB, insets, body, sentH, want, up, home, top: () => innerHeight - KB };
 }
 
 /** A right-pinned window over another: the top one (typed into) fits above the keyboard, the other stays. */
@@ -3030,9 +3036,12 @@ async function kbFitSide(W, k, pg) {
   ];
   await k.up(0);
   await window.__gw.settled();
-  const [left0, chat0] = [k.body(981), k.body(982)];
+  const [left0, chat0, home0] = [k.body(981), k.body(982), k.home()];
   await k.up(k.KB);
   const chat = k.body(982);
+  const home = k.home();
+  const moved = home0.filter((r, i) => r !== home[i]);
+  k.want(home0.length > 0 && !moved.length, `home moved with the keyboard typing into a window: ${moved.slice(0, 3).map((r) => `${r} -> ${home[home0.indexOf(r)]}`).join("; ") || "no home elements"} (want home kept: only the window fits)`);
   k.want(chat.bottom <= k.top() + 0.5, `side-pinned: the typed-into window's body ends at ${chat.bottom} with the keyboard's top at ${k.top()} (want at or above it)`);
   k.want(chat.top === chat0.top, `side-pinned: its top moved ${chat0.top} -> ${chat.top} (want kept: there's room)`);
   const h = k.sentH(982);
