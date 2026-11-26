@@ -1,0 +1,44 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  The phone's "coordinator" mail relayed to the Mac coordinator (tools/agents/coordinator-relay.py; unit
+  units/mac/coordinator-relay-mac.json) every 60 s; a pass while the phone is off the VPN is one WireGuard check.
+  Installed by tools/agents/coordinator-relay-deploy.sh, which fills in @HOME@ and @R@ (the verify-runner checkout:
+  never a worktree that may be removed). LimitLoadToSessionType Background: this Mac is headless.
+-->
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>com.powos.coordinator-relay</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>/usr/bin/env</string>
+    <string>python3</string>
+    <string>@R@/tools/agents/coordinator-relay.py</string>
+    <string>run</string>
+  </array>
+  <key>WorkingDirectory</key>
+  <string>@R@</string>
+  <key>StartInterval</key>
+  <integer>60</integer>
+  <key>RunAtLoad</key>
+  <true/>
+  <key>LimitLoadToSessionType</key>
+  <string>Background</string>
+  <key>ProcessType</key>
+  <string>Background</string>
+  <key>LowPriorityIO</key>
+  <true/>
+  <key>Nice</key>
+  <integer>10</integer>
+  <key>EnvironmentVariables</key>
+  <dict>
+    <key>PATH</key>
+    <string>@HOME@/.local/bin:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin</string>
+  </dict>
+  <key>StandardOutPath</key>
+  <string>/dev/null</string>
+  <key>StandardErrorPath</key>
+  <string>@HOME@/.cache/powos-coordinator-relay/launchd.err</string>
+</dict>
+</plist>

@@ -1,0 +1,26 @@
+{
+  "id": "coordinator-relay-mac",
+  "name": "Phone coordinator-mail relay (Mac launchd agent)",
+  "kind": "service",
+  "owner": "system:powos-board",
+  "host": "mac",
+  "purpose": "every 60 s (launchd com.powos.coordinator-relay, tools/agents/coordinator-relay.py from the $POWOS_RUN_ROOT/verify-runner checkout, default ~/pw/verify-runner): while the phone answers on the VPN (tools/phone/adb.sh --vpn-state), peeks the phone's `powos comms` inbox of the coordinator role (mail from PowOS mobile's manager), appends new messages by id to ~/.cache/powos-coordinator-inbox.jsonl plus one summary line each to ~/.cache/powos-coordinator-inbox.log (what the Mac coordinator watches), then marks exactly those ids read on the phone. Replies: tools/agents/reply-phone.sh. Read-only on the phone otherwise",
+  "installedBy": "tools/agents/coordinator-relay-deploy.sh install",
+  "files": [
+    "~/Library/LaunchAgents/com.powos.coordinator-relay.plist",
+    "~/.cache/powos-coordinator-relay",
+    "~/.cache/powos-coordinator-inbox.jsonl",
+    "~/.cache/powos-coordinator-inbox.log"
+  ],
+  "processes": [
+    {
+      "match": "tools/agents/coordinator-relay\\.py"
+    }
+  ],
+  "unbounded": "macOS has no cgroups; a short python pass every 60 s: one docker exec (WireGuard handshake age) while the phone is off, two adb calls capped at 90 s each while it answers",
+  "remove": {
+    "commands": [
+      "tools/agents/coordinator-relay-deploy.sh remove"
+    ]
+  }
+}
