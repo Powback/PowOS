@@ -147,6 +147,7 @@ status)
   [ -s "$Q/rooted-pending" ] && { read -r rb rt < "$Q/rooted-pending"; echo "rooted deploy pending since ${rb:0:9} (origin ${rt:0:9}; runs after the APK, under the phone-busy rules)"; }
   [ -s "$Q/kwin-activation" ] && [ -f "$here/verify/kwin-activate-lib.sh" ] && ( . "$here/verify/kwin-activate-lib.sh"; kwact_status_line "$Q/kwin-activation" )
   [ -s "$Q/window-failed" ] && { read -r wt ww wf < "$Q/window-failed"; if [ "$wf" = render-watch ]; then echo "WINDOWS BROKEN: ${wt:0:9} ($ww) failed the passive window check (render-watch) - log $Q/done/render-watch-${wt:0:9}.log"; else echo "WINDOWS BROKEN: ${wt:0:9} ($ww) failed the device window check (verify/window-render.sh; changed: $wf) - log $Q/done/window-render-${wt:0:9}.log"; fi; }
+  [ -s "$Q/window-owed" ] && { read -r ot ow oat < "$Q/window-owed"; echo "WINDOW CHECK OWED: ${ot:0:9} ($ow) shipped unchecked at $(date -r "${oat:-0}" '+%F %T' 2>/dev/null) after ${WINDOW_WAIT_MAX_S:-1800} s NOT JUDGED - runs at the next awake/idle phone (requests: shipped-unchecked)"; }
   [ -s "$Q/window-gate.pid" ] && kill -0 "$(cat "$Q/window-gate.pid")" 2>/dev/null && echo "device window check running (pid $(cat "$Q/window-gate.pid"); hidden display, no wait)"
   gd=$(for f in "$Q"/gate-deferred/*; do [ -s "$f" ] || continue; read -r gt ga _ < "$f"; echo "$(basename "$f") ${gt:0:9} since $(date -r "$ga" +%H:%M)"; done | paste -sd, - | sed 's/,/, /g')
   [ -z "$gd" ] || echo "GATE DEFERRED (no verdict: the gate machine ${POW_JOB_CONTEXT:-pow58} didn't answer): $gd - nothing failed, requests kept; gated again once it answers"
@@ -367,7 +368,7 @@ run)
     [ "$(cat "$Q/failed-apps" 2>/dev/null)" != "$h" ] || return 1
     b=$(cat "$Q/apps-live" 2>/dev/null || true); [ -n "$b" ] || b=$(cat "$HOME/.cache/powos-installed-commit" 2>/dev/null || true)
     [ -n "$b" ] && git cat-file -e "$b^{commit}" 2>/dev/null && [ -n "$(apps_changed "$b" "$h")" ]; }
-  bg_go() { rooted_go || apps_due || pkgs_out || pkgs_due || [ -s "$Q/gate-deferred/postgate" ]; }
+  bg_go() { rooted_go || apps_due || pkgs_out || pkgs_due || [ -s "$Q/gate-deferred/postgate" ] || owed_due; }
   # THE PACKAGES (11-10): kwin 3.76's PKGBUILD (patches 0067/0068) landed and shipped as "code", but no step ever built
   # or published a package - only an agent's hand-run build-pkgs.sh did, so the phone stayed on 3.74 and the game-audio
   # check failed on the missing KWin half. pkg_names A B: targets/android/pkgs/<name>/ dirs with a PKGBUILD at B whose
@@ -548,13 +549,14 @@ run)
     grep -q '^window-render: ' "$wl" || echo "window-render: FAIL (no verdict, rc $wrc)" >> "$wl"
     # rc 2 = NOT JUDGED (the phone isn't Awake: the hidden display goes dark with the screen; or the user acted -
     # touched it during the Linux step, opened/closed a window). Neither a pass nor a skip
-    # that lets the ship through: the caller keeps its requests and retries every WINDOW_WAIT_S (60) s, no cap.
+    # that lets the ship through: the caller keeps its requests and retries every WINDOW_WAIT_S (60) s, up to
+    # WINDOW_WAIT_MAX_S (window_bound) - then it ships unchecked and the check is owed ($Q/window-owed, owed_window).
     if [ $wrc = 2 ]; then
-      echo "$(date '+%F %T') ${t:0:9} $what window check waiting for an awake, idle phone ($(grep -m1 '^window-render: NOT JUDGED' "$wl" | cut -c17-80))" >> "$Q/shipped.log"
+      echo "$(date '+%F %T') ${t:0:9} $what window check waiting for an awake, idle phone ($(grep -m1 '^window-render: NOT JUDGED' "$wl" | cut -c16-80))" >> "$Q/shipped.log"
       echo "$(date +%T) ${t:0:9}: window check waiting for an awake phone - its requests are kept, retried in ${WINDOW_WAIT_S:-60} s (log $wl)"
       return 2
     fi
-    rm -f "$Q/window-unjudged"   # judged (PASS or FAIL; a FAIL keeps window-failed, which checks every ship)
+    rm -f "$Q/window-unjudged" "$Q/window-owed" "$Q/window-wait-since"   # judged (PASS or FAIL; a FAIL keeps window-failed, which checks every ship)
     if [ $wrc = 0 ]; then
       rm -f "$Q/window-failed"; echo "$(date '+%F %T') ${t:0:9} $what window-render PASS" >> "$Q/shipped.log"
       echo "$(date +%T) ${t:0:9}: device window check PASS"; return 0
@@ -623,6 +625,40 @@ run)
   }
   # done_req FILE RESULT: a request fully on the phone.
   done_req() { echo "result=$2" >> "$1"; mv "$1" "$Q/done/"; }
+  # shipped_as: a request's result word - "shipped-unchecked" while a window check is owed ($Q/window-unjudged: a base
+  # whose window changes no device check has judged yet), else "shipped". Live, not judged: the board can tell them apart.
+  shipped_as() { if [ -s "$Q/window-unjudged" ]; then echo shipped-unchecked; else echo shipped; fi; }
+  # window_bound SINCE: a NOT JUDGED window check that started waiting at SINCE has waited WINDOW_WAIT_MAX_S (1800) s:
+  # it stops blocking (11-26 21:20-22:50: the user chatted on the phone on and off - Dozing between touches, never idle
+  # 600 s - and one APK's check held 7 requests for 90 min). The don't-wake rule stands; the check is owed instead.
+  # The clock is the phone's unjudged time, not one tip's: a superseded wait leaves its start in $Q/window-wait-since
+  # (cleared once a check judges) and the next wait starts from it - a stream of tips can't restart it forever.
+  window_bound() { [ -n "$1" ] && [ $(( $(date +%s) - $1 )) -ge "${WINDOW_WAIT_MAX_S:-1800}" ]; }
+  wait_since() { cat "$Q/window-wait-since" 2>/dev/null || date +%s; }
+  # window_owe TIP WHAT BASE: the ship goes on unjudged - BASE kept as $Q/window-unjudged (the next check covers it;
+  # "none" = no base, every window file), $Q/window-owed for status/owed_window, logged loudly + mailed once.
+  window_owe() {
+    [ -s "$Q/window-unjudged" ] || echo "${3:-none}" > "$Q/window-unjudged"
+    [ -s "$Q/window-owed" ] || echo "$1 $2 $(date +%s)" > "$Q/window-owed"
+    echo "$(date '+%F %T') ${1:0:9} $2 SHIPPED UNCHECKED - window check NOT JUDGED for ${WINDOW_WAIT_MAX_S:-1800} s (phone never awake+idle); the check is owed, run at the next awake/idle window" >> "$Q/shipped.log"
+    echo "$(date +%T) ${1:0:9}: !!! window check NOT JUDGED for ${WINDOW_WAIT_MAX_S:-1800} s - $2 shipped UNCHECKED, its requests done as shipped-unchecked; the check is owed (next awake/idle phone)"
+    mail "ship ${1:0:9} ($2) SHIPPED UNCHECKED: the device window check was NOT JUDGED for ${WINDOW_WAIT_MAX_S:-1800} s (the phone dozing between the user's touches); it runs at the next awake/idle window, a FAIL then flags WINDOWS BROKEN"
+  }
+  # owed_window: a window check owed (window_owe, or a superseded wait whose newer tip ships nothing that runs one)
+  # runs here on the live shell, every WINDOW_WAIT_S (60) s, while no APK is out and no other check waits. NOT JUDGED:
+  # tried again; PASS clears it; FAIL is WINDOWS BROKEN (window_gate). Keeps the runner up (bg_go) till judged.
+  owed_due() { [ -s "$Q/window-unjudged" ] && [ ! -s "$Q/window-wait" ] && ! apk_out; }
+  owed_window() {
+    owed_due || return 0
+    local lt t r
+    lt=$(cat "$Q/window-owed-try" 2>/dev/null || echo 0)
+    [ $(( $(date +%s) - lt )) -ge "${WINDOW_WAIT_S:-60}" ] || return 0
+    date +%s > "$Q/window-owed-try"
+    t=$(cat "$Q/live" 2>/dev/null || true); [ -n "$t" ] || return 0
+    r=0; window_gate "" "$t" owed || r=$?
+    [ $r = 0 ] && rm -f "$Q/window-unjudged" "$Q/window-owed" "$Q/window-wait-since"   # PASS, or no window change left to judge
+    return 0
+  }
   # The known hacks to the Progress app (apps/powos-progress, its Hacks widget): the HACK registry of what just
   # shipped, pushed whole after each ship - no polling. In the background and never fatal: a ship doesn't wait on it.
   sync_hacks() { [ -x lib/apps/powos-progress-cli ] || return 0
@@ -764,7 +800,7 @@ run)
   # reap_apk_installed A: reap_apk's installed case (rc 0, or the phone reports A installed): the live record,
   # the window/shell checks, then its requests done. rc 2 = the window check was NOT JUDGED ($Q/apk stays).
   reap_apk_installed() {
-    local A=$1 live st wg r n sha ht failure=
+    local A=$1 live st wg r n sha ht failure='' wb since nt ride=''
     live=$(cat "$Q/live" 2>/dev/null || true)
     # Keep the pre-install obligation across NOT JUDGED retries: live below records actual content.
     [ -f "$Q/apk/shell-want" ] || printf '%s\n' "$live" > "$Q/apk/shell-want"
@@ -784,9 +820,30 @@ run)
     fi
     # The device window check BEFORE its requests are done (the build it replaced: ship-apk's snapshot of the
     # previous install, ship-guard.sh snapshot DIR/commit): WINDOWS BROKEN keeps them and marks the APK failed.
-    wg=0; window_gate "$(cat "$HOME/.cache/powos-ship-snapshot/commit" 2>/dev/null)" "$st" apk || wg=$?
-    # NOT JUDGED (phone asleep): nothing recorded, its requests kept; the next reap tries again in ~60 s.
-    if [ $wg = 2 ]; then date +%s > "$Q/apk/window-wait"; return 2; fi
+    # The base is read once (the snapshot is the NEXT APK's once one starts) and kept with the wait.
+    [ -f "$Q/apk/window-base" ] || cat "$HOME/.cache/powos-ship-snapshot/commit" > "$Q/apk/window-base" 2>/dev/null || : > "$Q/apk/window-base"
+    wb=$(cat "$Q/apk/window-base")
+    wg=0; window_gate "$wb" "$st" apk || wg=$?
+    # NOT JUDGED (phone asleep): nothing recorded, its requests kept; the next reap tries again in ~60 s - unless
+    # (a) origin has a newer tip on top of this one that ships something (an APK or a shell change): it goes now and
+    #     ITS check covers this base too ($Q/window-unjudged); these requests ride along (ancestors of the new tip,
+    #     done with its ship), none done here; or
+    # (b) it has waited WINDOW_WAIT_MAX_S: installed is installed - done as shipped-unchecked, the check owed.
+    if [ $wg = 2 ]; then
+      [ -s "$Q/apk/window-since" ] || wait_since > "$Q/apk/window-since"
+      since=$(cat "$Q/apk/window-since")
+      nt=$(git rev-parse HEAD 2>/dev/null || true)
+      if [ -n "$nt" ] && [ "$nt" != "$A" ] && [ "$nt" != "$st" ] && git merge-base --is-ancestor "$A" "$nt" 2>/dev/null &&
+         { pending_apk "$nt" || [ -n "$(delta "$st" "$nt")" ]; }; then
+        [ -s "$Q/window-unjudged" ] || echo "${wb:-none}" > "$Q/window-unjudged"
+        [ -s "$Q/window-wait-since" ] || echo "$since" > "$Q/window-wait-since"
+        echo "$(date +%T) ${A:0:9}: APK window check still waiting for an awake phone - superseded by ${nt:0:9} (its ship checks both; these requests ride along)"
+        echo "$(date '+%F %T') ${A:0:9} apk window check superseded by ${nt:0:9} (NOT JUDGED; the newer ship's check covers it)" >> "$Q/shipped.log"
+        ride=1; wg=0
+      elif window_bound "$since"; then
+        window_owe "$A" apk "$wb"; wg=0
+      else date +%s > "$Q/apk/window-wait"; return 2; fi
+    fi
     rm -f "$Q/apk/window-wait"
     # What the phone RENDERS, not the record: older than the shipped shell = the APK failed, the shell re-applied.
     [ $wg = 0 ] || failure="WINDOWS BROKEN"
@@ -798,8 +855,8 @@ run)
     # A shell held for this APK came with its install (ship-apk pushes origin's tip shell after it).
     { read -r ht _ < "$Q/shell-held" && git merge-base --is-ancestor "$ht" "$A"; } 2>/dev/null && rm -f "$Q/shell-held"
     # The records above first, THEN its requests done: a watcher seeing them done sees the records too.
-    n=0; [ $wg = 0 ] && for r in "$Q"/*.req; do [ -f "$r" ] || continue; sha=; . "$r"
-      git merge-base --is-ancestor "$sha" "$A" 2>/dev/null && { done_req "$r" "shipped:${A:0:9}:apk"; n=$((n+1)); }; done
+    n=0; [ $wg = 0 ] && [ -z "$ride" ] && for r in "$Q"/*.req; do [ -f "$r" ] || continue; sha=; . "$r"
+      git merge-base --is-ancestor "$sha" "$A" 2>/dev/null && { done_req "$r" "$(shipped_as):${A:0:9}:apk"; n=$((n+1)); }; done
     echo "$(date '+%F %T') ${A:0:9} apk $n req: $(grep -h '^note=' "$Q/apk/notes" 2>/dev/null | head -1 | cut -c6- || true)" >> "$Q/shipped.log"
     units_publish
     echo "$(date +%T) ${A:0:9}: APK installed ($n request(s) done)"
@@ -877,33 +934,38 @@ run)
     echo "$(date '+%F %T') ${T:0:9} shell ${#sreqs[@]} req ($who_s): ${sn:-(silent)}" >> "$Q/shipped.log"
     units_publish
     for r in ${nreqs[@]+"${nreqs[@]}"}; do [ -f "$r" ] && echo "noted=1" >> "$r"; done
-    for r in ${sreqs[@]+"${sreqs[@]}"}; do done_req "$r" "shipped:${T:0:9}:shell"; done
+    for r in ${sreqs[@]+"${sreqs[@]}"}; do done_req "$r" "$(shipped_as):${T:0:9}:shell"; done
     echo "$(date +%T) ${T:0:9}: shipped (shell)"
     sync_hacks
     e2e_round
   }
   # window_wait: a window check NOT JUDGED (the phone asleep) blocks the loop - nothing else ships, no request is done -
-  # until it's judged: retried every WINDOW_WAIT_S (60) s, each try logged (window_gate), no cap. Returns 0 while it
+  # until it's judged: retried every WINDOW_WAIT_S (60) s, each try logged (window_gate), up to WINDOW_WAIT_MAX_S
+  # (window_bound: then shipped unchecked, the check owed - window_owe). An APK's wait ($Q/apk/window-wait) is
+  # reap_apk's, which supersedes/bounds it the same way. Returns 0 while it
   # still waits (the caller sleeps and loops), 1 once judged (PASS: the ship's requests done; FAIL: as a FAIL).
   window_wait() {
-    local ww_at ww_base ww_tip wgr
+    local ww_at ww_base ww_tip ww_since='' wgr
     [ -s "$Q/window-wait" ] || { [ -f "$Q/apk/window-wait" ] && return 0; return 1; }
     . "$Q/window-wait"
+    ww_since=${ww_since:-$ww_at}
     # Superseded (ask-latency 11-01: one dozing-phone wait blocked every later ship for 94 min, 5 requests stuck): the
-    # phone is asleep (nobody looking) and origin has a newer tip that changes the shell again and needs no APK - the
-    # loop ships that tip now. Its own window check covers this tip's base too ($Q/window-unjudged, window_gate), and
-    # this tip's requests are ancestors of the new one, so none is done before a check of its window changes passes.
+    # phone is asleep (nobody looking) and origin has a newer tip that changes the shell again or needs an APK (11-26:
+    # APK tips were stuck behind it too) - the loop ships that tip now. Its own window check (the shell's, or its APK
+    # install's) covers this tip's base too ($Q/window-unjudged, window_gate); this tip's requests ride along with it.
     local nt; nt=$(git rev-parse HEAD)
     if [ "$nt" != "$ww_tip" ] && git merge-base --is-ancestor "$ww_tip" "$nt" 2>/dev/null &&
-       ! pending_apk "$nt" && [ -n "$(delta "$ww_tip" "$nt")" ]; then
-      [ -s "$Q/window-unjudged" ] || echo "$ww_base" > "$Q/window-unjudged"
+       { pending_apk "$nt" || [ -n "$(delta "$ww_tip" "$nt")" ]; }; then
+      [ -s "$Q/window-unjudged" ] || echo "${ww_base:-none}" > "$Q/window-unjudged"
+      [ -s "$Q/window-wait-since" ] || echo "$ww_since" > "$Q/window-wait-since"
       rm -f "$Q/window-wait"
       echo "$(date +%T) ${ww_tip:0:9}: window check still waiting for an awake phone - superseded by ${nt:0:9} (its check covers both)"
       return 1
     fi
     [ $(( $(date +%s) - ww_at )) -ge "${WINDOW_WAIT_S:-60}" ] || return 0
     T=$ww_tip; window_gate "$ww_base" "$T" shell; wgr=$?
-    if [ $wgr = 2 ]; then sed -i '' "s/^ww_at=.*/ww_at=$(date +%s)/" "$Q/window-wait"; return 0; fi
+    if [ $wgr = 2 ] && window_bound "$ww_since"; then window_owe "$T" shell "$ww_base"; wgr=0
+    elif [ $wgr = 2 ]; then sed -i '' "s/^ww_at=.*/ww_at=$(date +%s)/" "$Q/window-wait"; return 0; fi
     rm -f "$Q/window-wait"
     if [ $wgr = 0 ]; then shell_done
     else echo "$T" > "$Q/failed"; echo "$(date +%T) ${T:0:9}: shell ship live but WINDOWS BROKEN - requests kept, waiting for a new origin commit"; fi
@@ -926,6 +988,7 @@ run)
       fi
       # A window check waiting for an awake phone (window-render rc 2): only its retry runs until it's judged.
       if window_wait; then sleep "$POLL"; continue; fi
+      owed_window
       T=$(git rev-parse HEAD)
       # The debounce: shell after SHIP_QUIET_SHELL_S (0) s of origin on this tip, an APK after QUIET (60) s.
       { read -r seen at < "$Q/tip-seen"; } 2>/dev/null || seen=
@@ -1066,7 +1129,7 @@ run)
           else window_gate "$base" "$T" shell; wgr=$?; fi
           if [ $wgr = 2 ]; then
             # NOT JUDGED (phone asleep): live, but its requests stay NOT done; the loop top retries the check (~60 s).
-            { printf 'ww_at=%s\nww_base=%q\nww_tip=%q\nwho_s=%q\nsn=%q\n' "$(date +%s)" "$base" "$T" "$who_s" "$sn"
+            { printf 'ww_at=%s\nww_since=%s\nww_base=%q\nww_tip=%q\nwho_s=%q\nsn=%q\n' "$(date +%s)" "$(wait_since)" "$base" "$T" "$who_s" "$sn"
               declare -p sreqs nreqs; } > "$Q/window-wait.tmp" && mv "$Q/window-wait.tmp" "$Q/window-wait"
             continue
           fi
@@ -1090,7 +1153,7 @@ run)
         # processed: the newest tip whose shell part is on the phone (nothing to push) - verify/queue.sh's shipped()
         # counts a commit it contains as shipped (11-05: a docs commit's checks waited for a ship that never comes).
         [ "$(cat "$Q/processed" 2>/dev/null)" = "$T" ] || echo "$T" > "$Q/processed"
-        for r in ${sreqs[@]+"${sreqs[@]}"}; do done_req "$r" "shipped:${T:0:9}:none"; done
+        for r in ${sreqs[@]+"${sreqs[@]}"}; do done_req "$r" "$(shipped_as):${T:0:9}:none"; done
         [ ${#sreqs[@]} -gt 0 ] && echo "$(date +%T) ${T:0:9}: nothing differs from what's live - ${#sreqs[@]} request(s) done"
       fi
       # 2. The APK, beside the loop: once origin stayed QUIET s on the tip, one at a time, not again on a tip that failed.
