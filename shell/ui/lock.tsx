@@ -24,6 +24,10 @@
  * sideways move on it is the track's, not the face's). A paused one stays 10 minutes (stock's). A media player's own
  * notification isn't listed while its card shows. The bottom corners hold the torch and the camera (lockshortcuts.tsx:
  * press and hold).
+ *
+ * A fingerprint unlocks straight from the face: the keyguard under it listens for an in-display sensor while the face
+ * occludes it, dismisses itself, and the face goes with it (LockFace.kt, USER_PRESENT). Its spot is drawn where the
+ * sensor is (LockFingerprint) and the hint says to touch it (sensorHint).
  */
 import { useEffect, useLayoutEffect, useRef, useState } from "preact/hooks";
 import { powos } from "../bridge.ts";
@@ -36,6 +40,8 @@ import { signal } from "@preact/signals";
 import { MediaCard, askAppIcons, askMedia, lockSessions, media, mediaSeen, refreshMedia, useCardDots } from "./media.tsx";
 import { PageDots } from "./pagedots.tsx";
 import { LockShortcuts, askShortcuts } from "./lockshortcuts.tsx";
+import { Icon } from "./icons.tsx";
+import type { LockSensor } from "../types.ts";
 
 /** Lifted this far (of the height) when let go, it unlocks. */
 const UNLOCK = 0.33;
@@ -120,7 +126,7 @@ function LockMedia() {
 }
 
 /** Pressed where the finger is the control's own (a seek line, a corner shortcut): never the face's swipe. */
-const OWN = ".cc-seek, .lock-shortcut";
+const OWN = ".cc-seek, .lock-shortcut, .lock-fp";
 
 /** A move that is the media track's sideways swipe (several cards, past SLOP, more sideways than up): the face lets it go. */
 function sideways(d: { x0: number; y0: number; track: boolean }, e: PointerEvent): boolean {
@@ -153,10 +159,39 @@ function verdict(d: { y0: number; last: [number, number]; v: number }, cancelled
   return { p, v, open };
 }
 
+/**
+ * The hint line with a fingerprint to use: an in-display sensor (its spot drawn, or its place unknown) is touched; a
+ * side (power button) sensor isn't armed while the face is up with the screen on (SystemUI listens then only for an
+ * in-display one, docs/NATIVE-SYSTEM-UI.md), so the swipe stays the hint there. No finger enrolled: the swipe.
+ */
+export function sensorHint(s: LockSensor | null): string {
+  if (!s?.enrolled) return "swipe up to unlock";
+  if (s.kind === "udfps") return "touch the sensor or swipe up";
+  if (s.kind === "other") return "touch the fingerprint sensor or swipe up";
+  return "swipe up to unlock";
+}
+
+/**
+ * Where an in-display fingerprint sensor is (FingerprintSensor.kt: the system's config_udfps_sensor_props), drawn at its
+ * place on the face. The face's window takes no touch there (a hole, native), so a finger on it is the keyguard's; the
+ * face goes once the keyguard is dismissed.
+ */
+function LockFingerprint({ s }: { s: LockSensor | null }) {
+  const p = s?.enrolled && s.kind === "udfps" ? s.spot : null;
+  if (!p) return null;
+  return (
+    <div class="lock-fp" aria-hidden="true" style={{ left: `${p.x - p.r}px`, top: `${p.y - p.r}px`, width: `${2 * p.r}px`, height: `${2 * p.r}px` }}>
+      <Icon name="fingerprint" />
+    </div>
+  );
+}
+
 export function Lock() {
   // On the minute's turn, nothing while the face is hidden (it was every 10 s, put away or not).
   const now = useMinuteClock();
   const [battery, setBattery] = useState<Battery>({ level: null, charging: false });
+  /** The fingerprint sensor (lock.sensor): its spot and the hint; null until known, or an older APK. */
+  const [sensor, setSensor] = useState<LockSensor | null>(null);
   const [list, setList] = useState<NotificationList>({
     available: true,
     items: [],
@@ -229,6 +264,8 @@ export function Lock() {
       // Painting again (a frame after being shown): from here the swipe is answered.
       requestAnimationFrame(() => void powos.lock.mark("ready"));
       powos.system.battery().then(setBattery);
+      // Asked each time shown: a finger enrolled meanwhile, the display's mode changed.
+      powos.lock.sensor().then(setSensor, () => setSensor(null));
       powos.notifications.list().then(setList);
       // The media cards and the torch as they are now (neither is told while the screen is off).
       refreshMedia();
@@ -322,8 +359,9 @@ export function Lock() {
       {/* How it charges, as the stock lock screen says it: "Super fast charging · 1 h until full" (charge.ts). */}
       <div class="lock-foot">
         {charge && <div class="lock-charge">{charge}</div>}
-        <div class="lock-hint muted">{hint ?? "swipe up to unlock"}</div>
+        <div class="lock-hint muted">{hint ?? sensorHint(sensor)}</div>
       </div>
+      <LockFingerprint s={sensor} />
       <LockShortcuts hint={setHint} />
     </div>
   );

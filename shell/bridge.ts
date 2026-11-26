@@ -52,6 +52,7 @@ import type {
   WidgetScreen,
   MediaState,
   LockShortcutState,
+  LockSensor,
   NativeSetting,
   GlassesState,
   SystemStatus,
@@ -297,6 +298,7 @@ function native(host: NonNullable<Window["PowosHost"]>): Bridge {
       shortcuts: () => call<LockShortcutState>("lock.shortcuts"), // detect: no shortcuts shown until the APK has them
       torch: (on) => call<boolean>("lock.torch", on), // detect
       camera: () => call<boolean>("lock.camera"), // detect
+      sensor: () => call<LockSensor>("lock.sensor"), // detect: no spot, no hint until the APK has it
     },
     pad: {
       state: () => call<boolean>("pad.state"),
@@ -907,6 +909,8 @@ function mock(): Bridge {
           return on;
         },
         camera: async () => (console.log("[mock] secure camera"), true),
+        // A side sensor (the OnePlus): no spot; the gate's LF1 sets an in-display one.
+        sensor: async (): Promise<LockSensor> => ({ kind: "side", enrolled: true, spot: null }),
       };
     })(),
     pad: (() => {

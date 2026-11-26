@@ -10139,6 +10139,65 @@ async function lockMediaScene(r, label) {
 }
 
 /**
+ * LF1 (lock-fingerprint, "Fingerprint unlocks straight from the lock face"): an in-display sensor's spot is drawn where
+ * the host says it is (lock.sensor, CSS px), with the touch hint; a swipe starting on the spot is never the face's
+ * unlock (the finger there is the keyguard's sensor); a side sensor, an unknown place and no finger enrolled draw no
+ * spot, each with its own hint.
+ */
+function lfState() {
+  const fp = document.querySelector(".lock-fp")?.getBoundingClientRect();
+  return {
+    unlock: window.__lf.unlock,
+    spot: fp?.width > 0 ? { x: Math.round(fp.left + fp.width / 2), y: Math.round(fp.top + fp.height / 2), w: Math.round(fp.width) } : null,
+    hint: document.querySelector(".lock-hint")?.textContent ?? "",
+  };
+}
+async function lockFingerprintScene(r, label) {
+  const f = await fingerOf(r.page);
+  const fails = [];
+  const spot = await r.page.evaluate(async () => {
+    const { powos } = await window.__gw.mod("./bridge.ts");
+    window.__lf = { unlock: 0, sensor: null };
+    powos.lock.unlock = async () => void window.__lf.unlock++;
+    powos.lock.sensor = async () => window.__lf.sensor;
+    window.__lfSet = (s) => ((window.__lf.sensor = s), window.__mockEvents.emit("lock.shown", null));
+    const sp = { x: Math.round(innerWidth / 2), y: innerHeight - 140, r: 32 };
+    window.__lfSet({ kind: "udfps", enrolled: true, spot: sp });
+    return sp;
+  });
+  await r.page.evaluate(lfState.toString());
+  const until = async (ok, ms = 3000) => {
+    const end = Date.now() + ms;
+    let s = await r.page.evaluate(lfState);
+    while (!ok(s) && Date.now() < end) await f.wait(60), (s = await r.page.evaluate(lfState));
+    return s;
+  };
+  let s = await until((x) => x.spot);
+  if (!s.spot) return [`LF1 ${label}: no fingerprint spot drawn for an in-display sensor`];
+  if (Math.abs(s.spot.x - spot.x) > 1 || Math.abs(s.spot.y - spot.y) > 1 || Math.abs(s.spot.w - 2 * spot.r) > 1)
+    fails.push(`LF1 ${label}: the spot is at ${JSON.stringify(s.spot)}, the sensor at ${JSON.stringify(spot)}`);
+  if (!/touch the sensor/.test(s.hint)) fails.push(`LF1 ${label}: the hint doesn't say to touch the sensor ("${s.hint}")`);
+  // Up from the spot: the sensor's finger, never the face's swipe.
+  const H = (await r.page.evaluate(() => innerHeight)) * 0.5;
+  await f.swipe(Array.from({ length: 13 }, (_, i) => ({ x: spot.x, y: Math.round(spot.y - (H * i) / 12) })));
+  await f.wait(300);
+  s = await r.page.evaluate(lfState);
+  if (s.unlock) fails.push(`LF1 ${label}: a swipe starting on the fingerprint spot asked the unlock`);
+  for (const [sensor, want, why] of [
+    [{ kind: "side", enrolled: true, spot: null }, /swipe up to unlock/, "a side sensor"],
+    [{ kind: "other", enrolled: true, spot: null }, /touch the fingerprint sensor/, "a sensor whose place is unknown"],
+    [{ kind: "udfps", enrolled: false, spot }, /swipe up to unlock/, "no finger enrolled"],
+  ]) {
+    await r.page.evaluate((x) => window.__lfSet(x), sensor);
+    s = await until((x) => !x.spot && want.test(x.hint));
+    if (s.spot) fails.push(`LF1 ${label}: a spot drawn for ${why}`);
+    if (!want.test(s.hint)) fails.push(`LF1 ${label}: ${why} says "${s.hint}", not ${want}`);
+  }
+  console.log(`     lock-fingerprint-${label}: ${JSON.stringify(s)}`);
+  return fails;
+}
+
+/**
  * WS1 (10-31 15:37: home's surface re-made, then no "w.f" for ~9 s until the watchdog reloaded home): with the page's
  * rAF held (a WebView that paused it while hidden), a visibilitychange to hidden and back sends the windows' geometry
  * within 500 ms, and so does the host's "webwindows.resend" alone - neither waits for a frame.
@@ -16038,6 +16097,10 @@ try {
   if (process.env.SHELL_PAGES !== "0")
     for (const [label, viewport] of [["folded", { width: 404, height: 900 }], ["unfolded", { width: 821, height: 883 }]])
       runs.push(open(browser, `${ORIGIN}/index.html?mode=lock`, `lock-media-${label}`, viewport).then((r) => whenReady(r, () => lockMediaScene(r, label))));
+  // LF1: an in-display fingerprint sensor's spot where the host says, its hint, no unlock from a swipe on it. Folded and unfolded.
+  if (process.env.SHELL_PAGES !== "0")
+    for (const [label, viewport] of [["folded", { width: 404, height: 900 }], ["unfolded", { width: 821, height: 883 }]])
+      runs.push(open(browser, `${ORIGIN}/index.html?mode=lock`, `lock-fingerprint-${label}`, viewport).then((r) => whenReady(r, () => lockFingerprintScene(r, label))));
   // TI1: tiled windows' bars, the w.f touch rects, the divider's pill (the user's layout, 10-31 15:08, unfolded).
   if (process.env.SHELL_PAGES !== "0")
     runs.push(open(browser, `${ORIGIN}/index.html`, "tile-bars-unfolded", { width: 821, height: 883 }).then((r) => whenReady(r, () => tileBarsScene(r))));

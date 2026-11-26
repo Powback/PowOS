@@ -232,6 +232,17 @@ export interface LockShortcutState {
   camera: boolean;
 }
 
+/**
+ * The fingerprint sensor as the lock face shows it (FingerprintSensor.kt): "udfps" an in-display one with its spot
+ * (CSS px, centre + radius: the face draws it there and takes no touch on it), "side" the power button's, "other" one
+ * whose place the system doesn't say, "none" no sensor. Only an enrolled finger makes it worth showing.
+ */
+export interface LockSensor {
+  kind: "udfps" | "side" | "other" | "none";
+  enrolled: boolean;
+  spot: { x: number; y: number; r: number } | null;
+}
+
 /** One control center tile: a switch (on true/false) or an action/page (on null). */
 export interface QuickTile {
   id: string;
@@ -1113,6 +1124,8 @@ export interface Bridge {
     torch(on: boolean): Promise<boolean>;
     /** The camera over the lock (its secure mode); false: none. */
     camera(): Promise<boolean>;
+    /** The fingerprint sensor: the spot / hint on the face (an older APK rejects: neither shown). */
+    sensor(): Promise<LockSensor>;
   };
   /**
    * The control center (and the notification panel's row): every tile the phone's own control center has, switched

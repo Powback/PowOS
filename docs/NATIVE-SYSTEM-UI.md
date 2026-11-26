@@ -260,9 +260,30 @@ Native design:
   (respecting the "hide sensitive content" settings), media and widgets, all rendered by the shell.
 - Unlock is `KeyguardManager.requestDismissKeyguard(activity, callback)` (public API). SystemUI's bouncer
   takes the PIN, Gatekeeper verifies it, and the trust and biometric state stay SystemUI's.
-- **To verify:** whether side-fingerprint unlock fires while a show-when-locked app occludes the keyguard.
-  SystemUI's `KeyguardUpdateMonitor` listens while occluded only in some states. If it doesn't, the
-  fingerprint touch calls `requestDismissKeyguard`, and the bouncer appears with the fingerprint armed.
+- **Fingerprint (2026-11-26, board "Fingerprint unlocks straight from the lock face").** What holds, from
+  AOSP's `KeyguardUpdateMonitor.shouldListenForFingerprint`: while a show-when-locked app occludes the keyguard,
+  SystemUI listens for the fingerprint with the screen off or going to sleep (any sensor), and with the screen
+  on only for an **in-display (UDFPS)** sensor, or when the occluding app "requests FP" (no public API). A
+  match then dismisses the keyguard itself (`BiometricUnlockController` `MODE_UNLOCK_COLLAPSING` /
+  `MODE_WAKE_AND_UNLOCK`), and the face goes on the `USER_PRESENT` that follows (`LockFace.kt`; `onResume`
+  and `SCREEN_ON` check `isKeyguardLocked` too). So:
+  - **In-display (S25-style UDFPS):** a finger on the sensor unlocks straight from the face. The face draws
+    the sensor's spot (`lock.tsx` `LockFingerprint`) where `com.android.internal.R.array.config_udfps_sensor_props`
+    puts it (native px, scaled to the current mode and turned with the display:
+    `shell/FingerprintSensor.kt`, `FingerprintSensorTest`), hints "touch the sensor or swipe up", and its window
+    takes no touch there (a touch-through hole, hidden internal-insets listener, `FLAG_NOT_TOUCH_MODAL`). The
+    live sensor properties (`getSensorPropertiesInternal`) need `USE_BIOMETRIC_INTERNAL` (signature), so a
+    phone whose HAL alone knows the spot gets no spot, only "touch the fingerprint sensor or swipe up".
+  - **Side / power button (OnePlus Open, `dumpsys fingerprint`: `mSensorType = 4`):** pressing the button
+    with an enrolled finger wakes and unlocks (the screen was off: listening), the face follows. With the
+    screen already on and the face up, AOSP doesn't listen: the hint stays "swipe up to unlock", and the swipe
+    brings the bouncer with the sensor armed. Not verified on OxygenOS with a real finger (no injection).
+  - The face's exit on an unlock from outside it is checked on the device with `wm dismiss-keyguard`
+    (`tools/phone/verify/lock-fingerprint.sh`). The biometric "acquired" event isn't observable without
+    `USE_BIOMETRIC_INTERNAL`, and `addKeyguardLockedStateListener` needs `SUBSCRIBE_TO_KEYGUARD_LOCKED_STATE`,
+    so `USER_PRESENT` stays the signal.
+  - **Still to verify:** a real finger on an in-display phone (spot position against the sensor, the unlock
+    while occluded on One UI), and whether OxygenOS arms the side sensor with the screen on.
 - Later, with `DISABLE_*` flags while locked, SystemUI's keyguard clock and notifications can be hidden so
   only the bouncer shows.
 
@@ -506,6 +527,6 @@ approves installing it on the phone, flash it through Magisk, reboot once, and c
 `dumpsys package com.powos.app` before any overlay exists.
 
 Open questions to settle with a device test (each is a "to verify" above): fingerprint unlock under a
-show-when-locked occluder; whether the panel enters its AOD mode without OnePlus's `AodManager`; whether
+show-when-locked occluder with a real finger (in-display spot position; a side sensor with the screen on); whether the panel enters its AOD mode without OnePlus's `AodManager`; whether
 `hiddenapibypass` holds on this ART build; whether OxygenOS's Settings resets a non-OnePlus recents
 provider (OnePlus's own `OverviewComponentObserver` logic lives in its launcher, which we'd no longer run).

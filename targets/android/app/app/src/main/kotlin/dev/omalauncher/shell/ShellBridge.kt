@@ -694,6 +694,8 @@ class ShellBridge(
             "lock.torch" -> requireNotNull(lock) { "not the lock face" }.shortcuts.torch(a.optBoolean(0, true))
             "lock.camera" -> requireNotNull(lock) { "not the lock face" }.shortcuts.camera()
             "lock.mark" -> UnlockLog.mark("page ${a.getString(0)}")
+            // The fingerprint sensor for the face's spot / hint (FingerprintSensor): its kind, a finger enrolled, where.
+            "lock.sensor" -> FingerprintSensor.read(context).json(context.resources.displayMetrics.density)
             "qs.destinations" -> SettingsSearch(context).destinations { broadcast("qs.destinations", "null") }
             "qs.state" -> quick.state()
             "qs.toggle" -> quick.toggle(a.getString(0)).let { quick.state() }

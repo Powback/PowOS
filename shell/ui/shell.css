@@ -3012,6 +3012,20 @@ html:root .lock .lock-shortcut.tile { --glass-blur-native: var(--backdrop-blur-n
 html:root .lock .lock-shortcut.tile.on { background: var(--color-foreground); color: var(--color-background); }
 .lock-charge { color: var(--color-foreground); font-size: var(--text-small); }
 .lock-hint { font-size: var(--text-small); }
+/* The in-display fingerprint sensor's spot (lock.tsx LockFingerprint): placed by the host's numbers (left/top/size, the
+   sensor's own circle), the face's material and the icon filling most of it. A press on it is never the face's swipe
+   (lock.tsx OWN; natively the window takes no touch there). Lifting the face takes it along. */
+.lock-fp {
+  position: absolute;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 50%;
+  background: var(--backdrop-tint);
+  color: var(--color-foreground);
+  font-size: 0;
+}
+.lock-fp .icon { width: 70%; height: 70%; }
 
 /* Other apps' Android widgets (appwidget.tsx): the widget's own frame fills the tile, drawn by the widget itself (its
    background, its corners) - no PowOS frame around it; selected, an outline shows it. */

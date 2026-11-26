@@ -29,7 +29,8 @@ import dev.omalauncher.App
  * when the screen goes off (and so is there as it comes on, the phone locked), PowOS's lock screen shows over Android's (an activity shown when
  * locked: [PowosLockActivity]) - the shell's lock screen (shell/ui/lock.tsx), hot-reloaded as every PowOS screen.
  * Unlocking stays Android's: swiping up asks it (requestDismissKeyguard: its PIN pad, the fingerprint), and once the
- * phone is unlocked the face goes. Underneath it Android's own lock screen is always there - whatever happens to the
+ * phone is unlocked the face goes - the keyguard's own fingerprint unlock too (USER_PRESENT): an in-display sensor is
+ * listened to while the face occludes the keyguard, and the face leaves its spot untouched (FingerprintSensor). Underneath it Android's own lock screen is always there - whatever happens to the
  * face, the phone stays locked and unlockable.
  */
 object LockFace {
@@ -177,6 +178,10 @@ class PowosLockActivity : Activity() {
             }
         h.bridge.emit("lock.shown", null)
         setContentView(h.web)
+        // An in-display fingerprint sensor: the face takes no touch on it (the spot lock.tsx draws there) - a finger on
+        // it is the keyguard's, which listens while the face occludes it and dismisses itself; then the face goes
+        // (USER_PRESENT above). FingerprintSensor.kt.
+        FingerprintSensor.read(this).takeIf { it.enrolled }?.spot?.let { FingerprintSensor.touchHole(window, it) }
         // A face whose page doesn't answer (it never loaded, it hangs) can't be swiped away - the phone can't be
         // unlocked through it (2026-10-20). It goes then: Android's own lock screen is under it, locked as before.
         watchdog =

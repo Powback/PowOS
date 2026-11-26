@@ -4,6 +4,8 @@
     <uses-permission android:name="android.permission.INTERNET" />
     <!-- The device agent's screen_on without root (devices/DeviceAgentHost.kt). -->
     <uses-permission android:name="android.permission.WAKE_LOCK" />
+    <!-- The lock face asks whether a finger is enrolled (FingerprintSensor.kt) before showing the sensor spot / hint. -->
+    <uses-permission android:name="android.permission.USE_BIOMETRIC" />
     <!-- Health Connect (shell/HealthConnectBridge.kt): read-only, what the wearables' apps wrote there. Asked once from PowOS
          (powos.health.grant); on the rooted phone `pm grant` does it too. -->
     <uses-permission android:name="android.permission.health.READ_STEPS" />
