@@ -196,3 +196,23 @@ install`. Phone only after the emulator check passes, via the normal ship.
 - Rotated or skewed glass is not covered by regions. It needs step 10 or stays axis-aligned.
 - The emulator's GL RenderEngine runs on the host GPU. Sync checks transfer to the phone; cost numbers do not
   (step 8 is phone-only).
+
+## Page cost: a page swipe measures once (2026-11-26)
+
+The user's 11-23 traces had `measureSurfaces`, `checkVisibility` and `getBoundingClientRect` from `nativeglass.ts`
+at 0.4 to 1 s per 12 to 27 s of home swipes: every surface's rect, clips, opacity and visibility were read every frame
+of every swipe. Now (`nativeglass.ts` "a page swipe, without measuring each frame"):
+
+- **Follow the sliders.** A page swipe only translates `.page-track`, `.home`, `.ai-screen` and `.home > .bar`
+  (gesture.ts applyTrack). The page is measured once as the loop starts; each later frame reads those few sliders'
+  rects and moves every region and clip by its nearest slider's delta. A slider changing size (the drawer's scale),
+  any class or style change on glass beyond a slide's own (`--track-x`, `--slide-x`, `--bar-counter`, the tokens
+  `sliding`/`dragging`/`away`/`shown`), a node with a surface, a surface or its parent resizing (ResizeObserver), a
+  scroll, or any other transition or animation on glass drops the kept set and the next frame measures again.
+- **Visibility cached.** `checkVisibility` is read once per surface and re-read only after such a change, or when an
+  IntersectionObserver sees the surface come or go.
+- Reads stay after the frame's layout (the ResizeObserver callback), never in a rAF.
+
+Gate: `home-paints` 46-50 full measures per swipe before, 1 after (2 to PowOS AI's page and back: the bar's role morph
+is a real shape change); every followed frame is also measured beside it and must match (178 frames, 0 px off).
+`home-swipes` counts the same. CDP A/B: `__glass.live.follow(false)`; `__glass.live.measures` counts.

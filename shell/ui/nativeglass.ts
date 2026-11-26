@@ -215,11 +215,40 @@ function reshape() {
   clipsOf = new Map();
   // A surface's size changing with its content (a widget's text, a list growing): measured then, and only then.
   sized.disconnect();
-  for (const el of shapes.keys()) sized.observe(el);
+  onScreen.disconnect();
+  visible = new Map();
+  for (const el of shapes.keys()) {
+    sized.observe(el);
+    if (el.parentElement) sized.observe(el.parentElement);
+    onScreen.observe(el);
+  }
 }
 
-/** The surfaces' own size changes (their content, not their place: the triggers below see those). */
-const sized = new ResizeObserver((es) => (why("resized", es[0]?.target), kick()));
+/**
+ * The surfaces' own size changes (their content, not their place: the triggers below see those), and their parents'
+ * (a column whose other content grew moves the surfaces in it). A size other than the one seen before drops a page
+ * swipe's kept set ([follow]); a first sighting (a reshape observes all again) doesn't.
+ */
+const sizes = new WeakMap<Element, string>();
+const sized = new ResizeObserver((es) => {
+  let grew = false;
+  for (const e of es) {
+    const k = `${e.contentRect.width} ${e.contentRect.height}`;
+    if (sizes.has(e.target) && sizes.get(e.target) !== k) grew = true;
+    sizes.set(e.target, k);
+  }
+  if (grew) unfollow();
+  why("resized", es[0]?.target);
+  kick();
+});
+/**
+ * A surface coming on or off screen, or shown or hidden in a way no class or style write said (a display or
+ * content-visibility from elsewhere): its visibility read again. Not a kick while a swipe slides: that is the swipe.
+ */
+const onScreen = new IntersectionObserver((es) => {
+  for (const e of es) visible.delete(e.target);
+  if (!follow) kick();
+});
 
 /** How far a joined side reaches into its neighbour (CSS px; ~1.4 device px at 2.76). */
 const JOIN_OVERLAP = 0.5;
@@ -235,6 +264,8 @@ const f = (n: number) => (Math.round(n * 10) / 10).toString();
 
 /** A surface's region before clipping: its box (joined sides reaching over), what clips it, its corners, its alpha. */
 interface Raw {
+  /** The surface (home for its foot strip): which slider it rides in a page swipe ([followFrom]). */
+  el?: Element;
   /** Left, top, right, bottom on screen (CSS px), the joined sides' overlap in. */
   box: [number, number, number, number];
   /** The element's own box (its corners are cut where a clip or the screen's edge cuts it). */
@@ -262,10 +293,9 @@ function readBlur() {
 
 /** Every surface's region as laid out now (one layout read of each surface, its clips and its fading ancestors). */
 const measureRaw = (followers: Element[] = []): Raw[] => ((windowsSeen = new Map()), measureSurfaces(followers));
-function measureSurfaces(followers: Element[] = []): Raw[] {
-  if (shapesDirty) (reshape(), readBlur());
-  const out: Raw[] = [];
-  // Ancestors are shared (a page's tiles): each one's opacity read once a frame.
+
+/** A measure's shared reads: an ancestor's opacity and a clip's box (a page's tiles share them), each read once. */
+function sharedReads() {
   const seen = new Map<Element, number>();
   const opacity = (e: Element) => {
     let o = seen.get(e);
@@ -274,33 +304,50 @@ function measureSurfaces(followers: Element[] = []): Raw[] {
   };
   // A clip that fades its edges (shell.css --scroll-fade-t/-b, where there's more to scroll): the blur ends half-way
   // into each fade, where the surface's tint is half gone - neither a hard blur edge past the fade nor a tint on bare
-  // wallpaper before it. Read once a frame per clip.
-  const fades = new Map<Element, [number, number]>();
-  const fadeOf = (c: Element) => {
-    let f = fades.get(c);
-    if (!f) {
-      const cs = getComputedStyle(c);
-      fades.set(c, (f = [parseFloat(cs.getPropertyValue("--scroll-fade-t")) / 2 || 0, parseFloat(cs.getPropertyValue("--scroll-fade-b")) / 2 || 0]));
-    }
-    return f;
-  };
-  // A clip is shared by the surfaces in it (a page's tiles, the track): its box read once a frame.
+  // wallpaper before it.
   const clipBoxes = new Map<Element, [number, number, number, number]>();
   const clipBox = (c: Element) => {
     let b = clipBoxes.get(c);
     if (!b) {
       const q = c.getBoundingClientRect();
-      const [ft, fb] = fadeOf(c);
+      const cs = getComputedStyle(c);
+      const ft = parseFloat(cs.getPropertyValue("--scroll-fade-t")) / 2 || 0;
+      const fb = parseFloat(cs.getPropertyValue("--scroll-fade-b")) / 2 || 0;
       clipBoxes.set(c, (b = [q.left, q.top + ft, q.right, q.bottom - fb]));
     }
     return b;
   };
+  return { opacity, clipBox };
+}
+
+/**
+ * Whether a surface is shown (display, visibility, content-visibility): read once and kept until something that can
+ * change it - a class or style on it or an ancestor, a transition or animation on one, a reshape, or the
+ * IntersectionObserver below seeing it come or go. 11-23 traces: checkVisibility 360-830 ms, read every frame.
+ */
+let visible = new Map<Element, boolean>();
+function shownNow(el: Element): boolean {
+  let v = visible.get(el);
+  if (v === undefined) visible.set(el, (v = el.checkVisibility({ visibilityProperty: true })));
+  return v;
+}
+
+/** A surface's box on screen, or null: gone, empty or hidden. */
+function boxOf(el: Element): DOMRect | null {
+  if (!el.isConnected) return null;
+  const r = el.getBoundingClientRect();
+  return r.width < 1 || r.height < 1 || !shownNow(el) ? null : r;
+}
+
+function measureSurfaces(followers: Element[] = []): Raw[] {
+  surfaceMeasures++;
+  if (shapesDirty) (reshape(), readBlur());
+  const out: Raw[] = [];
+  const { opacity, clipBox } = sharedReads();
   const followerOf = (e: Element) => followers.find((f) => f.contains(e));
   for (const [el, s] of shapes) {
-    if (!el.isConnected) continue;
-    const r = el.getBoundingClientRect();
-    if (r.width < 1 || r.height < 1) continue;
-    if (!el.checkVisibility({ visibilityProperty: true })) continue;
+    const r = boxOf(el);
+    if (!r) continue;
     const cut = regionBoxes(el, s, r);
     let alpha = 1;
     for (const a of s.chain) alpha *= opacity(a);
@@ -308,6 +355,7 @@ function measureSurfaces(followers: Element[] = []): Raw[] {
     const k = r.width / ((el as HTMLElement).offsetWidth || r.width);
     const follower = followerOf(el);
     out.push({
+      el,
       box: cut.box,
       own: cut.own,
       under: cut.under,
@@ -319,16 +367,21 @@ function measureSurfaces(followers: Element[] = []): Raw[] {
       blur: s.blur,
     });
   }
-  // The strip under the bar (home's ::after, the navigation bar's band): square, along the screen's foot.
+  const foot = footRegion();
+  if (foot) out.push(foot);
+  return out;
+}
+
+/** The strip under the bar (home's ::after, the navigation bar's band): square, along the screen's foot. */
+function footRegion(): Raw | null {
   const home = document.querySelector<HTMLElement>(".home");
   const foot = home && getComputedStyle(home, "::after");
   // Hidden (display: none - home's foot without a slab), its computed height is still the inset's: no region then.
-  if (home && foot && foot.display !== "none" && !home.classList.contains("editing")) {
-    const h = parseFloat(foot.height) || 0;
-    const r = home.getBoundingClientRect();
-    if (h >= 1) out.push({ box: [r.left, r.bottom - h, r.right, r.bottom], own: [r.left, r.bottom - h, r.right, r.bottom], clips: [], radii: [0, 0, 0, 0], alpha: 1, square: true });
-  }
-  return out;
+  if (!home || !foot || foot.display === "none" || home.classList.contains("editing")) return null;
+  const h = parseFloat(foot.height) || 0;
+  const r = home.getBoundingClientRect();
+  if (h < 1) return null;
+  return { el: home, box: [r.left, r.bottom - h, r.right, r.bottom], own: [r.left, r.bottom - h, r.right, r.bottom], clips: [], radii: [0, 0, 0, 0], alpha: 1, square: true };
 }
 
 /**
@@ -500,14 +553,154 @@ function computed(): string | null {
   return format(out);
 }
 
-/** This frame's regions: computed during the drawer's drag, measured otherwise. */
+// ---- a page swipe, without measuring each frame -----------------------------------------------------------------------
+/*
+ * A page swipe (gesture.ts applyTrack) moves nothing but a few sliders sideways: the page track, home, PowOS AI's
+ * screen and the bar's counter, each by a translate on a registered property (--track-x, --slide-x, --bar-counter),
+ * under a finger or on its settle transition. Every surface rides the slider nearest above it, so the page is measured
+ * once as the swipe starts and each frame after that moves those regions (and their clips) by how far their slider
+ * has moved since: one rect read per slider, none per surface. 2026-11-23 traces (0302ff1b0ce1, 9771acdfae62):
+ * measureSurfaces + checkVisibility + getBoundingClientRect, every frame of every swipe, 0.4-1 s per 12-27 s of swipes
+ * (~48 full measures a swipe in the gate's home-paints; now 0 or 1).
+ * Anything else that can move, resize, fade or hide glass - a class or style beyond a slide's own on something that
+ * carries glass, a node with a surface, a surface or its parent resizing, a scroll, a transition or animation that
+ * isn't a slider's slide, a slider scaling (the drawer) - drops the kept set: the next frame measures the page again.
+ * The set lives for one run of the loop: a still home forgets it.
+ */
+/** The elements a page swipe slides (gesture.ts applyTrack). */
+const SLIDERS = ".page-track, .home, .ai-screen, .home > .bar";
+/** What those slides write and transition: a translate, nothing else. */
+const SLIDE_PROPS = new Set(["--track-x", "--slide-x", "--track-counter", "--bar-counter", "--glass-x", "transform", "translate"]);
+/**
+ * Class tokens a swipe toggles on the sliders and pages that move or hide nothing: transitions off (sliding, dragging),
+ * animations paused off screen (a page's away, PowOS AI's screen's shown - powai.tsx). A transition that stops for
+ * them fires its transitioncancel, which drops the kept set.
+ */
+const SLIDE_TOKENS = new Set(["sliding", "dragging", "away", "shown"]);
+
+interface Follow {
+  raws: Raw[];
+  sliders: Element[];
+  /** Each slider's box when measured. */
+  at: DOMRect[];
+  /** Each region's slider (index in [sliders]), -1 none: it stays put. */
+  of: number[];
+  /** Each region's clips' sliders, the same. */
+  clipOf: number[][];
+}
+let follow: Follow | null = null;
+/** For CDP A/B (`__glass.live.follow(false)`): every swipe frame measured from the page, as before. */
+let following = true;
+
+/** The kept set gone (something moved that a slide doesn't explain): the page measured again, its visibility read. */
+function unfollow() {
+  follow = null;
+  visible.clear();
+}
+
+function followFrom(raws: Raw[]): Follow {
+  const sliders = [...document.querySelectorAll(SLIDERS)];
+  const at = sliders.map((e) => e.getBoundingClientRect());
+  const idx = (e: Element | null | undefined) => {
+    const s = e?.closest(SLIDERS);
+    return s ? sliders.indexOf(s) : -1;
+  };
+  const clipOf = raws.map((g) => (g.el && shapes.get(g.el)?.clips.map(idx)) || []);
+  return { raws, sliders, at, of: raws.map((g) => idx(g.el)), clipOf };
+}
+
+/** How far each slider moved since the measure, or null: one is gone or changed size (scaled - the drawer). */
+function slid(fw: Follow): [number, number][] | null {
+  const d: [number, number][] = [];
+  for (let i = 0; i < fw.sliders.length; i++) {
+    const r = fw.sliders[i].getBoundingClientRect();
+    const a = fw.at[i];
+    if (!fw.sliders[i].isConnected || Math.abs(r.width - a.width) > 0.01 || Math.abs(r.height - a.height) > 0.01) return null;
+    d.push([r.left - a.left, r.top - a.top]);
+  }
+  return d;
+}
+
+/** A transition of a slider's slide (its translate), not anything else's. */
+const slideOf = (a: Animation, t: Element) => typeof CSSTransition !== "undefined" && a instanceof CSSTransition && SLIDE_PROPS.has(a.transitionProperty) && t.matches(SLIDERS);
+/** Something other than a slide animates glass: measured from the page. */
+const otherMotion = () =>
+  document.getAnimations().some((a) => {
+    const t = (a.effect as KeyframeEffect | null)?.target;
+    return a.playState === "running" && a.timeline === document.timeline && !!t && !slideOf(a, t) && carries(t);
+  });
+
+/** This frame's regions from the kept set, moved with the sliders: none read from the page. Null: measure it. */
+function followed(): string | null {
+  const fw = follow;
+  if (!fw) return null;
+  const d = slid(fw);
+  if (!d || otherMotion()) return (unfollow(), null);
+  const at = (q: [number, number, number, number], i: number): [number, number, number, number] =>
+    i < 0 ? q : [q[0] + d[i][0], q[1] + d[i][1], q[2] + d[i][0], q[3] + d[i][1]];
+  return format(fw.raws.map((g, n) => ({ ...g, box: at(g.box, fw.of[n]), own: at(g.own, fw.of[n]), clips: g.clips.map((c, k) => at(c, fw.clipOf[n][k] ?? -1)) })));
+}
+
+/** A style write that only slides (each declaration that changed is a slide's own). */
+function slideStyle(old: string | null, now: string | null): boolean {
+  const decls = (v: string | null) => {
+    const m = new Map<string, string>();
+    for (const d of (v ?? "").split(";")) {
+      const i = d.indexOf(":");
+      if (i > 0) m.set(d.slice(0, i).trim(), d.slice(i + 1).trim());
+    }
+    return m;
+  };
+  const a = decls(old);
+  const b = decls(now);
+  for (const k of new Set([...a.keys(), ...b.keys()])) if (a.get(k) !== b.get(k) && !SLIDE_PROPS.has(k)) return false;
+  return true;
+}
+
+/** A class change on a slider or a page that is only a swipe's state ([SLIDE_TOKENS]). */
+function slideClass(el: Element, old: string | null): boolean {
+  if (!el.matches(`${SLIDERS}, .page`)) return false;
+  const was = new Set((old ?? "").split(/\s+/).filter(Boolean));
+  const now = new Set(el.classList);
+  for (const t of was) if (!now.has(t) && !SLIDE_TOKENS.has(t)) return false;
+  for (const t of now) if (!was.has(t) && !SLIDE_TOKENS.has(t)) return false;
+  return true;
+}
+
+/** A carrier's attribute change that only slides (on a slider: anything else's translate moves it on its own). */
+const onlySlides = (r: MutationRecord) =>
+  r.attributeName === "style"
+    ? (r.target as Element).matches(SLIDERS) && slideStyle(r.oldValue, (r.target as Element).getAttribute("style"))
+    : slideClass(r.target as Element, r.oldValue);
+
+/**
+ * For the gate (home-paints) and CDP (`__glass.live.check(true)`): each followed frame measured from the page as well,
+ * the largest difference of any number kept (`__glass.live.checked`): the followed set must be the measured one.
+ */
+let checking = false;
+let checked = { frames: 0, worst: 0, at: "" };
+function check(f: string) {
+  const m = measure();
+  const a = f.split(" ");
+  const b = m.split(" ");
+  const d = a.length === b.length ? Math.max(0, ...a.map((v, i) => Math.abs(Number(v) - Number(b[i])) || (v === b[i] ? 0 : Infinity))) : Infinity;
+  checked.frames++;
+  if (d > checked.worst) checked = { ...checked, worst: d, at: `${f} | measured ${m}` };
+}
+
+/** This frame's regions: computed during the drawer's drag, moved with a page swipe's sliders, measured otherwise. */
 function regions(): string {
   if (!computing) return measure();
   const c = computed();
   if (c != null) return c;
   const anims = drawerAnims();
-  if (anims.length && track(anims)) return computed() ?? measure();
-  return measure();
+  if (anims.length && track(anims)) return (unfollow(), computed() ?? measure());
+  const f = following ? followed() : null;
+  if (f != null && checking) check(f);
+  if (f != null) return f;
+  const raws = measureRaw();
+  if (following) follow = followFrom(raws);
+  return format(raws);
 }
 
 // ---- when ---------------------------------------------------------------------------------------------------------
@@ -526,6 +719,8 @@ const STILL_FRAMES = 6;
 const MOVING_STILL_FRAMES = 60;
 /** Counters for CDP (`__glass.live.counts`): measured frames and region sets sent to the host. */
 const counts = { measured: 0, sent: 0, since: performance.now() };
+/** Full measures of the page (measureSurfaces calls) since load, for CDP and the gate (home-paints: 0 or 1 a swipe). */
+let surfaceMeasures = 0;
 /** For CDP A/B only (`__glass.live.hold(true)`): measured as ever, but the regions not sent to the host. */
 let held = false;
 /**
@@ -694,6 +889,8 @@ function kick() {
   wake();
   still = 0;
   if (running || !nativeGlass.value) return;
+  // A new run measures afresh: what changed while nothing ran (a window moved, a sibling's text) wasn't watched.
+  follow = null;
   running = true;
   requestAnimationFrame(frame);
 }
@@ -702,6 +899,7 @@ function kick() {
 function changed() {
   shapesDirty = true;
   tracks = null;
+  unfollow();
   kick();
 }
 
@@ -723,6 +921,8 @@ new MutationObserver((records) => {
     if (!carries(r.target)) continue;
     // A surface's own class (its corners, a join): its shape again. A holder's style or class: it may have moved.
     if (r.attributeName === "class" && (r.target as Element).matches(SURFACES)) return why("class", r.target), changed();
+    // Beyond a swipe's own slide: positions, sizes, fades or visibility may have changed - read again.
+    if (!onlySlides(r)) unfollow();
     if (!moved) why(r.attributeName ?? "attr", r.target);
     moved = true;
   }
@@ -754,7 +954,9 @@ powos.on("lock.shown", () => resend("lock.shown"));
 powos.on("system.home", () => resend("system.home"));
 // Another wallpaper: the rest glass is a render of the old one - live, then rendered again once still.
 powos.on("system.glass", () => resend("system.glass"));
-const animated = (e: Event) => carries(e.target) && (why(e.type, e.target), kick());
+/** A transition or animation event on glass: a slider's slide keeps the kept set, anything else (a fade too) drops it. */
+const slideEvent = (e: Event) => e instanceof TransitionEvent && SLIDE_PROPS.has(e.propertyName) && e.target instanceof Element && e.target.matches(SLIDERS);
+const animated = (e: Event) => carries(e.target) && (slideEvent(e) || unfollow(), why(e.type, e.target), kick());
 for (const ev of ["transitionrun", "transitionstart", "transitionend", "transitioncancel", "animationstart", "animationend"]) addEventListener(ev, animated, { capture: true, passive: true });
 addEventListener("resize", () => (why("resize"), changed()));
 // A scroll moves only what's in the scrolled box: the drawer's list holds no glass (the launcher's is its frame's), so
@@ -763,7 +965,7 @@ document.addEventListener(
   "scroll",
   (e) => {
     const t = e.target;
-    if (t === document || (t instanceof Element && t.querySelector(SURFACES))) why("scroll", t instanceof Node ? t : null), kick();
+    if (t === document || (t instanceof Element && t.querySelector(SURFACES))) unfollow(), why("scroll", t instanceof Node ? t : null), kick();
   },
   { capture: true, passive: true },
 );
@@ -792,6 +994,17 @@ export const debug = {
   /** For CDP A/B (`__glass.live.sync(false)`): "b.r" as an older host gets, though this one says "b.sync 1". */
   sync: (on: boolean) => void (syncOff = !on),
   compute: (on: boolean) => void ((computing = on), (tracks = null)),
+  /** For CDP A/B (`__glass.live.follow(false)`): every page swipe frame measured from the page, as before 11-26. */
+  follow: (on: boolean) => void ((following = on), unfollow()),
+  /** Each followed frame measured as well (`checked`: frames, the largest difference): the gate's proof they match. */
+  check: (on: boolean) => void ((checking = on), (checked = { frames: 0, worst: 0, at: "" })),
+  get checked() {
+    return checked;
+  },
+  /** Full measures of the page since load (every surface's rect read): a page swipe takes 0 or 1. */
+  get measures() {
+    return surfaceMeasures;
+  },
   /** What set off the last measures (cause, element), oldest first. */
   get kicks() {
     return [...kicks];

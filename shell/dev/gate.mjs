@@ -15574,7 +15574,7 @@ const MUST = {
  * ms. Its ~10 Paint/s left are one empty Paint per move (no layer painted, ~0.3 ms): the bar's counter is a `translate`,
  * which Chrome doesn't update directly the way it does home's `transform`.
  */
-const HOME_PAINTS = { idle: 1, swipes: 15, ai: 12, aiLayers: 110 };
+const HOME_PAINTS = { idle: 1, swipes: 15, ai: 12, aiLayers: 110, glassMeasures: 1 };
 
 /**
  * This page's paints while [act] runs and [ms] pass: the main thread's Paint events of its frame (a devtools trace, as
@@ -15611,8 +15611,11 @@ async function layerName(cdp, l, id) {
   return n ? n.localName + cls : `layer ${id}`;
 }
 
-/** Page swipes by touch (CDP input, as a finger: the gesture's own handlers), [dirs] 1 = to the next page, -1 = back. */
-async function touchSwipes(page, dirs) {
+/**
+ * Page swipes by touch (CDP input, as a finger: the gesture's own handlers), [dirs] 1 = to the next page, -1 = back;
+ * [after] runs once each swipe has settled.
+ */
+async function touchSwipes(page, dirs, after) {
   const cdp = await page.target().createCDPSession();
   const touch = (type, x) => cdp.send("Input.dispatchTouchEvent", { type, touchPoints: x == null ? [] : [{ x, y: 630 }] });
   for (const dir of dirs) {
@@ -15621,6 +15624,7 @@ async function touchSwipes(page, dirs) {
     for (let i = 1; i <= 6; i++) (await new Promise((r) => setTimeout(r, 16)), await touch("touchMove", x0 - dir * i * 25));
     await touch("touchEnd");
     await new Promise((r) => setTimeout(r, 600));
+    await after?.();
   }
   await cdp.detach().catch(() => {});
 }
@@ -15645,17 +15649,50 @@ async function asTheUsersHome() {
   return O.overlayOn() ? "" : "the meter's rs didn't put the render overlay up";
 }
 
+/**
+ * The live glass in home-paints' swipes: its full measures (nativeglass.ts measureSurfaces: every surface's rect, clips,
+ * opacity) per swipe - the user's traces 11-23 had one every frame of every swipe (0.4-1 s per 12-27 s of swipes, ~48 a
+ * swipe here). A swipe moves the glass with its sliders' own transforms (nativeglass.ts followed): measured once as it
+ * starts. [counted] wraps swipes; [verdict] after them (it swipes 4 more, each followed frame also measured: the regions
+ * sent must be the page's, to the format's 0.1 px).
+ */
+function glassSwipes(page) {
+  const measures = () => page.evaluate(() => window.__glass?.live?.measures ?? NaN);
+  const perSwipe = [];
+  const counted = (dirs) => async () => {
+    let n = await measures();
+    await touchSwipes(page, dirs, async () => perSwipe.push(-n + (n = await measures())));
+  };
+  const checked = () => page.evaluate(() => ({ frames: 0, worst: NaN, at: "no check", ...window.__glass?.live?.checked })).catch(() => ({ frames: 0, worst: NaN, at: "unread" }));
+  const verdict = async () => {
+    await page.evaluate(() => window.__glass?.live?.check?.(true));
+    await touchSwipes(page, [1, -1, -1, 1]);
+    const same = await checked();
+    await page.evaluate(() => window.__glass?.live?.check?.(false));
+    const fails = [];
+    if (!(same.frames > 0 && same.worst <= 0.11)) fails.push(`the live glass's followed swipe frames differ from the page measured (${same.frames} frames, worst ${same.worst}): ${same.at}`);
+    // A swipe to or from PowOS AI's page morphs the bar (bar.tsx: its role and seat change as the page is set): one more.
+    const most = (i) => HOME_PAINTS.glassMeasures + (i >= 4 ? 1 : 0);
+    if (!(perSwipe.length === 8 && perSwipe.every((n, i) => n <= most(i))))
+      fails.push(`the live glass measured the page ${perSwipe.join(", ")} times in its 8 swipes (before 11-26: ~48 each) - want <= ${HOME_PAINTS.glassMeasures} a swipe between home's pages, ${HOME_PAINTS.glassMeasures + 1} to PowOS AI's page and back (the bar's morph): the glass follows the sliders (nativeglass.ts followed)`);
+    return { fails, line: `glass measures per swipe ${perSwipe.join(" ")} | followed frames ${same.frames} off by ${same.worst} px at most` };
+  };
+  return { counted, verdict };
+}
+
 async function homePaints(page) {
   const setup = await page.evaluate(asTheUsersHome);
   if (setup) return [`home-paints: ${setup}`];
   // Settled (the overlay's mount, the first page's layout); a trace's start itself costs one paint (~0.25/s here).
   await new Promise((r) => setTimeout(r, 3000));
   const idle = await paintsWhile(page, 4000);
-  const home = await paintsWhile(page, 4 * 620 + 600, () => touchSwipes(page, [1, -1, 1, -1]));
-  const ai = await paintsWhile(page, 4 * 620 + 600, () => touchSwipes(page, [-1, 1, -1, 1]));
+  const glass = glassSwipes(page);
+  const home = await paintsWhile(page, 4 * 620 + 600, glass.counted([1, -1, 1, -1]));
+  const ai = await paintsWhile(page, 4 * 620 + 600, glass.counted([-1, 1, -1, 1]));
+  const g = await glass.verdict();
   const line = (r) => `${r.n} Paint (${r.perSec}/s, ${r.paintMs} ms; ${r.layers} layer paints${r.top.length ? ": " + r.top.join(", ") : ""})`;
-  console.log(`     home-paints: idle 4 s ${line(idle)} | 4 swipes between home's pages ${line(home)} | 4 to PowOS AI's page and back ${line(ai)}`);
-  const fails = [];
+  console.log(`     home-paints: idle 4 s ${line(idle)} | 4 swipes between home's pages ${line(home)} | 4 to PowOS AI's page and back ${line(ai)} | ${g.line}`);
+  const fails = [...g.fails];
   if (idle.perSec > HOME_PAINTS.idle) fails.push(`idle home painted ${line(idle)} - want <= ${HOME_PAINTS.idle}/s: nothing on it changes`);
   for (const [what, r, max] of [["between home's pages", home, HOME_PAINTS.swipes], ["to PowOS AI's page and back", ai, HOME_PAINTS.ai]])
     if (r.perSec > max) fails.push(`page swipes ${what} painted ${line(r)} - want <= ${max}/s: a slide moves layers, it doesn't repaint them`);

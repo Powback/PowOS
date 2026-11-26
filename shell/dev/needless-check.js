@@ -52,11 +52,18 @@ export async function needlessRenders() {
 export async function homeSwipes() {
   await window.__gw.settled();
   const R = await importShim("./ui/renderscan.ts"), S = await importShim("./state.ts"), G = await importShim("./ui/gesture.ts");
+  await liveGlass();
+  // The live glass's full measures per swipe (nativeglass.ts measureSurfaces; the user's traces 11-23: one every frame
+  // of every swipe): a swipe's glass follows its sliders, measured once as it starts.
+  const measures = () => window.__glass?.live?.measures ?? NaN;
+  const glass = [];
   const swipe = async (to) => {
+    const n = measures();
     for (const dx of [-12, -40, -90]) { G.pageDrag.value = dx; await window.__gw.frames(1); }
     G.pageDrag.value = null;
     S.page.value = to;
     await window.__gw.sleep(350);
+    glass.push(measures() - n);
   };
   S.page.value = 0;
   await window.__gw.sleep(400);
@@ -82,7 +89,24 @@ export async function homeSwipes() {
     G.pageDrag.value = null;
     S.page.value = 0;
   }
-  return swipeFails(home, ai, idle);
+  return [...swipeFails(home, ai, idle), ...glassFails(glass)];
+}
+
+/** The live glass's stand-in (a port, "b.state 1": nativeglass.ts measures as on the phone), as home-paints has it. */
+async function liveGlass() {
+  const N = await importShim("./apps/native.ts");
+  const ch = new MessageChannel();
+  ch.port2.onmessage = () => {};
+  N.native.value = ch.port1;
+  for (const f of N.fromNative) f("b.state 1");
+  await window.__gw.frames(3);
+}
+
+/** homeSwipes' glass verdict: per swipe, home's pages 0 or 1 full measure, to PowOS AI's and back 1 more (the bar's morph). */
+function glassFails(glass) {
+  window.__swipes += ` | glass measures per swipe ${glass.join(" ")}`;
+  const most = (i) => (i < 6 ? 1 : 2);
+  return glass.length === 12 && glass.every((n, i) => n <= most(i)) ? [] : [`the live glass measured the page ${glass.join(", ")} times in 12 swipes (before 11-26: one every frame) - want <= 1 a swipe between home's pages, 2 to PowOS AI's page and back`];
 }
 
 /** homeSwipes' verdicts on its three reports. */
