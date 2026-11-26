@@ -2388,23 +2388,29 @@ async function switcherThumbsCheck() {
 }
 
 /**
- * The switcher's drag up and toward a side docks into Open Canvas (ui/carddock.ts; board switcher-drag-dock-open-canvas,
- * the user 11-23: "it does play like a click when i activate the switcher and drag the app to one of the sides, but it
- * doesnt activate splitview for it"). Unfolded, the host says Open Canvas is there: a real touch drag (CDP touch events,
- * through Chromium's touch-action + gesture pipeline, as on the phone) of the front card up and to the left reaches the
- * host's tasks.canvasDock(card, "left", partner) - the partner a split-capable app, never a PowOS task (a Linux window,
- * the lock face) - and a refusal leaves a note on screen (never silent).
+ * The switcher's split view (ui/carddock.ts + ui/canvaspick.tsx; the user, 11-26: "You should be able to drag the window
+ * to the right side, left side, top or bottom. The app should then dock and you should be able to select the other app
+ * ... right now it's just randomly selecting the last app"). Unfolded, Open Canvas there and stacking: real touch drags
+ * (CDP touch events, through Chromium's touch-action + gesture pipeline, as on the phone) of the front card -
+ *   1. preview: held at each edge (left, right, top, bottom) home's drop ghost (.ww-drop snap:<side>) covers that half;
+ *      dragged back to the middle and let go: no dock, no picker, the card back (a clean cancel)
+ *   2. drop: let go at the left edge the card docks there at once (.canvas-pick left) and the picker lists the recent
+ *      apps (Settings and the Linux window dimmed with why, the lock face left out) then all apps - and NOTHING is sent
+ *      to the host (never an auto-picked partner)
+ *   3. pick: a tap on Files starts the pair: tasks.canvasDock(1201, "left", 1204), "Opening Files" shown
+ *   4. cancel: dropped at the right edge, then a tap on the docked half: no dock, the app back (tasks.open(1201))
+ *   5. a host refusal after the pick: the picker back with the reason; Settings dragged: the "can't be used" note
  */
 async function switcherCanvasDragCheck(r) {
   const cdp = await r.page.target().createCDPSession();
   await cdp.send("Emulation.setTouchEmulationEnabled", { enabled: true, maxTouchPoints: 5 });
   const t = { r, cdp };
-  const fails = await canvasDragRefused(t);
-  await gateSleep(2600);
-  fails.push(...(await canvasDragDocks(t)));
-  await gateSleep(2600);
-  fails.push(...(await canvasDragBlocked(t)));
-  await r.page.evaluate(() => window.__mockEvents.emit("recents.end", { to: "home" })).catch(() => {});
+  const fails = [];
+  for (const step of [canvasDragPreviews, canvasDropPick, canvasDropCancel, canvasPickRefused, canvasDragBlocked]) {
+    fails.push(...(await step(t)));
+    await r.page.evaluate(() => window.__mockEvents.emit("recents.end", { to: "home" })).catch(() => {});
+    await gateSleep(900);
+  }
   return fails;
 }
 
@@ -2416,11 +2422,15 @@ function canvasDragSetup({ r }, refuse, from = 1201) {
     async (refuse, from) => {
       const { powos } = await window.__gw.mod("./bridge.ts");
       window.__dock = [];
+      window.__opened = [];
       powos.tasks.canvas = async () => true;
+      powos.tasks.canvasVertical = async () => true;
       // Chrome and Files can be in split view; the lock face (1202, no key), a Linux window (1203) and Settings (1205,
       // OxygenOS's blocklist) can't.
       powos.tasks.canvasSides = async () => [1201, 1204];
       powos.tasks.canvasDock = async (id, side, other) => (window.__dock.push([id, side, other]), refuse ? { ok: false, reason: refuse } : { ok: true });
+      window.__origOpen ??= powos.tasks.open;
+      powos.tasks.open = async (id, ...rest) => (window.__opened.push(id), window.__origOpen ? window.__origOpen(id, ...rest).catch(() => true) : true);
       const icon = "data:image/svg+xml," + encodeURIComponent('<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 8 8"><rect width="8" height="8" fill="#e63"/></svg>');
       const tasks = [
         { id: 1201, label: "Chrome", key: "a:com.android.chrome/.Main", icon, snapshot: "", webwindow: 3, fullScreen: true },
@@ -2439,56 +2449,207 @@ function canvasDragSetup({ r }, refuse, from = 1201) {
   );
 }
 
-/** A thumb's arc from [at]: up first (a card push, not the row's scroll), then on up and toward the left edge. */
-async function canvasDragLeft({ cdp }, at) {
-  const touch = (type, pts) => cdp.send("Input.dispatchTouchEvent", { type, touchPoints: pts });
+const touchOf = ({ cdp }) => (type, pts) => cdp.send("Input.dispatchTouchEvent", { type, touchPoints: pts });
+
+/** A thumb from [at]: lifted (up first - a card push, not the row's scroll), then on to [to] (no release). */
+async function canvasDragTo(t, at, to) {
+  const touch = touchOf(t);
   await touch("touchStart", [{ x: at.x, y: at.y, id: 1 }]);
-  const path = [[0, -14], [-2, -30], [-10, -60], [-30, -100], [-70, -150], [-130, -200], [-200, -240], [-260, -270], [-300, -290]];
-  for (const [dx, dy] of path) {
-    await touch("touchMove", [{ x: at.x + dx, y: at.y + dy, id: 1 }]);
+  await touch("touchMove", [{ x: at.x, y: at.y - 14, id: 1 }]);
+  await gateSleep(16);
+  await touch("touchMove", [{ x: at.x, y: at.y - 30, id: 1 }]);
+  await gateSleep(16);
+  const from = { x: at.x, y: at.y - 30 };
+  for (let i = 1; i <= 10; i++) {
+    await touch("touchMove", [{ x: from.x + ((to.x - from.x) * i) / 10, y: from.y + ((to.y - from.y) * i) / 10, id: 1 }]);
     await gateSleep(16);
   }
+  await gateSleep(250);
+}
+
+const canvasRelease = async (t) => (await touchOf(t)("touchEnd", []), await gateSleep(700));
+
+/** A real tap (touch down and up, as a finger: the drop's swallowed click needs the next press) on [sel]'s centre. */
+async function canvasTap(t, sel) {
+  const c = await t.r.page.evaluate((sel) => {
+    const b = document.querySelector(sel)?.getBoundingClientRect();
+    return b ? { x: b.left + b.width / 2, y: b.top + Math.min(b.height / 2, 40) } : null;
+  }, sel);
+  if (!c) return false;
+  const touch = touchOf(t);
+  await touch("touchStart", [{ x: c.x, y: c.y, id: 2 }]);
+  await gateSleep(40);
   await touch("touchEnd", []);
-  await gateSleep(700);
+  return true;
 }
 
-/** The switcher's note text now. */
-const canvasNote = ({ r }) => r.page.evaluate(() => document.querySelector(".recents-note")?.textContent ?? "");
+/** The screen's edge point for [side] (CSS px), 6 px in. */
+const edgePoint = ({ r }, side) =>
+  r.page.evaluate((side) => {
+    const W = innerWidth, H = innerHeight;
+    return { left: { x: 6, y: H / 2 }, right: { x: W - 6, y: H / 2 }, top: { x: W / 2, y: 6 }, bottom: { x: W / 2, y: H - 6 } }[side];
+  }, side);
 
-/** Refused by the host: the reason on screen. */
-async function canvasDragRefused(t) {
-  const at = await canvasDragSetup(t, "Chrome can't be used in split view");
-  if (!at) return ["no card for task 1201 in the switcher"];
-  await canvasDragLeft(t, at);
-  const note = await canvasNote(t);
-  return note.includes("split view") ? [] : [`a refused dock left no note on screen (note: "${note}")`];
-}
-
-/** The same card (refused before) docks: tasks.canvasDock(1201, left, 1204 - Files, the newest split-capable app). */
-async function canvasDragDocks(t) {
+/** Each edge previews its half with home's ghost; back to the middle and let go: nothing docked, the card back. */
+async function canvasDragPreviews(t) {
   const at = await canvasDragSetup(t, null);
   if (!at) return ["no card for task 1201 in the switcher"];
-  await canvasDragLeft(t, at);
-  const dock = await t.r.page.evaluate(() => window.__dock);
-  console.log(`     switcher-canvas-drag: docks ${JSON.stringify(dock)}`);
-  const d = dock[0];
-  if (!d) return ["the drag up-left never called tasks.canvasDock (a card refused once still ignoring touches?)"];
   const fails = [];
-  if (d[0] !== 1201 || d[1] !== "left") fails.push(`tasks.canvasDock(${d.join(", ")}): want task 1201 on the left`);
-  if (d[2] !== 1204) fails.push(`the partner is task ${d[2]}, want 1204 (Files: not PowOS's lock/Linux tasks, not Settings)`);
+  await canvasDragTo(t, at, await edgePoint(t, "left"));
+  for (const side of ["left", "right", "top", "bottom"]) fails.push(...(await previewAt(t, side)));
+  const mid = await t.r.page.evaluate(() => ({ x: innerWidth / 2, y: innerHeight / 2 }));
+  for (let i = 1; i <= 6; i++) (await touchOf(t)("touchMove", [{ x: mid.x, y: mid.y - i, id: 1 }]), await gateSleep(20));
+  await gateSleep(200);
+  if (await t.r.page.evaluate(() => !!document.querySelector(".recents .ww-drop"))) fails.push("back in the middle the drop ghost stayed");
+  await canvasRelease(t);
+  const after = await t.r.page.evaluate(() => ({
+    dock: window.__dock.length,
+    pick: !!document.querySelector(".canvas-pick"),
+    card: !!document.querySelector('.recents .task[data-task="1201"]'),
+  }));
+  if (after.dock || after.pick) fails.push(`let go in the middle after a dock drag: docked anyway (${JSON.stringify(after)})`);
+  if (!after.card) fails.push("let go in the middle after a dock drag: the card was removed (want a clean cancel)");
   return fails;
 }
 
-/** The dragged app on OxygenOS's blocklist (Settings): never sent to the host, the user told. */
+/** The finger held at [side]'s edge: home's ghost (snap:<side>) on that half. */
+async function previewAt(t, side) {
+  const p = await edgePoint(t, side);
+  for (let i = 0; i < 4; i++) (await touchOf(t)("touchMove", [{ x: p.x + i, y: p.y + (i % 2), id: 1 }]), await gateSleep(30));
+  await gateSleep(300);
+  const g = await t.r.page.evaluate(() => {
+    const e = document.querySelector(".recents .ww-drop");
+    const b = e?.getBoundingClientRect();
+    return e ? { zone: e.dataset.zone, x: b.left, y: b.top, w: b.width, h: b.height, W: innerWidth, H: innerHeight } : null;
+  });
+  console.log(`     switcher-canvas-drag: ${side} preview ${JSON.stringify(g)}`);
+  if (!g) return [`held at the ${side} edge: no drop ghost (.ww-drop) in the switcher`];
+  const share = side === "left" || side === "right" ? g.w / g.W : g.h / g.H;
+  const far = side === "right" ? g.x >= g.W / 3 : side === "bottom" ? g.y >= g.H / 3 : true;
+  return [
+    [g.zone !== `snap:${side}`, `held at the ${side} edge: the ghost is ${g.zone}`],
+    [share < 0.4 || share > 0.55, `the ${side} ghost covers ${Math.round(share * 100)}% of the screen, want a half`],
+    [!far, `the ${side} ghost isn't on the ${side} (${JSON.stringify(g)})`],
+  ]
+    .filter(([bad]) => bad)
+    .map(([, m]) => m);
+}
+
+/** The picker's state: side, docked app, the recent and all-apps cells (with dimmed ones' reasons). */
+const pickerState = ({ r }) =>
+  r.page.evaluate(() => {
+    const p = document.querySelector(".canvas-pick");
+    if (!p) return null;
+    const cell = (b) => ({ task: b.dataset.task ?? null, dim: b.classList.contains("dim"), why: b.querySelector(".canvas-pick-app-why")?.textContent ?? "" });
+    return {
+      side: p.dataset.side,
+      docked: p.querySelector(".canvas-pick-head")?.textContent ?? "",
+      recent: [...p.querySelectorAll(".canvas-pick-grid.recent .canvas-pick-app")].map(cell),
+      all: p.querySelectorAll(".canvas-pick-grid:not(.recent) .canvas-pick-app").length,
+      opening: p.querySelector(".canvas-pick-opening")?.textContent ?? "",
+    };
+  });
+
+/** The picker's recent row: Files offered, Settings and the Linux window dimmed with why, no lock face, no dragged app. */
+function pickListFails(s) {
+  const by = (task) => s.recent.find((c) => c.task === String(task)) ?? null;
+  const files = by(1204);
+  const settings = by(1205);
+  const linux = by(1203);
+  return [
+    [s.side !== "left" || !s.docked.includes("Chrome"), `docked ${s.side} with "${s.docked}", want Chrome on the left`],
+    [!files || files.dim, `Files (1204) not offered as a recent app: ${JSON.stringify(s.recent)}`],
+    [!settings?.dim || !settings.why, `Settings (1205, blocklisted) isn't dimmed with a reason: ${JSON.stringify(settings)}`],
+    [!linux?.dim, `the Linux window (1203) isn't dimmed: ${JSON.stringify(linux)}`],
+    [by(1202) || by(1201), `the lock face or the dragged app itself offered: ${JSON.stringify(s.recent)}`],
+    [s.recent.map((c) => c.task).join() !== "1203,1205,1204", `recent apps not in the switcher's order: ${JSON.stringify(s.recent.map((c) => c.task))}`],
+  ]
+    .filter(([bad]) => bad)
+    .map(([, m]) => m);
+}
+
+/** Dropped left: docked at once, the picker up, nothing sent; a tap on Files starts the pair with both chosen apps. */
+async function canvasDropPick(t) {
+  const at = await canvasDragSetup(t, null);
+  if (!at) return ["no card for task 1201 in the switcher"];
+  await canvasDragTo(t, at, await edgePoint(t, "left"));
+  await canvasRelease(t);
+  const s = await pickerState(t);
+  console.log(`     switcher-canvas-drag: dropped left -> ${JSON.stringify(s)}`);
+  if (!s) return ["let go at the left edge: no picker (.canvas-pick) - the app didn't dock"];
+  const fails = pickListFails(s);
+  const dock = await t.r.page.evaluate(() => window.__dock);
+  if (dock.length) fails.push(`the drop alone started a pair (auto-picked partner): ${JSON.stringify(dock)}`);
+  return [...fails, ...(await pickFiles(t))];
+}
+
+/** A tap on dimmed Settings: nothing; then on Files: tasks.canvasDock(1201, left, 1204) and "Opening Files". */
+async function pickFiles(t) {
+  const tap = (task) => canvasTap(t, `.canvas-pick-app[data-task="${task}"]`);
+  await tap(1205);
+  await gateSleep(200);
+  const early = (await t.r.page.evaluate(() => window.__dock)).length;
+  await tap(1204);
+  await gateSleep(300);
+  const d = (await t.r.page.evaluate(() => window.__dock))[0] ?? [];
+  const opening = (await pickerState(t))?.opening ?? "no picker";
+  console.log(`     switcher-canvas-drag: picked Files -> ${JSON.stringify(d)} (${opening})`);
+  return [
+    [early > 0, "a tap on dimmed Settings started a pair"],
+    [d.join() !== "1201,left,1204", `tasks.canvasDock(${d.join(", ")}): want (1201, left, 1204)`],
+    [!opening.includes("Files"), `after the pick no "Opening Files" (optimistic): "${opening}"`],
+  ]
+    .filter(([bad]) => bad)
+    .map(([, m]) => m);
+}
+
+/** Dropped right, then a tap on the docked half: nothing started, the dragged app back full screen. */
+async function canvasDropCancel(t) {
+  const at = await canvasDragSetup(t, null);
+  if (!at) return ["no card for task 1201 in the switcher"];
+  await canvasDragTo(t, at, await edgePoint(t, "right"));
+  await canvasRelease(t);
+  const s = await pickerState(t);
+  if (s?.side !== "right") return [`let go at the right edge: picker ${JSON.stringify(s)}, want docked right`];
+  await canvasTap(t, ".canvas-pick-docked");
+  await gateSleep(400);
+  const r = await t.r.page.evaluate(() => ({ dock: window.__dock, opened: window.__opened, pick: !!document.querySelector(".canvas-pick") }));
+  console.log(`     switcher-canvas-drag: cancelled -> ${JSON.stringify(r)}`);
+  const fails = [];
+  if (r.dock.length) fails.push(`cancel started a pair: ${JSON.stringify(r.dock)}`);
+  if (r.pick) fails.push("cancel left the picker up");
+  if (!r.opened.includes(1201)) fails.push(`cancel didn't bring Chrome back full screen (tasks.open: ${JSON.stringify(r.opened)})`);
+  return fails;
+}
+
+/** The host refusing the picked pair: the picker back (pick again), the reason on screen. */
+async function canvasPickRefused(t) {
+  const at = await canvasDragSetup(t, "Files can't be used in split view");
+  if (!at) return ["no card for task 1201 in the switcher"];
+  await canvasDragTo(t, at, await edgePoint(t, "bottom"));
+  await canvasRelease(t);
+  const s = await pickerState(t);
+  if (s?.side !== "bottom") return [`let go at the bottom edge: picker ${JSON.stringify(s)}, want docked bottom`];
+  await canvasTap(t, '.canvas-pick-app[data-task="1204"]');
+  await gateSleep(500);
+  const note = await t.r.page.evaluate(() => document.querySelector(".recents-note")?.textContent ?? "");
+  const s2 = await pickerState(t);
+  const fails = [];
+  if (!note.includes("split view")) fails.push(`a refused pair left no note ("${note}")`);
+  if (!s2 || s2.opening) fails.push(`after the refusal the picker isn't back: ${JSON.stringify(s2)}`);
+  return fails;
+}
+
+/** The dragged app on OxygenOS's blocklist (Settings): never docked, the user told. */
 async function canvasDragBlocked(t) {
   const at = await canvasDragSetup(t, null, 1205);
   if (!at) return ["no card for task 1205 in the switcher"];
-  await canvasDragLeft(t, at);
-  const note = await canvasNote(t);
-  const dock = await t.r.page.evaluate(() => window.__dock);
+  await canvasDragTo(t, at, await edgePoint(t, "left"));
+  await canvasRelease(t);
+  const r = await t.r.page.evaluate(() => ({ note: document.querySelector(".recents-note")?.textContent ?? "", pick: !!document.querySelector(".canvas-pick"), dock: window.__dock }));
   const fails = [];
-  if (dock.length) fails.push(`Settings (not allowed in split view) was sent to the host: ${JSON.stringify(dock)}`);
-  if (!note.includes("Settings can't be used in split view")) fails.push(`dragging Settings to a side left no "can't be used in split view" note ("${note}")`);
+  if (r.dock.length || r.pick) fails.push(`Settings (not allowed in split view) docked: ${JSON.stringify(r)}`);
+  if (!r.note.includes("Settings can't be used in split view")) fails.push(`dragging Settings to a side left no "can't be used in split view" note ("${r.note}")`);
   return fails;
 }
 

@@ -31,6 +31,30 @@ class CanvasDockTest {
     }
 
     @Test
+    fun droppedTopOrBottomStacksTheApps() {
+        val top = CanvasDock.plan(settings, files, CanvasDock.Side.TOP, 0)
+        assertEquals(listOf(settings, files), top.packages)
+        assertEquals(1, top.extras["androidx.flexible.layoutOrientation"])
+        val bottom = CanvasDock.plan(settings, files, CanvasDock.Side.BOTTOM, 0)
+        assertEquals(listOf(files, settings), bottom.packages)
+        assertEquals(1, bottom.extras["focusIndex"])
+    }
+
+    @Test
+    fun sideNamesFromThePage() {
+        assertEquals(CanvasDock.Side.TOP, CanvasDock.Side.of("top"))
+        assertEquals(CanvasDock.Side.RIGHT, CanvasDock.Side.of("right"))
+        assertNull(CanvasDock.Side.of("middle"))
+    }
+
+    @Test
+    fun anAppKeyNamesItsPackage() {
+        assertEquals("com.android.chrome", CanvasDock.keyPackage("a:com.android.chrome/com.google.android.apps.chrome.Main"))
+        assertEquals("com.x", CanvasDock.keyPackage("a:com.x@10"))
+        assertNull(CanvasDock.keyPackage("l:org.kde.dolphin"))
+    }
+
+    @Test
     fun theDraggedAppHasFocusInTheCanvas() {
         assertEquals(0, CanvasDock.plan(settings, files, CanvasDock.Side.LEFT, 0).extras["focusIndex"])
         assertEquals(1, CanvasDock.plan(settings, files, CanvasDock.Side.RIGHT, 0).extras["focusIndex"])

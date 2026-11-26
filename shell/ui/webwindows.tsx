@@ -2277,7 +2277,7 @@ function holdAppSizes(ids: (number | null)[]) {
 }
 
 /** The drop's preview: the tile the window would take, translucent; it glides between zones. */
-function DropPreview({ d, o }: { d: { rect: Box; zone?: Zone; slot?: Slot; kind?: Place["kind"] }; o: { x: number; y: number } }) {
+export function DropPreview({ d, o }: { d: { rect: Box; zone?: Zone; slot?: Slot; kind?: Place["kind"] }; o: { x: number; y: number } }) {
   const r = d.rect;
   // A dragged window's floating ghost is its own frame: under the windows, never over the window it previews.
   const style = { left: `${r.x - o.x}px`, top: `${r.y - o.y}px`, width: `${r.w}px`, height: `${r.h}px`, zIndex: d.kind === "float" ? 0 : 999 };

@@ -6,16 +6,17 @@
  * icon (GroupIcon, the dock's DG1 group cell's) over the whole split - each side's last frame at its share of the
  * screen, side by side or one over the other as on the screen (t.splitLayout).
  *
- * Unfolded with Open Canvas ([canDock]): pushed up AND toward a side (ui/carddock.ts) it docks into the native split
- * view on that side - the card follows the finger sideways too and the target half lights up ([onDockHover]) while
- * it's in a dock zone; a mostly vertical push is a removal as before.
+ * Unfolded with Open Canvas ([canDock]): lifted (a push up), the card follows the finger 1:1 both ways, as a window's
+ * bar drag on home; the finger at a screen edge (left / right, top / bottom where the canvas stacks: [vertical]) lights
+ * that half with home's own drop ghost ([onDockHover]), and let go there the card docks ([onDock]: ui/canvaspick.tsx
+ * then asks for the other app). A dock drag let go elsewhere goes back; a plain push up is a removal as before.
  */
 import { useRef, useState } from "preact/hooks";
 import type { RecentTask, SplitSide } from "../types.ts";
 import { spring } from "./spring.ts";
 import { tick } from "./haptics.ts";
 import { memo } from "./memo.ts";
-import { cardRelease, dockSide, type DockSide } from "./carddock.ts";
+import { cardRelease, dockSide, docking, type CardDrag, type DockSide } from "./carddock.ts";
 
 const SLOP = 10;
 /** Held this long without moving: the card's menu (Android's long-press timeout). */
@@ -28,6 +29,8 @@ interface Drag {
   dy: number;
   dx: number;
   side: DockSide | null;
+  /** A dock drag (it lit a target or went well sideways): let go outside a target it goes back, never removed. */
+  docking: boolean;
   up: boolean | null;
   samples: { y: number; t: number }[];
   press: number;
@@ -52,6 +55,7 @@ export const TaskCard = memo(function TaskCard({
   onRemove,
   onMenu,
   canDock,
+  vertical,
   onDockHover,
   onDock,
 }: {
@@ -75,10 +79,12 @@ export const TaskCard = memo(function TaskCard({
   onMenu: (id: number, card: HTMLElement) => void;
   /** Open Canvas is there (unfolded, supported, an Android app's card): up and to a side docks it. */
   canDock?: boolean;
+  /** Open Canvas stacks one over the other here: the top and bottom edges dock too. */
+  vertical?: boolean;
   /** The half a dock would go to as the finger moves (null: none) - the layer shows it. */
   onDockHover?: (side: DockSide | null) => void;
-  /** Let go in a dock zone; false: it stays (the card springs back). */
-  onDock?: (id: number, side: DockSide) => boolean | void;
+  /** Let go in a dock zone ([shot]: where its picture is now); false: it stays (the card springs back). */
+  onDock?: (id: number, side: DockSide, shot: DOMRect) => boolean | void;
 }) {
   const el = useRef<HTMLDivElement>(null);
   const shot = useRef<HTMLElement>(null);
@@ -88,11 +94,13 @@ export const TaskCard = memo(function TaskCard({
   /** Back to its place, as a spring from where the finger left it. */
   const springBack = (dy: number, dx = 0) => {
     const card = el.current!;
+    const from = card.style.opacity || "1";
     card.style.transform = "";
     card.style.opacity = "";
+    card.style.transition = "";
     card.animate(
       [
-        { transform: `translate(${dx}px, ${dy}px)`, opacity: String(1 - Math.min(1, -dy / card.clientHeight)) },
+        { transform: `translate(${dx}px, ${dy}px)${canDock ? " scale(0.94)" : ""}`, opacity: from },
         { transform: "none", opacity: "1" },
       ],
       { duration: spring.ms, easing: spring.easing },
@@ -109,24 +117,24 @@ export const TaskCard = memo(function TaskCard({
   };
 
   /**
-   * Docked: the card goes on toward its half and fades (the app comes up there); [onDock] refusing it (no partner,
-   * the host said no) springs it back. The half's highlight goes either way.
+   * Docked: its picture goes on into the half (ui/canvaspick.tsx grows it there from where the card is now), the card
+   * itself hidden meanwhile; [onDock] refusing it (the dragged app can't be in split view) springs it back. The half's
+   * highlight goes either way.
    */
   const dockAway = (dx: number, dy: number, side: DockSide) => {
     const card = el.current!;
     onDockHover?.(null);
-    if (onDock?.(t.id, side) === false) return springBack(dy, dx);
+    const at = (shot.current ?? card).getBoundingClientRect();
+    if (onDock?.(t.id, side, at) === false) return springBack(dy, dx);
     gone.current = true;
-    const to = side === "left" ? -card.getBoundingClientRect().right : innerWidth - card.getBoundingClientRect().left;
     card.style.transform = "";
-    const a = card.animate(
-      [
-        { transform: `translate(${dx}px, ${dy}px)`, opacity: "1" },
-        { transform: `translate(${dx + to * 0.25}px, ${dy}px) scale(0.9)`, opacity: "0" },
-      ],
-      { duration: spring.ms, easing: spring.easing, fill: "forwards" },
-    );
-    // Cancelled too (the host refused the dock: recents.tsx undocked cancels the fly-off): the card takes touches
+    card.style.opacity = "";
+    card.style.transition = "";
+    const a = card.animate([{ transform: `translate(${dx}px, ${dy}px)`, opacity: "0" }, { transform: `translate(${dx}px, ${dy}px)`, opacity: "0" }], {
+      duration: 1e9,
+      fill: "forwards",
+    });
+    // Cancelled (the pick ended or was cancelled: recents.tsx undock cancels it): the card is back and takes touches
     // again - only onfinish left it "gone" for good, every later press on it ignored.
     a.onfinish = a.oncancel = () => (gone.current = false);
   };
@@ -136,6 +144,7 @@ export const TaskCard = memo(function TaskCard({
     const card = el.current!;
     gone.current = true;
     const to = -(card.getBoundingClientRect().bottom + 40);
+    card.style.transition = "";
     const speed = Math.max(Math.abs(v), 1.6); // px/ms
     const ms = Math.min(260, Math.max(120, (dy - to) / speed));
     card.style.transform = "";
@@ -148,17 +157,43 @@ export const TaskCard = memo(function TaskCard({
     ).onfinish = () => onRemove(t.id);
   };
 
-  /** An upward drag's move: down past its place it barely moves (a rubber band), up it follows the finger. */
+  /** The geometry ui/carddock.ts reads for this drag at the finger's [e]. */
+  const geo = (d: Drag, e: PointerEvent, dx: number, dy: number): CardDrag => ({
+    dx,
+    dy,
+    x: e.clientX,
+    y: e.clientY,
+    cardH: el.current!.clientHeight,
+    screenW: innerWidth,
+    screenH: innerHeight,
+    vertical,
+    docking: d.docking,
+  });
+
+  /**
+   * A lifted card's move. Without Open Canvas: up it follows the finger, down past its place it barely moves (a rubber
+   * band), fading as it goes up (the removal). With it: home's window drag - 1:1 both ways, no rubber band and no
+   * axis lock (the old up-only drag jumped when the finger went down, the user 11-26), lifted (a little smaller); it
+   * fades only while it is still a plain push up, never once it's a dock drag.
+   */
   const follow = (d: Drag, e: PointerEvent, dx: number, dy: number) => {
-    d.dy = dy < 0 ? dy : dy * 0.15;
-    // Sideways it follows the finger only where it can dock (the old pure-vertical drag everywhere else).
+    d.dy = canDock || dy < 0 ? dy : dy * 0.15;
     d.dx = canDock ? dx : 0;
     d.samples.push({ y: e.clientY, t: e.timeStamp });
     while (d.samples.length > 2 && e.timeStamp - d.samples[0].t > 80) d.samples.shift();
     const card = el.current!;
-    if (canDock) hover(dockSide({ dx, dy, x: e.clientX, cardH: card.clientHeight, screenW: innerWidth }));
-    card.style.transform = `translate(${d.dx}px, ${d.dy}px)`;
-    card.style.opacity = String(1 - Math.min(1, Math.max(0, -d.dy) / card.clientHeight));
+    const fade = Math.min(1, Math.max(0, -d.dy) / card.clientHeight);
+    if (!canDock) {
+      card.style.transform = `translate(${d.dx}px, ${d.dy}px)`;
+      card.style.opacity = String(1 - fade);
+      return;
+    }
+    const g = geo(d, e, dx, dy);
+    d.docking = docking(g);
+    hover(dockSide(g));
+    card.style.transition = "opacity var(--spring-fast-ms) var(--spring-fast)";
+    card.style.transform = `translate(${d.dx}px, ${d.dy}px) scale(0.94)`;
+    card.style.opacity = String(d.docking ? (d.side ? 0.85 : 1) : 1 - fade);
   };
 
   /** An upward drag let go ([mx]: the finger's sideways travel): docked, removed or back (ui/carddock.ts cardRelease). */
@@ -171,9 +206,9 @@ export const TaskCard = memo(function TaskCard({
     window.addEventListener("pointerdown", () => window.removeEventListener("click", swallow, true), { capture: true, once: true });
     const first = d.samples[0];
     const v = (e.clientY - first.y) / Math.max(1, e.timeStamp - first.t);
-    const r = cardRelease({ dx: mx, dy: d.dy, x: e.clientX, cardH: el.current!.clientHeight, screenW: innerWidth }, v, !!canDock);
+    const r = cardRelease(geo(d, e, mx, e.clientY - d.y), v, !!canDock);
     if (r.kind === "dock") return dockAway(d.dx, d.dy, r.side);
-    if (d.side) console.info(`[canvas] card ${t.id} let go outside the ${d.side} dock zone (x ${Math.round(e.clientX)}): ${r.kind}`);
+    if (d.side || d.docking) console.info(`[canvas] card ${t.id} let go outside a dock zone (${Math.round(e.clientX)}, ${Math.round(e.clientY)}): ${r.kind}`);
     if (d.side) onDockHover?.(null);
     if (r.kind === "remove") flingAway(d.dy, v, d.dx);
     else springBack(d.dy, d.dx);
@@ -198,7 +233,7 @@ export const TaskCard = memo(function TaskCard({
           tick();
           onMenu(t.id, el.current!);
         }, LONG_PRESS);
-        drag.current = { x: e.clientX, y: e.clientY, dy: 0, dx: 0, side: null, up: null, samples: [{ y: e.clientY, t: e.timeStamp }], press };
+        drag.current = { x: e.clientX, y: e.clientY, dy: 0, dx: 0, side: null, docking: false, up: null, samples: [{ y: e.clientY, t: e.timeStamp }], press };
         // The rest of this press is the card's, wherever it goes (a touch is captured by its target anyway): a mouse's or
         // pen's quick swipe whose moves came coalesced into one far above the card (11-02, gate under load) went to the
         // layer beside the cards - its release there "a tap beside the cards", the app it was opened over opened.

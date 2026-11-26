@@ -1,44 +1,63 @@
 /**
- * A switcher card dragged up and toward a side: docked into OxygenOS's Open Canvas (the native split view,
- * com.oplus.pscanvas) on that side - the user, 11-23: "When I use the switcher and I drag a window up and to the side
- * it should be docked to that side ... the split view native thing". Not PowOS's desktop split.
+ * A switcher card lifted and dragged to a screen edge: docked into OxygenOS's Open Canvas (the native split view,
+ * com.oplus.pscanvas) on that side, then the user picks the app for the other half (ui/canvaspick.tsx). The user,
+ * 11-26: "You should be able to drag the window to the right side, left side, top or bottom. The app should then dock
+ * and you should be able to select the other app ... The docking in the home screen works perfectly ... Use that as
+ * reference". Not PowOS's desktop split.
  *
- * Pure geometry, no DOM (shell/test/carddock.test.ts): which half a card dragged by (dx, dy) targets now, and what its
- * release does. A mostly vertical drag stays a removal exactly as before (switcher.tsx REMOVE / FLICK); only a drag that
- * is clearly diagonal AND has carried the finger into the outer part of the screen on that side docks.
+ * Pure geometry, no DOM (shell/test/carddock.test.ts): which half the finger targets now (home's edge rule), and what
+ * a release does. A drag that never went to a side stays the old removal (switcher.tsx REMOVE / FLICK); a dock drag
+ * let go outside a target goes back.
  */
 
-export type DockSide = "left" | "right";
+export type DockSide = "left" | "right" | "top" | "bottom";
 
-/** Up at least this much of the card's height before a side counts (a sideways nudge at the start never docks). */
-export const DOCK_UP = 0.18;
-/** Sideways at least this much of the screen's width. */
+/**
+ * Where the finger has to be for a half to light: within home's own edge band of the screen's edge (webwindows.tsx's
+ * bar drag snaps at SNAP_EDGE 24 px - the docking the user called perfect, 11-26), a little wider here because the card
+ * under the finger is wide and the switcher has no work-area inset to stop at.
+ */
+export const DOCK_EDGE_PX = 40;
+/** Sideways this much of the screen's width (or ever in a target): a dock drag, let go anywhere else it goes back. */
 export const DOCK_DX = 0.14;
-/** The finger in the outer part of the screen on that side: x <= EDGE * width (left), >= (1 - EDGE) * width (right). */
-export const DOCK_EDGE = 0.36;
-/** Diagonal enough: |dx| at least this times the distance up (~27 degrees off vertical). */
-export const DOCK_SLANT = 0.5;
 
 export interface CardDrag {
   /** Finger's travel since the press (CSS px; up is negative dy). */
   dx: number;
   dy: number;
-  /** Where the finger is now (CSS px from the left edge of the screen). */
+  /** Where the finger is now (CSS px from the screen's left / top edge). */
   x: number;
-  /** The card's height and the screen's width (CSS px). */
+  y?: number;
+  /** The card's height and the screen's width / height (CSS px). */
   cardH: number;
   screenW: number;
+  screenH?: number;
+  /** Open Canvas stacks one over the other here (top / bottom targets; the host's tasks.canvasVertical). */
+  vertical?: boolean;
+  /** The drag was a dock drag already (it lit a target, or went well sideways): let go outside one, it goes back. */
+  docking?: boolean;
 }
 
-/** The half a card dragged as [d] targets right now, or null: a removal / spring-back as before. */
+/**
+ * The half a card dragged as [d] targets right now, or null - home's rule: the FINGER at a screen edge (left / right,
+ * and top / bottom where the canvas stacks), the nearest edge when it is in two bands (a corner).
+ */
 export function dockSide(d: CardDrag): DockSide | null {
-  const up = -d.dy;
-  if (up < d.cardH * DOCK_UP) return null;
-  if (Math.abs(d.dx) < d.screenW * DOCK_DX) return null;
-  if (Math.abs(d.dx) < up * DOCK_SLANT) return null;
-  if (d.dx < 0 && d.x <= d.screenW * DOCK_EDGE) return "left";
-  if (d.dx > 0 && d.x >= d.screenW * (1 - DOCK_EDGE)) return "right";
-  return null;
+  const e = DOCK_EDGE_PX;
+  const H = d.screenH ?? Infinity;
+  const y = d.y ?? H / 2;
+  const near: [DockSide, number][] = [
+    ["left", d.x],
+    ["right", d.screenW - d.x],
+  ];
+  if (d.vertical && Number.isFinite(H)) near.push(["top", y], ["bottom", H - y]);
+  const hit = near.filter(([, dist]) => dist <= e).sort((a, b) => a[1] - b[1])[0];
+  return hit ? hit[0] : null;
+}
+
+/** A dock drag now ([CardDrag.docking]): it lit a target, or carried the card well sideways. */
+export function docking(d: CardDrag): boolean {
+  return !!d.docking || dockSide(d) != null || Math.abs(d.dx) >= d.screenW * DOCK_DX;
 }
 
 /** Pushed up this far (of its height), or flicked up (px/ms), a card is removed (switcher.tsx's, unchanged). */
@@ -48,16 +67,31 @@ export const FLICK = 0.5;
 export type CardRelease = { kind: "dock"; side: DockSide } | { kind: "remove" } | { kind: "back" };
 
 /**
- * What letting go of an upward card drag does. [canDock]: Open Canvas is there (unfolded, supported) - else exactly the
- * old rule. [vy]: the finger's recent speed (px/ms, up negative). A drag in a dock zone docks even when flicked (the
- * half was shown under the finger); anything else is the old removal rule.
+ * What letting go of a lifted card does. [canDock]: Open Canvas is there (unfolded, supported) - else exactly the old
+ * rule. [vy]: the finger's recent speed (px/ms, up negative). The finger in a target docks (the half was shown under
+ * it, so even flicked); a dock drag let go anywhere else goes back - a clean cancel, never a removal; anything else is
+ * the old removal rule.
  */
 export function cardRelease(d: CardDrag, vy: number, canDock: boolean): CardRelease {
   const side = canDock ? dockSide(d) : null;
   if (side) return { kind: "dock", side };
+  if (canDock && docking(d)) return { kind: "back" };
   if (vy < -FLICK || (-d.dy > d.cardH * REMOVE && vy < 0.3)) return { kind: "remove" };
   return { kind: "back" };
 }
+
+/** The half of a [w] x [h] screen [side] takes (CSS px, the canvas's 8 dp gap between them) - the drop's preview. */
+export function halfRect(side: DockSide, w: number, h: number, gap = 8): { x: number; y: number; w: number; h: number } {
+  const hw = (w - gap) / 2;
+  const hh = (h - gap) / 2;
+  if (side === "left") return { x: 0, y: 0, w: hw, h };
+  if (side === "right") return { x: w - hw, y: 0, w: hw, h };
+  if (side === "top") return { x: 0, y: 0, w, h: hh };
+  return { x: 0, y: h - hh, w, h: hh };
+}
+
+/** The other half ([side]'s opposite): where the picker for the second app is. */
+export const otherSide = (side: DockSide): DockSide => ({ left: "right", right: "left", top: "bottom", bottom: "top" })[side] as DockSide;
 
 type Card = { id: number; key?: string | null; split?: unknown };
 
@@ -75,23 +109,11 @@ export function canSide(c: Card, sides: Set<number> | null): boolean {
 }
 
 /**
- * The app beside the docked one: the newest OTHER card that can be a side ([canSide]). [list] is the switcher's order,
- * newest first after the lead.
+ * Whether card [dragged] can be docked at all (the picker comes up for the second app), or why not - "dragged": the
+ * dragged app itself can't be in split view (OxygenOS's blocklist: Settings). The second app is never picked for the
+ * user (the user, 11-26: "it's just randomly selecting the last app you had activated"): they pick it.
  */
-export function dockPartner(list: Card[], dragged: number, sides: Set<number> | null = null): number | null {
-  const t = list.find((c) => c.id !== dragged && canSide(c, sides));
-  return t ? t.id : null;
-}
-
-/**
- * What a card let go in a dock zone does: dock beside [other], or why not - "dragged": the dragged app itself can't be in
- * split view (OxygenOS's blocklist: Settings), "partner": no other open app can. Both are said to the user.
- */
-export type DockPick = { other: number } | { why: "dragged" | "partner" };
-
-export function dockPick(list: Card[], dragged: number, sides: Set<number> | null): DockPick {
+export function dockable(list: Card[], dragged: number, sides: Set<number> | null): boolean {
   const card = list.find((c) => c.id === dragged);
-  if (!card || !canSide(card, sides)) return { why: "dragged" };
-  const other = dockPartner(list, dragged, sides);
-  return other == null ? { why: "partner" } : { other };
+  return !!card && canSide(card, sides);
 }

@@ -6,8 +6,9 @@
  * ones, a tap beside the cards or Back goes back to the app it was opened over (over home: closes it), the home swipe
  * closes it to home (the host's "recents.end" to: home - the same collapse). A card's icon (or a long press) opens its
  * menu: split screen (then pick the second app), floating window, screenshot, app info, pin. Unfolded with OxygenOS's
- * Open Canvas, a card pushed up AND toward a side docks into that native split view on that side, beside the newest
- * other app (ui/carddock.ts; the host's tasks.canvasDock) - the target half lit while the finger is there.
+ * Open Canvas, a card lifted and dragged to a screen edge docks into that native split view on that side (ui/carddock.ts,
+ * home's drop ghost lighting the half), then the other half asks which app goes beside it (ui/canvaspick.tsx; only that
+ * pick starts the pair: the host's tasks.canvasDock).
  *
  * A swipe up over an app builds it under the finger (system/Switcher.kt, the native side): home comes up behind the
  * app ("recents.begin"), the app's window shrinks onto the first card's slot - where that slot is, the page tells the
@@ -31,11 +32,12 @@ import { signal } from "@preact/signals";
 import { powos } from "../bridge.ts";
 import type { BackgroundApp, RecentTask } from "../types.ts";
 import { TaskCard, type Rect } from "./switcher.tsx";
-import { frontWindow, tileApps, webWindowsOn } from "./webwindows.tsx";
+import { DropPreview, frontWindow, tileApps, webWindowsOn } from "./webwindows.tsx";
 import { spring } from "./spring.ts";
 import { dropKeyboard } from "./keyboard.ts";
 import { appView, closeApp, forgetOpened, mergeTasks, openApp, taskApp } from "../apps/pages.ts";
-import { dockPick, type DockSide } from "./carddock.ts";
+import { dockable, halfRect, type DockSide } from "./carddock.ts";
+import { CanvasPicker, canvasPick } from "./canvaspick.tsx";
 
 type Phase = "closed" | "drag" | "shown";
 
@@ -93,8 +95,10 @@ const pinned = signal<Set<string>>(new Set());
 const loaded = signal(false);
 /** OxygenOS's Open Canvas can take a docked card now (unfolded, supported: the host's tasks.canvas, asked at each open). */
 const canvas = signal(false);
+/** Open Canvas stacks one over the other here too: the top and bottom edges dock (the host's tasks.canvasVertical). */
+const canvasVertical = signal(false);
 /** The cards OxygenOS lets into Open Canvas (the host's tasks.canvasSides, asked at each open); null: not told (older APK). */
-let canvasSides: Set<number> | null = null;
+const canvasSides = signal<Set<number> | null>(null);
 /** The half a card being dragged would dock to (lit under the cards), or null. */
 const dockHover = signal<DockSide | null>(null);
 /** A short note (a screenshot saved). */
@@ -225,6 +229,7 @@ const nextFrame = () => new Promise<void>((r) => requestAnimationFrame(() => r()
 
 function reset() {
   menu.value = null;
+  undock();
   backgroundOpen.value = false;
   splitFirst.value = null;
   splitMore.value = null;
@@ -293,13 +298,16 @@ function begin(e: { from: number | null; tasks: RecentTask[] }) {
  */
 function askCanvas() {
   dockHover.value = null;
-  canvasSides = null;
+  canvasSides.value = null;
   const ask = powos.tasks.canvas;
-  if (!ask) return void (canvas.value = false);
+  if (!ask) return void (canvas.value = canvasVertical.value = false);
   ask().then((on) => (canvas.value = !!on), () => (canvas.value = false));
+  const vertical = powos.tasks.canvasVertical;
+  if (!vertical) canvasVertical.value = false;
+  else vertical().then((on) => (canvasVertical.value = !!on), () => (canvasVertical.value = false));
   powos.tasks.canvasSides?.().then(
-    (ids) => (canvasSides = Array.isArray(ids) ? new Set(ids) : null),
-    () => (canvasSides = null),
+    (ids) => (canvasSides.value = Array.isArray(ids) ? new Set(ids) : null),
+    () => (canvasSides.value = null),
   );
 }
 
@@ -313,23 +321,16 @@ function dockHoverCard(side: DockSide | null) {
 const cardName = (id: number) => tasks.value.find((t) => t.id === id)?.label || "This app";
 
 /**
- * Card [id] let go in the [side] dock zone: Open Canvas with it on that side and the newest other app that can be in it
- * on the other (the host's tasks.canvasDock: OxygenOS's app-pair shortcut). Never silent (the user, 11-23: "it does play
- * like a click ... but it doesnt activate splitview"): the dragged app not allowed in split view, no other app that is,
- * or the host refusing it - the card springs back and a note says why. The switcher itself goes when home stops under
- * the canvas (recents.hide), as for any launch.
+ * Card [id] let go in the [side] dock zone: docked into that half at once (its picture grows there from [shot]) and
+ * the other half asks for the second app (ui/canvaspick.tsx) - nothing is started yet, and nothing is picked for the
+ * user. Never silent: the dragged app not allowed in split view (OxygenOS's blocklist) or no host for it - the card
+ * springs back and a note says why.
  */
-function dockCard(id: number, side: DockSide): boolean {
-  const dock = powos.tasks.canvasDock;
-  if (!dock) return refuse(id, "Not supported by this build yet");
-  const pick = dockPick(tasks.value, id, canvasSides);
-  if ("why" in pick)
-    return refuse(id, pick.why === "dragged" ? `${cardName(id)} can't be used in split view` : "Open another app that works in split view first");
-  console.info(`[canvas] dock task ${id} ${side}, beside ${pick.other}`);
-  dock(id, side, pick.other).then(
-    (r) => (r?.ok ? console.info(`[canvas] dock of task ${id} started`) : undocked(id, r?.reason)),
-    (e) => undocked(id, `Split view didn't open (${e?.message ?? e})`),
-  );
+function dockCard(id: number, side: DockSide, shot: DOMRect): boolean {
+  if (!powos.tasks.canvasDock) return refuse(id, "Not supported by this build yet");
+  if (!dockable(tasks.value, id, canvasSides.value)) return refuse(id, `${cardName(id)} can't be used in split view`);
+  console.info(`[canvas] task ${id} docked ${side}: picking the other app`);
+  canvasPick.value = { id, side, from: { left: shot.left, top: shot.top, width: shot.width, height: shot.height } };
   return true;
 }
 
@@ -340,24 +341,28 @@ function refuse(id: number, reason: string): false {
   return false;
 }
 
-/** A dock the host refused: the card back where it was (its fly-off undone), with the reason. */
-function undocked(id: number, reason?: string) {
-  console.warn(`[canvas] dock of task ${id} refused by the host: ${reason ?? "no reason"}`);
-  row?.querySelector<HTMLElement>(`.task[data-task="${id}"]`)?.getAnimations().forEach((a) => a.cancel());
-  showNote(reason || "Split view didn't open");
+/** The pick over: the docked card back in the row (its hiding undone, it takes touches again). */
+function undock() {
+  const p = canvasPick.value;
+  canvasPick.value = null;
+  if (p) row?.querySelector<HTMLElement>(`.task[data-task="${p.id}"]`)?.getAnimations().forEach((a) => a.cancel());
 }
 
-/** The half a dragged card docks to: Open Canvas's side, lit under the cards; it fades in and out on the spring (§6). */
+/** The pick cancelled (Back, a tap on the docked half): the dragged app back full screen, as it was. */
+function cancelPick(id: number) {
+  console.info(`[canvas] pick for task ${id} cancelled: the app back full screen`);
+  undock();
+  powos.tasks.open(id).then((ok) => void (ok || refresh()));
+}
+
+/**
+ * The half a dragged card docks to: home's own drop ghost (webwindows.tsx DropPreview, the window docking the user
+ * called perfect) on the half Open Canvas gives it.
+ */
 function DockTarget({ side }: { side: DockSide | null }) {
-  const pop = usePresence(side != null);
-  const last = useRef(side);
-  if (side) last.current = side;
-  if (!pop.on || !last.current) return null;
-  return (
-    <div class={`recents-dock ${last.current} ${pop.leaving ? "leaving" : ""}`} aria-hidden="true">
-      Split view · {last.current}
-    </div>
-  );
+  if (!side) return null;
+  const { w, h } = size.value;
+  return <DropPreview d={{ rect: halfRect(side, w || innerWidth, h || innerHeight), slot: side }} o={{ x: 0, y: 0 }} />;
 }
 
 /** Shown without a swipe (the overview button, up and hold over home): it comes up over home. */
@@ -668,7 +673,8 @@ function reportSlot() {
  * over home it closes. Before (X2) it always closed to home, the app it was opened over lost behind it.
  */
 function beside() {
-  if (splitFirst.value != null) splitFirst.value = null;
+  if (canvasPick.value) cancelPick(canvasPick.value.id);
+  else if (splitFirst.value != null) splitFirst.value = null;
   else if (from.value != null) open(from.value, firstShot() ?? undefined);
   else close();
 }
@@ -677,6 +683,7 @@ function beside() {
 export function recentsBack(): boolean {
   if (phase.value === "closed") return false;
   if (menu.value) menu.value = null;
+  else if (canvasPick.value) cancelPick(canvasPick.value.id);
   else if (backgroundOpen.value) backgroundOpen.value = false;
   else if (splitFirst.value != null) splitFirst.value = null;
   else if (from.value != null) open(from.value, firstShot() ?? undefined);
@@ -1074,7 +1081,8 @@ export function Recents() {
               onOpen={openCard}
               onRemove={remove}
               onMenu={menuCard}
-              canDock={canvas.value && first == null && !t.split && nativeSide(t.id)}
+              canDock={canvas.value && first == null && !canvasPick.value && !t.split && nativeSide(t.id)}
+              vertical={canvasVertical.value}
               onDockHover={dockHoverCard}
               onDock={dockCard}
             />
@@ -1093,6 +1101,7 @@ export function Recents() {
           {note.value}
         </div>
       )}
+      <CanvasPicker tasks={list} sides={canvasSides.value} w={w} h={h} onCancel={cancelPick} onNote={showNote} />
       <Menu />
       <Opening />
     </div>

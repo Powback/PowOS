@@ -1321,11 +1321,14 @@ export interface Bridge {
      */
     canvas?(): Promise<boolean>;
     /**
-     * Host-optional: task [id]'s app docked into Open Canvas on [side], task [other]'s app on the other side (the
-     * switcher's drag up and toward a side, ui/carddock.ts). OxygenOS's app-pair shortcut (docs/research/pscanvas.md
+     * Host-optional: task [id]'s app docked into Open Canvas on [side], [other] on the other side - a recent task's id
+     * (the app keeps its task) or an app key ("a:pkg/act", started fresh) - the switcher's drag to an edge, then the
+     * user's pick (ui/carddock.ts, ui/canvaspick.tsx). "top" / "bottom" only where [canvasVertical]. OxygenOS's app-pair shortcut (docs/research/pscanvas.md
      * entry A): started by intent, so whether each app comes back in its own state is OxygenOS's (logged by the host).
      */
-    canvasDock?(id: number, side: "left" | "right", other: number): Promise<CanvasDockResult>;
+    canvasDock?(id: number, side: "left" | "right" | "top" | "bottom", other: number | string): Promise<CanvasDockResult>;
+    /** Host-optional: Open Canvas stacks two apps one over the other here (the switcher's top / bottom targets). */
+    canvasVertical?(): Promise<boolean>;
     /** Host-optional: Open Canvas as it stands (the no-permission reads), or null where there's none. For checks. */
     canvasState?(): Promise<CanvasState | null>;
     /**

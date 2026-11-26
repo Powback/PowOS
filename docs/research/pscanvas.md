@@ -394,3 +394,10 @@ The lines to look for: `needInterceptActivityForMinimized targetPkg:…`, `get s
   (PowCDN's way). Then `rsync` from .58.
 - Decompile command: `~powos/research/pscanvas/2026-11-23/run-jadx.sh <dir>` on .58 (rootless podman,
   `--cgroup-parent=nomad.slice`, 16 threads).
+
+**Rebuilt (11-26), the user: "the split view selection activation switcher really sucks ... it's just randomly
+selecting the last app you had activated".** The switcher no longer picks a partner: the card dropped on an edge docks
+in the page (ui/canvaspick.tsx) and the user picks the second app; `tasks.canvasDock` now takes that pick as a task id
+or an app key (an app with no task is started by its launch intent, same path A). Top / bottom docks send
+`androidx.flexible.layoutOrientation=1` (`tasks.canvasVertical`); NOT yet measured on the device - the verify check
+drags sideways only, and `CanvasDock.checkBack` brings the app back with a toast if a stacked start doesn't land.

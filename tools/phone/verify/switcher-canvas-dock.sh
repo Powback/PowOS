@@ -2,16 +2,18 @@
 # lanes: phone
 # needs: home
 # switcher-canvas-dock.sh (board task switcher-drag-dock-open-canvas; host system/CanvasDock.kt, page ui/carddock.ts):
-# the switcher's "drag a card up and toward a side" dock into OxygenOS's Open Canvas (com.oplus.pscanvas, the native
-# split view), done the way the user does it - a REAL drag injected on the switcher's card (input swipe), not the host
-# call - on the unfolded inner screen. The user, 11-23: "it does play like a click when i activate the switcher and drag
-# the app to one of the sides, but it doesnt activate splitview for it".
+# the switcher's split view - drag a card to a screen edge, it docks there, then PICK the other app (ui/canvaspick.tsx) -
+# into OxygenOS's Open Canvas (com.oplus.pscanvas, the native split view), done the way the user does it: a REAL drag
+# injected on the switcher's card (input motionevent: up first, then to the edge) and a real tap on the picked app, not
+# the host call - on the unfolded inner screen. The user, 11-26: "You should be able to drag the window to the right
+# side, left side, top or bottom. The app should then dock and you should be able to select the other app".
 #   1. tasks.canvas says yes unfolded (unfolds with cmd device_state if folded, reset after); tasks.canvasSides read
 #      (Settings, on OxygenOS's split blocklist, must not be in it when it runs)
 #   2. Calculator, then Chrome started (both split-capable; apps already running are used as they are, never removed)
-#   3. The switcher (KEYCODE_APP_SWITCH), Chrome's card dragged up and toward the side away from its centre: Open Canvas
-#      comes up - isInPocketStudio(0) true, two regions (tasks.canvasState), Chrome's on the dragged-to side; the page's
-#      and host's lines ([canvas] / PowosCanvasDock) logged
+#   3. The switcher (KEYCODE_APP_SWITCH), Chrome's card dragged to the screen edge away from its centre: the picker is up
+#      and NO canvas yet (never an auto-picked partner); a tap on Calculator in it: Open Canvas comes up - two sides read
+#      from dumpsys input's frames, Chrome's on the dragged-to side; the page's and host's lines ([canvas] /
+#      PowosCanvasDock) logged
 #      and PowOS never adopts the canvas into a web window (window-log "com.oplus.pscanvas) was full screen")
 #   4. MEASURED, not judged: each app's task before vs. in the canvas ("reused" / "new task", CanvasDock.measure)
 #   5. The canvas closed (Home, then its task removed); Settings' card dragged the same way: no canvas, and the note
@@ -44,15 +46,28 @@ start() { local id; id=$(tid "$1")
   echo "$id"; }
 # The injected drag is the tools' own input (window-lock.sh's powos-selfinput), not the user's touch.
 selfinput() { sh_ "echo \$(( \$(date +%s) + 8 )) > /data/local/tmp/powos-selfinput"; }
-# drag_card <task id>: the switcher opened over the front app, that task's card dragged up and toward the side away
-# from its centre (a straight swipe: up-dominant at the first 10 px, diagonal enough, ending in the outer 20 % of the
-# screen - ui/carddock.ts dockSide). Echoes "left|right x0 y0 x1 y1" (device px), or "none <why>".
-drag_card() { local g side x0 y0 x1 y1
+# drag_card <task id>: the switcher opened over the front app, that task's card lifted (up 60 CSS px first: a card push,
+# not the row's scroll) and carried to the screen edge away from its centre (6 px in: ui/carddock.ts dockSide's edge
+# band), then let go. Echoes "left|right x0 y0 x1 y1" (device px), or "none <why>".
+drag_card() { local g side x0 y0 x1 y1 ux uy i
   selfinput; sh_ "input keyevent KEYCODE_APP_SWITCH" >/dev/null; sleep 1.5
-  g=$(ev "(()=>{const c=document.querySelector('.recents.open .task[data-task=\"$1\"]');if(!c)return 'none no card for task $1 ('+[...document.querySelectorAll('.recents .task')].map(e=>e.dataset.task).join(',')+')';const r=c.getBoundingClientRect(),d=devicePixelRatio,W=innerWidth,x=r.left+r.width/2,y=r.top+r.height/2,left=x>=W/2,tx=left?W*0.2:W*0.8,dx=tx-x,dy=-Math.min(y-20,Math.max(1.3*Math.abs(dx),r.height*0.35));return [left?'left':'right',x*d,y*d,tx*d,(y+dy)*d].map(v=>typeof v==='number'?Math.round(v):v).join(' ')})()" | tr -d '"')
+  g=$(ev "(()=>{const c=document.querySelector('.recents.open .task[data-task=\"$1\"]');if(!c)return 'none no card for task $1 ('+[...document.querySelectorAll('.recents .task')].map(e=>e.dataset.task).join(',')+')';const r=c.getBoundingClientRect(),d=devicePixelRatio,W=innerWidth,x=r.left+r.width/2,y=r.top+r.height/2,left=x>=W/2,tx=left?6:W-6;return [left?'left':'right',x*d,y*d,tx*d,(y-60)*d].map(v=>typeof v==='number'?Math.round(v):v).join(' ')})()" | tr -d '"')
   case $g in left*|right*) ;; *) echo "${g:-none no answer}"; return ;; esac
   read -r side x0 y0 x1 y1 <<<"$g"
-  selfinput; sh_ "input swipe $x0 $y0 $x1 $y1 700" >/dev/null
+  selfinput
+  # One shell: DOWN, up 4 steps, sideways 8 steps to the edge (the finger held there a moment: the half lights), UP.
+  local cmd="input motionevent DOWN $x0 $y0"
+  for i in 1 2 3 4; do uy=$(( y0 + (y1 - y0) * i / 4 )); cmd="$cmd; input motionevent MOVE $x0 $uy"; done
+  for i in 1 2 3 4 5 6 7 8; do ux=$(( x0 + (x1 - x0) * i / 8 )); cmd="$cmd; input motionevent MOVE $ux $y1"; done
+  sh_ "$cmd; sleep 0.3; input motionevent MOVE $x1 $y1; input motionevent UP $x1 $y1" >/dev/null
+  echo "$g"; }
+# picker_side: the side the picker docked the dragged app on ("left" / "right" ...), or "" when no picker is up.
+picker_side() { ev "document.querySelector('.canvas-pick')?.dataset.side||''" | tr -d '"'; }
+# pick_app <task id>: a real tap on that task's cell in the picker. Echoes "x y" (device px) or "none <why>".
+pick_app() { local g
+  g=$(ev "(()=>{const b=document.querySelector('.canvas-pick-app[data-task=\"$1\"]');if(!b)return 'none no picker cell for task $1 ('+[...document.querySelectorAll('.canvas-pick-app[data-task]')].map(e=>e.dataset.task).join(',')+')';const r=b.getBoundingClientRect(),d=devicePixelRatio;return Math.round((r.left+r.width/2)*d)+' '+Math.round((r.top+Math.min(r.height/2,30))*d)})()" | tr -d '"')
+  case $g in none*|"") echo "${g:-none no answer}"; return ;; esac
+  selfinput; sh_ "input tap $g" >/dev/null
   echo "$g"; }
 pagelog() { sh_ "logcat -d" | grep -E "PowosCanvasDock|\[canvas\]|OplusSplitScreenManagerService.*(PocketStudio|PairTask|shortcut|unSupports)|FlexibleWindowManagerService.*(PocketStudio|hortcut)|AndroidRuntime|ANR in" | grep -v "getPocketStudioTaskRegion" | tail -"${1:-10}" | cut -c1-230; }
 
@@ -74,10 +89,17 @@ SID=$(tid $S)
 [ -n "$SID" ] && case $sides in *"$SID"*) bad "sides: Settings (task $SID, OxygenOS's split blocklist) is in $sides" ;; esac
 sh_ "logcat -c" >/dev/null
 
-# 3. The real drag on Chrome's card (the switcher opened over Chrome).
+# 3. The real drag on Chrome's card (the switcher opened over Chrome): docked, the picker up, no canvas till the pick.
 g=$(drag_card "$CID"); say "drag: chrome's card $g"
 case $g in none*) bad "drag: $g"; wwc_end "-" ;; esac
 SIDE=${g%% *}
+sleep 1
+ps=$(picker_side); say "picker: docked ${ps:-none}"
+[ "$ps" = "$SIDE" ] || bad "picker: let go at the $SIDE edge, the picker says '${ps:-no picker}'"
+"$T/shot.sh" "$OUT/picker.png" >/dev/null 2>&1
+[ -n "$(canvas_task)" ] && bad "picker: a canvas opened before the pick (an auto-picked partner)"
+p=$(pick_app "$KID"); say "pick: calculator at $p"
+case $p in none*) bad "pick: $p"; wwc_end "-" ;; esac
 for _ in 1 2 3 4 5 6 7 8 9 10; do sleep 0.5; [ -n "$(canvas_task)" ] && break; done
 sleep 3   # CanvasDock.measure reads back at 2.5 s
 "$T/shot.sh" "$OUT/canvas.png" >/dev/null 2>&1
@@ -173,4 +195,4 @@ if [ -n "$SID" ]; then
   while IFS= read -r l; do say "log: $l"; done < <(pagelog 4)
   sh_ "input keyevent KEYCODE_HOME" >/dev/null
 fi
-wwc_end "Chrome's card dragged ${SIDE:-?} docked into Open Canvas beside Calculator (regions read back); Settings refused with a note"
+wwc_end "Chrome's card dragged to the ${SIDE:-?} edge docked, Calculator picked: Open Canvas with both (sides read back); Settings refused with a note"

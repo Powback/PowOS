@@ -406,6 +406,7 @@ function native(host: NonNullable<Window["PowosHost"]>): Bridge {
       toWindow: (id) => call<boolean>("tasks.toWindow", id),
       canvas: () => call<boolean>("tasks.canvas"),
       canvasDock: (id, side, other) => call<CanvasDockResult>("tasks.canvasDock", id, side, other),
+      canvasVertical: () => call<boolean>("tasks.canvasVertical"),
       canvasState: () => call<CanvasState | null>("tasks.canvasState"),
       canvasSides: () => call<number[]>("tasks.canvasSides"),
     },

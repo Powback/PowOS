@@ -40,19 +40,24 @@ description: Use when working on PowOS window tasks - floating Android windows (
 - Other events: recents.show/hide/tasks/update, switcher.toggle. Home's stop emits recents.tasks (cards laid out ahead).
 - recents.tsx frame(p, x, y, home): CSS vars on the layer + an inline transform/opacity on `.screens` (home + AI page).
 
-## Dock a card into Open Canvas (11-23, the user: "drag a window up and to the side ... the split view native thing")
-- Unfolded, a switcher card pushed up AND toward a side (shell/ui/carddock.ts dockSide: up >= 18% of the card, sideways
-  >= 14% of the screen, >= ~27 degrees off vertical, finger in the outer 36% on that side) docks it into OxygenOS's Open
-  Canvas (com.oplus.pscanvas) on that side, the newest other single Android app on the other (dockPartner). Mostly
-  vertical = the old removal/spring-back (cardRelease; JS test shell/test/carddock.test.ts via
-  test/tier1/test-switcher-carddock.sh). Live: the card follows the finger sideways, `.recents-dock` lights the half.
+## Dock a card into Open Canvas (11-23; rebuilt 11-26, the user: "drag the window to the right side, left side, top or bottom. The app should then dock and you should be able to select the other app")
+- Unfolded with Open Canvas (tasks.canvas), a switcher card lifted (first move up: a card push; sideways = the row's
+  scroll) follows the finger 1:1 both ways, as a window bar drag on home (no rubber band, no fade once it's a dock
+  drag). The FINGER in the screen's edge band (shell/ui/carddock.ts dockSide, DOCK_EDGE_PX; home's SNAP_EDGE rule)
+  lights that half with home's own ghost (webwindows.tsx DropPreview, `.ww-drop` data-zone `snap:<side>`, haptic tick).
+  Top/bottom only where tasks.canvasVertical (CanvasDock.vertical; layoutOrientation 1). Let go there: the app docks at
+  once (shell/ui/canvaspick.tsx: its picture grows into the half) and the other half is the picker - recent cards first
+  (dimmed with why: tasks.canvasSides / Linux windows), then all Android apps with search (powos.apps.list: state.ts's
+  list would be an import cycle). Only the tap starts tasks.canvasDock(id, side, other) - other = task id or app key.
+  NEVER an auto-picked partner. Back / a tap on the docked half cancels: tasks.open(id). A dock drag let go outside a
+  target goes back (cardRelease "back"), a plain push up still removes. JS test shell/test/carddock.test.ts.
 - Host: system/CanvasDock.kt (docs/research/pscanvas.md path A: app-pair dynamic shortcut + LauncherApps.startShortcut,
   no Oplus permission). NOT PowOS's desktop split, NOT WM Shell split. Folded / unsupported: tasks.canvas false, the
   drag is the old one. Started by intent (a marked workaround) - task reuse logged per dock (`logcat -s PowosCanvasDock`).
 - Partner + blocklist (11-23 fix): the host's `tasks.canvasSides` (CanvasDock.sides: recent tasks whose TaskInfo
   supportsPocketStudioMultiWindow / supportsSplitScreenMultiWindow aren't false - OxygenOS's split blocklist lands
   there: Settings - and not PowOS's own package: lock face, home, Linux windows are com.powos.app tasks) is the truth
-  for the partner (carddock.ts dockPick). Never silent: dragged app blocked -> "<App> can't be used in split view";
+  for the picker's dimming and the dragged app (carddock.ts dockable). Never silent: dragged app blocked -> "<App> can't be used in split view";
   no partner / host refusal -> a note; every host refusal logs `PowosCanvasDock ... refused: <reason>`, the page logs
   `[canvas] ...`. Card keys are "a:pkg/act" (Android), "l:app" (Linux), null (PowOS lock/home): never match on a raw
   package prefix. A refused card's fly-off is cancelled -> its `gone` flag must clear on cancel too (it didn't: the
@@ -65,9 +70,9 @@ description: Use when working on PowOS window tasks - floating Android windows (
   Side verdicts use a task's split flags only when it has live activities (TaskInfo.numActivities > 0): a cached
   task reads false for all of them (Discord 3936) - Discord is on no inner-screen blocklist (sys_wms_split_app_ps.xml
   `com.discord type="1:0:0"` = bar phone/cover only).
-- Check: `tools/phone/verify/switcher-canvas-dock.sh` (phone only; REAL injected drag of Chrome's card beside
+- Check: `tools/phone/verify/switcher-canvas-dock.sh` (phone only; REAL injected drag of Chrome's card to the edge, then a tap on Calculator in the picker, beside
   Calculator, regions + side read back; then Settings' card -> the note, no canvas). Gate: `switcher-canvas-drag`
-  (CDP touch drag in Chromium: reaches tasks.canvasDock with the right partner; refusal note; Settings blocked).
+  (CDP touch drags: ghost per edge, drop -> picker (no host call), tap -> canvasDock(1201,left,1204), cancel, refusal, Settings).
 
 ## Keyboard over a web window (KB1, 11-23)
 - An Android app on its VD gets NO IME insets (IME on display 0 via FALLBACK policy; insets are per display): its

@@ -780,7 +780,8 @@ class ShellBridge(
             "tasks.screenshot" -> dev.omalauncher.system.Tasks.screenshot(context, a.getInt(0))
             // The switcher's drag up and toward a side: OxygenOS's Open Canvas (system/CanvasDock.kt, ui/carddock.ts).
             "tasks.canvas" -> dev.omalauncher.system.CanvasDock.available(context)
-            "tasks.canvasDock" -> canvasDock(a.getInt(0), a.getString(1), a.getInt(2))
+            "tasks.canvasDock" -> canvasDock(a.getInt(0), a.getString(1), a.opt(2))
+            "tasks.canvasVertical" -> dev.omalauncher.system.CanvasDock.vertical(context)
             "tasks.canvasState" -> dev.omalauncher.system.CanvasDock.state() ?: JSONObject.NULL
             "tasks.canvasSides" -> JSONArray(dev.omalauncher.system.CanvasDock.sides(context))
             // Home's switcher layer (shell/ui/recents.tsx, system/Switcher.kt).
@@ -1254,14 +1255,24 @@ class ShellBridge(
             .put("layout", dev.omalauncher.system.SplitDrawer.layout(context))
     }
 
-    /** Task [id] docked into Open Canvas on [side] ("left" / "right") beside task [other]: { ok, reason? } (CanvasDock.dock). */
+    /**
+     * Task [id] docked into Open Canvas on [side] ("left" / "right" / "top" / "bottom") beside [other] - the user's pick:
+     * a task id, or an app key ("a:pkg/act") - { ok, reason? } (CanvasDock.dock).
+     */
     private fun canvasDock(
         id: Int,
         side: String,
-        other: Int,
+        other: Any?,
     ): JSONObject {
-        val s = if (side == "left") dev.omalauncher.system.CanvasDock.Side.LEFT else dev.omalauncher.system.CanvasDock.Side.RIGHT
-        val r = dev.omalauncher.system.CanvasDock.dock(context, id, s, other)
+        val no = { why: String -> JSONObject().put("ok", false).put("reason", why) }
+        val s = dev.omalauncher.system.CanvasDock.Side.of(side) ?: return no("Unknown side $side")
+        val o =
+            when (other) {
+                is Number -> dev.omalauncher.system.CanvasDock.Other.Task(other.toInt())
+                is String -> other.toIntOrNull()?.let { dev.omalauncher.system.CanvasDock.Other.Task(it) } ?: dev.omalauncher.system.CanvasDock.Other.App(other)
+                else -> return no("Pick the app for the other side")
+            }
+        val r = dev.omalauncher.system.CanvasDock.dock(context, id, s, o)
         return JSONObject().put("ok", r.ok).apply { r.reason?.let { put("reason", it) } }
     }
 

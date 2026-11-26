@@ -1,76 +1,75 @@
 // The switcher's card gestures (shell/ui/carddock.ts): node --test shell/test/carddock.test.ts
-// Every existing card gesture keeps its result; only a clear up-and-to-a-side drag docks into Open Canvas.
+// A plain push up is still the removal; the finger at a screen edge (home's window-docking rule) docks into Open
+// Canvas on that half; a dock drag let go anywhere else goes back. The second app is the user's pick, never chosen here.
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { cardRelease, dockPartner, dockPick, dockSide } from "../ui/carddock.ts";
+import { canSide, cardRelease, dockable, docking, dockSide, halfRect, otherSide, DOCK_EDGE_PX } from "../ui/carddock.ts";
 
 // The unfolded inner screen (CSS px) and a card on it; the card starts in the middle.
-const W = 900;
-const H = 560;
-const mid = W / 2;
-const drag = (dx: number, dy: number, from = mid) => ({ dx, dy, x: from + dx, cardH: H, screenW: W });
+const W = 821;
+const H = 883;
+const CARD = 520;
+const at = (x: number, y: number, more: object = {}) => ({ dx: x - W / 2, dy: y - H / 2, x, y, cardH: CARD, screenW: W, screenH: H, ...more });
 
 test("straight up past REMOVE: removed, as before (with or without Open Canvas)", () => {
-  for (const can of [true, false]) assert.deepEqual(cardRelease(drag(0, -0.5 * H), 0, can), { kind: "remove" });
+  for (const can of [true, false]) assert.deepEqual(cardRelease(at(W / 2, H / 2 - 0.5 * CARD), 0, can), { kind: "remove" });
 });
 
-test("flicked up: removed, as before", () => {
-  assert.deepEqual(cardRelease(drag(10, -60), -0.9, true), { kind: "remove" });
+test("flicked up mid-screen: removed, as before", () => {
+  assert.deepEqual(cardRelease(at(W / 2 + 10, H / 2 - 60), -0.9, true), { kind: "remove" });
 });
 
 test("a short push up: springs back, as before", () => {
-  assert.deepEqual(cardRelease(drag(0, -0.2 * H), 0.1, true), { kind: "back" });
+  assert.deepEqual(cardRelease(at(W / 2, H / 2 - 0.2 * CARD), 0.1, true), { kind: "back" });
 });
 
-test("up with a little sideways drift (mostly vertical): still a removal, never a dock", () => {
-  assert.equal(dockSide(drag(-80, -0.6 * H)), null);
-  assert.deepEqual(cardRelease(drag(-80, -0.6 * H), -0.2, true), { kind: "remove" });
+test("the finger at the left / right edge: that half (home's edge rule), wherever it is up or down", () => {
+  assert.equal(dockSide(at(10, 400)), "left");
+  assert.equal(dockSide(at(W - 10, 700)), "right");
+  assert.deepEqual(cardRelease(at(10, 400), 0, true), { kind: "dock", side: "left" });
+  // Flicked while at the edge: the half was shown under the finger, so it docks.
+  assert.deepEqual(cardRelease(at(W - 5, 300), -1.2, true), { kind: "dock", side: "right" });
 });
 
-test("up and toward the left edge: docks left; toward the right edge: docks right", () => {
-  assert.equal(dockSide(drag(-330, -0.3 * H)), "left");
-  assert.equal(dockSide(drag(330, -0.3 * H)), "right");
-  assert.deepEqual(cardRelease(drag(-330, -0.3 * H), 0, true), { kind: "dock", side: "left" });
-  // Flicked while in the zone: the half was shown under the finger, so it docks.
-  assert.deepEqual(cardRelease(drag(330, -0.3 * H), -1.2, true), { kind: "dock", side: "right" });
+test("top / bottom only where the canvas stacks (the host's tasks.canvasVertical)", () => {
+  assert.equal(dockSide(at(W / 2, 10)), null);
+  assert.equal(dockSide(at(W / 2, 10, { vertical: true })), "top");
+  assert.equal(dockSide(at(W / 2, H - 10, { vertical: true })), "bottom");
+});
+
+test("a corner: the nearer edge", () => {
+  assert.equal(dockSide(at(30, 5, { vertical: true })), "top");
+  assert.equal(dockSide(at(5, 30, { vertical: true })), "left");
+});
+
+test("the finger short of the edge band: no target", () => {
+  assert.equal(dockSide(at(DOCK_EDGE_PX + 30, 400)), null);
+});
+
+test("a dock drag let go outside a target goes back - a clean cancel, never a removal", () => {
+  // Carried well sideways (a dock drag), then let go mid-screen and high up: back, not removed.
+  const d = at(W / 2 - 200, H / 2 - 0.6 * CARD);
+  assert.equal(docking(d), true);
+  assert.deepEqual(cardRelease(d, -0.2, true), { kind: "back" });
+  // It lit a half before (docking), then came back to the middle: back.
+  assert.deepEqual(cardRelease(at(W / 2, 200, { docking: true }), -1, true), { kind: "back" });
 });
 
 test("no Open Canvas (folded, unsupported, older APK): the same drag is the old rule", () => {
-  assert.deepEqual(cardRelease(drag(-330, -0.5 * H), 0, false), { kind: "remove" });
-  assert.deepEqual(cardRelease(drag(-330, -0.2 * H), 0, false), { kind: "back" });
+  assert.deepEqual(cardRelease(at(10, H / 2 - 0.5 * CARD), 0, false), { kind: "remove" });
+  assert.deepEqual(cardRelease(at(10, H / 2 - 0.2 * CARD), 0.1, false), { kind: "back" });
 });
 
-test("sideways without going up: never a dock (the row's scroll owns sideways starts anyway)", () => {
-  assert.equal(dockSide(drag(-400, -10)), null);
+test("halves: the canvas's two sides with its gap, the picker opposite", () => {
+  assert.deepEqual(halfRect("left", 808, 600), { x: 0, y: 0, w: 400, h: 600 });
+  assert.deepEqual(halfRect("right", 808, 600), { x: 408, y: 0, w: 400, h: 600 });
+  assert.deepEqual(halfRect("bottom", 800, 608), { x: 0, y: 308, w: 800, h: 300 });
+  assert.equal(otherSide("top"), "bottom");
+  assert.equal(otherSide("left"), "right");
 });
 
-test("finger still in the middle of the screen: no dock zone yet", () => {
-  // A card at the right edge dragged left 200 px ends up mid-screen: not the left half's zone.
-  assert.equal(dockSide(drag(-200, -0.3 * H, 750)), null);
-});
-
-test("the zone needs the finger on that side, not just travel toward it", () => {
-  // A card at the far left moved further left: left zone; the same move from the far right isn't the right zone.
-  assert.equal(dockSide(drag(-140, -0.25 * H, 300)), "left");
-  assert.equal(dockSide(drag(-140, -0.25 * H, 850)), null);
-});
-
-test("partner: the newest other single Android app, never a split card, a PowOS app, or home", () => {
-  const list = [
-    { id: 7, key: "a:com.android.settings" },
-    { id: -2, key: "p:notes" },
-    { id: 9, key: "com.powos.app/home" },
-    { id: 4, key: "a:x", split: [{}, {}] },
-    { id: 3, key: "a:com.coloros.filemanager" },
-  ];
-  assert.equal(dockPartner(list, 7), 3);
-  assert.equal(dockPartner(list, 3), 7);
-  assert.equal(dockPartner([{ id: 7, key: "a:s" }], 7), null);
-});
-
-// The phone's list as tasks.list gave it on 11-23 (the user's failed dock): PowOS's lock face (no key), Linux windows
-// ("l:", PowOS tasks), Settings (on OxygenOS's split blocklist). The old rule (key starts with "com.powos.app") matched
-// none of these keys, so the lock face was picked as the partner and the host refused it.
+// The phone's list as tasks.list gave it on 11-23: PowOS's lock face (no key), Linux windows ("l:", PowOS tasks),
+// Settings (on OxygenOS's split blocklist).
 const phone = [
   { id: 3986, key: "a:com.android.chrome/com.google.android.apps.chrome.Main" },
   { id: 3987, key: null },
@@ -79,18 +78,18 @@ const phone = [
   { id: 3938, key: "a:com.powterm/.MainActivity" },
 ];
 
-test("partner without the host's list: never the lock face (no key) or a Linux window (l:)", () => {
-  assert.equal(dockPartner(phone, 3986), 3974);
+test("canSide without the host's list: never the lock face (no key), a Linux window (l:), a PowOS app or a split", () => {
+  assert.equal(canSide(phone[1], null), false);
+  assert.equal(canSide(phone[2], null), false);
+  assert.equal(canSide(phone[0], null), true);
+  assert.equal(canSide({ id: -2, key: "p:notes" }, null), false);
+  assert.equal(canSide({ id: 4, key: "a:x", split: [{}, {}] }, null), false);
 });
 
-test("partner with the host's list (tasks.canvasSides): only apps OxygenOS lets into split view", () => {
-  assert.equal(dockPartner(phone, 3986, new Set([3986, 3938])), 3938);
-});
-
-test("dockPick: a blocked dragged app or no partner is a reason, never a silent no-op", () => {
+test("dockable: the host's list (tasks.canvasSides) is the truth for the dragged app", () => {
   const sides = new Set([3986, 3938]);
-  assert.deepEqual(dockPick(phone, 3986, sides), { other: 3938 });
-  assert.deepEqual(dockPick(phone, 3974, sides), { why: "dragged" });
-  assert.deepEqual(dockPick(phone, 3986, new Set([3986])), { why: "partner" });
-  assert.deepEqual(dockPick(phone, 3982, null), { why: "dragged" });
+  assert.equal(dockable(phone, 3986, sides), true);
+  assert.equal(dockable(phone, 3974, sides), false);
+  assert.equal(dockable(phone, 3982, null), false);
+  assert.equal(dockable(phone, 1, sides), false);
 });

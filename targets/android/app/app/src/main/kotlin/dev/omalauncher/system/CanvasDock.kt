@@ -14,8 +14,9 @@ import org.json.JSONArray
 import org.json.JSONObject
 
 /**
- * The switcher's dock (shell/ui/carddock.ts): a card dragged up and toward a side goes into OxygenOS's Open Canvas
- * (com.oplus.pscanvas, the native split view) on that side, the newest other app on the other. The user, 11-23: "drag
+ * The switcher's dock (shell/ui/carddock.ts): a card dragged to a screen edge goes into OxygenOS's Open Canvas
+ * (com.oplus.pscanvas, the native split view) on that side, the app the user then picks (shell/ui/canvaspick.tsx: a
+ * recent task, or any app by key) on the other - never one picked for them (the user, 11-26). The user, 11-23: "drag
  * a window up and to the side it should be docked to that side ... the split view native thing that we're
  * decompiling". Not PowOS's desktop split, not WM Shell's split.
  *
@@ -53,8 +54,24 @@ object CanvasDock {
 
     /** CanvasCalculateLayoutRect.twoSplitLayout: 2 side by side, 1 one over the other. */
     const val SIDE_BY_SIDE = 2
+    const val STACKED = 1
 
-    enum class Side { LEFT, RIGHT }
+    /** The dragged app's half: LEFT / TOP are intent 0 (pscanvas.md path A: intent 0 is left or top). */
+    enum class Side {
+        LEFT,
+        RIGHT,
+        TOP,
+        BOTTOM,
+        ;
+
+        val first get() = this == LEFT || this == TOP
+        val stacked get() = this == TOP || this == BOTTOM
+
+        companion object {
+            /** The page's side name ("left" / "right" / "top" / "bottom"); anything else: null. */
+            fun of(name: String?): Side? = entries.firstOrNull { it.name.equals(name, ignoreCase = true) }
+        }
+    }
 
     /** A dock to start: the packages in canvas order (0 = left), and the shortcut's extras. */
     data class Plan(
@@ -75,13 +92,13 @@ object CanvasDock {
         side: Side,
         userId: Int,
     ): Plan {
-        val order = if (side == Side.LEFT) listOf(dragged, other) else listOf(other, dragged)
+        val order = if (side.first) listOf(dragged, other) else listOf(other, dragged)
         return Plan(
             order,
             mapOf(
                 KEY_COMBINATION to true,
                 KEY_USER_IDS to IntArray(order.size) { userId },
-                KEY_ORIENTATION to SIDE_BY_SIDE,
+                KEY_ORIENTATION to if (side.stacked) STACKED else SIDE_BY_SIDE,
                 KEY_FOCUS to order.indexOf(dragged),
             ),
         )
@@ -89,6 +106,13 @@ object CanvasDock {
 
     /** The answer to the page (types.ts CanvasDockResult). */
     data class Result(val ok: Boolean, val reason: String? = null)
+
+    /**
+     * Open Canvas stacks two apps one over the other here (the switcher's top / bottom targets): wherever a dock can go,
+     * since path A's start options carry androidx.flexible.layoutOrientation 1 into CanvasCalculateLayoutRect.
+     * twoSplitLayout (pscanvas.md section 4). Measured per dock by [checkBack] (an app not in the canvas is brought back).
+     */
+    fun vertical(context: Context): Boolean = available(context)
 
     /** Open Canvas can take a dock now: unfolded inner screen, OxygenOS's canvas there, PowOS the shortcut host. */
     fun available(context: Context): Boolean = why(context) == null
@@ -187,31 +211,61 @@ object CanvasDock {
         return out.filterValues { it == null }.keys.map { it.id }
     }
 
+    /** The app the user picked for the other half: a recent task, or an app by its key ("a:pkg/act", started fresh). */
+    sealed interface Other {
+        data class Task(val id: Int) : Other
+
+        data class App(val key: String) : Other
+    }
+
+    /** The package an app key names ("a:pkg/act[@profile]"), or null for any other kind of app. Pure: CanvasDockTest. */
+    fun keyPackage(key: String): String? = key.takeIf { it.startsWith("a:") }?.removePrefix("a:")?.substringBefore('/')?.substringBefore('@')?.takeIf { it.isNotEmpty() }
+
     /**
-     * Task [id]'s app docked on [side], task [other]'s app on the other side, in Open Canvas (path A, class doc). The
-     * shortcut stays published (re-pushed each dock; PowosShortcuts.publish may replace it - it's only ever started here).
-     * Every refusal is logged with its reason (`logcat -s PowosCanvasDock`) and goes to the page, which shows it.
+     * Task [id]'s app docked on [side], [other] (the user's pick) on the other side, in Open Canvas (path A, class doc).
+     * The shortcut stays published (re-pushed each dock; PowosShortcuts.publish may replace it - it's only ever started
+     * here). Every refusal is logged with its reason (`logcat -s PowosCanvasDock`) and goes to the page, which shows it.
      */
     fun dock(
         context: Context,
         id: Int,
         side: Side,
-        other: Int,
+        other: Other,
     ): Result {
         Log.i(TAG, "dock task $id ($side) beside $other asked")
         return start(context, id, side, other).also { if (!it.ok) Log.w(TAG, "dock task $id ($side) beside $other refused: ${it.reason}") }
     }
 
+    /** [other] as the dock reads it: its recent task, or (an app not running) its package with no task. */
+    private fun otherRecent(
+        context: Context,
+        tasks: List<Recent>,
+        other: Other,
+    ): Recent? =
+        when (other) {
+            is Other.Task -> tasks.firstOrNull { it.id == other.id }
+            is Other.App -> {
+                val pkg = keyPackage(other.key) ?: return null
+                tasks.firstOrNull { it.pkg == pkg } ?: run {
+                    val pm = context.packageManager
+                    val label = runCatching { pm.getApplicationLabel(pm.getApplicationInfo(pkg, 0)).toString() }.getOrNull() ?: return null
+                    Recent(-1, pkg, label, emptyMap())
+                }
+            }
+        }
+
     private fun start(
         context: Context,
         id: Int,
         side: Side,
-        other: Int,
+        other: Other,
     ): Result {
         why(context)?.let { return Result(false, it) }
-        if (id == other) return Result(false, "Pick two different apps")
         val tasks = recent(context)
-        val pair = listOf(id, other).map { t -> tasks.firstOrNull { it.id == t } ?: return Result(false, "That app isn't open anymore") }
+        val dragged = tasks.firstOrNull { it.id == id } ?: return Result(false, "That app isn't open anymore")
+        val second = otherRecent(context, tasks, other) ?: return Result(false, "That app isn't installed anymore")
+        if (dragged.pkg == second.pkg) return Result(false, "Pick two different apps")
+        val pair = listOf(dragged, second)
         pair.firstNotNullOfOrNull { whyNotSide(context, it) }?.let { return Result(false, it) }
         val pkgs = pair.map { it.pkg!! }
         val labels = pair.associate { it.pkg!! to it.label }
