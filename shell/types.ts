@@ -786,6 +786,22 @@ export interface Bridge {
     /** False: it couldn't be opened. */
     open(id: string): Promise<boolean>;
   };
+  /**
+   * The launcher search's personal sources (SearchSources.kt; searchsources.ts): the phone's contacts and files, and
+   * the web. Ids only travel back: the host rebuilds the URI / number from them. The phone's only; an older APK rejects.
+   */
+  search?: {
+    /** What it may read; [ask]: the search's "Allow" row is still wanted (asked once, a "no" kept). */
+    state(): Promise<SearchSourceState>;
+    /** Asks once: "granted" (rooted), "asked" (the dialog is up; "search.permission" follows), "done" (asked before). */
+    ask(): Promise<"granted" | "asked" | "done">;
+    contacts(text: string): Promise<SearchContact[]>;
+    files(text: string): Promise<SearchFile[]>;
+    /** A contact's card, the dialer with its number ("call"), a file in its viewer. False: it couldn't. */
+    open(kind: "contact" | "call" | "file", id: string): Promise<boolean>;
+    /** The phone's web search for [text] (its search app, else the browser). */
+    web(text: string): Promise<boolean>;
+  };
   /** The shell's own data files (data/*.json), kept by the host. */
   store: {
     get<T = unknown>(name: string): Promise<T | null>;
@@ -1850,6 +1866,9 @@ export interface VirtualDesktop {
 
 /** A settings page or control the host can open (SettingsSearch.kt), and the app it opens in: [package], its name
  * [app] and picture [appIcon] (a data: URL, for one that isn't a launcher app). Older hosts send no app. */
+export interface SearchSourceState { contacts: boolean; files: boolean; ask: boolean }
+export interface SearchContact { id: string; name: string; number?: string }
+export interface SearchFile { id: string; name: string; mime: string; folder: string; modified: number; size: number }
 export interface NativeSetting { id: string; label: string; keywords: string; breadcrumb?: string; package?: string; app?: string; appIcon?: string }
 
 /** The shared bar's input (barsync.ts): its text (with a dictation's words as heard), whether a dictation is writing it,

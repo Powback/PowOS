@@ -3922,6 +3922,22 @@ html[data-sideways] .home.dock-right:not(.wide) > .bar { margin-right: var(--sid
 .launcher-search-results .search-group-row:active { background: var(--soft-fill); }
 .launcher-search-results .search-group-label { white-space: normal; overflow-wrap: anywhere; }
 .launcher-search-results .search-group-detail { font-size: var(--text-small); line-height: 1.4; white-space: normal; overflow-wrap: anywhere; }
+/* A contact's row and its Call button at the end (drawer.tsx SearchRow with an action). */
+.launcher-search-results .search-row-with-action { display: flex; align-items: center; gap: 6px; min-width: 0; }
+.launcher-search-results .search-row-with-action .search-group-row { flex: 1; }
+.launcher-search-results .search-row-action { flex: none; padding: 8px 14px; border-radius: 999px; background: var(--soft-fill); color: var(--color-accent); font-weight: 600; }
+.launcher-search-results .search-row-action:active { opacity: 0.7; }
+/* A source still answering (contacts, files): its card with two placeholder rows, where its results will be. */
+.launcher-search-results .search-placeholder-row { height: 0.85em; margin: 10px 10px 10px 46px; width: 55%; }
+.launcher-search-results .search-placeholder-row + .search-placeholder-row { width: 35%; }
+/* The inline answer (math, a conversion): the value large, what it worked out above it. */
+.launcher-search-results .search-answer { grid-column: 1 / -1; display: flex; flex-direction: column; align-items: flex-start; gap: 2px; min-width: 0; padding: 12px 16px; border-radius: var(--radius); background: var(--soft-fill); text-align: left; }
+.launcher-search-results .search-answer-detail { font-size: var(--text-small); overflow-wrap: anywhere; }
+.launcher-search-results .search-answer-value { font-size: 1.6em; font-weight: 600; overflow-wrap: anywhere; }
+/* "Search the web for …": the last row, its whole text. */
+.launcher-search-results .search-web { grid-column: 1 / -1; display: flex; align-items: center; gap: 12px; min-width: 0; padding: 12px 16px; border-radius: var(--radius); text-align: left; }
+.launcher-search-results .search-web:active { background: var(--soft-fill); }
+.launcher-search-results .search-web-ico { flex: none; display: grid; place-items: center; width: 28px; height: 28px; border-radius: 50%; background: var(--soft-fill); }
 
 /* ---- Web windows: an app's window as an element of its page (ui/webwindows.tsx, docs/WEB_WINDOWS.md "Element model").
    The app's pixels are a layer UNDER home's surface at the body: the body paints nothing once live, so the page is

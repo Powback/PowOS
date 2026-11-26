@@ -477,6 +477,7 @@ class ShellActivity : Activity() {
     ) {
         super.onRequestPermissionsResult(requestCode, permissions, grantResults)
         if (requestCode == ShellBridge.MIC_REQUEST) host.bridge.micPermission(grantResults.firstOrNull() == PackageManager.PERMISSION_GRANTED)
+        if (requestCode == SearchSources.REQUEST) SearchSources.answered()
         if (requestCode == dev.omalauncher.system.StatusPermission.REQUEST) {
             dev.omalauncher.system.StatusPermission.answered(grantResults.firstOrNull() == PackageManager.PERMISSION_GRANTED)
         }

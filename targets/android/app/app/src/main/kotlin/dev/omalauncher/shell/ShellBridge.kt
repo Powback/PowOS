@@ -702,6 +702,13 @@ class ShellBridge(
             // The glance under the clock (LockGlance): the next alarm, the next event, the weather - as they are now.
             "lock.glance" -> LockGlance.read(context)
             "qs.destinations" -> SettingsSearch(context).destinations { broadcast("qs.destinations", "null") }
+            // The launcher search's personal sources (SearchSources: contacts, files, the web; shell/searchsources.ts).
+            "search.state" -> SearchSources.state(context)
+            "search.ask" -> SearchSources.ask(context, activity)
+            "search.contacts" -> SearchSources.contacts(context, a.getString(0))
+            "search.files" -> SearchSources.files(context, a.getString(0))
+            "search.open" -> SearchSources.open(context, a.getString(0), a.getString(1))
+            "search.web" -> SearchSources.web(context, a.getString(0))
             "qs.state" -> quick.state()
             "qs.toggle" -> quick.toggle(a.getString(0)).let { quick.state() }
             "qs.open" -> quick.open(a.getString(0))
@@ -2293,6 +2300,12 @@ class ShellBridge(
     }
 
     companion object {
+        /** [event] to every open shell window (SearchSources: a permission answered). */
+        fun broadcastAll(event: String, json: String) {
+            val all = synchronized(live) { live.toList() }
+            all.forEach { it.emit(event, json) }
+        }
+
         /**
          * WebWindowLaunch: home's page asked for [pkg]'s web window ("webwindows.launch", as from the launcher overlay:
          * its frame shows at once; an open one comes up). False: no home page, or [pkg] has no drawer app.
@@ -2336,7 +2349,8 @@ class ShellBridge(
         // and a 58 ms frame landed 54 ms after it (perf-1793456386286): looked up here; only the recognizer binding,
         // which Android requires on the main thread, is posted back there (NativeSpeech.warm).
         // quickpage.pages: a resolveActivity and an icon drawn per settings page (QuickPageCatalog).
-        private val LOOKUPS = setOf("apps.local", "qs.destinations", "speech.warm", "quickpage.pages", "apps.background", "apps.stopBackground", "apps.shortcuts")
+        // search.contacts / search.files: ContentResolver queries (SearchSources), never on the main thread.
+        private val LOOKUPS = setOf("search.contacts", "search.files", "search.state", "apps.local", "qs.destinations", "speech.warm", "quickpage.pages", "apps.background", "apps.stopBackground", "apps.shortcuts")
         private val lookups = java.util.concurrent.Executors.newSingleThreadExecutor { r -> Thread(r, "shell-lookups").apply { isDaemon = true } }
 
         /** The hub's network calls (devices.realm: up to 10 s on a slow LAN), on their own thread: never the UI's, nor a lookup's. */

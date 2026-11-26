@@ -23,7 +23,7 @@ import { powos } from "../bridge.ts";
 import { Icon, type IconName } from "./icons.tsx";
 import { ALL, ALPHABET, appsOfLetter, launcherApps, launcherView, nextLetter, POW, POW_FOLDER, powGroups, resolveLetter, sortApps, type Group, type LetterEvent, type Sorted } from "./launcherview.ts";
 
-import { searchResults, searchSections, searchPending, openSearchResult, type SearchResult } from "../search.ts";
+import { searchResults, searchSections, searchPending, openSearchResult, searchAnswer, searchHints, searchPlaceholders, searchWeb, type SearchGroup, type SearchResult } from "../search.ts";
 import { springFast } from "./spring.ts";
 import { arrive } from "./notifmotion.ts";
 import { tick } from "./haptics.ts";
@@ -590,12 +590,15 @@ export function Drawer() {
   const searching = query.value.trim() !== "";
   // No app by that name: it's a question for PowOS AI. In a chat, typing is the next message: the chat stays (the user,
   // 2026-10-28: it flipped to search results while typing a follow-up) until the launcher closes.
-  const liveAsking = chatting.value || (searching && searchResults.value.length === 0 && !searchPending.value);
+  const liveAsking = chatting.value || (searching && searchResults.value.length === 0 && !searchAnswer.value && !searchPending.value);
   const open = drawerOpen.value;
   // Closing clears the search and ends the chat (state.ts closeDrawer) at once: the panel swapped to the app pages
   // under its fade, and the cards it showed vanished instead of fading out as they faded in (the user, 2026-10-28).
   // What was on screen stays for the close's fade (--p, 180 ms), then the drawer goes back to its pages.
-  const live = { searching, asking: liveAsking, sections: searchSections.value, pending: searchPending.value };
+  const live = {
+    searching, asking: liveAsking, pending: searchPending.value,
+    sections: { ...searchSections.value, answer: searchAnswer.value, hints: searchHints.value, placeholders: searchPlaceholders.value, web: searchWeb.value },
+  };
   const { searching: shownSearch, asking, sections, pending } = useHeldWhileClosing(open, live);
   return (
     // The launcher panel's lower part (home.tsx): it comes in (shell.css, by --p) as the recent bar grows into the panel.
@@ -611,7 +614,13 @@ export function Drawer() {
  * nearest the bar (the manager, E2E 194): the apps' tiles just over it, the settings and actions cards above them, the
  * best group lowest - and the list opens scrolled to its foot. Top or middle: the apps first, as before.
  */
-function SearchResults({ sections, pending }: { sections: typeof searchSections.value; pending: boolean }) {
+type Shown = typeof searchSections.value & { answer: SearchResult | null; hints: SearchResult[]; placeholders: SearchGroup[]; web: SearchResult | null };
+
+/**
+ * The launcher's search results. Also: the inline answer (math, a conversion) nearest the bar's side, a placeholder card
+ * per source still answering (contacts, files: never a blank wait), the "Allow" row and "Search the web for …" last.
+ */
+function SearchResults({ sections, pending }: { sections: Shown; pending: boolean }) {
   const list = useRef<HTMLDivElement>(null);
   const seen = useRef(new WeakSet<Element>());
   const bottomUp = alignOf("launcher") === "bottom";
@@ -634,10 +643,22 @@ function SearchResults({ sections, pending }: { sections: typeof searchSections.
     <div class="search-group-head"><SearchIcon icon={group.icon} label={group.label} /><span class="search-group-name">{group.label}</span></div>
     {group.items.map((result) => <SearchRow key={result.id} result={result} />)}
   </section>);
-  const note = pending && <div class="scr-note muted" role="status">Searching…</div>;
+  // Only once nothing at all is up yet: the placeholders say the rest is coming.
+  const note = pending && !sections.placeholders.length && <div class="scr-note muted" role="status">Searching…</div>;
+  const answer = sections.answer && <MathAnswerRow result={sections.answer} />;
+  const placeholders = sections.placeholders.filter((g) => !sections.groups.some((x) => x.id === g.id)).map((g) => <PlaceholderGroup key={`ph:${g.id}`} group={g} />);
+  const hints = sections.hints.map((r) => <section class="search-group search-hint" key={r.id} data-search-group={r.group?.id}>
+    <button type="button" class="search-group-row" data-search-result={r.id} onClick={() => r.open()}>
+      <span class="search-group-label">{r.label}</span>{r.detail && <span class="search-group-detail">{r.detail}</span>}
+    </button>
+  </section>);
+  const web = sections.web && <button type="button" class="search-web" data-search-result="web" onClick={() => openSearchResult(sections.web!)}>
+    <span class="search-web-ico" aria-hidden="true">⌕</span><span class="search-group-label">{sections.web.label}</span>
+  </button>;
+  const ph = bottomUp ? [...placeholders].reverse() : placeholders;
   return (
     <div class="drawer-list results" ref={list} data-order={bottomUp ? "bottom-up" : "top-down"}><div class="launcher-search-results">
-      {bottomUp ? <>{note}{groups}{appTiles}</> : <>{appTiles}{groups}{note}</>}
+      {bottomUp ? <>{web}{hints}{note}{ph}{groups}{appTiles}{answer}</> : <>{answer}{appTiles}{groups}{ph}{note}{hints}{web}</>}
     </div></div>
   );
 }
@@ -669,14 +690,38 @@ function AppResultRow({ result }: { result: SearchResult }) {
 }
 
 /** The search results' pieces that arrive: an app's row, a group (with its rows), a group's new row, the note. */
-const ARRIVALS = ".scr-row, .search-group, .search-group-row, .scr-note";
+const ARRIVALS = ".scr-row, .search-group, .search-group-row, .scr-note, .search-answer, .search-web";
 
 function SearchRow({ result }: { result: SearchResult }) {
-  return (
+  const row = (
     <button type="button" class="search-group-row" data-search-result={result.id} onClick={() => openSearchResult(result)}>
       <span class="search-group-label">{result.label}</span>
       {result.detail && <span class="search-group-detail">{result.detail}</span>}
     </button>
+  );
+  if (!result.action) return row;
+  // A contact: the row opens its card, its end button calls.
+  const act = result.action;
+  return <div class="search-row-with-action">{row}<button type="button" class="search-row-action" data-search-action={result.id} onClick={() => openSearchResult({ ...result, open: () => act.run() })}>{act.label}</button></div>;
+}
+
+/** The inline answer: the value large, what was worked out under it; a tap copies the value. */
+function MathAnswerRow({ result }: { result: SearchResult }) {
+  return (
+    <button type="button" class="search-answer" data-search-result={result.id} onClick={() => openSearchResult(result)}>
+      <span class="search-answer-detail muted">{result.detail}</span>
+      <span class="search-answer-value">{result.label}</span>
+    </button>
+  );
+}
+
+/** A source still answering: its card with placeholder rows, at the place its results will take. */
+function PlaceholderGroup({ group }: { group: SearchGroup }) {
+  return (
+    <section class="search-group search-placeholder" data-search-placeholder={group.id} aria-busy="true">
+      <div class="search-group-head"><SearchIcon icon={group.icon} label={group.label} /><span class="search-group-name">{group.label}</span></div>
+      <div class="search-placeholder-row pending-skel-row" /><div class="search-placeholder-row pending-skel-row" />
+    </section>
   );
 }
 

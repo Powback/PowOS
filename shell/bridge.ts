@@ -7,6 +7,9 @@
 import type {
   AppShortcut,
   FilePlace,
+  SearchContact,
+  SearchFile,
+  SearchSourceState,
   Clip,
   BackgroundApp,
   HostWebWindow,
@@ -160,6 +163,15 @@ function native(host: NonNullable<Window["PowosHost"]>): Bridge {
     },
     usage: { recent: (limit) => call<string[]>("usage.recent", limit), frequent: (limit) => call<string[]>("usage.frequent", limit) },
     files: { places: () => call<FilePlace[]>("files.places"), open: (id) => call<boolean>("files.open", id) },
+    // The launcher search's contacts, files and web (SearchSources.kt): the phone's only, an older APK rejects them.
+    search: {
+      state: () => call<SearchSourceState>("search.state"),
+      ask: () => call<"granted" | "asked" | "done">("search.ask"),
+      contacts: (text) => call<SearchContact[]>("search.contacts", text),
+      files: (text) => call<SearchFile[]>("search.files", text),
+      open: (kind, id) => call<boolean>("search.open", kind, id),
+      web: (text) => call<boolean>("search.web", text),
+    },
     home: {
       get: () => call<Home>("home.get"),
       place: (key, cell, page) => call("home.place", key, cell, page),
@@ -701,6 +713,7 @@ function mock(): Bridge {
       places: async () => [{ id: "downloads", label: "Downloads" }, { id: "documents", label: "Documents" }, { id: "camera", label: "Camera" }, { id: "music", label: "Music" }, { id: "linux", label: "Linux home" }],
       open: async (id) => (console.log("[mock] files.open", id), true),
     },
+    search: mockSearch(events),
     home: homeLayout(home, homeChanged, () => apps),
     store: {
       get: async <T>(name: string) => {
@@ -2014,5 +2027,44 @@ function mockRemote(events: Events): Bridge["remote"] {
     },
     keys: async (reports) => console.log("[mock] keys", JSON.stringify(reports)),
     mouse: async (buttons, dx, dy, wheel, pan) => console.log("[mock] mouse", buttons, dx, dy, wheel ?? 0, pan ?? 0),
+  };
+}
+
+/**
+ * The phone's contacts and files in a desktop browser: a few made-up ones, answered after a short wait so the search's
+ * placeholders show (dev/search-sources-check.js). window.__searchMock: its permission state and what was opened.
+ */
+function mockSearch(events: Events): NonNullable<Bridge["search"]> {
+  const m = ((window as any).__searchMock ??= { state: { contacts: true, files: true, ask: false }, delay: 250, opened: [] as string[][], asked: 0 });
+  const people: SearchContact[] = [
+    { id: "101/lk-ingrid", name: "Ingrid Solberg", number: "+47 912 34 567" },
+    { id: "102/lk-magnus", name: "Magnus Lie", number: "+47 934 56 789" },
+    { id: "103/lk-sofie", name: "Sofie Lie" },
+  ];
+  const day = 86_400_000, now = Date.now();
+  const files: SearchFile[] = [
+    { id: "9001", name: "invoice-november.pdf", mime: "application/pdf", folder: "Download", modified: now - day, size: 182_000 },
+    { id: "9002", name: "fjord-trip.jpg", mime: "image/jpeg", folder: "DCIM/Camera", modified: now - 2 * day, size: 3_400_000 },
+    { id: "9003", name: "quarterly-report.xlsx", mime: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", folder: "Documents", modified: now - 9 * day, size: 48_000 },
+  ];
+  const wait = () => new Promise((r) => setTimeout(r, m.delay));
+  const match = (name: string, text: string) => text.trim().toLowerCase().split(/\s+/).every((w) => name.toLowerCase().includes(w));
+  return {
+    state: async () => ({ ...m.state }),
+    ask: async () => {
+      m.asked++;
+      m.state = { contacts: true, files: true, ask: false };
+      setTimeout(() => events.emit("search.permission", null), 50);
+      return "asked";
+    },
+    contacts: async (text) => (await wait(), m.state.contacts ? people.filter((p) => match(p.name, text)) : []),
+    files: async (text) => {
+      await wait();
+      if (!m.state.files) return [];
+      const q = text.trim().toLowerCase();
+      return q === "recent" || q === "recent files" ? files : files.filter((f) => match(f.name, text));
+    },
+    open: async (kind, id) => (m.opened.push([kind, id]), console.log("[mock] search.open", kind, id), true),
+    web: async (text) => (m.opened.push(["web", text]), console.log("[mock] search.web", text), true),
   };
 }

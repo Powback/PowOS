@@ -16587,6 +16587,20 @@ try {
         const fails = await r.page.evaluate(async () => (await importShim("./dev/ai-counts-check.js")).aiCountsCheck());
         return fails.map((f) => `ai-counts-${label}: ${f}`);
       })));
+  // The launcher search's contacts, files, math and web (dev/search-sources-check.js; board task
+  // search-finds-contacts-files-web-and-does-quick-m) against the mock host's sources, folded and unfolded.
+  if (process.env.SHELL_PAGES !== "0")
+    for (const [label, view] of [
+      ["folded", { width: 404, height: 899 }],
+      ["unfolded", { width: 821, height: 883 }],
+    ])
+      runs.push(open(browser, `${ORIGIN}/index.html?mode=pull`, `search-sources-${label}`, view).then((r) => whenReady(r, async () => {
+        const fails = await r.page.evaluate(async () => (await importShim("./dev/search-sources-check.js")).searchSourcesCheck());
+        await r.page.evaluate(async () => { const s = await importShim("./state.ts"); s.drawer.value = 1; s.query.value = "ingrid"; });
+        await r.page.waitForSelector('[data-search-result="contact:101/lk-ingrid"]').catch(() => {});
+        await r.page.screenshot({ path: `/cache/search-sources-${label}.png` });
+        return fails.map((f) => `search-sources-${label}: ${f}`);
+      })));
   // Try cards show before | after, the after an emulator shot of the fix (the user, 2026-11-01).
   if (process.env.SHELL_PAGES !== "0")
     runs.push(open(browser, `${ORIGIN}/index.html`, "try-pair", { width: 404, height: 900 }).then((r) => whenReady(r, () => aiTryPairCheck(r.page))));

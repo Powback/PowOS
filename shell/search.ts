@@ -7,6 +7,7 @@ import { powos } from "./bridge.ts";
 import { openQuickPage, returnAfterQuick } from "./ui/quickpage.tsx";
 import type { NativeSetting } from "./types.ts";
 import { net } from "./apps/net.ts";
+import { mathResult, personalProviders, sourcesRevision, webResult } from "./searchsources.ts";
 
 export interface SearchResult {
   id: string;
@@ -21,6 +22,10 @@ export interface SearchResult {
   detail?: string;
   /** Opens it; true: as a quick page's card (ui/quickpage.tsx), the search kept to return to when the card closes. */
   open(): void | boolean;
+  /** A second thing it does, a button at the row's end: a contact's "Call". */
+  action?: { label: string; run(): void };
+  /** Shown under the results, never counted as one (the search's "Allow" row): text that finds nothing stays a chat. */
+  hint?: boolean;
 }
 export interface SearchGroup { id: string; label: string; icon?: string }
 /** The launcher app that is [pkg] (an Android app's key is "a:<package>/<activity>[@profile]"), its own profile first. */
@@ -32,6 +37,8 @@ const POWOS_SETTINGS: SearchGroup = { id: "powos", label: "PowOS settings", icon
 export interface SearchProvider {
   id: string;
   search(text: string, signal: AbortSignal): SearchResult[] | Promise<SearchResult[]>;
+  /** Its group, shown as placeholder rows from the first key until its answer (searchsources.ts); null: none now. */
+  placeholder?(): SearchGroup | null;
 }
 const providers = signal<SearchProvider[]>([]);
 export function registerSearchProvider(provider: SearchProvider) {
@@ -154,7 +161,12 @@ registerSearchProvider({ id: "app-api", async search(_text, signal) {
   });
 } });
 
+// The phone's contacts and files (searchsources.ts), each streaming in on its own.
+for (const p of personalProviders()) registerSearchProvider(p);
+
 const extra = signal<SearchResult[]>([]);
+/** The providers still out for the current text: their placeholder groups show until each answers. */
+const pendingSources = signal<string[]>([]);
 export const searchPending = signal(false);
 /** What's searched: the pill's text - except in a chat, where it's the next message, never a search (the user, 2026-10-28:
  * "launcher chat refreshes every keypress" - each key ran every provider, and its results re-rendered the launcher). */
@@ -179,7 +191,7 @@ export const searchResults = computed(() => {
   // Apps and settings pages come first; App API capabilities (hundreds of "open <url>" actions) are a capped tail so they cannot bury them.
   // The apps themselves before everything else: they're the grid at the top (the user, 2026-10-30).
   const tier = (r: SearchResult) => r.id.startsWith("app-api:") ? 2 : r.group ? 1 : 0;
-  const ranked = [...entries, ...extra.value].map((r) => ({ r, rank: searchRank(q, r.label, r.keywords) }))
+  const ranked = [...entries, ...extra.value.filter((r) => !r.hint)].map((r) => ({ r, rank: searchRank(q, r.label, r.keywords) }))
     .filter(({ rank }) => rank >= 0).sort((a, b) => tier(a.r) - tier(b.r) || a.rank - b.rank || a.r.label.localeCompare(b.r.label)).map(({ r }) => r);
   // The same thing twice - one setting indexed from two Android sources, an action under two ids - shows once: same
   // app, same name, same place in it.
@@ -192,6 +204,22 @@ export const searchResults = computed(() => {
     seen.add(key);
     return !r.id.startsWith("app-api:") || ++capi <= 8;
   }).slice(0, 60);
+});
+/** Rows under the results that aren't results (the "Allow" row): never make the search count as finding something. */
+export const searchHints = computed(() => (searched.value ? extra.value.filter((r) => r.hint) : []));
+/** The inline answer to the text (math, a unit conversion): first, nearest the bar. A result: "12*7" is no chat. */
+export const searchAnswer = computed(() => mathResult(searched.value));
+/** "Search the web for …": always the last row while searching. */
+export const searchWeb = computed(() => webResult(searched.value));
+/** The sources still answering, as their groups' placeholders: never a blank wait while contacts / files are read. */
+export const searchPlaceholders = computed(() => {
+  if (!searched.value) return [];
+  const out: SearchGroup[] = [];
+  for (const p of providers.value) {
+    const g = pendingSources.value.includes(p.id) ? p.placeholder?.() : null;
+    if (g) out.push(g);
+  }
+  return out;
 });
 /** [searchResults] as the launcher shows them: the apps (a grid), then each app's settings and actions under it, the
  * groups in the order of their best match. */
@@ -246,9 +274,12 @@ queueMicrotask(() => effect(() => {
   const q = searched.value;
   const sources = providers.value;
   nativeSettingsRevision.value;
+  sourcesRevision.value;
   const controller = new AbortController();
   extra.value = [];
   searchPending.value = !!q;
+  // Placeholders from the first key, through the debounce, until each source answers.
+  pendingSources.value = q ? sources.filter((p) => p.placeholder).map((p) => p.id) : [];
   if (!q) return;
   const timer = setTimeout(() => {
     if (related(q, noMatch.peek()) || chatting.peek()) searchesAfterChat++;
@@ -258,10 +289,11 @@ queueMicrotask(() => effect(() => {
       if (controller.signal.aborted) return;
       found.set(id, results);
       extra.value = [...found.values()].flat();
+      if (pendingSources.peek().includes(id)) pendingSources.value = pendingSources.peek().filter((p) => p !== id);
       searchPending.value = --remaining > 0;
-      if (!remaining && !searchResults.peek().length) noMatch.value = q;
+      if (!remaining && !searchResults.peek().length && !searchAnswer.peek()) noMatch.value = q;
     };
-    if (!remaining) { searchPending.value = false; if (!searchResults.peek().length) noMatch.value = q; }
+    if (!remaining) { searchPending.value = false; if (!searchResults.peek().length && !searchAnswer.peek()) noMatch.value = q; }
     for (const provider of sources) {
       let timeout: ReturnType<typeof setTimeout> | undefined;
       try {
