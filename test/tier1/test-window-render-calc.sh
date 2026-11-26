@@ -59,6 +59,7 @@ ok "the hidden check's app is PowOS's WindowCheckActivity" "$(echo "$H" | grep -
 ok "the hidden check never names the user's Calculator" "$(echo "$H" | grep -v '^ *#' | grep -ci 'calculator')" 0
 M=$ROOT/targets/android/app/app/src/main/AndroidManifest.xml
 ok "WindowCheckActivity: in the manifest, own process, not exported, no launcher entry" "$(sed -n '/\.shell\.WindowCheckActivity"/,/\/>/p' "$M" | grep -c 'android:process=":windowcheck"\|android:exported="false"\|documentLaunchMode="always"') $(sed -n '/\.shell\.WindowCheckActivity"/,/\/>/p' "$M" | grep -c LAUNCHER)" "3 0"
+python3 -I -c "import sys,xml.dom.minidom as m; m.parse(sys.argv[1])" "$M" 2>/dev/null; ok "the manifest is well-formed XML (11-26: a '--' in a comment broke the APK build)" "$?" 0
 K=$ROOT/targets/android/app/app/src/main/kotlin/dev/omalauncher/shell/WindowCheckActivity.kt
 ok "the activity's descriptions are the ones window-render.py reads" "$(grep -c '"powos-window-check-count"\|"powos-window-check-tap"' "$K") $(grep -c 'desc:powos-window-check-count\|desc:powos-window-check-tap' "$ROOT/tools/phone/verify/window-render.py")" "2 1"
 ok "the visible check plans its tap and undoes it" "$(grep -c 'PY calcdisp\|input -d \$VD tap \$ux' "$S")" 2

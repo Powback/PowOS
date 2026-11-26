@@ -315,7 +315,7 @@
             android:stateNotNeeded="true"
             android:windowSoftInputMode="adjustNothing" />
 
-        <!-- The device window check's own app (shell/WindowCheckActivity.kt; tools/phone/verify/window-render.sh --hidden):
+        <!-- The device window check's own app (shell/WindowCheckActivity.kt; tools/phone/verify/window-render.sh, its hidden mode):
              a counter + a Tap button the check launches as root on its hidden display. No launcher entry, not exported,
              its own process (App.onCreate returns at once there). -->
         <activity
