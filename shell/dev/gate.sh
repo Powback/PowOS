@@ -175,7 +175,9 @@ case $base in
     # HEAD + the phone's overrides + exactly those files is what the phone will run) - there the rest is listed, never
     # silently dropped.
     unc=$({ git -C "$top" diff --name-only HEAD -- "$rel"; git -C "$top" ls-files --others --exclude-standard -- "$rel"; } |
-      grep -v "^$rel/node_modules\(/\|\$\)" | sort -u)
+      { grep -v "^$rel/node_modules\(/\|\$\)" || true; } | sort -u)
+    # `|| true`: grep -v exits 1 on no lines, and a clean tree (the ship's runner checkout) has none - under
+    # set -e + pipefail the gate then ended rc 1 with NO output (11-26: APK ship 18df6cb48 FAILED rc 1, empty log).
     if [ -n "$unc" ]; then
       if [ -z "$headonly" ] && [ "${GATE_PRIORITY:-}" != ship ] && [ ${#files[@]} -eq 0 ] && [ -z "$overrides" ]; then
         while IFS= read -r f; do

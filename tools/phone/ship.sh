@@ -460,7 +460,13 @@ run)
     # The user's no-idle-wait setting (file present = on): install at once, don't wait for the user to be idle.
     [ -e "$NOIDLE" ] && set -- "$@" --now
     case " $* " in *" --publish-only "*) touch "$Q/apk/publish-only" ;; esac
-    ( cd "$SA" && POWOS_SHIP_SERVICE=1 SHIP_DIR=$Q GATE_PRIORITY=ship bash tools/phone/ship-apk.sh "$@" > "$(cat "$Q/apk/log")" 2>&1; echo $? > "$Q/apk/rc" ) &
+    # The log opens with the exact command and ends with its rc, all stdout/stderr between (11-26: 18df6cb48 FAILED
+    # rc 1 with a 0-byte log - nothing said what ran or where it stopped). Not bash -x as the rooted step: ship-apk's
+    # idle wait loops for hours, and its traced source lines would match apk_link_fault's patterns.
+    ( l=$(cat "$Q/apk/log"); r=0
+      echo "$(date +%T) cd $SA && POWOS_SHIP_SERVICE=1 SHIP_DIR=$Q GATE_PRIORITY=ship bash tools/phone/ship-apk.sh $* (HEAD $(git -C "$SA" rev-parse --short HEAD 2>/dev/null))" > "$l"
+      { cd "$SA" && POWOS_SHIP_SERVICE=1 SHIP_DIR=$Q GATE_PRIORITY=ship bash tools/phone/ship-apk.sh "$@"; } >> "$l" 2>&1 || r=$?
+      echo "$(date +%T) ship-apk.sh rc $r" >> "$l"; echo $r > "$Q/apk/rc" ) &
     echo $! > "$Q/apk/pid"
   }
   # post_gate TIP LOG FILE...: the full gate on what was just pushed, in the background, one at a time (a newer tip's

@@ -27,6 +27,8 @@
 # published at build time, before the install, ship-guard's boot check and window-render - those device checks
 # never gated PowApps; they judge the OnePlus install, and still run there when it's back.
 set -euo pipefail
+# Any set -e exit names its line and command in the log (11-26: rc 1 with an empty log, nothing said where).
+trap 'echo "ship-apk: FAILED rc $? at line $LINENO: $BASH_COMMAND" >&2' ERR
 cd "$(git rev-parse --show-toplevel)"
 BASE=${POWOS_BASE:-main}   # the one branch (main since 11-13)
 # Always the shared, current rules: each worktree has its own copy of this script, and an old copy skipped the
@@ -132,8 +134,11 @@ if [ $grc -ne 0 ] && grep -q '^FAIL' "$glog" && ! grep '^FAIL' "$glog" | grep -q
   [ $grc != 2 ] || gate_err
 fi
 if [ $grc -ne 0 ]; then
-  { grep -E '^FAIL|^gate:' "$glog" | head -12; grep -E '^(error|src/).*TS[0-9]' "$glog" | head -5; } >&2
-  echo "ship-apk: REFUSED - this commit's shell doesn't load (above); fix it on origin first" >&2
+  # Each grep `|| true`: no matching line (a gate that died silently) made grep exit 1, and under pipefail + set -e this
+  # script then ended rc 1 before the REFUSED line - an empty log (11-26, 18df6cb48).
+  { grep -E '^FAIL|^gate:' "$glog" | head -12 || true; grep -E '^(error|src/).*TS[0-9]' "$glog" | head -5 || true; } >&2
+  echo "ship-apk: REFUSED - this commit's shell doesn't load (gate rc $grc; above, or its last lines:)" >&2
+  tail -5 "$glog" >&2 || true
   exit 3
 fi
 blog=${TMPDIR:-/tmp}/ship-apk-build.log
