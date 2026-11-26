@@ -58,7 +58,9 @@ build_lock() {
   local l=$HOME/.cache/powos-warm-build.lock i
   mkdir -p "$HOME/.cache"
   for i in $(seq 1200); do
-    if mkdir "$l" 2>/dev/null; then echo $$ > "$l/pid"; trap 'rm -rf "$HOME/.cache/powos-warm-build.lock"' EXIT; return 0; fi
+    if mkdir "$l" 2>/dev/null; then echo $$ > "$l/pid"; trap 'rm -rf "$HOME/.cache/powos-warm-build.lock"' EXIT
+      # Counted as queue wait by tools/agents/efficiency.py.
+      [ "$i" = 1 ] || echo "warm-builder: got the build lock after $((i - 1)) s" >&2; return 0; fi
     kill -0 "$(cat "$l/pid" 2>/dev/null)" 2>/dev/null || { sleep 1; kill -0 "$(cat "$l/pid" 2>/dev/null)" 2>/dev/null || rm -rf "$l"; continue; }
     [ "$i" = 1 ] && echo "warm-builder: another build runs (pid $(cat "$l/pid" 2>/dev/null)) - waiting" >&2
     sleep 1

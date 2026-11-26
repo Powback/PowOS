@@ -149,6 +149,51 @@ def call_timings(path, since=''):
     }
 
 
+# Queue wait: tool time spent waiting for a shared slot/lock/queue rather than working. Each source prints its own wait:
+#   gate    shell/dev/gate.sh "slot wait N s" / "got a slot after N s"
+#   build   tools/agents/build-slot.sh "got the <lane> slot after Ns", warm-builder.sh "got the build lock after N s",
+#           tools/jobs/gradle-pool.sh "gradle-pool: slot wait N s"
+#   verify  the whole tool time of a `queue.sh wait <job>` call (it only blocks on the phone/emulator queue)
+GATE_WAIT_RE = re.compile(r'(?:(?<!gradle-pool: )slot wait|gate: got a slot after) (\d+) s')
+BUILD_WAIT_RE = re.compile(r'build-slot: got the \S+ slot after (\d+) ?s|warm-builder: got the build lock after (\d+) s|'
+                           r'gradle-pool: slot wait (\d+) s')
+VERIFY_WAIT_RE = re.compile(r'verify/queue(?:-emu)?\.sh wait\b')
+
+
+def queue_wait(path, since=''):
+    """One transcript -> {'gate_s', 'build_s', 'verify_s', 'total_s'}: seconds this agent's tools waited in a queue
+    (see the *_RE above). A result's gate wait counts once (its largest number: the summary repeats it)."""
+    issued, cmds = {}, {}
+    w = {'gate_s': 0, 'build_s': 0, 'verify_s': 0}
+    for line in open(path, errors='replace'):
+        try:
+            e = json.loads(line)
+        except ValueError:
+            continue
+        raw = e.get('timestamp') or ''
+        if since and raw < since:
+            continue
+        ts, m = parse_ts(raw), e.get('message') or {}
+        if e.get('type') == 'assistant':
+            for x in m.get('content') or []:
+                if isinstance(x, dict) and x.get('type') == 'tool_use':
+                    issued[x.get('id')] = ts
+                    cmds[x.get('id')] = (x.get('input') or {}).get('command', '') if x.get('name') == 'Bash' else ''
+        elif e.get('type') == 'user' and isinstance(m.get('content'), list):
+            for x in m['content']:
+                if not (isinstance(x, dict) and x.get('type') == 'tool_result'):
+                    continue
+                txt = _text(x.get('content'))
+                g = [int(n) for n in GATE_WAIT_RE.findall(txt)]
+                w['gate_s'] += max(g) if g else 0
+                w['build_s'] += sum(int(next(n for n in t if n)) for t in BUILD_WAIT_RE.findall(txt))
+                t0 = issued.get(x.get('tool_use_id'))
+                if VERIFY_WAIT_RE.search(cmds.get(x.get('tool_use_id'), '')) and t0 is not None and ts is not None:
+                    w['verify_s'] += max(0, round((ts - t0).total_seconds()))
+    w['total_s'] = w['gate_s'] + w['build_s'] + w['verify_s']
+    return w
+
+
 def _span_minutes(lo, hi):
     """Wall-clock minutes between two ISO timestamps (the transcript's first and last in-window entries) -
     0 when either is missing or unparseable, never a crash on a malformed timestamp."""
@@ -319,7 +364,7 @@ def main():
     files = [f for f in glob.glob(a.root + '/*PowOS*/**/*.jsonl', recursive=True) if os.path.getmtime(f) > 0]
     if a.tools:
         tools_report(files, since, a.json); return
-    agents, minutes, timings, cats, n = {}, {}, {}, collections.Counter(), collections.Counter()
+    agents, minutes, timings, qwait, cats, n = {}, {}, {}, {}, collections.Counter(), collections.Counter()
     for f in files:
         calls, mins = scan(f, since)
         if not calls:
@@ -328,6 +373,7 @@ def main():
         agents[name] = calls
         minutes[name] = mins
         timings[name] = call_timings(f, since)
+        qwait[name] = queue_wait(f, since)
         for ctx, c, _ in calls.values():
             cats[c or 'final text'] += ctx; n[c or 'final text'] += 1
     tot = sum(cats.values()) or 1
@@ -365,6 +411,7 @@ def main():
                              'sec_per_call': timings.get(k, {}).get('sec_per_call', 0.0),
                              'reads_before_edit': timings.get(k, {}).get('reads_before_first_edit', 0),
                              'files_reread': timings.get(k, {}).get('files_read_3plus', 0),
+                             'queue_wait': qwait.get(k, {}),
                              } for k, v in agents.items()),
                            key=lambda r: -r['Mtok']),
     }
@@ -372,6 +419,11 @@ def main():
     tool_s_tot = sum(t['tool_time_s'] for t in timings.values())
     out['model_time_h'] = round(model_s_tot / 3600, 1)
     out['tool_time_h'] = round(tool_s_tot / 3600, 1)
+    # Queue wait (queue_wait above): the share of tool time spent waiting for a gate slot, a build lock or the verify
+    # queue - the 11-25 measurement that drove the gate slots / Gradle pool / ready worktrees work.
+    qt = {k: sum(q.get(k, 0) for q in qwait.values()) for k in ('gate_s', 'build_s', 'verify_s', 'total_s')}
+    qt['pct_of_tool_time'] = round(100 * qt['total_s'] / tool_s_tot, 1) if tool_s_tot else 0.0
+    out['queue_wait'] = qt
     misses = []
     if out['avg_ctx_k'] > 200: misses.append(f"avg context {out['avg_ctx_k']}k > 200k: agents live too long (one task per agent run)")
     if out['wait_pct'] > 5: misses.append(f"waiting/polling {out['wait_pct']}% > 5%: queue phone checks (verify/queue.sh), no poll loops")
@@ -390,12 +442,18 @@ def main():
           f"{out['commits']} commits ({out['Mtok_per_commit']} Mtok each, {out['process_commits_pct']}% process)")
     print(f"model time {out['model_time_h']}h (thinking between a tool_result and the next tool_use) vs "
           f"tool time {out['tool_time_h']}h (tool_use -> its own tool_result)")
+    q = out['queue_wait']
+    print(f"queue wait {q['total_s'] / 3600:.1f}h = {q['pct_of_tool_time']}% of tool time (gate slot {q['gate_s']}s, "
+          f"build lock {q['build_s']}s, verify queue {q['verify_s']}s)")
     for k, v in out['by_category'].items(): print(f"  {k:16} {v['calls']:5} calls {v['pct']:5.1f}%")
     print("top agents by tokens:")
     for r in out['by_agent'][:8]:
         extra = f"  restarts_needed={r['restarts_needed']} OVER_BUDGET" if r['over_budget'] else ''
         extra += '  OVER_TIME' if r['over_time'] else ''
         print(f"  {r['agent'][:36]:36} {r['calls']:5} calls avg {r['avg_ctx_k']:4}k  {r['Mtok']} Mtok  {r['minutes']}min{extra}")
+        qw = r['queue_wait']
+        if qw.get('total_s'):
+            print(f"    queue wait {qw['total_s']}s (gate {qw['gate_s']}s, build {qw['build_s']}s, verify {qw['verify_s']}s)")
         print(f"    {r['model_s']}s model / {r['tool_s']}s tool ({r['sec_per_call']}s/call tool), "
               f"{r['reads_before_edit']} reads before first edit, {r['files_reread']} file(s) read 3+ times")
     print("misses:" if misses else "all targets met"); [print('  - ' + m) for m in misses]
