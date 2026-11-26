@@ -138,8 +138,9 @@ column names the file to load; `.claude/skills/<skill>/SKILL.md` has a `## <old-
 - Board wording (manager, 2026-10-22): notes are plain words for the user, no commit hashes; status `waiting` only for
   something the USER must do (it shows as a Needs-you card), never for a queued check or another agent.
 - Worktrees: `tools/agents/worktree.sh new <name>` (origin tip, shared node_modules, and the Android build's
-  gitignored inputs linked from the shared cache - see "KWin patches" below), `done <name>` once pushed (refuses
-  unpushed/uncommitted work), `list`. Never leave a merged worktree behind. From a stale
+  gitignored inputs linked from the shared cache - see "KWin patches" below - plus the APK's staged inputs:
+  PowStream natives and bundled apps, cached by source; it ends with a `ready: ...` line, `worktree.sh ready`
+  repeats it), `done <name>` once pushed (refuses unpushed/uncommitted work), `list`. Never leave a merged worktree behind. From a stale
   checkout (or anywhere outside a PowOS worktree), bootstrap it first: `cd ~/Projects/PowOS && git fetch origin main
   && git show origin/main:tools/agents/worktree.sh | bash -s new <name>` (the `cd` matters:
   the piped script resolves its own repo from `$PWD`, not from a `git -C` on the `show` half alone - run from
