@@ -4,12 +4,15 @@
 # with an import cycle - home and the lock face dead, the shade's window over everything), and nobody is told: so it
 # never gets there.
 #
-#   shell/dev/gate.sh [--tree | --dir DIR | --installed DIR] [--overrides DIR] [--app APPDIR] [file...]
+#   shell/dev/gate.sh [--tree | --head | --dir DIR | --installed DIR] [--overrides DIR] [--app APPDIR] [file...]
+#
+# Default (an agent's gate, no files named): git HEAD + this worktree's uncommitted shell changes (staged, unstaged,
+# untracked, deletions) - what the agent is about to commit. --head: HEAD alone.
 #
 # The shell it checks is the one the phone will run after the push: the committed shell (git HEAD: what an APK is
 # built from - build-app.sh refuses a dirty tree), the phone's current overrides over it (--overrides: push.sh pulls
-# them), and the files being pushed, from the working tree, over that. Other agents' uncommitted edits elsewhere in
-# shell/ are not part of it, as they aren't part of the phone. --tree: the working tree as it is instead; --dir: DIR
+# them), and the files being pushed, from the working tree, over that; the run names any other uncommitted shell file it
+# leaves out. --tree: the working tree as it is instead; --dir: DIR
 # as it is (nothing composed).
 #   1. tsc --noEmit over that shell (the folder's own tsconfig and node_modules); the style lint (dev/lint-style.sh:
 #      a raw colour, a line or a shadow outside theme.css's tokens fails, dev/style-allow.txt the exceptions); the
@@ -47,10 +50,12 @@ IMAGE=${GATE_IMAGE:-zenika/alpine-chrome:with-puppeteer}
 # The local container's platform: the docker host's own arch (the Mac's VM: arm64), never an emulated one.
 case $(uname -m) in x86_64 | amd64) PLATFORM=linux/amd64 ;; *) PLATFORM=linux/arm64 ;; esac
 GATE_ALL=${GATE_ALL:-}
-base=head dir="" installed="" overrides="" app="" shots="" wallpaper="" widgets=${GATE_WIDGETS:-} files=()
+base=head headonly="" dir="" installed="" overrides="" app="" shots="" wallpaper="" widgets=${GATE_WIDGETS:-} files=()
 while [ $# -gt 0 ]; do
   case "$1" in
     --tree) base=tree; shift ;;
+    # --head: git HEAD alone, the working tree's uncommitted shell changes left out (the default composes them in, below).
+    --head) headonly=1; shift ;;
     --dir) base=dir; dir=$(cd "$2" && pwd); shift 2 ;;
     # The shell the installed APK ships (its assets/shell, push.sh pulls it): the base instead of git HEAD - the phone
     # runs that, not HEAD, while the APK lags behind (2026-10-21: HEAD's assist.tsx failed against the phone's
@@ -62,7 +67,7 @@ while [ $# -gt 0 ]; do
     --wallpaper) wallpaper=$(cd "$(dirname "$2")" && pwd)/$(basename "$2"); shift 2 ;;
     --widgets) widgets=1; shift ;;
     --all) GATE_ALL=1; shift ;;
-    -h|--help) sed -n '2,39p' "$0"; exit 0 ;;
+    -h|--help) sed -n '2,42p' "$0"; exit 0 ;;
     # f305: repo-relative (shell/ui/x.tsx), absolute and ./ paths name the same shell file as ui/x.tsx.
     *) f=${1#./}; f=${f#"$SHELL_DIR"/}; f=${f#shell/}; files+=("$f"); shift ;;
   esac
@@ -161,9 +166,28 @@ case $base in
     ;;
   head)
     top=$(git -C "$SHELL_DIR" rev-parse --show-toplevel)
-    rel=${SHELL_DIR#"$top"/}
+    rel=$(git -C "$SHELL_DIR" rev-parse --show-prefix); rel=${rel%/}   # not ${SHELL_DIR#$top/}: /var vs /private/var
     git -C "$top" archive HEAD "$rel" | tar -mxf - -C "$work"
     [ "$rel" = shell ] || mv "$work/$rel" "$S"
+    # The working tree's uncommitted shell changes (staged, unstaged, untracked; deletions too) over HEAD: an agent's
+    # gate tests what it is about to commit. 11-26: HEAD alone was gated, so an agent's first run tested the old code
+    # and passed. Not for the ship's gate (a clean runner checkout), --head, or a push naming its files (shell/push.sh:
+    # HEAD + the phone's overrides + exactly those files is what the phone will run) - there the rest is listed, never
+    # silently dropped.
+    unc=$({ git -C "$top" diff --name-only HEAD -- "$rel"; git -C "$top" ls-files --others --exclude-standard -- "$rel"; } |
+      grep -v "^$rel/node_modules\(/\|\$\)" | sort -u)
+    if [ -n "$unc" ]; then
+      if [ -z "$headonly" ] && [ "${GATE_PRIORITY:-}" != ship ] && [ ${#files[@]} -eq 0 ] && [ -z "$overrides" ]; then
+        while IFS= read -r f; do
+          r=${f#"$rel"/}
+          if [ -f "$top/$f" ] || [ -L "$top/$f" ]; then mkdir -p "$S/$(dirname "$r")" && cp -P "$top/$f" "$S/$r"
+          else rm -f "$S/$r"; fi
+        done <<< "$unc"
+        echo "gate: tests HEAD + $(echo "$unc" | wc -l | tr -d ' ') uncommitted shell file(s) from the working tree (--head: HEAD alone)"
+      else
+        echo "gate: NOTE - $(echo "$unc" | wc -l | tr -d ' ') uncommitted shell file(s) are NOT in this run ($([ -n "$headonly" ] && echo "--head" || { [ "${GATE_PRIORITY:-}" = ship ] && echo "ship gate"; } || echo "named files only")): $(echo "$unc" | head -8 | sed "s|^$rel/||" | paste -sd' ' -)"
+      fi
+    fi
     ;;
 esac
 if [ "$base" != dir ]; then
@@ -224,7 +248,11 @@ fi
 export GATE_ONLY
 [ -z "${GATE_ONLY:-}" ] || [ "$scope_note" != "all scenes" ] || scope_note="GATE_ONLY=$GATE_ONLY"
 echo "gate: scope: $scope_note"
-[ -z "${GATE_SCOPE_DRY:-}" ] || { echo "gate: GATE_ONLY=${GATE_ONLY:-} skip_tsc=${skip_tsc:-0}"; exit 0; }   # dev/gate-scope-test.sh
+# dev/gate-scope-test.sh, dev/gate-tree-test.sh (GATE_COMPOSE_DUMP=DIR: a copy of the composed shell there).
+if [ -n "${GATE_SCOPE_DRY:-}" ]; then
+  [ -z "${GATE_COMPOSE_DUMP:-}" ] || { mkdir -p "$GATE_COMPOSE_DUMP" && (cd "$S" && tar --exclude ./node_modules -cf - .) | tar -xf - -C "$GATE_COMPOSE_DUMP"; }
+  echo "gate: GATE_ONLY=${GATE_ONLY:-} skip_tsc=${skip_tsc:-0}"; exit 0
+fi
 # The pass cache: the same composed tree (+ scope + flags) that passed once passes again at once - an agent's rerun
 # (a flaky tool timeout, a re-check before landing) costs nothing. Failures are never cached.
 cache_dir="${XDG_CACHE_HOME:-$HOME/.cache}/powos-gate/pass"
