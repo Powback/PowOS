@@ -133,7 +133,7 @@ object Drops {
         val (realm, token) = PowStation.credentials(c) ?: return null
         val mine = Base64.getEncoder().encodeToString(ByteArray(32).also { rnd.nextBytes(it) })
         val body = JSONObject().put("app", KEY_APP).put("name", KEY_NAME).put("value", mine).put("keep", true)
-        val (st, r) = json("POST", "$realm/v1/account/secret", body.toString().toByteArray(), token) ?: return null
+        val (st, r) = json(Req("POST", "$realm/v1/account/secret", body.toString().toByteArray()), token) ?: return null
         if (st != 200) return null
         val value = r.optString("value").ifBlank { mine } // "value": the account had one already - that one
         val k = runCatching { Base64.getDecoder().decode(value) }.getOrNull()?.takeIf { it.size == 32 } ?: return null
@@ -165,7 +165,7 @@ object Drops {
         val (realm, token) = PowStation.credentials(c) ?: return Sent.No("this device hasn't joined a PowStation (Settings > powstation)")
         val key = key(c) ?: return Sent.No("PowStation isn't reachable")
         val path = "/v1/account/drop?kind=$kind" + if (kind == "send") "&to=${java.net.URLEncoder.encode(to, "UTF-8")}" else ""
-        val (st, r) = json("POST", realm + path, seal(key, kind, item), token, "application/octet-stream") ?: return Sent.No("PowStation isn't reachable")
+        val (st, r) = json(Req("POST", realm + path, seal(key, kind, item), "application/octet-stream"), token) ?: return Sent.No("PowStation isn't reachable")
         if (st == 401) forget(c)
         return if (st == 200) Sent.Ok(r.optString("id")) else Sent.No(r.optString("error_description").ifBlank { "PowStation answered $st" })
     }
@@ -176,7 +176,7 @@ object Drops {
         kind: String,
     ): List<Waiting>? {
         val (realm, token) = PowStation.credentials(c) ?: return null
-        val (st, r) = json("GET", "$realm/v1/account/drops?kind=$kind", null, token) ?: return null
+        val (st, r) = json(Req("GET", "$realm/v1/account/drops?kind=$kind"), token) ?: return null
         if (st == 401) forget(c)
         return if (st == 200) parseWaiting(r) else null
     }
@@ -187,7 +187,7 @@ object Drops {
     ): Item? {
         val (realm, token) = PowStation.credentials(c) ?: return null
         val key = key(c) ?: return null
-        val (st, bytes) = raw("GET", "$realm/v1/account/drop/${w.id}", null, token, null) ?: return null
+        val (st, bytes) = raw(Req("GET", "$realm/v1/account/drop/${w.id}"), token) ?: return null
         return if (st == 200) open(key, w.kind, bytes) else null
     }
 
@@ -196,37 +196,38 @@ object Drops {
         id: String,
     ) {
         val (realm, token) = PowStation.credentials(c) ?: return
-        json("POST", "$realm/v1/account/drop/$id/done", "{}".toByteArray(), token)
+        json(Req("POST", "$realm/v1/account/drop/$id/done", "{}".toByteArray()), token)
     }
 
     /** The account's other devices a send can go to; null when the realm can't be asked. */
     fun devices(c: Context): List<Pair<String, String>>? {
         val (realm, token) = PowStation.credentials(c) ?: return null
-        val (st, r) = json("GET", "$realm/v1/devices", null, token) ?: return null
+        val (st, r) = json(Req("GET", "$realm/v1/devices"), token) ?: return null
         return if (st == 200) targets(r) else null
     }
 
+    private class Req(
+        val method: String,
+        val url: String,
+        val body: ByteArray? = null,
+        val ctype: String = "application/json",
+    )
+
     private fun json(
-        method: String,
-        url: String,
-        body: ByteArray?,
+        req: Req,
         token: String,
-        ctype: String = "application/json",
-    ): Pair<Int, JSONObject>? =
-        raw(method, url, body, token, ctype)?.let { (st, b) -> st to (runCatching { JSONObject(String(b)) }.getOrNull() ?: JSONObject()) }
+    ): Pair<Int, JSONObject>? = raw(req, token)?.let { (st, b) -> st to (runCatching { JSONObject(String(b)) }.getOrNull() ?: JSONObject()) }
 
     // HACK: plain HTTP to the realm on the LAN/VPN like PowStation.kt (the realm serves only that); the drop itself is
     // sealed here, but the bearer crosses the LAN/VPN leg in the clear. Real fix: the realm CA / a .pow certificate.
     private fun raw(
-        method: String,
-        url: String,
-        body: ByteArray?,
+        req: Req,
         token: String,
-        ctype: String?,
     ): Pair<Int, ByteArray>? =
         runCatching {
-            val conn = URL(url).openConnection() as HttpURLConnection
-            conn.requestMethod = method
+            val body = req.body
+            val conn = URL(req.url).openConnection() as HttpURLConnection
+            conn.requestMethod = req.method
             conn.connectTimeout = 2500
             conn.readTimeout = 20000
             conn.setRequestProperty("Authorization", "Bearer $token")
@@ -234,7 +235,7 @@ object Drops {
                 if (body != null) {
                     conn.doOutput = true
                     conn.setFixedLengthStreamingMode(body.size)
-                    conn.setRequestProperty("Content-Type", ctype ?: "application/octet-stream")
+                    conn.setRequestProperty("Content-Type", req.ctype)
                     conn.outputStream.use { it.write(body) }
                 }
                 val st = conn.responseCode

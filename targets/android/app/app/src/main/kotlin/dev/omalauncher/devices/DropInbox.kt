@@ -39,30 +39,27 @@ object DropInbox {
 
     @Synchronized
     fun start(context: Context) {
-        if (started) return
+        if (started || android.app.Application.getProcessName() != context.packageName) return
         started = true
         val app = context.applicationContext
         Thread({
-            var shortcutsAt = 0L
-            while (true) {
-                val wait =
-                    runCatching {
-                        val pm = app.getSystemService(PowerManager::class.java)
-                        if (PowStation.credentials(app) == null || pm?.isInteractive == false) return@runCatching POLL_MS
-                        if (System.currentTimeMillis() - shortcutsAt > SHORTCUTS_MS) {
-                            Drops.devices(app)?.let { publishTargets(app, it) }
-                            shortcutsAt = System.currentTimeMillis()
-                        }
-                        val waiting = Drops.waiting(app, "send") ?: return@runCatching AWAY_MS
-                        waiting.forEach { receive(app, it) }
-                        POLL_MS
-                    }.getOrElse {
-                        Log.w(TAG, "round: $it")
-                        AWAY_MS
-                    }
-                Thread.sleep(wait)
-            }
+            while (true) Thread.sleep(runCatching { round(app) }.getOrElse { Log.w(TAG, "round: $it"); AWAY_MS })
         }, "powos-drops").apply { isDaemon = true }.start()
+    }
+
+    private var shortcutsAt = 0L
+
+    /** One poll; how long until the next. */
+    private fun round(app: Context): Long {
+        val pm = app.getSystemService(PowerManager::class.java)
+        if (PowStation.credentials(app) == null || pm?.isInteractive == false) return POLL_MS
+        if (System.currentTimeMillis() - shortcutsAt > SHORTCUTS_MS) {
+            Drops.devices(app)?.let { publishTargets(app, it) }
+            shortcutsAt = System.currentTimeMillis()
+        }
+        val waiting = Drops.waiting(app, "send") ?: return AWAY_MS
+        waiting.forEach { receive(app, it) }
+        return POLL_MS
     }
 
     private fun receive(
@@ -97,15 +94,8 @@ object DropInbox {
         nm.createNotificationChannel(NotificationChannel(CHANNEL, "Sent from your devices", NotificationManager.IMPORTANCE_HIGH))
         val from = w.fromName.ifBlank { "your other device" }
         val nid = w.id.hashCode()
-        val uri = FileProvider.getUriForFile(c, c.packageName + ".files", f)
         val text = item.type == "text" || item.type == "link"
-        val open =
-            if (item.type == "link") {
-                Intent(Intent.ACTION_VIEW, Uri.parse(item.text.trim()))
-            } else {
-                Intent(Intent.ACTION_VIEW).setDataAndType(uri, item.mime.ifBlank { if (text) "text/plain" else "*/*" })
-                    .addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
-            }.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+        val open = openIntent(c, item, f)
         val second =
             Intent(c, Action::class.java).setAction(ACTION).putExtra("op", if (text) "copy" else "save")
                 .putExtra("path", f.absolutePath).putExtra("mime", item.mime).putExtra("nid", nid)
@@ -121,6 +111,17 @@ object DropInbox {
                 .setAutoCancel(true)
                 .build()
         nm.notify(nid, n)
+    }
+
+    private fun openIntent(
+        c: Context,
+        item: Drops.Item,
+        f: File,
+    ): Intent {
+        if (item.type == "link") return Intent(Intent.ACTION_VIEW, Uri.parse(item.text.trim())).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+        val uri = FileProvider.getUriForFile(c, c.packageName + ".files", f)
+        val mime = item.mime.ifBlank { if (item.type == "text") "text/plain" else "*/*" }
+        return Intent(Intent.ACTION_VIEW).setDataAndType(uri, mime).addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_ACTIVITY_NEW_TASK)
     }
 
     /** The share sheet's direct targets: "Send to <device>" for each of the account's other devices. */

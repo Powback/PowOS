@@ -72,40 +72,49 @@ class SendToDeviceActivity : Activity() {
         const val EXTRA_TO = "dev.omalauncher.devices.SEND_TO"
         const val SHARE_CATEGORY = "dev.omalauncher.category.SEND_TO_DEVICE"
 
-        /** What the share carries: a stream (image/file, read up to the cap + 1) or text/link. */
+        /** What the share carries: a stream (image/file, read up to the cap) or text/link. */
         fun itemOf(
             c: Context,
             share: Intent,
         ): Drops.Item? {
             @Suppress("DEPRECATION")
             val uri = share.getParcelableExtra<Uri>(Intent.EXTRA_STREAM)
-            if (uri != null) {
-                val mime = share.type?.takeIf { '*' !in it } ?: c.contentResolver.getType(uri).orEmpty()
-                var name = ""
-                var size = -1L
-                c.contentResolver.query(uri, arrayOf(OpenableColumns.DISPLAY_NAME, OpenableColumns.SIZE), null, null, null)?.use {
-                    if (it.moveToFirst()) {
-                        name = it.getString(0).orEmpty()
-                        size = if (it.isNull(1)) -1 else it.getLong(1)
-                    }
-                }
-                if (size > Drops.SEND_MAX) throw IllegalStateException(Drops.tooBig("send", size))
-                val bytes =
-                    c.contentResolver.openInputStream(uri)?.use { s ->
-                        val out = java.io.ByteArrayOutputStream()
-                        val chunk = ByteArray(64 * 1024)
-                        while (true) {
-                            val n = s.read(chunk)
-                            if (n < 0) break
-                            out.write(chunk, 0, n)
-                            if (out.size() > Drops.SEND_MAX) throw IllegalStateException(Drops.tooBig("send", out.size().toLong()))
-                        }
-                        out.toByteArray()
-                    } ?: return null
-                return Drops.Item(if (mime.startsWith("image/")) "image" else "file", bytes, name, mime)
-            }
+            if (uri != null) return streamItem(c, uri, share.type)
             val text = share.getCharSequenceExtra(Intent.EXTRA_TEXT)?.toString()?.takeIf { it.isNotBlank() } ?: return null
             return Drops.Item.ofText(text)
+        }
+
+        private fun streamItem(
+            c: Context,
+            uri: Uri,
+            type: String?,
+        ): Drops.Item? {
+            val mime = type?.takeIf { '*' !in it } ?: c.contentResolver.getType(uri).orEmpty()
+            val (name, size) = nameAndSize(c, uri)
+            Drops.tooBig("send", size)?.let { throw IllegalStateException(it) }
+            val bytes = c.contentResolver.openInputStream(uri)?.use { readCapped(it) } ?: return null
+            return Drops.Item(if (mime.startsWith("image/")) "image" else "file", bytes, name, mime)
+        }
+
+        private fun nameAndSize(
+            c: Context,
+            uri: Uri,
+        ): Pair<String, Long> =
+            c.contentResolver.query(uri, arrayOf(OpenableColumns.DISPLAY_NAME, OpenableColumns.SIZE), null, null, null)?.use {
+                if (!it.moveToFirst()) return@use "" to -1L
+                it.getString(0).orEmpty() to (if (it.isNull(1)) -1L else it.getLong(1))
+            } ?: ("" to -1L)
+
+        private fun readCapped(s: java.io.InputStream): ByteArray {
+            val out = java.io.ByteArrayOutputStream()
+            val chunk = ByteArray(64 * 1024)
+            var n = s.read(chunk)
+            while (n >= 0) {
+                out.write(chunk, 0, n)
+                Drops.tooBig("send", out.size().toLong())?.let { throw IllegalStateException(it) }
+                n = s.read(chunk)
+            }
+            return out.toByteArray()
         }
     }
 }
