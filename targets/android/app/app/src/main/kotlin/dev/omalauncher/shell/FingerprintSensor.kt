@@ -46,35 +46,42 @@ object FingerprintSensor {
     /** no fingerprint sensor */
     const val NONE = "none"
 
+    /** A display size in pixels, natural orientation. */
+    data class Size(val w: Int, val h: Int) {
+        val ok get() = w > 0 && h > 0
+    }
+
     /**
      * [props] (config_udfps_sensor_props: x, y, radius in the native mode's pixels, natural orientation) on the display as
-     * it is now: scaled by the current mode against the native one ([nativeW] x [nativeH] -> [naturalW] x [naturalH],
-     * both natural orientation, as SystemUI's UdfpsOverlayParams scale), then turned by [rotation] (Surface.ROTATION_*).
-     * Null when there is nothing usable (empty, a zero radius, off the panel).
+     * it is now: scaled by the current mode against the native one ([native] -> [now], both natural orientation, as
+     * SystemUI's UdfpsOverlayParams scale), then turned by [rotation] (Surface.ROTATION_*). Null when there is nothing
+     * usable (empty, a zero radius, off the panel).
      */
     fun spot(
         props: IntArray?,
-        nativeW: Int,
-        nativeH: Int,
-        naturalW: Int,
-        naturalH: Int,
+        native: Size,
+        now: Size,
         rotation: Int,
     ): Spot? {
-        if (props == null || props.size < 3 || nativeW <= 0 || nativeH <= 0 || naturalW <= 0 || naturalH <= 0) return null
-        val (x, y, r) = props
-        if (r <= 0 || x !in 0..nativeW || y !in 0..nativeH) return null
-        val scale = min(naturalW.toFloat() / nativeW, naturalH.toFloat() / nativeH)
+        if (!usable(props, native) || !now.ok) return null
+        val (x, y, r) = props!!
+        val scale = min(now.w.toFloat() / native.w, now.h.toFloat() / native.h)
         val sx = x * scale
         val sy = y * scale
         val (rx, ry) =
             when (rotation) {
-                1 -> sy to naturalW - sx
-                2 -> naturalW - sx to naturalH - sy
-                3 -> naturalH - sy to sx
+                1 -> sy to now.w - sx
+                2 -> now.w - sx to now.h - sy
+                3 -> now.h - sy to sx
                 else -> sx to sy
             }
         return Spot(rx.roundToInt(), ry.roundToInt(), (r * scale).roundToInt().coerceAtLeast(1))
     }
+
+    private fun usable(
+        props: IntArray?,
+        native: Size,
+    ): Boolean = props != null && props.size >= 3 && native.ok && props[2] > 0 && props[0] in 0..native.w && props[1] in 0..native.h
 
     /** Which kind, from what the system says: the feature, the UDFPS spot, a side (power button) sensor's config. */
     fun kind(
@@ -125,7 +132,7 @@ object FingerprintSensor {
         if (display == null || props == null) return null
         val native = display.supportedModes.maxByOrNull { it.physicalWidth * it.physicalHeight } ?: return null
         val now = display.mode
-        return spot(props, native.physicalWidth, native.physicalHeight, now.physicalWidth, now.physicalHeight, display.rotation)
+        return spot(props, Size(native.physicalWidth, native.physicalHeight), Size(now.physicalWidth, now.physicalHeight), display.rotation)
     }
 
     private fun display(context: Context): Display? =
