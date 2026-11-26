@@ -8143,6 +8143,38 @@ async function stackUnstackCheck() {
 }
 
 /**
+ * LD2 (e2e 1125-1924: the launcher's letter view, "dragging a:com.oplus.camera/.Camera out opened no window"): real
+ * touches (CDP) - a launcher tile (a letter's, and Recent's) held past the long press and dragged mostly up, over a
+ * window open on the page: its web window opens (dev/launcher-drag-check.js launcherDropSetup). The launcher's list is
+ * touch-action pan-y; without the carry owning the touch the browser scrolled it and cancelled the carry.
+ */
+async function launcherDropCheck(r) {
+  const f = await soFinger(r.page);
+  const seen = [];
+  const fails = [];
+  for (const place of ["letter", "recent"]) fails.push(...(await launcherDropOne(r.page, f, place, seen)));
+  console.log(`     launcher-drop-touch: ${seen.join(" ")}`);
+  return fails;
+}
+
+/** One LD2 drop: [place]'s lowest tile held 0.7 s, dragged up 260 px by the finger [f], let go; its window judged. */
+async function launcherDropOne(page, f, place, seen) {
+  const at = await page.evaluate(async (p) => (await importShim("./dev/launcher-drag-check.js")).launcherDropSetup(p), place);
+  if (at.err) return [`LD2 ${place}: ${at.err}`];
+  const step = (i) => ({ x: at.x + ((at.to.x - at.x) * i) / 10, y: at.y + ((at.to.y - at.y) * i) / 10 });
+  await f.touch("touchStart", [{ x: at.x, y: at.y }]);
+  await f.sleep(700);
+  for (let i = 1; i <= 10; i++) (await f.touch("touchMove", [step(i)]), await f.sleep(32));
+  await f.sleep(200);
+  await f.touch("touchEnd", []);
+  const res = await page.evaluate(async (k) => (await importShim("./dev/launcher-drag-check.js")).launcherDropResult(k), at.key);
+  seen.push(`${place}:${at.key}:${res.opened ? "window" : "none"}`);
+  if (res.opened) return [];
+  const why = res.stuck ? "the carry never ended" : "the carry was cancelled: the list's scroll took the touch";
+  return [`LD2 ${place}: ${at.key} held and dragged up by a finger opened no web window (${why})`];
+}
+
+/**
  * SO1, real touches (CDP) on home (ui/scrollown.ts, gesture.ts claimSideways, the host's HomePullAxis): a widget on home
  * gets a sideways scroller (as an app island's pan-x strip) - (1) a sideways drag on it scrolls its content and home's
  * page stays; (2) a diagonal one too, and home tells the host the finger is taken sideways (shade.homeClaim: the host's
@@ -16281,6 +16313,9 @@ try {
         console.log(`     ${name}: ${await r.page.evaluate(() => window.__launcherDrag).catch(() => "?")}`);
         return fails;
       })));
+    // LD2 (e2e 1125-1924, launcher-letter "opened no window"): a launcher tile held and dragged UP by a real finger opens
+    // its web window - the list's pan-y scroll never takes the carried app's touch (pointercancel = nothing opened).
+    runs.push(open(browser, `${ORIGIN}/index.html`, "launcher-drop-touch", { width: 821, height: 883, hasTouch: true }).then((r) => whenReady(r, () => launcherDropCheck(r))));
     // HZ-VOTE (perf-1793639664326): the drawer's Web Animation settle holds the host's 120 Hz vote, given back after (drawer-settle-refresh).
     runs.push(open(browser, `${ORIGIN}/index.html`, "drawer-settle-refresh", { width: 404, height: 900 }).then((r) => whenReady(r, async () => {
       await r.page.evaluateOnNewDocument(() => {

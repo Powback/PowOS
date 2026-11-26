@@ -346,17 +346,38 @@ export function startCarry(what: { item?: HomeItem; app?: string; fromDock?: boo
     hoverOut(carry.value, ev.clientX, ev.clientY);
     hoverFoot(carry.value, ev.clientX, ev.clientY);
   };
+  const release = ownTouch(e);
   const up = async (ev: PointerEvent) => {
     if (ev.pointerId !== e.pointerId) return;
     window.removeEventListener("pointermove", move);
     window.removeEventListener("pointerup", up);
     window.removeEventListener("pointercancel", up);
+    release();
     clearInterval(turner);
     await letGo(carry.value, ev);
   };
   window.addEventListener("pointermove", move);
   window.addEventListener("pointerup", up);
   window.addEventListener("pointercancel", up);
+}
+
+/**
+ * The carried thing's touch is the carry's until it lifts: its moves are never a scroll (the returned function gives it
+ * back). A tile in a pan-y list (the launcher's sections and a letter's apps, a folder's grid) carried mostly up or down
+ * was taken by the browser as the list's scroll, which cancels the pointer - letGo saw a pointercancel and opened
+ * nothing (e2e 1125-1924, launcher-letter: "dragging a:com.oplus.camera/.Camera out opened no window"; Recent's
+ * sideways drag to the middle never showed it). Also on the touch's own target: it stays the target after the launcher
+ * closes and unmounts it, and a detached node's touchmoves never reach window.
+ */
+function ownTouch(e: PointerEvent) {
+  const own = (ev: TouchEvent) => void (ev.cancelable && ev.preventDefault());
+  const target = e.target instanceof EventTarget && e.target !== window ? e.target : null;
+  window.addEventListener("touchmove", own, { capture: true, passive: false });
+  target?.addEventListener("touchmove", own as EventListener, { passive: false });
+  return () => {
+    window.removeEventListener("touchmove", own, true);
+    target?.removeEventListener("touchmove", own as EventListener);
+  };
 }
 
 /** [c] let go at [ev] (startCarry): on the foot, the dock, a folder, or home's grid where the finger is. */
