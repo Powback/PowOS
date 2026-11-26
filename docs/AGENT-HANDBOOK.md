@@ -432,6 +432,11 @@ widened first; out of scope here. `tools/emu/emu.sh` otherwise needed no change 
   APK's own shell + the phone's current overrides + your files. It refuses only failures your push ADDS. It also
   refuses when a page names a local file (href/src, "./ui/x.css") or imports a module the phone won't have: push a
   file with everything it imports or names, in ONE push. Never bypass the gate.
+- Your own gate (`shell/dev/gate.sh`, no files named) tests HEAD + your worktree's uncommitted shell changes
+  (staged, unstaged, untracked, deletions); `--head` tests HEAD alone, and a run that leaves uncommitted files out
+  names them. It also runs the push gate's lints on your branch's changed files (`tools/lint/changed-lints.sh`:
+  Kotlin complexity, shellcheck ratchet, hack registry - the same script pre-push runs), so they fail in the first
+  gate run. Up to 6 agent gates run at once while .58 answers (2 on the hub).
 - A scroll-driven CSS animation (`animation-timeline: scroll()`/`view()`, e.g. the dock's edge fade) is "running"
   for as long as it exists on `document.getAnimations()` - it never finishes, so a still/settled wait that doesn't
   exclude it times out, and an at-rest check that doesn't false-fails forever (friction f125). `gate.mjs`'s checks
