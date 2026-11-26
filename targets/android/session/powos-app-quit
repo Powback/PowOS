@@ -11,9 +11,17 @@
 #     after 2 s, a sweep for what a launcher started meanwhile); whatever that leaves (it failed, no powos), this
 #     script ends itself: the tree of the launch's outermost `SteamLaunch AppId=<id>` process. Steam's client stays.
 #   - anything else (Dolphin, a Wine app): the process and its descendants - TERM, KILL whatever is left after 2 s.
-# Never: Steam's client (and its web helpers / launcher), FEXServer (every FEX process shares it), the PowOS session,
-# KWin, Xwayland, Plasma, the buses, audio - nor another user's process, nor this script's own ancestors. A protected
-# pid KWin hands over is refused as a whole (Steam's own window closed: Steam stays in its tray).
+#   - Steam itself (the pid is Steam's client or one of its helpers - Steam's windows are steamwebhelper's - or
+#     `powos-app-quit --steam`, the app menu's close): Steam quits, as an app swiped away on stock Android does (the
+#     user, 11-26: "steam is always running even when i try to stop it from the switcher" - its window's close only
+#     put it in its tray). In order: the user-closed mark (~/.local/state/powos/user-closed/steam: /usr/bin/steam and
+#     powos-steam-resident start no background Steam while it is there; the user's next start of Steam or a game clears
+#     it), each running game's launch chain (`powos game <id> stop`: games close with Steam), Steam thawed and asked
+#     `steam -shutdown` (its wrapper), up to POWOS_STEAM_QUIT_WAIT (15) s for it to exit, then TERM - KILL after 2 s -
+#     of what is left of its process group and its tree.
+# Never: FEXServer (every FEX process shares it), the PowOS session, KWin, Xwayland, Plasma, the buses, audio - nor
+# another user's process, nor this script's own ancestors; Steam's client only through the Steam quit above. Any
+# other protected pid KWin hands over is refused as a whole.
 # Logs one line per step to stderr (KWin's log) and $XDG_RUNTIME_DIR/powos-app-quit.log.
 #   POWOS_APP_QUIT_DRY=1 powos-app-quit <pid>   prints what it would end, ends nothing.
 set -u
@@ -54,10 +62,94 @@ ppid_of() { awk '{print $4}' "/proc/$1/stat" 2>/dev/null | head -1; }
 # This script and its ancestors (KWin) - never ours to end.
 self=" "; a=$$; while [[ -n "$a" && "$a" -gt 1 ]]; do self+="$a "; a=$(ppid_of "$a"); done
 
-[[ "$pid" =~ ^[0-9]+$ && "$pid" -gt 1 ]] || { log "usage: powos-app-quit <pid>"; exit 2; }
+# Steam's own processes: its client, its wrapper/launcher scripts, its web UI (whose windows Steam's are).
+STEAM_NAMES=" steam steam.sh bin_steam.sh steamwebhelper steam-runtime-steam-remote steam-runtime-launcher-interface-0 "
+steam_client() { local s; s=$(cat "$HOME/.steam/steam.pid" 2>/dev/null)
+  [[ "$s" =~ ^[0-9]+$ && -d /proc/$s ]] && [[ "$(stat -c %u "/proc/$s" 2>/dev/null)" == "$(id -u)" ]] && echo "$s"; }
+is_steam() {
+  local n
+  [[ "$1" == "$(steam_client)" ]] && return 0
+  [[ "$(stat -c %u "/proc/$1" 2>/dev/null)" == "$(id -u)" ]] || return 1
+  while read -r n; do [[ -n "$n" && "$STEAM_NAMES" == *" $n "* ]] && return 0; done < <(names "$1")
+  return 1
+}
+# hard_protected <pid>: never ended, not even by a Steam quit - protected for anything but being Steam's.
+hard_protected() {
+  local n
+  [[ "$(stat -c %u "/proc/$1" 2>/dev/null)" == "$(id -u)" ]] || return 0
+  [[ " $self " == *" $1 "* ]] && return 0
+  while read -r n; do
+    [[ -n "$n" && "$PROTECT" == *" $n "* && "$STEAM_NAMES" != *" $n "* ]] && return 0
+  done < <(names "$1")
+  return 1
+}
+# tree_of <pid>: it and its descendants (one ps call).
+tree_of() { ps -e -o pid=,ppid= 2>/dev/null | awk -v r="$1" '{c[$2] = c[$2] " " $1}
+  END {n = 1; q[1] = r; for (i = 1; i <= n; i++) {p = q[i]; if (s[p]++) continue; print p
+       m = split(c[p], k, " "); for (j = 1; j <= m; j++) q[++n] = k[j]}}'; }
+alive() { [[ -d /proc/$1 ]] && ! grep -q '^State:.*Z' "/proc/$1/status" 2>/dev/null; }
+
+# steam_quit: Steam quits and stays quit until the user opens it again (the header).
+steam_quit() {
+  local s mark ids id rc i go=() kept=() left=() p pg
+  mark=${XDG_STATE_HOME:-$HOME/.local/state}/powos/user-closed/steam
+  s=$(steam_client)
+  [[ -n "$s" ]] || s=$pid
+  log "Steam closed by the user: quitting Steam (client ${s:-none}), its games too; marked closed until the user opens it"
+  [[ "$DRY" == 1 ]] && { log "dry run: nothing ended, no mark"; exit 0; }
+  mkdir -p "${mark%/*}" && date '+%F %T' > "$mark"
+  # Its games first, each through the games tooling's own close (wineserver too, Steam's cloud sync awaited).
+  ids=$(ps -u "$(id -u)" -o args= 2>/dev/null | sed -n 's/.*SteamLaunch AppId=\([0-9][0-9]*\) --.*/\1/p' | sort -u)
+  for id in $ids; do
+    if command -v powos >/dev/null; then
+      timeout 35 powos game "$id" stop 2>&1 | while read -r l; do log "powos game $id: $l"; done
+      rc=${PIPESTATUS[0]}; log "game $id: closed (exit $rc)"
+    fi
+  done
+  [[ -n "$s" && -d /proc/$s ]] || { log "Steam isn't running"; exit 0; }
+  # Thawed (a frozen client answers nothing), then asked through its wrapper (bounded: the forwarder can hang on a
+  # dying client).
+  timeout 2 dbus-send --session --print-reply=literal --reply-timeout=1500 --dest=dev.powos.Sleep /Gui \
+    dev.powos.Sleep.Gui.Wake string:steam >/dev/null 2>&1 || true
+  pg=$(ps -o pgid= -p "$s" 2>/dev/null | tr -d ' ')
+  timeout -k 1 10 steam -shutdown </dev/null >/dev/null 2>&1 || log "steam -shutdown: exit $?"
+  for (( i = 0; i < ${POWOS_STEAM_QUIT_WAIT:-15} * 10; i++ )); do
+    alive "$s" || break
+    sleep 0.1
+  done
+  alive "$s" && log "Steam still runs ${POWOS_STEAM_QUIT_WAIT:-15} s after -shutdown: ending it" || log "Steam shut down"
+  # What is left: its tree, and its process group's Steam processes (a helper re-parented out of the tree; a group it
+  # may share with a launcher shell gives only those - never another app started from the same shell).
+  local cand
+  cand=$(tree_of "$s")
+  if [[ -n "$pg" && "$pg" -gt 1 ]]; then
+    for p in $(ps -e -o pid=,pgid= 2>/dev/null | awk -v g="$pg" '$2 == g {print $1}'); do
+      is_steam "$p" && cand="$cand $p"
+    done
+  fi
+  for p in $(echo $cand | tr ' ' '\n' | sort -un); do
+    alive "$p" || continue
+    if hard_protected "$p"; then kept+=("$p:$(comm_of "$p")"); else go+=("$p"); fi
+  done
+  [[ ${#go[@]} == 0 ]] && { log "nothing of Steam's left${kept[*]:+ (kept: ${kept[*]})}"; exit 0; }
+  log "TERM $(for p in "${go[@]}"; do printf '%s:%s ' "$p" "$(comm_of "$p")"; done)${kept[*]:+(kept: ${kept[*]})}"
+  kill -TERM "${go[@]}" 2>/dev/null
+  for _ in $(seq 20); do
+    left=(); for p in "${go[@]}"; do alive "$p" && left+=("$p"); done
+    [[ ${#left[@]} == 0 ]] && { log "Steam ended on TERM"; exit 0; }
+    sleep 0.1
+  done
+  log "KILL after 2 s: ${left[*]}"
+  kill -KILL "${left[@]}" 2>/dev/null
+  exit 0
+}
+
+[[ "$pid" == --steam ]] && { pid=$(steam_client); pid=${pid:-0}; steam_quit; }
+[[ "$pid" =~ ^[0-9]+$ && "$pid" -gt 1 ]] || { log "usage: powos-app-quit <pid> | --steam"; exit 2; }
 [[ -d /proc/$pid ]] || { log "gone already"; exit 0; }
+is_steam "$pid" && steam_quit
 if protected "$pid"; then
-  log "$(comm_of "$pid") is protected (Steam, the session, KWin, Xwayland, another user's, or our own): nothing ended"
+  log "$(comm_of "$pid") is protected (the session, KWin, Xwayland, FEXServer, another user's, or our own): nothing ended"
   exit 0
 fi
 

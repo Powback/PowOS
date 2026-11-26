@@ -9,6 +9,23 @@
 # native client, i386 + x86-64 for x86 programs - each process skips the ones of other architectures) provides them
 # from /dev/shm. Preloaded from the home directory: the same path outside FEX, under FEX and inside the Steam Runtime
 # container (pressure-vessel binds the home in; from /usr/lib the container's programs couldn't find it).
+# The user closed Steam (its switcher card, its window's or the app menu's close: powos-app-quit --steam) - it stays
+# closed until the user opens it again, as an app swiped away on stock Android does (the user, 11-26: "steam is always
+# running even when i try to stop it from the switcher"). The mark, ~/.local/state/powos/user-closed/steam: a background
+# start (-silent with no steam:// link - powos-steam-resident at session start, Steam's own "run at login" autostart)
+# is refused while it is there; any other start is the user's (a tap on Steam or a game, a steam:// link) and clears it.
+# -shutdown neither starts Steam nor clears it.
+UC=${XDG_STATE_HOME:-$HOME/.local/state}/powos/user-closed/steam
+case " $* " in
+  *" -shutdown "*) ;;
+  *" steam://"*) rm -f "$UC" ;;
+  *" -silent "*)
+    if [ -e "$UC" ]; then
+      echo "steam: closed by the user $(date -r "$UC" '+%F %T' 2>/dev/null): background start (steam $*) refused" >&2
+      exit 0
+    fi ;;
+  *) rm -f "$UC" ;;
+esac
 L=${XDG_DATA_HOME:-$HOME/.local/share}/powos-sysvipc
 for b in aarch64 i386 x86_64; do
   cmp -s /usr/lib/powos-sysvipc/$b/libsysvipc-emu.so "$L/$b/libsysvipc-emu.so" \

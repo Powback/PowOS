@@ -5304,7 +5304,8 @@ class WebWindows(
          * ([handBack]: out of the web window, the app stays); else - the user closed it: its bar's close, its switcher
          * card swiped away ([closeForTask]), the app menu's close - "quit": KWin closes the window (WM_DELETE_WINDOW /
          * xdg close) and ~3 s later, if its process still runs, ends that process's tree only (kwin 0042 ->
-         * session/powos-app-quit: a Steam game's own launch chain by its AppId, never Steam or another app).
+         * session/powos-app-quit: a Steam game's own launch chain by its AppId; Steam's own window: Steam quits, its
+         * games too, and stays closed until the user opens it again).
          */
         fun linuxGoes(
             kwinClosed: Boolean,

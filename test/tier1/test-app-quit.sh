@@ -62,9 +62,10 @@ out=$(POWOS_APP_QUIT_DRY=1 "$QUIT" "$game" 2>&1)
 check "dry run sees Steam game 384190" 'echo "$out" | grep -q "Steam game 384190"'
 check "dry run ends nothing" 'alive $game && alive $wserver && alive $reaper'
 
-# Steam's own window closed: Steam is refused as a whole.
-out=$("$QUIT" "$steam" 2>&1)
-check "Steam's pid is protected" 'echo "$out" | grep -q "protected" && alive $steam && alive $game'
+# Steam's own window closed: Steam quits (below) - a dry run names it and ends nothing, marks nothing.
+out=$(POWOS_APP_QUIT_DRY=1 "$QUIT" "$steam" 2>&1)
+check "dry run on Steam's pid: quits Steam" 'echo "$out" | grep -q "quitting Steam" && alive $steam && alive $game'
+check "dry run leaves no user-closed mark" '[[ ! -e $T/.local/state/powos/user-closed/steam ]]'
 
 # The swipe: game window pid handed over, `powos game stop` fails - the whole launch chain still goes, Steam stays.
 out=$("$QUIT" "$game" 2>&1)
@@ -94,6 +95,88 @@ for _ in $(seq 50); do zk=$(pgrep -P "$holder" | head -1); [[ -n "$zk" ]] && bre
 out=$("$QUIT" "${zk:-0}" 2>&1)
 check "an app left a zombie by its parent counts as ended" 'echo "$out" | grep -q "ended on TERM" && ! echo "$out" | grep -q "still there"'
 check "the zombie is still listed (the case is real)" '[[ -d /proc/${zk:-0} ]] && grep -q "^State:.*Z" /proc/${zk:-0}/status'
+
+# ---- Steam quit (the user, 11-26: "steam is always running even when i try to stop it from the switcher") ----------
+# Steam's window closed only put it in its tray; its card's close must quit it, its games too, and nothing in PowOS may
+# start it again until the user does. Stubs: `steam -shutdown` (a client that obeys it, or one that ignores it), and
+# `powos game <id> stop` that ends that game's chain.
+cat > "$T/bin/powos" <<EOF
+#!/bin/bash
+echo "\$*" >> "$T/powos.calls"
+if [[ "\$1 \$3" == "game stop" ]]; then  # the game's chain: the reaper and its children
+  for r in \$(pgrep -f "SteamLaunch AppId=\$2 -- $T/"); do pkill -TERM -P "\$r"; kill -TERM "\$r"; done
+fi
+exit 0
+EOF
+cat > "$T/bin/steam" <<EOF
+#!/bin/bash
+echo "\$*" >> "$T/steam.calls"
+[[ "\$*" == -shutdown && ! -e "$T/steam-ignores" ]] && kill -TERM "\$(cat "$T/.steam/steam.pid")"
+exit 0
+EOF
+chmod +x "$T/bin/powos" "$T/bin/steam"
+mkdir -p "$T/.steam"
+MARK=$T/.local/state/powos/user-closed/steam
+unmark() { [[ -e "$MARK" ]] && unlink "$MARK"; return 0; }
+# fake_steam <appid>: Steam's client (argv0 steam) > {steamwebhelper, reaper SteamLaunch AppId=<id> -- > game}; sets
+# $client $helper $sgame and steam.pid.
+fake_steam() {
+  # (The AppId as an argument: the client's own command line must not name the game's launch.)
+  (exec -a steam bash -c '
+    (exec -a steamwebhelper sleep 300) &
+    bash -c "(exec -a Game.exe sleep 300) & wait" reaper SteamLaunch "AppId=$1" -- "$2/_v2-entry-point" &
+    trap "exit 0" TERM; while :; do sleep 0.1; done' steam "$1" "$T") &
+  client=$!; pids+=("$client"); helper= sgame=
+  for _ in $(seq 50); do
+    helper=$(pgrep -P "$client" -f '^steamwebhelper' | head -1); sgame=$(pgrep -f '^Game.exe' | head -1)
+    [[ -n "$helper" && -n "$sgame" ]] && break; sleep 0.1
+  done
+  pids+=("$helper" "$sgame"); echo "$client" > "$T/.steam/steam.pid"
+}
+
+# 1. Its card closed (KWin hands over the window's pid: steamwebhelper's), Steam obeys -shutdown.
+fake_steam 111
+out=$("$QUIT" "$helper" 2>&1)
+sleep 0.3
+check "steamwebhelper's pid quits Steam" 'echo "$out" | grep -q "quitting Steam"'
+check "its running game closed through powos game stop" 'grep -qx "game 111 stop" "$T/powos.calls" && ! alive $sgame'
+check "Steam asked steam -shutdown via its wrapper" 'grep -qx -- "-shutdown" "$T/steam.calls"'
+check "Steam's client ended" '! alive $client'
+check "user-closed mark written" '[[ -s $MARK ]]'
+check "its helper ended" '! alive ${helper:-0}'
+unmark; : > "$T/steam.calls"
+
+# 2. Steam ignores -shutdown (it stays in its tray): TERM after the wait.
+touch "$T/steam-ignores"
+fake_steam 222
+out=$(POWOS_STEAM_QUIT_WAIT=1 "$QUIT" "$client" 2>&1)
+sleep 0.3
+check "a Steam ignoring -shutdown is TERMed after the wait" 'echo "$out" | grep -q "still runs 1 s after -shutdown" && ! alive $client && ! alive ${helper:-0}'
+check "mark written again" '[[ -s $MARK ]]'
+check "the test's own shell (same process group) stays" 'alive $$'
+unlink "$T/steam-ignores"
+
+# 3. The app menu's close: --steam, Steam not running - the mark is still written, nothing else to do.
+unmark; echo 999999 > "$T/.steam/steam.pid"
+out=$("$QUIT" --steam 2>&1)
+check "--steam with no Steam running: marked, done" '[[ -s $MARK ]] && echo "$out" | grep -q "Steam isn.t running"'
+
+# 4. Nothing starts it again while marked: /usr/bin/steam refuses a background start (-silent, no link) and a user's
+# start clears the mark; powos-steam-resident doesn't start it.
+W="$SCRIPT_DIR/../../targets/android/pkgs/steam/steam"
+gate=$(sed -n '/^UC=/,/^esac/p' "$W")
+check "the wrapper has the user-closed gate" '[[ -n "$gate" ]]'
+uc() { sh -c "$gate"'
+echo started' steam "$@" 2>&1; }
+check "marked: steam -silent refused" '[[ "$(uc -silent)" == *"background start"*"refused"* && "$(uc -silent)" != *started* && -e $MARK ]]'
+check "marked: steam -shutdown passes, mark kept" '[[ "$(uc -shutdown)" == started && -e $MARK ]]'
+check "a game link (-silent steam://rungameid) is the user's: clears it" '[[ "$(uc -silent steam://rungameid/1)" == started && ! -e $MARK ]]'
+date > "$MARK"
+check "a plain start (a tap on Steam) clears it" '[[ "$(uc)" == started && ! -e $MARK ]]'
+check "unmarked: steam -silent starts" '[[ "$(uc -silent)" == started ]]'
+date > "$MARK"; : > "$T/steam.calls"
+POWOS_STEAM_RESIDENT_DELAY=0 sh "$SCRIPT_DIR/../../targets/android/pkgs/steam/powos-steam-resident"
+check "powos-steam-resident starts no Steam while marked" '[[ ! -s $T/steam.calls ]] && grep -q "closed by the user" "$T/powos-steam-resident.log"'
 
 echo "== $PASS passed, $FAIL failed =="
 [[ $FAIL == 0 ]]

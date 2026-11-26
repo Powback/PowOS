@@ -18,6 +18,9 @@ C=${XDG_CONFIG_HOME:-$HOME/.config}/powos
 exec >> "${XDG_RUNTIME_DIR:-/tmp}/powos-steam-resident.log" 2>&1  # what it did, per session
 [ -e "$C/steam-resident-off" ] && exit 0
 command -v steam >/dev/null 2>&1 || exit 0
+# The user closed Steam (powos-app-quit --steam's mark; /usr/bin/steam refuses this -silent start too): not started again
+# until the user opens it.
+[ -e "${XDG_STATE_HOME:-$HOME/.local/state}/powos/user-closed/steam" ] && { echo "$(date '+%F %T') powos-steam-resident: closed by the user, not started"; exit 0; }
 log() { echo "$(date '+%F %T') powos-steam-resident: $*"; }
 running() { case $(readlink "/proc/$(cat "$HOME/.steam/steam.pid" 2>/dev/null || echo 0)/exe" 2>/dev/null) in
   */steam | */FEX*) return 0 ;; esac; return 1; }

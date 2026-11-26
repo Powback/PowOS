@@ -1822,8 +1822,8 @@ class ShellBridge(
 
     /**
      * Closes PowOS app [key] cleanly when it is a Steam game (the games tooling's own close, lib/game.sh `powos game
-     * <appid> stop`: its launch chain TERMed, wineserver too) or Steam itself (woken if unified sleep froze it, then
-     * asked to -shutdown, as `stop --steam` does). False for anything else: the page removes its tasks instead, as a
+     * <appid> stop`: its launch chain TERMed, wineserver too) or Steam itself (`powos-app-quit --steam`: its games
+     * closed, Steam asked to -shutdown, ended if it stays, and marked closed by the user so nothing starts it again). False for anything else: the page removes its tasks instead, as a
      * window's close button does. Runs in the PowOS session off the main thread; its result goes to logcat.
      */
     private fun closeApp(key: String): Boolean {
@@ -1834,9 +1834,9 @@ class ShellBridge(
         val command =
             when {
                 game != null -> "timeout 20 powos game $game stop"
-                steam ->
-                    "timeout 2 dbus-send --session --print-reply=literal --reply-timeout=1500 --dest=dev.powos.Sleep /Gui " +
-                        "dev.powos.Sleep.Gui.Wake string:steam >/dev/null 2>&1; timeout -k 1 10 steam -shutdown </dev/null"
+                // The switcher's quit for Steam (session/powos-app-quit): games closed, -shutdown, TERM fallback, and the
+                // user-closed mark that keeps PowOS from starting it again until the user does.
+                steam -> "timeout 60 powos-app-quit --steam"
                 else -> return false
             }
         thread(name = "app-close", isDaemon = true) {

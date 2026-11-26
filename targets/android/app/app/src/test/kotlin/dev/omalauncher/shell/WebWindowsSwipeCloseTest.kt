@@ -10,7 +10,7 @@ import java.io.File
  * Board swiping-a-game-or-linux-app-away-in-the-switcher (X1/X2): a Linux window's card swiped away closes the app,
  * not just its card. X1: the swipe (Tasks.remove of the card's id) closes that one web window by its bar's close path,
  * which tells KWin "quit" for that KWin window. X2: KWin closes it and ~3 s later, if that window's own pid still runs,
- * runs powos-app-quit on that pid only (its tree / its Steam game's launch chain; never Steam or another app).
+ * runs powos-app-quit on that pid only (its tree / its Steam game's launch chain; Steam's own window: Steam quits, 11-26).
  */
 class WebWindowsSwipeCloseTest {
     private val src = File("src/main/kotlin/dev/omalauncher/shell/WebWindows.kt").readText()
@@ -70,6 +70,10 @@ class WebWindowsSwipeCloseTest {
         }
         assertTrue("never another user's", quit.contains("stat -c %u"))
         assertTrue("never by name globally", !quit.contains("pkill") && !quit.contains("killall"))
+        // Steam's own window (the user, 11-26: "steam is always running even when i try to stop it from the switcher"):
+        // Steam quits through its wrapper, and the user-closed mark keeps PowOS from starting it again.
+        assertTrue(quit.contains("is_steam \"\$pid\" && steam_quit"))
+        assertTrue(quit.contains("steam -shutdown") && quit.contains("powos/user-closed/steam"))
     }
 
     /**
