@@ -29,6 +29,9 @@ export interface CanvasPick {
 
 export const canvasPick = signal<CanvasPick | null>(null);
 
+/** When the finger went down on a picker cell (performance.now()): the press -> pair-call latency, logged per pick. */
+let pressedAt = 0;
+
 /** A choice in the picker: a recent task (its id: the app keeps its state) or an app by key (started fresh). */
 interface Choice {
   key: string;
@@ -222,7 +225,7 @@ function Section({ title, list, recent, onPick }: { title: string; list: Choice[
 
 function ChoiceCell({ c, onPick }: { c: Choice; onPick: (c: Choice) => void }) {
   return (
-    <button type="button" class={`canvas-pick-app ${c.why ? "dim" : ""}`} data-key={c.key} data-task={c.task ?? undefined} title={c.why ?? undefined} onClick={() => onPick(c)}>
+    <button type="button" class={`canvas-pick-app ${c.why ? "dim" : ""}`} data-key={c.key} data-task={c.task ?? undefined} title={c.why ?? undefined} onPointerDown={() => (pressedAt = performance.now())} onClick={() => onPick(c)}>
       {c.icon ? <img class="canvas-pick-app-icon" src={c.icon} alt="" draggable={false} /> : <span class="canvas-pick-app-icon blank" />}
       <span class="canvas-pick-app-label">{c.label}</span>
       {c.why && <span class="canvas-pick-app-why">{c.why}</span>}
@@ -245,9 +248,11 @@ function dock(p: CanvasPick, c: Choice, onNote: (text: string) => void) {
     onNote(reason);
   };
   if (!start) return back("Not supported by this build yet");
-  console.info(`[canvas] dock task ${p.id} ${p.side}, beside ${other} (picked)`);
+  const t0 = performance.now();
+  const press = pressedAt ? Math.round(t0 - pressedAt) : -1;
+  console.info(`[canvas] dock task ${p.id} ${p.side}, beside ${other} (picked, press -> call ${press} ms)`);
   start(p.id, p.side, other).then(
-    (r) => (r?.ok ? console.info(`[canvas] dock of task ${p.id} started`) : back(r?.reason || "Split view didn't open")),
+    (r) => (r?.ok ? console.info(`[canvas] dock of task ${p.id} started (host answered in ${Math.round(performance.now() - t0)} ms)`) : back(r?.reason || "Split view didn't open")),
     (e) => back(`Split view didn't open (${e?.message ?? e})`),
   );
 }

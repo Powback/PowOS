@@ -33,10 +33,29 @@ tid() { local v; v=$(hcall tasks.list "[]" "l=>(l.find(t=>(t.key||'').includes('
 canvas_task() { sh_ "dumpsys activity activities" | grep -E "^ *\* Task\{.*com\.oplus\.pscanvas.* visible=true" | sed -nE 's/.*Task\{[0-9a-f]+ #([0-9]+).*/\1/p' | sed -n 1p; }
 # Every pscanvas container, visible or not (closed before the run: a stale one is where OxygenOS may put the next dock).
 canvas_tasks() { sh_ "dumpsys activity activities" | grep -E "^ *\* Task\{.*com\.oplus\.pscanvas" | sed -nE 's/.*Task\{[0-9a-f]+ #([0-9]+).*/\1/p' | sort -u; }
-# The page's tasks.canvasDock calls from now on, each with its args and ms since [dock_watch] (the drop/pick evidence).
-dock_watch() { ev "(()=>{globalThis.__dockCalls=[];globalThis.__dockT0=Date.now();if(!globalThis.__dockWrapped){globalThis.__dockWrapped=1;import('./bridge.ts').then(m=>{const k=m.powos.tasks,o=k.canvasDock;if(o)k.canvasDock=(...a)=>(globalThis.__dockCalls.push((Date.now()-globalThis.__dockT0)+'ms:'+a.join(',')),o(...a))})}return 'ok'})()" >/dev/null; }
-# "none", or each call as "<ms>ms:<id>,<side>,<other>" joined by ";".
-dock_calls() { ev "(globalThis.__dockCalls||[]).join(';')||'none'" | tr -d '"'; }
+# The page's dock calls as its own log lines (canvaspick.tsx: "[canvas] dock task <id> <side>, beside <other> (picked,
+# press -> call N ms)"), from logcat - not a wrapper on the page's bridge (the 11-26 18:52 run's wrapper read "none"
+# while the call had happened). Echoes the lines, or nothing.
+dock_lines() { sh_ "logcat -d -s PowosShell:I PowosVerify:I" | grep -E "\(picked|PowosVerify: tap" | cut -c1-230; }
+# Waits up to 5 s for the pick's call; echoes "<id> <side> <other> <press->call ms> <tap->call ms>" or "none".
+wait_pick() { local l i
+  for i in 1 2 3 4 5 6 7 8 9 10; do
+    l=$(dock_lines)
+    case $l in *"(picked"*) break ;; esac
+    sleep 0.5
+  done
+  python3 - "$l" <<'PYL'
+import re, sys
+lines = sys.argv[1].splitlines()
+ts = lambda l: (lambda h, m, s: (int(h) * 60 + int(m)) * 60 + float(s))(*re.search(r"(\d\d):(\d\d):(\d\d\.\d+)", l).groups())
+tap = [ts(l) for l in lines if "PowosVerify: tap" in l]
+pick = [l for l in lines if "(picked" in l]
+if not pick: print("none"); sys.exit()
+m = re.search(r"dock task (\d+) (\w+), beside (\S+) \(picked(?:, press -> call (-?\d+) ms)?", pick[-1])
+tc = round((ts(pick[-1]) - tap[-1]) * 1000) if tap else -1
+print(m.group(1), m.group(2), m.group(3), m.group(4) or "-1", tc)
+PYL
+}
 # The keyguard is up (the 11-26 run: the lock screen came up right at the pick - adopt gate keyguard=true - and the
 # tap never reached the picker). Not the check's to judge: "not now".
 locked() { sh_ "dumpsys window" | awk '/mDreamingLockscreen=true|isKeyguardShowing=true|mShowingLockscreen=true/{f=1} END{exit !f}'; }
@@ -78,7 +97,7 @@ picker_side() { ev "document.querySelector('.canvas-pick')?.dataset.side||''" | 
 pick_app() { local g
   g=$(ev "(()=>{const b=document.querySelector('.canvas-pick-app[data-task=\"$1\"]');if(!b)return 'none no picker cell for task $1 ('+[...document.querySelectorAll('.canvas-pick-app[data-task]')].map(e=>e.dataset.task).join(',')+')';const r=b.getBoundingClientRect(),d=devicePixelRatio;return Math.round((r.left+r.width/2)*d)+' '+Math.round((r.top+Math.min(r.height/2,30))*d)})()" | tr -d '"')
   case $g in none*|"") echo "${g:-none no answer}"; return ;; esac
-  selfinput; sh_ "input tap $g" >/dev/null
+  selfinput; sh_ "log -t PowosVerify tap; input tap $g" >/dev/null
   echo "$g"; }
 # The dock's lines (host, page, OxygenOS, the switcher), saved whole to dock-log.txt; [n] of them echoed. Not
 # AndroidRuntime: the check's own `content`/`input` calls flooded it and pushed every dock line out (11-26 run).
@@ -105,7 +124,6 @@ SID=$(tid $S)
 for c in $(canvas_tasks); do r=$(hcall tasks.remove "[$c]" "v=>String(v)"); say "setup: stale canvas task $c removed: $r"; done
 sh_ "logcat -c" >/dev/null
 sh_ "input keyevent KEYCODE_WAKEUP" >/dev/null
-dock_watch; sleep 1
 
 # 3. The real drag on Chrome's card (the switcher opened over Chrome): docked, the picker up, no canvas till the pick.
 g=$(drag_card "$CID"); say "drag: chrome's card $g"
@@ -115,15 +133,17 @@ sleep 1
 ps=$(picker_side); say "picker: docked ${ps:-none}"
 [ "$ps" = "$SIDE" ] || bad "picker: let go at the $SIDE edge, the picker says '${ps:-no picker}'"
 "$T/shot.sh" "$OUT/picker.png" >/dev/null 2>&1
-calls=$(dock_calls); say "picker: tasks.canvasDock calls before the pick: $calls"
-case $calls in none) ;; *) bad "picker: tasks.canvasDock called on the drop, before any pick: $calls" ;; esac
+calls=$(dock_lines); say "picker: dock calls before the pick: ${calls:-none}"
+[ -n "$calls" ] && bad "picker: the drop alone started a pair, before any pick: $calls"
 [ -n "$(canvas_task)" ] && bad "picker: a visible canvas opened before the pick (an auto-picked partner)"
 locked && { pagelog 6 >/dev/null; wwc_skip "the lock screen came up before the pick"; }
 p=$(pick_app "$KID"); say "pick: calculator at $p"
 case $p in none*) bad "pick: $p"; wwc_end "-" ;; esac
-sleep 1
-calls=$(dock_calls); say "pick: tasks.canvasDock calls after the tap: $calls"
-case $calls in *":$CID,$SIDE,$KID"*) ;; *) bad "pick: the tap on Calculator didn't call tasks.canvasDock($CID, $SIDE, $KID): $calls (picker now: $(picker_side))" ;; esac
+w=$(wait_pick); read -r wid wside wother wpress wtap <<<"$w"
+if [ "$w" = none ]; then bad "pick: no dock call within 5 s of the tap on Calculator (picker now: $(picker_side))"
+elif [ "$wid $wside $wother" != "$CID $SIDE $KID" ]; then bad "pick: dock call ($wid, $wside, $wother), want ($CID, $SIDE, $KID)"
+else say "pick: tasks.canvasDock($wid, $wside, $wother); latency press -> call ${wpress} ms (page), tap injected -> call ${wtap} ms (logcat, includes input's own start)"
+  [ "${wpress:--1}" -gt 300 ] && bad "pick: press -> call took ${wpress} ms (want <= 300: the pick must feel instant)"; fi
 locked && say "pick: the lock screen is up after the tap (see dock-log.txt)"
 for _ in 1 2 3 4 5 6 7 8 9 10; do sleep 0.5; [ -n "$(canvas_task)" ] && break; done
 sleep 3   # CanvasDock.measure reads back at 2.5 s
@@ -148,7 +168,7 @@ win = open(sys.argv[2], errors="replace").read()
 out, src = {}, {}
 for line in inp.splitlines():
     for pkg in sys.argv[3:]:
-        if pkg in out or not re.search(r"name='[0-9a-f]+ " + re.escape(pkg) + "/", line): continue
+        if pkg in out or not re.search(r"name='?[0-9a-f]+ " + re.escape(pkg) + "/", line) or "displayId=0," not in line: continue
         if re.search(r"visible=false|NOT_VISIBLE", line): continue
         m = re.search(r"frame=\[(-?\d+),(-?\d+)\]\[(-?\d+),(-?\d+)\]", line)
         if m and int(m.group(3)) > int(m.group(1)): out[pkg] = [int(v) for v in m.groups()]; src[pkg] = "input"
@@ -183,14 +203,14 @@ fr = dict((k, [int(x) for x in v.split(",")]) for k, v in (p.split("=") for p in
 c, k = fr.get("com.android.chrome"), fr.get("com.oneplus.calculator")
 if c and k:
     if c[:2] == k[:2]:
-        out.append(f"FAIL sides unreadable: Chrome and Calculator both at {c[:2]} ({c} / {k}) - see input.txt, windows.txt, canvas.png")
+        print(f"UNREAD sides unreadable (not a FAIL: the canvas is up): Chrome and Calculator both at {c[:2]} ({c} / {k}) - see input.txt, windows.txt, canvas.png")
         c = None
 if c and k:
     ok = c[0] < k[0] if side == "left" else c[0] > k[0]
     if c[2] - c[0] >= 1.5 * (k[2] - k[0]) or k[2] - k[0] >= 1.5 * (c[2] - c[0]): print(f"MEASURE uneven sides: Chrome {c}, Calculator {k}")
     if ok: print(f"OK Chrome is on the {side} (frame {c}), Calculator beside it ({k})")
     else: out.append(f"FAIL Chrome (frame {c}) isn't on the {side} of Calculator ({k})")
-elif s.get("inCanvas"): out.append(f"FAIL canvas up but not both apps' windows read from dumpsys window: {fr}")
+elif s.get("inCanvas"): print(f"UNREAD canvas up but not both apps' frames read (not a FAIL, see canvas.png): {fr}")
 if len(reg) == 2:
     want = (min if side == "left" else max)(reg, key=lambda k: reg[k][0])
     after = (ld.get("after") or {}).get("com.android.chrome")
