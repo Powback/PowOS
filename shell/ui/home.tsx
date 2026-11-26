@@ -26,6 +26,8 @@ import { ScreenPanel } from "./screen.tsx";
 import { SessionScreen } from "./session.tsx";
 import { AppScreen } from "./appscreen.tsx";
 import { RemoteScreen } from "./remote.tsx";
+import { HdmiInScreen } from "./hdmiin.tsx";
+import { hdmiView } from "../hdmiin.ts";
 import { GlassesScreen } from "./glasses.tsx";
 import { AgentsScreen } from "./agents.tsx";
 import { Screens } from "./screens.tsx";
@@ -70,6 +72,7 @@ const homePullOk = computed(
     !sessionView.value &&
     !appView.value &&
     !remoteOpen.value &&
+    hdmiView.value !== "full" &&
     !glassesOpen.value &&
     !agentsView.value &&
     screens.value.length === 0,
@@ -874,6 +877,7 @@ export function Home() {
       <ScreenPanel />
       <SessionScreen />
       <AppScreen />
+      <HdmiInScreen />
       <RemoteScreen />
       <GlassesScreen />
       <AgentsScreen />

@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 108 108"><!-- HDMI in (ui/hdmiin.tsx): a screen with an HDMI plug going into it, on PowOS's ground and gradient. -->
+<defs><linearGradient id="b" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#24283b"/><stop offset="1" stop-color="#16161e"/></linearGradient>
+<linearGradient id="o" gradientUnits="userSpaceOnUse" x1="26" y1="26" x2="82" y2="82"><stop offset="0" stop-color="#33ccff"/><stop offset="1" stop-color="#00ff99"/></linearGradient></defs>
+<rect width="108" height="108" rx="24" fill="url(#b)"/>
+<rect x="24" y="28" width="60" height="38" rx="6" fill="none" stroke="url(#o)" stroke-width="6"/>
+<path d="M46 76h16M54 66v10" fill="none" stroke="url(#o)" stroke-width="6" stroke-linecap="round"/>
+<path d="M42 40h24v6l-4 6H46l-4-6z" fill="url(#o)"/>
+</svg>

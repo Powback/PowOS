@@ -273,9 +273,15 @@ export function diff(before: string, after: string, caret: number): { reports: n
 
 /** The Remote input screen open (the control center's tile opens it; Back closes it, state.ts). */
 export const remoteOpen = signal(false);
-export const openRemote = () => (remoteOpen.value = true);
+/** Opened as a side panel (HDMI in's PC controls, ui/hdmiin.tsx): the picture stays in view beside it. */
+export const remoteBeside = signal(false);
+export const openRemote = (beside = false) => {
+  remoteBeside.value = beside;
+  remoteOpen.value = true;
+};
 export function closeRemote() {
   if (!remoteOpen.value) return;
   remoteOpen.value = false;
+  remoteBeside.value = false;
   powos.keyboard.hide();
 }

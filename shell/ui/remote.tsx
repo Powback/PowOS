@@ -27,6 +27,7 @@ import {
   latched,
   layout,
   press,
+  remoteBeside,
   remoteOpen,
   repeat,
   send,
@@ -73,7 +74,7 @@ function Remote() {
     };
   }, []);
   return (
-    <div class="remote-screen tile sheet" {...own}>
+    <div class={`remote-screen tile sheet${remoteBeside.value ? " beside" : ""}`} {...own}>
       <header class="remote-top">
         <button type="button" class="session-back" onClick={closeRemote}>
           ‹

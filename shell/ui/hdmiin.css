@@ -1,0 +1,94 @@
+/* HDMI in (hdmiin.tsx): the capture full screen on black, or a small 16:9 window over home. */
+.hdmi-screen {
+  position: fixed;
+  z-index: 14;
+  inset: 0;
+  background: #000;
+  color: var(--color-foreground);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.hdmi-window {
+  position: fixed;
+  z-index: 14;
+  width: min(360px, 60vw);
+  aspect-ratio: 16 / 9;
+  overflow: hidden;
+  background: #000;
+  color: var(--color-foreground);
+  border-radius: var(--radius);
+  box-shadow: var(--lift);
+  touch-action: none;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.hdmi-picture { position: absolute; inset: 0; }
+.hdmi-video { width: 100%; height: 100%; object-fit: contain; background: #000; display: block; }
+.hdmi-mode {
+  position: absolute;
+  right: 12px;
+  bottom: 12px;
+  padding: 3px 8px;
+  border-radius: 8px;
+  font-size: var(--text-small);
+  font-variant-numeric: tabular-nums;
+  background: var(--control-fill);
+  pointer-events: none;
+}
+.hdmi-bar {
+  position: absolute;
+  top: max(8px, var(--inset-top, 0px));
+  left: 8px;
+  right: 8px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  pointer-events: none;
+}
+.hdmi-bar > * { pointer-events: auto; }
+.hdmi-title { flex: 1; font-weight: 600; color: var(--on-wallpaper); text-shadow: var(--label-shadow); pointer-events: none; }
+.hdmi-window .hdmi-title { font-size: var(--text-small); }
+.hdmi-btn {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  height: 36px;
+  min-width: 36px;
+  padding: 0 8px;
+  justify-content: center;
+  border: 0;
+  border-radius: 20px;
+  color: var(--color-foreground);
+  background: var(--control-fill);
+}
+.hdmi-btn.on { color: var(--accent-text); background: color-mix(in srgb, var(--color-accent) 30%, var(--control-fill)); }
+.hdmi-hint { font-size: var(--text-small); }
+.hdmi-empty {
+  max-width: 560px;
+  padding: 24px var(--edge, 16px);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
+  text-align: center;
+  line-height: 1.4;
+  border-radius: var(--radius);
+  background: var(--control-fill);
+}
+.hdmi-empty p { margin: 0; }
+.hdmi-empty .muted { color: var(--color-muted); }
+.hdmi-head { font-size: 1.2em; font-weight: 600; }
+.hdmi-warn { color: var(--status-needs); }
+.hdmi-tip { font-size: var(--text-small); }
+.hdmi-action {
+  height: 38px;
+  padding: 0 18px;
+  border: 0;
+  border-radius: 20px;
+  color: var(--color-background);
+  background: var(--color-accent);
+}
+.hdmi-window .hdmi-empty { padding: 8px; gap: 4px; font-size: var(--text-small); }
+.hdmi-window .hdmi-empty .muted:not(.hdmi-tip) { display: none; }

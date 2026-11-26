@@ -5,6 +5,7 @@
 import { computed, effect, signal, type Signal } from "@preact/signals";
 import { powos } from "./bridge.ts";
 import { closeRemote, remoteOpen } from "./remote.ts";
+import { closeHdmiIn, hdmiView, openHdmiIn } from "./hdmiin.ts";
 import { closeGlasses, glassesOpen } from "./glasses/open.ts";
 import { agentsView, closeAgents } from "./agents.ts";
 import { backScreen, closeScreens } from "./screens.ts";
@@ -21,7 +22,13 @@ import { adoptWebWindow, onWebWindowPage, openWebWindow, setIconOf, setPageBesid
 
 /** The host's apps (Android's, Linux's); with the installed PowOS apps that have a page (apps/pages.ts), [apps]. */
 const hostApps = signal<App[]>([]);
-export const apps = computed(() => [...hostApps.value, ...powosApps.value]);
+/**
+ * HDMI in (ui/hdmiin.tsx): PowOS's own app, in the shell on every platform - not an installed one, so it's added here.
+ * Its key is a PowOS app's ("p:"), opened by [launch] as its screen.
+ */
+export const HDMI_KEY = "p:hdmi-in";
+const HDMI_ENTRY: App = { key: HDMI_KEY, label: "HDMI in", icon: "./icons/hdmi-in.svg", kind: "powos" };
+export const apps = computed(() => [...hostApps.value, ...powosApps.value, HDMI_ENTRY]);
 /**
  * The Pow folder (ui/launcherview.ts POW_FOLDER: every .pow web app in one folder, the user 11-23) as a launcher entry:
  * there while any .pow app is. Not in [apps] (search, the switcher, usage never see it); in [byKey], so the dock, home
@@ -583,6 +590,7 @@ export function back(): boolean {
   // A PowOS app open full screen: back to where it was opened from.
   else if (appView.value) closeApp();
   else if (remoteOpen.value) closeRemote();
+  else if (hdmiView.value) closeHdmiIn();
   else if (glassesOpen.value) closeGlasses();
   // Settings and its screens: the top one (or what's open inside it).
   else if (backScreen()) return true;
@@ -685,6 +693,12 @@ export async function launch(key: string, { fullScreen = false }: { fullScreen?:
   if (key === POW_FOLDER) {
     closeDrawer(true);
     folder.value = key;
+    return;
+  }
+  // HDMI in: its screen (ui/hdmiin.tsx), not a page of an installed app.
+  if (key === HDMI_KEY) {
+    openHdmiIn();
+    closeDrawer(true);
     return;
   }
   // A PowOS app: its page, full screen in this one (ui/appscreen.tsx).

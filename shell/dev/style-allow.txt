@@ -16,3 +16,4 @@ ui/shell.css .ai-unit.orphan { box-shadow: inset 3px 0 0 var(--color-accent); } 
 ui/shell.css background: rgb(0 0 0 / 0.25);  # AUDIT: the assistant's dim over the app
 ui/shell.css transparent calc(var(--fr) - 0.5px), #000 var(--fr));  # a CSS mask's keep-area (mask semantics, not a colour): the seam fillet's quarter-circle cut
 dev/preview/sheet.tsx .pv-cell.bad .home-tile { outline: 2px solid var(--color-red);  # the widget-fit sheet's marker on a tile with problems: dev tooling, never on the phone
+ui/hdmiin.css background: #000;  # HDMI in's video stage and letterbox: black is the picture's own bars, not a theme surface

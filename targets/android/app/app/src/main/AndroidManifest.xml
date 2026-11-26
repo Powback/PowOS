@@ -50,6 +50,9 @@
     <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
     <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />
     <uses-feature android:name="android.hardware.camera" android:required="false" />
+    <!-- HDMI in: a capture dongle is a USB (external) camera; never required. -->
+    <uses-feature android:name="android.hardware.camera.external" android:required="false" />
+    <uses-feature android:name="android.hardware.usb.host" android:required="false" />
     <!-- Home's swipe down pulls the notification shade down. -->
     <!-- The control center's state and sliders (shell/QuickSettings.kt). WRITE_SETTINGS is an app op, granted there. -->
     <uses-permission android:name="android.permission.ACCESS_WIFI_STATE" />
@@ -496,6 +499,24 @@
             android:taskAffinity="${applicationId}.files"
             android:theme="@style/Theme.Omalauncher.Window"
             android:windowSoftInputMode="adjustResize" />
+
+        <!-- HDMI in (shell/HdmiIn.kt, docs/HDMI-IN.md): a capture dongle plugged in, Android offers PowOS for it; picked,
+             home opens with HDMI in's screen. No window of its own. -->
+        <activity
+            android:name=".shell.HdmiIn$Attach"
+            android:excludeFromRecents="true"
+            android:exported="true"
+            android:label="HDMI in"
+            android:noHistory="true"
+            android:taskAffinity=""
+            android:theme="@android:style/Theme.NoDisplay">
+            <intent-filter>
+                <action android:name="android.hardware.usb.action.USB_DEVICE_ATTACHED" />
+            </intent-filter>
+            <meta-data
+                android:name="android.hardware.usb.action.USB_DEVICE_ATTACHED"
+                android:resource="@xml/hdmi_in_usb" />
+        </activity>
 
         <!-- Send to my device (devices/SendToDeviceActivity.kt, docs/DEVICES.md "Clipboard and Send to"): the share
              sheet's target, plus one sharing shortcut per device of the account ("Send to Desk", DropInbox). -->

@@ -230,6 +230,9 @@ class ShellBridge(
     /** Remote input (RemoteInput.kt): the phone as a computer's keyboard and mouse, "remote.*" calls. */
     private val remote = RemoteInput.Client(context, activity, ::emit)
 
+    /** HDMI in (HdmiIn.kt, shell/ui/hdmiin.tsx): what's plugged in, its permissions, the screen held - "hdmiin.*" calls. */
+    val hdmiIn = HdmiIn(context, activity, ::emit)
+
     /** The smart glasses (glasses/Glasses.kt): pairing, connection, their display, input and mic - "glasses.*" calls. */
     private val glasses = dev.omalauncher.glasses.Glasses.Client(context, activity, ::emit)
 
@@ -937,6 +940,7 @@ class ShellBridge(
                 when {
                     method.startsWith("remote.") -> remote.call(method.removePrefix("remote."), a)
                     method.startsWith("glasses.") -> glasses.call(method.removePrefix("glasses."), a)
+                    method.startsWith("hdmiin.") -> hdmiIn.call(method.removePrefix("hdmiin."), a)
                     else -> throw IllegalArgumentException("no such call: $method")
                 }
         }

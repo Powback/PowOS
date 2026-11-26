@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- HDMI in (shell/HdmiIn.kt Attach): a USB device with a video (UVC, class 14) interface - an HDMI capture dongle (a
+     webcam matches too). Android offers PowOS when one is plugged in. -->
+<resources>
+    <usb-device class="14" />
+</resources>

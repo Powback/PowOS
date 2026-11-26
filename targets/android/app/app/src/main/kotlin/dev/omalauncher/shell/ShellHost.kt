@@ -80,6 +80,13 @@ class ShellHost(
                         Log.i(TAG, "${mode ?: "home"} ${m.messageLevel()} ${m.sourceId().substringAfterLast('/')}:${m.lineNumber()} ${m.message()}")
                         return true
                     }
+
+                    // HDMI in's getUserMedia (shell/ui/hdmiin.tsx): the page's own origin, what PowOS holds (HdmiIn.kt).
+                    override fun onPermissionRequest(request: android.webkit.PermissionRequest) {
+                        val shell = devUrl()?.let { Uri.parse(it).let { u -> "${u.scheme}://${u.authority}" } } ?: ORIGIN
+                        val ok = HdmiIn.grantable(context, request.origin?.toString(), shell, request.resources)
+                        if (ok.isEmpty()) request.deny() else request.grant(ok)
+                    }
                 }
         }
 

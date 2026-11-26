@@ -7,6 +7,9 @@
 #include <QUrlQuery>
 #include <QWebChannel>
 #include <QWebEngineProfile>
+#if QT_VERSION >= QT_VERSION_CHECK(6, 8, 0)
+#include <QWebEnginePermission>
+#endif
 #include <QWindow>
 
 bool ShellPage::acceptNavigationRequest(const QUrl &url, NavigationType, bool isMainFrame)
@@ -38,6 +41,28 @@ ShellView::ShellView(QScreen *screen, QWebEngineProfile *profile, const Services
     page->setBackgroundColor(Qt::transparent);
     setAttribute(Qt::WA_TranslucentBackground);
     setContextMenuPolicy(Qt::NoContextMenu);
+
+    // HDMI in (shell/ui/hdmiin.tsx, docs/HDMI-IN.md): the page's own getUserMedia on a capture dongle (a V4L2 camera +
+    // ALSA input). Only the shell's powos: origin, only camera / mic; every other ask is left unanswered, as before.
+#if QT_VERSION >= QT_VERSION_CHECK(6, 8, 0)
+    connect(page, &QWebEnginePage::permissionRequested, this, [](QWebEnginePermission p) {
+        using T = QWebEnginePermission::PermissionType;
+        const auto t = p.permissionType();
+        if (t != T::MediaAudioCapture && t != T::MediaVideoCapture && t != T::MediaAudioVideoCapture)
+            return;
+        if (p.origin().scheme() == QLatin1String("powos"))
+            p.grant();
+        else
+            p.deny();
+    });
+#else
+    connect(page, &QWebEnginePage::featurePermissionRequested, this, [page](const QUrl &origin, QWebEnginePage::Feature f) {
+        if (f != QWebEnginePage::MediaAudioCapture && f != QWebEnginePage::MediaVideoCapture && f != QWebEnginePage::MediaAudioVideoCapture)
+            return;
+        page->setFeaturePermission(origin, f, origin.scheme() == QLatin1String("powos") ? QWebEnginePage::PermissionGrantedByUser
+                                                                                         : QWebEnginePage::PermissionDeniedByUser);
+    });
+#endif
 
     // A renderer that died (OOM, GPU fault) is a reload, not a dead surface: the services keep their state.
     connect(page, &QWebEnginePage::renderProcessTerminated, this, [this](QWebEnginePage::RenderProcessTerminationStatus status, int code) {

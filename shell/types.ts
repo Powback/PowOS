@@ -1035,6 +1035,17 @@ export interface Bridge {
     mouse(buttons: number, dx: number, dy: number, wheel?: number, pan?: number): Promise<void>;
   };
   /**
+   * HDMI in (ui/hdmiin.tsx, docs/HDMI-IN.md): the capture itself is the page's (getUserMedia); the host says what is
+   * plugged in, asks the camera/mic permissions, and holds the screen (awake; full: immersive + landscape). Android
+   * only - elsewhere these reject ("unsupported") and the page does without. "hdmiin.permission" ({ granted }) answers
+   * an "asked"; "hdmiin.open" opens the screen (a dongle plugged in and the user chose PowOS for it).
+   */
+  hdmiin: {
+    probe(): Promise<HdmiProbe>;
+    permissions(): Promise<"granted" | "asked" | "unavailable">;
+    screen(awake: boolean, full: boolean): Promise<void>;
+  };
+  /**
    * Smart glasses (Even Realities G2/G1: glasses/Glasses.kt, docs/GLASSES.md): the pair, its connection, its display,
    * input and microphone. "glasses.state" (GlassesState) on every change; "glasses.input" ({ input, side }: input
    * "click" | "double" | "up" | "down" | "enter" | "exit" | "headUp" | "headDown" ...); "glasses.transcript" ({ text,
@@ -1767,6 +1778,17 @@ export interface RemoteHost {
   /** The one it was with last: Bluetooth reconnects to it. */
   last?: boolean;
   connected?: boolean;
+}
+/** What the host sees plugged in for HDMI in (HdmiIn.kt). */
+export interface HdmiProbe {
+  /** USB devices with a video (UVC) or audio interface. */
+  usb: { name: string | null; vendorId: number; productId: number; video: boolean; audio: boolean }[];
+  /** Camera2 cameras facing external (what the WebView can open). */
+  externalCameras: string[];
+  /** A USB audio input is plugged in (Android's default input is it then). */
+  usbAudioIn: boolean;
+  camera: boolean;
+  mic: boolean;
 }
 /** Remote input's sides: where reports go, and how each side is. */
 export interface RemoteState {

@@ -51,6 +51,7 @@ import type {
   TermState,
   ThemeChoice,
   GlassSource,
+  HdmiProbe,
   ThemeColors,
   WidgetScreen,
   MediaState,
@@ -263,6 +264,11 @@ function native(host: NonNullable<Window["PowosHost"]>): Bridge {
       disconnect: () => call("remote.disconnect"),
       keys: (reports) => call("remote.keys", reports),
       mouse: (buttons, dx, dy, wheel, pan) => call("remote.mouse", buttons, dx, dy, wheel ?? 0, pan ?? 0),
+    },
+    hdmiin: {
+      probe: () => call<HdmiProbe>("hdmiin.probe"),
+      permissions: () => call<"granted" | "asked" | "unavailable">("hdmiin.permissions"),
+      screen: (awake, full) => call("hdmiin.screen", awake, full),
     },
     glasses: {
       state: () => call<GlassesState>("glasses.state"),
@@ -914,6 +920,12 @@ function mock(): Bridge {
       write: async (text) => void (await navigator.clipboard?.writeText(text).catch(() => {})),
     },
     remote: mockRemote(events),
+    // A desktop browser: no host side; the page finds the dongle by getUserMedia alone (as on the Linux desktop).
+    hdmiin: {
+      probe: async () => Promise.reject(new Error("unsupported")),
+      permissions: async () => "granted",
+      screen: async () => {},
+    },
     glasses: mockGlasses(events),
     lock: (() => {
       let torch = false;

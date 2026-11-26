@@ -128,3 +128,5 @@
   padding: 0 6px;
   box-shadow: var(--lift);
 }
+/* HDMI in's PC controls (hdmiin.tsx): a side panel, the captured screen staying in view on the left. */
+.remote-screen.beside { left: auto; width: min(420px, 46vw); z-index: 16; border-radius: var(--radius) 0 0 var(--radius); }

@@ -402,6 +402,8 @@ class ShellActivity : Activity() {
      * up, [EXTRA_HOME_DRAFT] in the AI page's field. Sent once the page is ready (a cold start's intent too). */
     private fun openPanel(intent: Intent) {
         intent.getStringExtra(EXTRA_SCREEN)?.let { name -> host.whenReady { host.bridge.emit("screens.open", org.json.JSONObject().put("name", name)) } }
+        // A capture dongle plugged in and PowOS picked for it (HdmiIn.Attach): HDMI in's screen.
+        if (intent.getBooleanExtra(HdmiIn.EXTRA_OPEN, false)) host.whenReady { host.bridge.emit("hdmiin.open", null) }
         val kind = intent.getStringExtra(EXTRA_HOME_PANEL) ?: return
         val ev = org.json.JSONObject().put("kind", kind)
         intent.getStringExtra(EXTRA_HOME_DRAFT)?.let { d -> ev.put("draft", d) }
@@ -477,6 +479,7 @@ class ShellActivity : Activity() {
     ) {
         super.onRequestPermissionsResult(requestCode, permissions, grantResults)
         if (requestCode == ShellBridge.MIC_REQUEST) host.bridge.micPermission(grantResults.firstOrNull() == PackageManager.PERMISSION_GRANTED)
+        if (requestCode == HdmiIn.REQUEST) host.bridge.hdmiIn.answered()
         if (requestCode == SearchSources.REQUEST) SearchSources.answered()
         if (requestCode == dev.omalauncher.system.StatusPermission.REQUEST) {
             dev.omalauncher.system.StatusPermission.answered(grantResults.firstOrNull() == PackageManager.PERMISSION_GRANTED)
