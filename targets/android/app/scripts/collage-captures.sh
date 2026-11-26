@@ -63,7 +63,8 @@ wait_for() {
 
 # Whether the launcher is the activity in front.
 front() {
-  adb shell dumpsys activity activities | grep -q "topResumedActivity=.* $PKG/"
+  # awk reads to the end: grep -q quit at the match and adb died of SIGPIPE under pipefail (shell-pitfalls).
+  adb shell dumpsys activity activities | awk -v p=" $PKG/" '/topResumedActivity=/ && index($0, p) {f=1} END {exit !f}'
 }
 
 mkdir -p "$OUT"

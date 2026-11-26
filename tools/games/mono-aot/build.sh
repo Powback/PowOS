@@ -48,7 +48,7 @@ x86_64-w64-mingw32-gcc -O1 -o "$W/loader.exe" "$HERE/loader.c"
 echo 'int __stdcall DllMainCRTStartup(void *h, unsigned r, void *p) { return 1; }' > "$W/entry.c"
 x86_64-w64-mingw32-gcc -O1 -c -o "$W/entry.o" "$W/entry.c"
 rm -rf "$O/images" "$O/images.tsv"; rm -f "$W"/s/*.row
-ls "$data/Managed" | grep -E '\.dll$' | grep -v '\.dll\.dll$' |
+ls "$data/Managed" | { grep -E '\.dll$' || true; } | { grep -v '\.dll\.dll$' || true; } |
   xargs -P "$JOBS" -I{} env MONO_AOT_WORK="$W" "$0" one "$G" "$O" "$JOBS" {}
 cat "$W"/s/*.row 2>/dev/null | sort > "$O/images.tsv"
 echo "built $(wc -l < "$O/images.tsv") images in $O/images ($(du -sh "$O/images" | cut -f1))"

@@ -26,6 +26,7 @@ ADB_PORT=5137 FWD_PORT=7357
 
 if [ "${POWOS_IN_ADB_CONTAINER:-0}" != 1 ]; then
   # ── Mac side: make sure the adb container runs, then re-run this script inside it ──────────────────────
+  # lint-ok: sigpipe - docker inspect -f prints one short line, all written before grep -q can exit
   if ! docker inspect -f '{{.State.Running}}' "$C" 2>/dev/null | grep -q true; then
     docker rm -f "$C" >/dev/null 2>&1 || true
     docker build -q -t powos-phone-adb - >/dev/null <<'EOF'
@@ -155,7 +156,7 @@ for mode in "" "MESA_VK_WSI_DEBUG=sw"; do
   awk -v s=$s -v e=$e -v m="${mode:-dmabuf}" 'BEGIN { printf "vkcube 600 frames (%s): %.1f fps\n", m, 600 / (e - s) }'
 done
 EOF
-    grep -E "vkcube|buffer creations|deviceName|driverName|zwp_linux_dmabuf|DRI3" "$R/gpu.txt" | head -30
+    grep -E "vkcube|buffer creations|deviceName|driverName|zwp_linux_dmabuf|DRI3" "$R/gpu.txt" | head -30 || true
 
     echo "== 3. Proton (powos-play, GE-Proton aarch64): first run downloads ~600 MB on the phone"
     {

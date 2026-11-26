@@ -82,4 +82,4 @@ PY
 docker run --rm ${PERF_RUN_ARGS:-} --platform "${PERF_PLATFORM:-linux/arm64}" --shm-size 512m -v "$work/shell:/shell:ro" -v "$work/perf.mjs:/usr/src/app/shots.mjs:ro" \
   -v "$shell/dev/agents-fleet.mjs:/usr/src/app/agents-fleet.mjs:ro" \
   -v "$work/out:/out" -e SHOTS_ONLY="^$scene\$" -e SHOTS_PROBE="$(cat "$probe")" -e PERF_TRACE="${PERF_TRACE:-}" -e PERF_TRACE_TOP="${PERF_TRACE_TOP:-}" -w /usr/src/app --entrypoint node \
-  "${GATE_IMAGE:-zenika/alpine-chrome:with-puppeteer}" shots.mjs 2>&1 | grep '^probe '
+  "${GATE_IMAGE:-zenika/alpine-chrome:with-puppeteer}" shots.mjs 2>&1 | { grep '^probe ' || true; }

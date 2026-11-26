@@ -21,11 +21,11 @@ x86_64-linux-gnu-gcc $CFLAGS -o "$OUT/stage/x86_64/sysv-test" /work/sysv-test.c
 gcc                  $CFLAGS -o "$OUT/stage/aarch64/sysv-test" /work/sysv-test.c
 check() {   # $1 readelf prefix, $2 lib: ELF class, exported symbols, highest GLIBC version needed (<= 2.39)
   local re=$1 lib=$2
-  "$re-readelf" -h "$lib" | grep -E 'Class|Machine'
+  "$re-readelf" -h "$lib" | { grep -E 'Class|Machine' || true; }
   for s in semget semop semtimedop semctl shmget shmat shmdt shmctl; do
     "$re-readelf" --dyn-syms -W "$lib" | awk '$7 != "UND" {print $8}' | grep -qx "$s" || { echo "STOP: $s not exported by $lib"; exit 1; }
   done
-  local maxv; maxv=$("$re-objdump" -T "$lib" | grep -o 'GLIBC_2\.[0-9]*' | sort -t. -k2 -n | tail -1)
+  local maxv; maxv=$("$re-objdump" -T "$lib" | { grep -o 'GLIBC_2\.[0-9]*' || true; } | sort -t. -k2 -n | tail -1)
   echo "$lib needs up to $maxv"
   [ "${maxv#GLIBC_2.}" -le 39 ] || { echo "STOP: $lib needs $maxv (> 2.39 of the RootFS)"; exit 1; }
 }

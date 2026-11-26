@@ -424,7 +424,7 @@ EOF
     echo "  Location: $proj_dir"
     echo ""
     echo "Files generated:"
-    ls -la "$proj_dir" | grep -v "^total" | grep -v "^d"
+    ls -la "$proj_dir" | grep -v "^total" | grep -v "^d" || true
     echo ""
     echo "Next steps:"
     echo "  1. cd $proj_dir"
@@ -976,7 +976,7 @@ dev_dockerize() {
         detected_lang="python"
         project_files="Python project detected"
         if [[ -f "$src_dir/requirements.txt" ]] && grep -qi "fastapi\|flask\|django" "$src_dir/requirements.txt" 2>/dev/null; then
-            detected_framework=$(grep -oi "fastapi\|flask\|django" "$src_dir/requirements.txt" 2>/dev/null | head -1)
+            detected_framework=$(grep -oi "fastapi\|flask\|django" "$src_dir/requirements.txt" 2>/dev/null | head -1 || true)
         fi
     elif [[ -f "$src_dir/go.mod" ]]; then
         detected_lang="go"
@@ -1193,7 +1193,7 @@ dev_build() {
 # which aren't files to shadow and would false-positive the coverage check).
 # sysext only merges /usr + /opt. One per line.
 _dev_pkg_usr_files() {
-    rpm -ql "$1" 2>/dev/null | grep -E '^/usr/' | while IFS= read -r f; do
+    rpm -ql "$1" 2>/dev/null | { grep -E '^/usr/' || true; } | while IFS= read -r f; do
         [[ -d "$f" && ! -L "$f" ]] || printf '%s\n' "$f"
     done
 }
@@ -1435,7 +1435,7 @@ dev_enable() {
             base_list="$(mktemp)"; ext_list="$(mktemp)"
             _dev_pkg_usr_files "$pkg" | sort -u > "$base_list"
             ( cd "$ext_dir" && find usr \( -type f -o -type l \) 2>/dev/null | sed 's|^|/|' ) | sort -u > "$ext_list"
-            missing="$(_dev_missing_files "$base_list" "$ext_list" | grep -vc 'extension-release')"
+            missing="$(_dev_missing_files "$base_list" "$ext_list" | grep -vc 'extension-release' || true)"
             if [[ "${missing:-0}" -gt 0 ]]; then
                 pwarn "Override INCOMPLETE: $missing of '$pkg's files aren't in this extension"
                 pwarn "— the base versions still show (Frankenstein). Re-seed: powos dev override $pkg"

@@ -49,7 +49,7 @@ build() {
         pacman -Q "$p" >/dev/null 2>&1 && host+=("$p")
     done
     pacman --root "$w/root" --dbpath "$w/root/var/lib/pacman" --noconfirm -Rdd "${stock[@]}" >/dev/null
-    pacman -Qlq "${host[@]}" | grep -v '/$' | tar -cf - -T - 2>/dev/null | tar -xf - -C "$w/root"
+    pacman -Qlq "${host[@]}" | { grep -v '/$' || true; } | tar -cf - -T - 2>/dev/null | tar -xf - -C "$w/root"
     # Nothing a benchmark reads: package caches, headers, docs, translations.
     rm -rf "$w/root/var/cache/pacman/pkg/"* "$w/root/var/lib/pacman/sync" "$w/root/usr/include" \
         "$w/root/usr/share/"{man,doc,info,locale,i18n,gtk-doc}
@@ -84,6 +84,6 @@ case "${1:-help}" in
         [[ $# -gt 0 ]] || set -- --off-screen
         run -v "$(dirname "$sock"):/run/xdg" -e WAYLAND_DISPLAY=wayland-0 -- glmark2-es2-wayland "$@" ;;
     sh) run -it -- bash ;;
-    rmi) "${PODMAN[@]}" images --format '{{.Repository}}:{{.Tag}}' | grep "^$IMAGE:" | xargs -r "${PODMAN[@]}" rmi ;;
+    rmi) "${PODMAN[@]}" images --format '{{.Repository}}:{{.Tag}}' | { grep "^$IMAGE:" || true; } | xargs -r "${PODMAN[@]}" rmi ;;
     *) sed -n '2,9p' "$0" | sed 's/^# \{0,1\}//'; [[ ${1:-help} == help ]] ;;
 esac

@@ -136,6 +136,6 @@ probe unfolded-again inner
 ph sleeplog >> "$OUT/run.txt"
 stop
 "$A" shell "su -c 'rm -f /data/local/tmp/powos-bf-fold-phone.sh /data/local/tmp/powos-bf-stop.sh /data/local/tmp/powos-bf-lib.sh /data/local/tmp/powos-bf-xframes.py /data/powos/root/var/tmp/powos-bf-fold-phone.sh /data/powos/root/var/tmp/powos-bf-lib.sh /data/powos/root/var/tmp/powos-bf-xframes.py'"
-r="RESULT bf-fold: $([ $fails = 0 ] && echo PASS || echo "FAIL ($fails bad steps)") - game kept $(echo "$first" | grep -o 'geom=[^ ]*') through fold/unfold; artefacts $OUT"
+r="RESULT bf-fold: $([ $fails = 0 ] && echo PASS || echo "FAIL ($fails bad steps)") - game kept $(echo "$first" | grep -o 'geom=[^ ]*' || true) through fold/unfold; artefacts $OUT"
 log "$r"
 [ $fails = 0 ]

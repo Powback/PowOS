@@ -31,7 +31,7 @@ aapt="$(command -v aapt || ls /opt/android-sdk/build-tools/*/aapt 2>/dev/null | 
 [ -n "$aapt" ] || { echo "install-app.sh: aapt not found (run in the android-builder image)" >&2; exit 1; }
 
 requested=$("$aapt" dump permissions "$apk" | sed -n "s/^uses-permission: name='\([^']*\)'.*/\1/p" | sort -u)
-privileged=$(grep -v '^\s*#' system-module/privileged-perms.txt | sed 's/\s.*//' | grep . | sort -u)
+privileged=$({ grep -v '^\s*#' system-module/privileged-perms.txt || true; } | sed 's/\s.*//' | { grep . || true; } | sort -u)
 need=$(comm -12 <(echo "$requested") <(echo "$privileged"))
 
 # What the phone allows now: PowOS's privapp file as mounted (the module's, once booted with it) - and Android's own.

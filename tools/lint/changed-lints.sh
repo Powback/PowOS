@@ -12,15 +12,26 @@
 #     apps/*/ui/*            shell/dev/lint-complexity.sh --apps
 #     targets/android/app/**/*.kt (not tests)   targets/android/lint-complexity.sh --only (detekt, ~4 s)
 #     every file             tools/lint/shellcheck-ratchet.py --check (keeps the shell scripts among them)
+#     shell scripts          tools/agents/shell-pitfalls.py (sigpipe, nomatch-grep, py-c...: three silent PowOS
+#                            pipeline deaths 11-25/26 were a grep's no-match or a SIGPIPE under set -e + pipefail)
+#     *.xml                  tools/lint/xml-wellformed.py (17ec6592's `--` in a manifest comment broke the APK build)
 #     always                 test/tier1/test-hack-registry.sh (~1 s: each hack marker needs its REMOTE-POWOS.md row)
 # GATE_LINT=0 skips tsc and the shellcheck ratchet (as the hook always did). Exit 0 clean, 1 a lint failed (above).
 set -uo pipefail
 root=$(git rev-parse --show-toplevel)
 noshell=""; [ "${1:-}" = --no-shell ] && { noshell=1; shift; }
-files=() apps="" kt="" sh=()
+files=() apps="" kt="" sh=() pit=() xml=()
 for f in "$@"; do
   [ -e "$root/$f" ] || continue
   sh+=("$f")
+  case "$f" in
+    */fixtures/*) ;;   # lint fixtures are bad on purpose
+    *.sh|*.bash) pit+=("$f") ;;
+    *.xml) xml+=("$f") ;;
+    *.*) ;;
+    *) first=$(head -n1 "$root/$f" 2>/dev/null || true)
+       case "$first" in '#!'*sh*) pit+=("$f") ;; esac ;;
+  esac
   case "$f" in
     shell/*.ts|shell/*.tsx|shell/*.mjs|shell/*.js) [ -n "$noshell" ] || files+=("${f#shell/}") ;;
     apps/*/ui/*) apps=--apps ;;
@@ -53,10 +64,17 @@ if [ ${#sh[@]} -gt 0 ] && [ "${GATE_LINT:-1}" != 0 ]; then
   c=0; out=$(cd "$root" && python3 tools/lint/shellcheck-ratchet.py --check "${sh[@]}" 2>&1) || c=$?
   [ $c = 0 ] || { echo "$out" | grep -v '^ok '; s=1; }
 fi
+if [ ${#pit[@]} -gt 0 ]; then
+  c=0; out=$(cd "$root" && python3 tools/agents/shell-pitfalls.py "${pit[@]}" 2>&1) || c=$?
+  [ $c = 0 ] || { echo "$out" | sed 's/^/FAIL shell pitfalls: /'; echo "FAIL shell pitfalls: fix, or '# lint-ok: <why>' on the line"; s=1; }
+fi
+if [ ${#xml[@]} -gt 0 ]; then
+  (cd "$root" && python3 tools/lint/xml-wellformed.py "${xml[@]}") || s=1
+fi
 # 11-09: five ships in one night failed only on test-hack-registry (a new hack marker with no row in
 # REMOTE-POWOS.md §4) - a ~1 s file scan.
 if ! out=$(bash "$root/test/tier1/test-hack-registry.sh" 2>&1); then
   echo "$out" | grep -E "FAIL" | sed 's/^ */FAIL hack registry: /'; s=1
 fi
-[ $s = 0 ] && echo "ok   changed-file lints (complexity, shellcheck ratchet, hack registry)"
+[ $s = 0 ] && echo "ok   changed-file lints (complexity, shellcheck ratchet, shell pitfalls, xml, hack registry)"
 exit $s

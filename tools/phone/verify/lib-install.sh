@@ -41,6 +41,6 @@ for _ in $(seq 12); do pgrep -f 'bin/powos-sleep-gui$' >/dev/null && break; slee
 pgrep -f 'bin/powos-sleep-gui$' >/dev/null || setsid -f powos-sleep-gui >> /run/powos-app/powos-sleep-gui.log 2>&1 < /dev/null
 sleep 4; pgrep -f 'bin/powos-sleep-gui$' >/dev/null && echo "powos-sleep-gui restarted: $(grep ' up: ' /run/powos-app/powos-sleep-gui.log | tail -1 | cut -c1-140)" || echo "FAIL restart: powos-sleep-gui not running"
 SH
-  "$here/../user.sh" "$s" 2>&1 | grep -v 'pushed' | tail -2; rm -f "$s"
+  "$here/../user.sh" "$s" 2>&1 | { grep -v 'pushed' || true; } | tail -2; rm -f "$s"
 fi
 exit $rc

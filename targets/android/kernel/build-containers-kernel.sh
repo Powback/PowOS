@@ -127,7 +127,7 @@ cmp "$W/u/kernel" out/Image && echo "boot image: kernel round-trips"
 # then fail to mount (logged, not fatal) - per-app memcg and the cpuctl boost groups are gone for that boot.
 eval python3 $T/mkbootimg.py "$(printf '%s' "$args" | sed -e "s#--kernel [^ ]*#--kernel out/Image#" \
   -e "s#--cmdline ''#--cmdline 'cgroup_no_v1=memory,cpu'#")" -o out/boot-powos-containers-v2test.img
-python3 $T/unpack_bootimg.py --boot_img out/boot-powos-containers-v2test.img --out "$W/v" | grep "command line"
+python3 $T/unpack_bootimg.py --boot_img out/boot-powos-containers-v2test.img --out "$W/v" | { grep "command line" || true; }
 (cd out && shasum -a 256 Image Image.gz boot-powos-containers.img boot-powos-containers-v2test.img Module.symvers \
   modules/*.ko > SHA256SUMS)
 echo "build took $(( ($(date +%s) - start) / 60 )) min"

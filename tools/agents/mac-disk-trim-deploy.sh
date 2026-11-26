@@ -26,7 +26,7 @@ install)
   launchctl bootstrap "$D" "$P"
   # The unit now does what the cron line did: drop exactly that line (matched on its tag), nothing else.
   if crontab -l 2>/dev/null | grep -qF "$CRON_TAG"; then
-    crontab -l | grep -vF "$CRON_TAG" | crontab -
+    crontab -l | { grep -vF "$CRON_TAG" || true; } | crontab -
     echo "removed the crontab fstrim line it replaces"
   fi
   echo "installed $L (every 20 min; weekly container removal)" ;;

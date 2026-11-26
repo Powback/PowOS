@@ -69,7 +69,7 @@ live() {
   d=$(cd "$1" && pwd -P) || d=$1   # lsof prints resolved paths (/private/var/..., symlinked roots)
   p=$(lsof -a -d cwd -Fpn 2>/dev/null | awk -v d="$d" '/^p/{pid=substr($0,2)} /^n/{n=substr($0,2); if (n==d || index(n, d"/")==1) {print pid; exit}}')
   [ -z "$p" ] || { echo "process $p has its cwd in it"; return; }
-  p=$(ps -axo pid=,command= 2>/dev/null | grep -F -e "$d/" -e "$d " | grep -v -e 'worktree.sh' -e 'grep -F' | head -1 | awk '{print $1}')
+  p=$(ps -axo pid=,command= 2>/dev/null | grep -F -e "$d/" -e "$d " | grep -v -e 'worktree.sh' -e 'grep -F' | head -1 | awk '{print $1}' || true)
   [ -z "$p" ] || { echo "process $p names it on its command line"; return; }
   gd=$(git -C "$d" rev-parse --absolute-git-dir 2>/dev/null) || gd=
   p=$({ [ -z "$gd" ] || find "$gd/HEAD" "$gd/logs/HEAD" -mmin -30 2>/dev/null

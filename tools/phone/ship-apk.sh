@@ -173,6 +173,7 @@ apk_delta() {   # shell files at commit $1 the APK's bundled shell lacks or has 
   unzip -q -o "$apk" 'assets/shell/*' -d "$d/apk" 2>/dev/null
   git archive "$1" shell | tar -x -C "$d/tip"
   # What build.gradle.kts's copyShell leaves out of the APK, and dev/test (no live page).
+  # lint-ok: nomatch-grep - shell/ always has page files past these excludes
   (cd "$d/tip/shell" && find . -type f | sed 's|^\./||' | sort |
     grep -vE '^(shell-build\.txt|DESIGN\.md|push\.sh|package(-lock)?\.json|tsconfig\.json|\.gitignore)$|^(dev|test|node_modules)/' |
     while read -r f; do cmp -s "$f" "$d/apk/assets/shell/$f" || echo "$f"; done)
@@ -196,7 +197,7 @@ if [ -n "$newer" ] && [ -n "${SHIP_GATE_FIRST:-}" ]; then
   if [ -z "$stamp" ]; then
     # Every FAIL line, not the last 8 lines: the pages' console noise (WebSocket retries) pushed the FAILs out (01:39).
     gl=$sq/done/pregate-$(git rev-parse --short "$tip").log; mkdir -p "$sq/done"; echo "$pg" > "$gl"
-    { echo "$pg" | grep -E "^(FAIL|gate:)" | head -20; echo "  (whole gate output: $gl)"; } >&2
+    { echo "$pg" | { grep -E "^(FAIL|gate:)" || true; } | head -20; echo "  (whole gate output: $gl)"; } >&2
     echo "ship-apk: REFUSED - not installing: the shell files origin changed since the build don't load at its tip (above)," >&2
     echo "  and the install would leave the phone on this APK's older copies of them. Fix them on origin, ship again (APK built, kept)." >&2
     exit 3

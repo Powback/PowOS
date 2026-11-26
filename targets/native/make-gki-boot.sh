@@ -16,11 +16,11 @@ T=out/tools/mkbootimg
 W=$(mktemp -d)
 trap 'rm -rf "$W"' EXIT
 echo "stock:"
-python3 $T/unpack_bootimg.py --boot_img "$STOCK" --out "$W/s" | grep -E 'header version|os version|os patch|kernel size|command line'
+python3 $T/unpack_bootimg.py --boot_img "$STOCK" --out "$W/s" | { grep -E 'header version|os version|os patch|kernel size|command line' || true; }
 args=$(python3 $T/unpack_bootimg.py --boot_img "$STOCK" --out "$W/s" --format mkbootimg)
 # The stock arguments, with our kernel instead of the stock one.
 eval python3 $T/mkbootimg.py "$(printf '%s' "$args" | sed "s#--kernel [^ ]*#--kernel $KERNEL#")" -o out/boot-powos-gki.img
 echo "ours:"
-python3 $T/unpack_bootimg.py --boot_img out/boot-powos-gki.img --out "$W/u" | grep -E 'header version|os version|os patch|kernel size'
+python3 $T/unpack_bootimg.py --boot_img out/boot-powos-gki.img --out "$W/u" | { grep -E 'header version|os version|os patch|kernel size' || true; }
 cmp "$W/u/kernel" "$KERNEL" && echo "round trip: kernel identical"
 ls -la out/boot-powos-gki.img

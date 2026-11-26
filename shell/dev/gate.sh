@@ -233,7 +233,7 @@ if [ -z "$GATE_ALL" ] && [ "${GATE_PRIORITY:-}" != ship ] && [ -z "$app" ] && [ 
       esac
     done
     if [ -z "$all" ]; then
-      modes_re=$(grep -oE 'mode === "[a-z0-9-]+"' "$S/app.tsx" 2>/dev/null | sed 's/mode === "//; s/"$//' | paste -sd'|' -)
+      modes_re=$({ grep -oE 'mode === "[a-z0-9-]+"' "$S/app.tsx" 2>/dev/null || true; } | sed 's/mode === "//; s/"$//' | paste -sd'|' -)
       GATE_ONLY="^(home${modes_re:+|$modes_re})\$${scope_re:+|$scope_re}"
       scope_note="scoped to ${#chg[@]} changed file(s) (--all for every scene)"
     fi
@@ -244,7 +244,7 @@ fi
 # GATE_SCOPE=boot (tools/phone/ship-apk.sh's pre-install gate): tsc + the page boots only - "does this shell load?" - not
 # the other scenes, the style/complexity lints or the widget sweep; those run in the post-deploy full gate (ship.sh).
 if [ "${GATE_SCOPE:-}" = boot ] && [ -z "${GATE_ONLY:-}" ]; then
-  modes_re=$(grep -oE 'mode === "[a-z0-9-]+"' "$S/app.tsx" 2>/dev/null | sed 's/mode === "//; s/"$//' | paste -sd'|' -)
+  modes_re=$({ grep -oE 'mode === "[a-z0-9-]+"' "$S/app.tsx" 2>/dev/null || true; } | sed 's/mode === "//; s/"$//' | paste -sd'|' -)
   GATE_ONLY="^(home${modes_re:+|$modes_re})\$"
   scope_note="boot only (tsc + the page boots)"
 fi
@@ -270,7 +270,7 @@ if [ "${GATE_PRIORITY:-}" != ship ] && [ "$base" = head ] && [ "${GATE_SCOPE:-}"
   if [ ${#changed[@]} -gt 0 ]; then
     tl=$(date +%s)
     if out=$(cd "$top" && bash tools/lint/changed-lints.sh --no-shell "${changed[@]}" 2>&1); then echo "$out" | tail -1
-    else echo "$out" | grep -v '^ok ' | head -40; echo "FAIL lints: the push gate's lints fail on this branch's changed files (above) - fix them now, pre-push refuses the same"; fail=1; fi
+    else echo "$out" | { grep -v '^ok ' || true; } | head -40; echo "FAIL lints: the push gate's lints fail on this branch's changed files (above) - fix them now, pre-push refuses the same"; fail=1; fi
     echo "     changed-file lints: ${#changed[@]} file(s) in $(( $(date +%s) - tl )) s"
   fi
 fi
@@ -296,7 +296,7 @@ elif [ -n "$skip_tsc" ]; then
   echo "     tsc: skipped (CSS/text-only change)"
 elif [ -x "$SHELL_DIR/node_modules/.bin/tsc" ]; then
   if out=$(cd "$S" && "$SHELL_DIR/node_modules/.bin/tsc" --noEmit -p . 2>&1); then echo "ok   tsc"
-  else echo "$out" | grep -v '^ ' | head -40 | sed 's/^/FAIL tsc: /'; fail=1; fi
+  else echo "$out" | { grep -v '^ ' || true; } | head -40 | sed 's/^/FAIL tsc: /'; fail=1; fi
 else
   echo "     tsc: skipped (no shell/node_modules - npm ci in shell/)"
 fi

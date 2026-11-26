@@ -271,7 +271,6 @@ tools/agents/worktree-gc-test.sh SC2034 1
 tools/agents/worktree-gc-test.sh SC2164 1
 tools/emu/emu.sh SC2034 1
 tools/emu/emu.sh SC2120 1
-tools/games/mono-aot/build.sh SC2010 1
 tools/jobs/docker-sibling.sh SC2046 3
 tools/phone/cdp-warm.sh SC1007 1
 tools/phone/cdp-warm.sh SC2034 1
@@ -365,7 +364,7 @@ tools/phone/verify/glass-sync-accept.sh SC2034 1
 tools/phone/verify/home-repeat.sh SC2034 1
 tools/phone/verify/home-select.sh SC2034 1
 tools/phone/verify/home-shade-layout.sh SC2034 1
-tools/phone/verify/home-stack.sh SC2034 2
+tools/phone/verify/home-stack.sh SC2034 1
 tools/phone/verify/idle-memory.sh SC2034 1
 tools/phone/verify/inner-rotation-back.sh SC2034 2
 tools/phone/verify/kwin-activate.sh SC2034 1
@@ -470,7 +469,7 @@ tools/phone/verify/ww-clamp.sh SC2034 2
 tools/phone/verify/ww-close-min.sh SC2034 2
 tools/phone/verify/ww-composition.sh SC2034 2
 tools/phone/verify/ww-glue.sh SC2034 2
-tools/phone/verify/ww-keyboard.sh SC2034 3
+tools/phone/verify/ww-keyboard.sh SC2034 2
 tools/phone/verify/ww-lib.sh SC1007 3
 tools/phone/verify/ww-lib.sh SC2034 2
 tools/phone/verify/ww-opens.sh SC2034 1

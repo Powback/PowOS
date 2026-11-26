@@ -5,7 +5,7 @@
 # fullscreenleave-test.cpp = 0069 + 0072: the stale-size leave refusal and its grace after a task resize.
 set -euo pipefail
 here=$(cd "$(dirname "$0")/.." && pwd)
-tree=$("$here/src-tree.sh" "${KWIN_TREE:-$here/out/src-tree}" | grep '^/' | head -1 | cut -d' ' -f1)
+tree=$("$here/src-tree.sh" "${KWIN_TREE:-$here/out/src-tree}" | { grep '^/' || true; } | head -1 | cut -d' ' -f1)
 # Structural only for KillPrompt; the real two-protocol hung-client gate is still mandatory.
 python3 -I "$here/test/killprompt-source-test.py" "$tree"
 docker run --rm -v "$here/test:/test:ro" -v "$tree/src/backends/anland:/anland:ro" -v "$tree/src/utils:/utils:ro" -w /tmp gcc:14 sh -c \

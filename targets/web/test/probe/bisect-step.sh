@@ -10,7 +10,7 @@ mkdir -p "$OUT"
 QEMU_WASM_NOCOMPILE=$RANGE "$W/build-qemu.sh" > "$OUT/build.log" 2>&1
 "$W/assemble.sh" > /dev/null 2>&1
 "$W/test/probe/run-browser.sh" "$OUT/probe" > "$OUT/probe.log" 2>&1 || true
-sum=$(tr -d '\r' < "$OUT/probe/serial.txt" | grep -o 'probe summary: .*' | tail -1)
+sum=$(tr -d '\r' < "$OUT/probe/serial.txt" | { grep -o 'probe summary: .*' || true; } | tail -1)
 case "$sum" in
   *"killed=0"*) echo "$RANGE OK ($sum)" ;;
   "")           echo "$RANGE UNKNOWN (no summary: timed out?)" ;;

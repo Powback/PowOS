@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""shell-pitfalls.py [file...] - lint the phone checks' shell for five pitfalls that produced false check FAILs.
+"""shell-pitfalls.py [file...] - lint shell for six pitfalls that produced false check FAILs or silent script deaths.
 
 WHY (11-10): three checks FAILed on shell pitfalls, not product bugs; each cost a queue run plus an agent.
   awk-ternary   `printf "%d", t>0?t:0` - BSD awk (the Mac's, 20200816) parses `>` as an output redirect: syntax
@@ -20,9 +20,18 @@ WHY (11-10): three checks FAILed on shell pitfalls, not product bugs; each cost 
                 `\\"` reaches Python as backslash-quote, so `f"{p[\\"n\\"]}"` breaks on every version. Put the
                 program in a quoted heredoc (`prog=$(cat <<'PY' ... PY)`, `python3 -c "$prog"`) and write p['n'].
                 (ai-tab-head 11-23)
+  nomatch-grep  under `set -e` + `set -o pipefail`, a grep (`grep -v`, `grep -c`, `grep -o`...) in a pipeline, or alone in
+                an assignment's `$(...)` (`x=$(... | grep -v y | sort)`, `n=$(grep -c x f)`, `r="a $(...)"`), exits 1
+                when nothing matches and the script ends right there with no message. gate.sh twice on 11-25/26 (a
+                clean tree's `| grep -v node_modules | sort`; the widget block's grep after re-enabling set -e). Handle
+                it: `|| true` on the pipeline, `{ grep x || true; } |` to keep the producer's status, or test it
+                (if/while/!/a non-final && || member). Not flagged: `local x=$(...)`, `$(...)` as an argument, `<(...)`,
+                a $(...)'s non-final commands, a function's last command (its caller tests it), a bare `grep x f`
+                statement (an assertion), heredoc bodies, and lines after `set +e` / `set +o pipefail`.
 
 Escape a deliberate case with `# lint-ok: <why>` on the line (or on the line just above it).
-With no arguments it scans tools/phone/**/*.sh and tools/agents/*.sh. Exit 1 if anything is found.
+With no arguments it scans tools/phone/**/*.sh and tools/agents/*.sh; tools/lint/changed-lints.sh runs it on every
+changed shell script (push hook + scoped gate). Exit 1 if anything is found.
 """
 import glob
 import os
@@ -372,7 +381,8 @@ def check_sigpipe(text, lines):
     errexit = file_has(text, "errexit")
     wrappers = su_wrappers(text) | {"sh_", "ash", "_kw_sh", "asroot", "ww_us", "us_"}
     hits = []
-    llist = list(logical_lines(lines))
+    # heredoc bodies are another shell's script (a phone-side `sh <<EOF`), without this file's pipefail
+    llist = list(logical_lines(blank_heredocs(text).splitlines(keepends=True)))
     for idx, (ln, s) in enumerate(llist):
         for segs, before, after, subst in split_pipelines(s):
             if len(segs) < 2:
@@ -624,6 +634,284 @@ def check_py_c(text):
     return hits
 
 
+# ---------------------------------------------------------------- (f) grep's "no match" status under errexit + pipefail
+GREP_SEG = re.compile(r"(?:command\s+|env\s+(?:[A-Za-z_][A-Za-z0-9_]*=\S*\s+)*|(?:LC_ALL|LANG)=\S*\s+)?[ef]?grep\b")
+ASSIGN_ONLY = re.compile(r"^(?:[A-Za-z_][A-Za-z0-9_]*(?:\[[^\]]*\])?\+?=(?:\"[^\"]*\"|'[^']*'|\S)*\s*)+$")
+SET_LINE = re.compile(r"^\s*set\s+([^#\n;&|]*)")
+
+
+def shell_modes(lines):
+    """[(errexit, pipefail)] per 1-based line (index 0 unused), following top-level `set -e/+e`, `set -o pipefail`,
+    `set -o errexit` in text order. Rough: a `set +e` inside a subshell or function stays off after it."""
+    e = p = False
+    out = [(False, False)]
+    for line in lines:
+        m = SET_LINE.match(line)
+        if m:
+            for w in re.findall(r"[-+]o\s+\w+|[-+][A-Za-z]+", m.group(1)):
+                on = w[0] == "-"
+                if w[1] == "o" and " " in w:
+                    name = w.split()[1]
+                    if name == "pipefail":
+                        p = on
+                    elif name == "errexit":
+                        e = on
+                    continue
+                if "e" in w[1:]:
+                    e = on
+                if w.endswith("o") and re.search(re.escape(w) + r"\s+pipefail", m.group(1)):
+                    p = on
+        out.append((e, p))
+    return out
+
+
+def blank_heredocs(text):
+    """text with every heredoc body line emptied (their content belongs to another shell or file)."""
+    top = toplevel_offsets(text)
+    lines = text.splitlines(keepends=True)
+    out, pend, off = [], [], 0
+    for line in lines:
+        if pend:
+            d = pend[0]
+            out.append("\n" if line.endswith("\n") else "")
+            if re.match(r"^\t*" + re.escape(d) + r"[ \t]*$", line.rstrip("\n")):
+                pend.pop(0)
+            off += len(line)
+            continue
+        out.append(line)
+        for m in HEREDOC_RE.finditer(line):
+            k = off + m.start()
+            if top[k] and not line.startswith("<<<", m.start()) and not (m.start() and line[m.start() - 1] == "<"):
+                pend.append(m.group(2))
+        off += len(line)
+    return "".join(out)
+
+
+def nomatch_lines(lines):
+    """Logical lines for the nomatch rule: logical_lines, plus lines that end in | && || or leave a $( open."""
+    buf, start, depth = "", None, 0
+    for n, s in logical_lines(lines):
+        if start is None:
+            start = n
+        buf += s
+        code = s
+        for sp in sorted(quoted_spans(s), reverse=True):  # drop quoted text, then a trailing comment
+            code = code[:sp[0]] + code[sp[1]:]
+        code = re.sub(r"(^|[\s;])#.*", r"\1", code)
+        depth = max(0, depth + code.count("$(") + code.count("<(") - code.count("$((") * 2
+                    - (code.count(")") - code.count("))") * 2))
+        if depth == 0 and not re.search(r"(\|\||&&|\|)\s*$", code.rstrip()):
+            yield start, buf
+            buf, start, depth = "", None, 0
+    if buf:
+        yield start, buf
+
+
+def split_pipelines_tree(s):
+    """split_pipelines with structure: [{segs, before, after, kind, parent, last}] where kind is 'top', 'subst'
+    ($(...)), 'proc' (<(...)/>(...)), 'group' ((...)); parent is the index of the enclosing pipeline (or None) and
+    last says it is the last pipeline of its $(...)/(...)."""
+    out, i, q = [], 0, None
+    counter = [0]
+
+    def frame(kind, before, parent, q_=None):
+        counter[0] += 1
+        return {"segs": [""], "before": before, "kind": kind, "q": q_, "pid": counter[0], "parent": parent,
+                "items": []}
+
+    stack = [frame("top", "open", None)]
+    pid_index = {}
+
+    def close_pipeline(sep_after, cur):
+        if any(x.strip() for x in cur["segs"]):
+            e = {"segs": cur["segs"], "before": cur["before"], "after": sep_after, "kind": cur["kind"],
+                 "parent_pid": cur["parent"], "last": False}
+            out.append(e)
+            pid_index[cur["pid"]] = len(out) - 1
+            cur["items"].append(len(out) - 1)
+        counter[0] += 1
+        cur["pid"] = counter[0]
+        cur["segs"] = [""]
+        cur["before"] = sep_after
+
+    def open_child(kind, before, q_=None):
+        stack.append(frame(kind, before, stack[-1]["pid"], q_))
+
+    def pop_child():
+        cur = stack.pop()
+        if cur["items"]:
+            out[cur["items"][-1]]["last"] = True
+        return cur
+
+    while i < len(s):
+        c = s[i]
+        cur = stack[-1]
+        if q == "'":
+            cur["segs"][-1] += c
+            if c == "'":
+                q = None
+            i += 1
+            continue
+        if q == '"':
+            if c == "\\" and i + 1 < len(s):
+                cur["segs"][-1] += s[i:i + 2]
+                i += 2
+                continue
+            if c == '"':
+                q = None
+                cur["segs"][-1] += c
+                i += 1
+                continue
+            if s.startswith("$(", i) and not s.startswith("$((", i):
+                cur["segs"][-1] += "$(…)"
+                open_child("subst", "open", '"')
+                q = None
+                i += 2
+                continue
+            cur["segs"][-1] += c
+            i += 1
+            continue
+        if c == "\\" and i + 1 < len(s):
+            cur["segs"][-1] += s[i:i + 2]
+            i += 2
+            continue
+        if c in "'\"":
+            q = c
+            cur["segs"][-1] += c
+            i += 1
+            continue
+        if c == "#" and (i == 0 or s[i - 1] in " \t;\n"):
+            j = s.find("\n", i)
+            i = len(s) if j < 0 else j
+            continue
+        if s.startswith("$((", i):
+            j = s.find("))", i)
+            j = len(s) if j < 0 else j + 2
+            cur["segs"][-1] += s[i:j]
+            i = j
+            continue
+        if s.startswith("$(", i) or s.startswith("<(", i) or s.startswith(">(", i):
+            cur["segs"][-1] += "$(…)"
+            open_child("subst" if s[i] == "$" else "proc", "open")
+            i += 2
+            continue
+        if c == "(" and not cur["segs"][-1].strip():
+            cur["segs"][-1] += "(…)"
+            open_child("group", "open")
+            i += 1
+            continue
+        if c == ")" and len(stack) > 1:
+            close_pipeline("close", cur)
+            top = pop_child()
+            if top.get("q"):
+                q = top["q"]
+            i += 1
+            continue
+        if s.startswith("&&", i) or s.startswith("||", i):
+            close_pipeline(s[i:i + 2], cur)
+            i += 2
+            continue
+        if c == "|":
+            cur["segs"].append("")
+            i += 1
+            continue
+        if c in ";&\n":
+            close_pipeline(";" if c != "&" else "&", cur)
+            i += 1
+            continue
+        cur["segs"][-1] += c
+        i += 1
+    while stack:
+        close_pipeline("eol", stack[-1])
+        pop_child()
+    for e in out:
+        p = e.pop("parent_pid")
+        e["parent"] = pid_index.get(p)
+    # a pipeline in an if/while condition: its head starts the condition, or it follows one through && / ||
+    for k, e in enumerate(out):
+        head = strip_lead_kw(e["segs"][0])
+        e["cond"] = re.match(r"(if|elif|while|until)\b", head.strip()) is not None or head.lstrip().startswith("!")
+    prev_in_frame = {}
+    for k, e in enumerate(out):
+        key = (e["parent"], e["kind"])
+        pk = prev_in_frame.get(key)
+        if pk is not None and out[pk]["after"] in ("&&", "||") and out[pk]["cond"]:
+            e["cond"] = True
+        prev_in_frame[key] = k
+    return out
+
+
+def strip_lead_kw(seg):
+    s = seg.strip()
+    s = re.sub(r"^(?:function\s+)?[A-Za-z_][A-Za-z0-9_]*\s*\(\)\s*\{\s*", "", s)
+    while True:
+        t = re.sub(r"^(?:\{|then|do|else|time)\s+", "", s)
+        if t == s:
+            return s
+        s = t
+
+
+def pipeline_guarded(out, k):
+    """errexit can't fire on out[k]: it is tested (if/while/!/a non-final && || member), or it is an argument
+    ($(...) in a command's words, <(...)), or its enclosing pipeline is guarded."""
+    e = out[k]
+    if e["cond"] or e["after"] in ("&&", "||"):
+        return True
+    if e["kind"] == "top":
+        return False
+    p = e["parent"]
+    if p is None:
+        return False
+    if e["kind"] == "proc":
+        return True
+    if e["kind"] == "subst":
+        if not e["last"]:
+            return True  # bash's $(...) doesn't inherit errexit: only its last status reaches the assignment
+        par = out[p]
+        if len(par["segs"]) != 1 or not ASSIGN_ONLY.match(strip_lead_kw(par["segs"][0])):
+            return True  # an argument (echo "$(...)", local x=$(...), for x in $(...)): the status is dropped
+    return pipeline_guarded(out, p)
+
+
+def is_function_tail(s, segs, rest_lines):
+    tail = segs[-1].rstrip()[-24:]
+    pos = s.rfind(tail) if tail else -1
+    rest = s[pos + len(tail):] if pos >= 0 else ""
+    nxt = rest_lines.strip()
+    return bool(re.match(r"\s*[;\n]?\s*\}", rest) or (nxt.startswith("}") and re.sub(r"\s", "", rest) in ("", ";")))
+
+
+def check_nomatch_grep(text, lines):
+    """grep (any pipeline member, or alone in an assignment's $(...)) under errexit + pipefail whose no-match status 1
+    isn't handled: the script ends right there with no message (gate.sh 11-25/26 twice)."""
+    if not (file_has(text, "pipefail") and file_has(text, "errexit")):
+        return []
+    modes = shell_modes(lines)
+    blank = blank_heredocs(text).splitlines(keepends=True)
+    llist = list(nomatch_lines(blank))
+    hits = []
+    for idx, (ln, s) in enumerate(llist):
+        e_on, p_on = modes[ln] if ln < len(modes) else (False, False)
+        if not (e_on and p_on):
+            continue
+        out = split_pipelines_tree(s)
+        nxt = llist[idx + 1][1] if idx + 1 < len(llist) else ""
+        for k, e in enumerate(out):
+            segs = e["segs"]
+            greps = [x for x in segs if GREP_SEG.match(strip_lead_kw(x))]
+            if not greps:
+                continue
+            if len(segs) == 1 and e["kind"] != "subst":
+                continue  # a bare `grep x f` statement: an assertion, the script's choice
+            if pipeline_guarded(out, k):
+                continue
+            if e["kind"] == "top" and is_function_tail(s, segs, nxt):
+                continue  # a function's last command: its status is the function's, the caller decides
+            g = strip_lead_kw(greps[0])
+            hits.append((ln, g.split()[0] if not g.startswith("command") else "grep"))
+    return sorted(set(hits))
+
+
 def lint_file(path):
     with open(path, encoding="utf-8", errors="replace") as f:
         text = f.read()
@@ -648,6 +936,10 @@ def lint_file(path):
         ln = text.count("\n", 0, off) + 1
         if not lint_ok(lines, ln):
             found.append((ln, "py-c", f"python3 -c program: {why}; move it to a quoted heredoc"))
+    for ln, g in check_nomatch_grep(text, lines):
+        if not lint_ok(lines, ln):
+            found.append((ln, "nomatch-grep", f"{g} under set -e + pipefail exits 1 on no match and ends the script"
+                                              " silently; add `|| true`, or test it (if/&&/||)"))
     return sorted(set(found))
 
 
