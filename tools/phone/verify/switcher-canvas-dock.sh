@@ -28,7 +28,18 @@ MINE_T=""
 # and Settings was that (neither had a task yet; the ERR text then went on as the task id). Anything not a number: "".
 tid() { local v; v=$(hcall tasks.list "[]" "l=>(l.find(t=>(t.key||'').includes('$1'))||{}).id??'-'")
   case $v in [0-9]*) echo "$v" ;; -) ;; *) echo "tid $1: $v" >&2 ;; esac; }
-canvas_task() { sh_ "dumpsys activity activities" | grep -E "Task\{.*com\.oplus\.pscanvas" | sed -nE 's/.*Task\{[0-9a-f]+ #([0-9]+).*/\1/p' | sed -n 1p; }
+# The VISIBLE Open Canvas container's task id. Not any pscanvas task: the 11-26 run's "a canvas opened before the
+# pick" was a container left over from an earlier dock (#3510, visible=false, sz=1, older than both apps' tasks).
+canvas_task() { sh_ "dumpsys activity activities" | grep -E "^ *\* Task\{.*com\.oplus\.pscanvas.* visible=true" | sed -nE 's/.*Task\{[0-9a-f]+ #([0-9]+).*/\1/p' | sed -n 1p; }
+# Every pscanvas container, visible or not (closed before the run: a stale one is where OxygenOS may put the next dock).
+canvas_tasks() { sh_ "dumpsys activity activities" | grep -E "^ *\* Task\{.*com\.oplus\.pscanvas" | sed -nE 's/.*Task\{[0-9a-f]+ #([0-9]+).*/\1/p' | sort -u; }
+# The page's tasks.canvasDock calls from now on, each with its args and ms since [dock_watch] (the drop/pick evidence).
+dock_watch() { ev "(()=>{globalThis.__dockCalls=[];globalThis.__dockT0=Date.now();if(!globalThis.__dockWrapped){globalThis.__dockWrapped=1;import('./bridge.ts').then(m=>{const k=m.powos.tasks,o=k.canvasDock;if(o)k.canvasDock=(...a)=>(globalThis.__dockCalls.push((Date.now()-globalThis.__dockT0)+'ms:'+a.join(',')),o(...a))})}return 'ok'})()" >/dev/null; }
+# "none", or each call as "<ms>ms:<id>,<side>,<other>" joined by ";".
+dock_calls() { ev "(globalThis.__dockCalls||[]).join(';')||'none'" | tr -d '"'; }
+# The keyguard is up (the 11-26 run: the lock screen came up right at the pick - adopt gate keyguard=true - and the
+# tap never reached the picker). Not the check's to judge: "not now".
+locked() { sh_ "dumpsys window" | grep -qE "mDreamingLockscreen=true|isKeyguardShowing=true|mShowingLockscreen=true"; }
 close_canvas() { local c r
   sh_ "input keyevent KEYCODE_HOME" >/dev/null; sleep 1
   c=$(canvas_task)
@@ -69,7 +80,10 @@ pick_app() { local g
   case $g in none*|"") echo "${g:-none no answer}"; return ;; esac
   selfinput; sh_ "input tap $g" >/dev/null
   echo "$g"; }
-pagelog() { sh_ "logcat -d" | grep -E "PowosCanvasDock|\[canvas\]|OplusSplitScreenManagerService.*(PocketStudio|PairTask|shortcut|unSupports)|FlexibleWindowManagerService.*(PocketStudio|hortcut)|AndroidRuntime|ANR in" | grep -v "getPocketStudioTaskRegion" | tail -"${1:-10}" | cut -c1-230; }
+# The dock's lines (host, page, OxygenOS, the switcher), saved whole to dock-log.txt; [n] of them echoed. Not
+# AndroidRuntime: the check's own `content`/`input` calls flooded it and pushed every dock line out (11-26 run).
+pagelog() { sh_ "logcat -d" | grep -E "PowosCanvasDock|\[canvas\]|PowosSwitcher|OplusSplitScreenManagerService.*(PocketStudio|PairTask|shortcut|unSupports)|FlexibleWindowManagerService.*(PocketStudio|hortcut)|FATAL EXCEPTION|ANR in" | grep -v "getPocketStudioTaskRegion" > "$OUT/dock-log.txt"
+  tail -"${1:-10}" "$OUT/dock-log.txt" | cut -c1-230; }
 
 wwc_start
 # 1. Open Canvas available (unfolded: wwc_start unfolds).
@@ -87,7 +101,11 @@ case $sides in *"no such call"*|*"unknown"*) bad "sides: this APK has no tasks.c
   *"$CID"*) ;; *) bad "sides: Chrome's task $CID isn't a side ($sides)" ;; esac
 SID=$(tid $S)
 [ -n "$SID" ] && case $sides in *"$SID"*) bad "sides: Settings (task $SID, OxygenOS's split blocklist) is in $sides" ;; esac
+# A canvas left from an earlier dock closed first (OxygenOS reuses its container; it also showed as a card).
+for c in $(canvas_tasks); do r=$(hcall tasks.remove "[$c]" "v=>String(v)"); say "setup: stale canvas task $c removed: $r"; done
 sh_ "logcat -c" >/dev/null
+sh_ "input keyevent KEYCODE_WAKEUP" >/dev/null
+dock_watch; sleep 1
 
 # 3. The real drag on Chrome's card (the switcher opened over Chrome): docked, the picker up, no canvas till the pick.
 g=$(drag_card "$CID"); say "drag: chrome's card $g"
@@ -97,9 +115,16 @@ sleep 1
 ps=$(picker_side); say "picker: docked ${ps:-none}"
 [ "$ps" = "$SIDE" ] || bad "picker: let go at the $SIDE edge, the picker says '${ps:-no picker}'"
 "$T/shot.sh" "$OUT/picker.png" >/dev/null 2>&1
-[ -n "$(canvas_task)" ] && bad "picker: a canvas opened before the pick (an auto-picked partner)"
+calls=$(dock_calls); say "picker: tasks.canvasDock calls before the pick: $calls"
+case $calls in none) ;; *) bad "picker: tasks.canvasDock called on the drop, before any pick: $calls" ;; esac
+[ -n "$(canvas_task)" ] && bad "picker: a visible canvas opened before the pick (an auto-picked partner)"
+locked && { pagelog 6 >/dev/null; wwc_skip "the lock screen came up before the pick"; }
 p=$(pick_app "$KID"); say "pick: calculator at $p"
 case $p in none*) bad "pick: $p"; wwc_end "-" ;; esac
+sleep 1
+calls=$(dock_calls); say "pick: tasks.canvasDock calls after the tap: $calls"
+case $calls in *":$CID,$SIDE,$KID"*) ;; *) bad "pick: the tap on Calculator didn't call tasks.canvasDock($CID, $SIDE, $KID): $calls (picker now: $(picker_side))" ;; esac
+locked && say "pick: the lock screen is up after the tap (see dock-log.txt)"
 for _ in 1 2 3 4 5 6 7 8 9 10; do sleep 0.5; [ -n "$(canvas_task)" ] && break; done
 sleep 3   # CanvasDock.measure reads back at 2.5 s
 "$T/shot.sh" "$OUT/canvas.png" >/dev/null 2>&1
@@ -185,7 +210,10 @@ if [ -n "$SID" ]; then
   # Every note the switcher shows from here on, caught as it mounts: it lives 2.4 s (recents-note animation), and the
   # 11-25 run read the DOM once ~20 s after the drag (a slow page eval + the shot) - '' whatever had been shown.
   ev "(()=>{globalThis.__dockNotes=[];globalThis.__dockNoteObs?.disconnect();const o=new MutationObserver(()=>{for(const e of document.querySelectorAll('.recents-note')){const t=e.textContent||'';if(t&&!__dockNotes.includes(t))__dockNotes.push(t)}});o.observe(document.body,{childList:true,subtree:true,characterData:true});globalThis.__dockNoteObs=o;return 'ok'})()" >/dev/null
-  g=$(drag_card "$SID"); say "drag: settings' card $g"
+  g=$(drag_card "$SID")
+  # The switcher's list can lag a fresh launch by a beat (11-26: Settings 3531 not yet a card): once more.
+  case $g in none*) sh_ "input keyevent KEYCODE_BACK" >/dev/null; sleep 2; g=$(drag_card "$SID") ;; esac
+  say "drag: settings' card $g"
   sleep 3
   n=$(ev "(()=>{const n=(globalThis.__dockNotes||[]).join(' | ');globalThis.__dockNoteObs?.disconnect();return n})()" | tr -d '"')
   "$T/shot.sh" "$OUT/settings-note.png" >/dev/null 2>&1
