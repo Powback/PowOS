@@ -28,6 +28,9 @@
  * A fingerprint unlocks straight from the face: the keyguard under it listens for an in-display sensor while the face
  * occludes it, dismisses itself, and the face goes with it (LockFace.kt, USER_PRESENT). Its spot is drawn where the
  * sensor is (LockFingerprint) and the hint says to touch it (sensorHint).
+ *
+ * Under the date, at a glance (lockglance.tsx, LockGlance.kt): the next alarm, the next event of the next 12 hours and
+ * the weather now, small chips on one line; a part that isn't there isn't shown.
  */
 import { useEffect, useLayoutEffect, useRef, useState } from "preact/hooks";
 import { powos } from "../bridge.ts";
@@ -42,6 +45,7 @@ import { PageDots } from "./pagedots.tsx";
 import { LockShortcuts, askShortcuts } from "./lockshortcuts.tsx";
 import { Icon } from "./icons.tsx";
 import type { LockSensor } from "../types.ts";
+import { LockGlance } from "./lockglance.tsx";
 
 /** Lifted this far (of the height) when let go, it unlocks. */
 const UNLOCK = 0.33;
@@ -343,6 +347,8 @@ export function Lock() {
           .toLowerCase()}
         {battery.level != null && ` · ${battery.charging ? "⚡" : ""}${battery.level}%`}
       </div>
+      {/* At a glance (lockglance.tsx): the next alarm, the next event, the weather - what's there. */}
+      <LockGlance now={now} />
       <LockMedia />
       {/* The shade's cards, locked (notifications.tsx Stack/Card): K2's icons are the shade's (the small icon in its app's
           color, else the app's), each card wears THE backdrop (.lock-note, shell.css K3). It scrolls only once it's

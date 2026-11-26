@@ -15,14 +15,16 @@ object StatusPermission {
     private const val PREFS = "status-permission"
     private const val ASKED = "asked-phone-state"
 
-    fun askOnce(activity: Activity) {
-        if (ShadeHost.current == null) return
-        if (activity.checkSelfPermission(Manifest.permission.READ_PHONE_STATE) == PackageManager.PERMISSION_GRANTED) return
-        if (andro.marchy.RootMode.enabled()) return
+    /** True if it asked now (one permission dialog at a time: home asks nothing else this time). */
+    fun askOnce(activity: Activity): Boolean {
+        if (ShadeHost.current == null) return false
+        if (activity.checkSelfPermission(Manifest.permission.READ_PHONE_STATE) == PackageManager.PERMISSION_GRANTED) return false
+        if (andro.marchy.RootMode.enabled()) return false
         val prefs = activity.getSharedPreferences(PREFS, Activity.MODE_PRIVATE)
-        if (prefs.getBoolean(ASKED, false)) return
+        if (prefs.getBoolean(ASKED, false)) return false
         prefs.edit().putBoolean(ASKED, true).apply()
         activity.requestPermissions(arrayOf(Manifest.permission.READ_PHONE_STATE), REQUEST)
+        return true
     }
 
     /** The answer ([Activity.onRequestPermissionsResult]): granted, the bar reads the SIMs again. */

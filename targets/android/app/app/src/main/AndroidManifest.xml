@@ -34,6 +34,8 @@
     <uses-permission android:name="android.permission.VIBRATE" />
     <!-- Speech input for the agent prompt bar; only recognized text reaches Linux. -->
     <uses-permission android:name="android.permission.RECORD_AUDIO" />
+    <!-- The lock face's glance (shell/LockGlance.kt): the next event of the next 12 hours, asked once (CalendarPermission). -->
+    <uses-permission android:name="android.permission.READ_CALENDAR" />
     <!-- What a .pow web app may ask for in its window (shell/WebAppActivity.kt, WebPermissions.kt): getUserMedia's
          camera and the site's geolocation, asked at run time and only after the user allowed it for that site. -->
     <uses-permission android:name="android.permission.CAMERA" />

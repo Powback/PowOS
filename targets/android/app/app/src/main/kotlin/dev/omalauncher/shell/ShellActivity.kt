@@ -228,8 +228,9 @@ class ShellActivity : Activity() {
         ShellWallpaper.refresh(this)
         ShellWallpaper.refresh(this, WALLPAPER_SETTLE_MS)
         checkStuckSoon("resumed")
-        // PowOS draws the status bar: its SIM icons need the phone permission - asked once, not rooted only.
-        dev.omalauncher.system.StatusPermission.askOnce(this)
+        // PowOS draws the status bar: its SIM icons need the phone permission - asked once, not rooted only. Then the
+        // lock face's next event: the calendar, asked once (one dialog at a time: the next resume if the phone's was).
+        if (!dev.omalauncher.system.StatusPermission.askOnce(this)) CalendarPermission.askOnce(this)
     }
 
     private val main = android.os.Handler(android.os.Looper.getMainLooper())

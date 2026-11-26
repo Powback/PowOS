@@ -53,6 +53,7 @@ import type {
   MediaState,
   LockShortcutState,
   LockSensor,
+  LockGlanceState,
   NativeSetting,
   GlassesState,
   SystemStatus,
@@ -299,6 +300,7 @@ function native(host: NonNullable<Window["PowosHost"]>): Bridge {
       torch: (on) => call<boolean>("lock.torch", on), // detect
       camera: () => call<boolean>("lock.camera"), // detect
       sensor: () => call<LockSensor>("lock.sensor"), // detect: no spot, no hint until the APK has it
+      glance: () => call<LockGlanceState>("lock.glance"), // detect: no glance until the APK has it
     },
     pad: {
       state: () => call<boolean>("pad.state"),
@@ -911,6 +913,8 @@ function mock(): Bridge {
         camera: async () => (console.log("[mock] secure camera"), true),
         // A side sensor (the OnePlus): no spot; the gate's LF1 sets an in-display one.
         sensor: async (): Promise<LockSensor> => ({ kind: "side", enrolled: true, spot: null }),
+        // A phone at rest: nothing (the lock-glance scenes emit their own "lock.glance").
+        glance: async (): Promise<LockGlanceState> => ({ alarm: null, event: null, weather: null }),
       };
     })(),
     pad: (() => {

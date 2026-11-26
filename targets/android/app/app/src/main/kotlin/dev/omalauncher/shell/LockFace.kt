@@ -177,6 +177,7 @@ class PowosLockActivity : Activity() {
                 }
             }
         h.bridge.emit("lock.shown", null)
+        glance = LockGlance.Watch(this) { h.bridge.emit("lock.glance", it) }
         setContentView(h.web)
         // An in-display fingerprint sensor: the face takes no touch on it (the spot lock.tsx draws there) - a finger on
         // it is the keyguard's, which listens while the face occludes it and dismisses itself; then the face goes
@@ -230,10 +231,13 @@ class PowosLockActivity : Activity() {
         lastBattery = null
         @Suppress("DEPRECATION")
         registerReceiver(battery, IntentFilter(Intent.ACTION_BATTERY_CHANGED))
+        // The glance under the clock (LockGlance): now, and on an alarm or calendar change and the weather's 30 minutes.
+        glance?.start()
     }
 
     override fun onPause() {
         watchdog?.stop()
+        glance?.stop()
         runCatching { unregisterReceiver(battery) }
         super.onPause()
     }
@@ -251,6 +255,8 @@ class PowosLockActivity : Activity() {
         }
 
     private var watchdog: PageWatchdog? = null
+
+    private var glance: LockGlance.Watch? = null
 
     // Back on a lock screen goes nowhere: the face stays until the phone is unlocked.
     @Deprecated("Back does nothing on a lock screen", ReplaceWith(""))

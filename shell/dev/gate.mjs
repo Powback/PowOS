@@ -10121,6 +10121,73 @@ async function lmUnlockStep({ f, r, st, until }, label, fails) {
   await f.swipe(Array.from({ length: 13 }, (_, i) => ({ x: x0, y: Math.round(y0 - (H * i) / 12) })));
   if (!(await until((x) => x.lm.unlock > 0)).lm.unlock) fails.push(`LM1 ${label}: a swipe up starting on the media card didn't unlock`);
 }
+/**
+ * LG1 (board "Lock screen shows next alarm, weather and next event"): the glance under the date (lockglance.tsx), a
+ * mock "lock.glance" pushed as the native side does. All three: three chips on one line, under the date, inside the
+ * screen and centred, a long event title cut (never wrapped, never past the edge). Only the weather: one chip. Nothing:
+ * no glance at all.
+ */
+/** LG1's look at the glance: each chip's kind, line and edges, whether the event's title is cut, the weather's font. */
+function lgRead() {
+  const box = document.querySelector(".lock-glance");
+  const date = document.querySelector(".lock-date")?.getBoundingClientRect();
+  const chips = [...document.querySelectorAll(".lock-glance-chip")].map((c) => {
+    const b = c.getBoundingClientRect();
+    const t = c.querySelector(".lock-glance-text");
+    return { kind: c.dataset.kind, top: Math.round(b.top), left: b.left, right: b.right, cut: !!t && t.scrollWidth > t.clientWidth + 1 };
+  });
+  const b = box?.getBoundingClientRect();
+  const wx = document.querySelector(".lock-glance-wx");
+  return { shown: !!box, chips, W: innerWidth, dateBottom: date?.bottom ?? 0, top: b?.top ?? 0, mid: b ? (b.left + b.right) / 2 : 0, wxFont: wx ? getComputedStyle(wx).fontFamily : "" };
+}
+
+/** LG1 with all three parts: the three chips, one line, under the date, inside the screen (and lgLookFails). */
+function lgAllFails(all, label) {
+  const fails = [];
+  const kinds = all.chips.map((c) => c.kind).join();
+  const lines = new Set(all.chips.map((c) => c.top)).size;
+  if (kinds !== "alarm,event,weather") fails.push(`LG1 ${label}: chips ${kinds || "none"}, want alarm,event,weather`);
+  if (lines > 1) fails.push(`LG1 ${label}: the glance wraps onto ${lines} lines`);
+  if (all.chips.some((c) => c.left < -0.5 || c.right > all.W + 0.5)) fails.push(`LG1 ${label}: a chip past the screen's edge (${JSON.stringify(all.chips)})`);
+  if (all.top < all.dateBottom - 0.5) fails.push(`LG1 ${label}: the glance (top ${all.top}) over the date (bottom ${all.dateBottom})`);
+  return [...fails, ...lgLookFails(all, label)];
+}
+
+/** LG1's look: centred, the weather icon in the symbol font, the long title cut on the folded screen. */
+function lgLookFails(all, label) {
+  const fails = [];
+  if (Math.abs(all.mid - all.W / 2) > 2) fails.push(`LG1 ${label}: the glance isn't centred (mid ${all.mid}, screen ${all.W / 2})`);
+  if (!/Symbols Nerd Font/.test(all.wxFont)) fails.push(`LG1 ${label}: the weather icon isn't drawn in the symbol font (${all.wxFont})`);
+  const cut = all.chips.find((c) => c.kind === "event")?.cut;
+  if (label === "folded" && !cut) fails.push(`LG1 ${label}: the long event title isn't cut on the folded screen`);
+  return fails;
+}
+
+/**
+ * LG1 (board "Lock screen shows next alarm, weather and next event"): the glance under the date (lockglance.tsx), a
+ * mock "lock.glance" pushed as the native side does. All three: three chips on one line, under the date, inside the
+ * screen and centred, a long event title cut (never wrapped, never past the edge). Only the weather: one chip.
+ * Nothing: no glance at all.
+ */
+async function lockGlanceScene(r, label) {
+  const push = async (g) => {
+    await r.page.evaluate((x) => window.__mockEvents.emit("lock.glance", x), g);
+    await r.page.evaluate(() => new Promise((ok) => requestAnimationFrame(() => requestAnimationFrame(ok))));
+    return r.page.evaluate(lgRead);
+  };
+  const now = Date.now();
+  const weather = { temp: "7°", icon: "\ue30d", place: "Oslo" };
+  const title = "Quarterly planning with the whole design and platform group, room 4";
+  const all = await push({ alarm: now + 7 * 3600e3, event: { title, at: now + 90 * 60e3 }, weather });
+  const fails = lgAllFails(all, label);
+  const one = await push({ alarm: null, event: null, weather });
+  const oneKinds = one.chips.map((c) => c.kind).join();
+  if (oneKinds !== "weather") fails.push(`LG1 ${label}: only weather pushed, chips ${oneKinds || "none"}`);
+  if ((await push({ alarm: null, event: null, weather: null })).shown) fails.push(`LG1 ${label}: an empty glance still shows`);
+  console.log(`     lock-glance-${label}: ${JSON.stringify({ kinds: all.chips.map((c) => c.kind).join(), cut: all.chips.find((c) => c.kind === "event")?.cut, one: oneKinds })}`);
+  return fails;
+}
+
 async function lockMediaScene(r, label) {
   const d = await lmDriver(r);
   // The cards in, and the list re-filtered by them (a render after).
@@ -16101,6 +16168,10 @@ try {
   if (process.env.SHELL_PAGES !== "0")
     for (const [label, viewport] of [["folded", { width: 404, height: 900 }], ["unfolded", { width: 821, height: 883 }]])
       runs.push(open(browser, `${ORIGIN}/index.html?mode=lock`, `lock-fingerprint-${label}`, viewport).then((r) => whenReady(r, () => lockFingerprintScene(r, label))));
+  // LG1: the glance under the date (next alarm, next event, weather), a mock "lock.glance". Folded and unfolded.
+  if (process.env.SHELL_PAGES !== "0")
+    for (const [label, viewport] of [["folded", { width: 404, height: 900 }], ["unfolded", { width: 821, height: 883 }]])
+      runs.push(open(browser, `${ORIGIN}/index.html?mode=lock`, `lock-glance-${label}`, viewport).then((r) => whenReady(r, () => lockGlanceScene(r, label))));
   // TI1: tiled windows' bars, the w.f touch rects, the divider's pill (the user's layout, 10-31 15:08, unfolded).
   if (process.env.SHELL_PAGES !== "0")
     runs.push(open(browser, `${ORIGIN}/index.html`, "tile-bars-unfolded", { width: 821, height: 883 }).then((r) => whenReady(r, () => tileBarsScene(r))));

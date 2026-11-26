@@ -243,6 +243,16 @@ export interface LockSensor {
   spot: { x: number; y: number; r: number } | null;
 }
 
+/**
+ * The lock face's glance under the clock (LockGlance.kt, "lock.glance"): the next alarm (epoch ms), the next event of
+ * the next 12 hours, the weather now (the today widget's wttr.in; icon: its Nerd Font glyph). Each null when there's none.
+ */
+export interface LockGlanceState {
+  alarm: number | null;
+  event: { title: string; at: number } | null;
+  weather: { temp: string; icon: string; place: string } | null;
+}
+
 /** One control center tile: a switch (on true/false) or an action/page (on null). */
 export interface QuickTile {
   id: string;
@@ -1126,6 +1136,8 @@ export interface Bridge {
     camera(): Promise<boolean>;
     /** The fingerprint sensor: the spot / hint on the face (an older APK rejects: neither shown). */
     sensor(): Promise<LockSensor>;
+    /** The glance under the clock as it is now (an older APK rejects: none shown); "lock.glance" pushes each change. */
+    glance(): Promise<LockGlanceState>;
   };
   /**
    * The control center (and the notification panel's row): every tile the phone's own control center has, switched

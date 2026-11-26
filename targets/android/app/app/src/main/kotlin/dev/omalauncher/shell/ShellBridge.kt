@@ -696,6 +696,8 @@ class ShellBridge(
             "lock.mark" -> UnlockLog.mark("page ${a.getString(0)}")
             // The fingerprint sensor for the face's spot / hint (FingerprintSensor): its kind, a finger enrolled, where.
             "lock.sensor" -> FingerprintSensor.read(context).json(context.resources.displayMetrics.density)
+            // The glance under the clock (LockGlance): the next alarm, the next event, the weather - as they are now.
+            "lock.glance" -> LockGlance.read(context)
             "qs.destinations" -> SettingsSearch(context).destinations { broadcast("qs.destinations", "null") }
             "qs.state" -> quick.state()
             "qs.toggle" -> quick.toggle(a.getString(0)).let { quick.state() }

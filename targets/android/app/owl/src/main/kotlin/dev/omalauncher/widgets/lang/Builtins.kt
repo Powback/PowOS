@@ -170,6 +170,12 @@ object Builtins {
         return f.format(Instant.ofEpochMilli((seconds * 1000).toLong()).atZone(ZoneId.systemDefault()))
     }
 
+    /** The same glyph for code outside widgets: the lock face's glance (LockGlance.kt). */
+    fun weatherGlyph(
+        code: Int,
+        night: Boolean,
+    ): String = weatherIcon(code, night)
+
     /**
      * Omarchy's weather glyphs (Nerd Font nf-weather, drawn with `font: icon`) for a
      * wttr.in weatherCode. Same table as omarchy's weather panel Model.js.
