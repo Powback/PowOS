@@ -15,7 +15,7 @@ ok()  { echo "  ok   - $1"; PASS=$((PASS+1)); }
 bad() { echo "  FAIL - $1"; [ -n "${2:-}" ] && echo "    $2"; FAIL=$((FAIL+1)); }
 T=$(mktemp -d); trap 'rm -rf "$T"' EXIT
 mkdir -p "$T/bin" "$T/spool"
-export COMMS_ROOT=$T/spool COMMS_AGENT_ID= POWOS_COMMS_START=0 POWOS_AI_AGENTS_DIR=$T/no-agents POWOS_AGENTS_QUEUE=$T/no-queue POWOS_PLATFORM=test
+export COMMS_ROOT=$T/spool COMMS_AGENT_ID='' POWOS_COMMS_START=0 POWOS_AI_AGENTS_DIR=$T/no-agents POWOS_AGENTS_QUEUE=$T/no-queue POWOS_PLATFORM=test
 cat > "$T/bin/powos" <<EOF
 #!/bin/bash
 [ "\$1" = comms ] || exit 2; shift
