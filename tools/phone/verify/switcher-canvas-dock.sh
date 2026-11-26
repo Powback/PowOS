@@ -59,12 +59,30 @@ PYL
 # The keyguard is up (the 11-26 run: the lock screen came up right at the pick - adopt gate keyguard=true - and the
 # tap never reached the picker). Not the check's to judge: "not now".
 locked() { sh_ "dumpsys window" | awk '/mDreamingLockscreen=true|isKeyguardShowing=true|mShowingLockscreen=true/{f=1} END{exit !f}'; }
+# The canvas containers THIS run opened (the pair it made): the only ones close_canvas dissolves. Never a user's pair.
+OURS_C=""
+# Ends the pairs this run made: home, then each of its containers removed (home's bridge, then cmd as a fallback).
+# Not by visibility (canvas_task): after Home the canvas is invisible, so the 18:52 run's cleanup found nothing and
+# left Chrome + Calculator paired - the 18:57 run then had no Chrome card to drag.
 close_canvas() { local c r
   sh_ "input keyevent KEYCODE_HOME" >/dev/null; sleep 1
-  c=$(canvas_task)
-  [ -n "$c" ] || return 0
-  r=$(hcall tasks.remove "[$c]" "v=>String(v)"); say "close: canvas task $c removed through home's bridge: $r"
-  [ -n "$(canvas_task)" ] && sh_ "cmd activity stack remove $c" >/dev/null && say "close: canvas task $c removed (cmd activity stack remove)"; }
+  for c in $OURS_C; do
+    case " $(canvas_tasks | tr '\n' ' ') " in *" $c "*) ;; *) continue ;; esac
+    r=$(hcall tasks.remove "[$c]" "v=>String(v)"); say "close: our canvas task $c removed through home's bridge: $r"
+    case " $(canvas_tasks | tr '\n' ' ') " in *" $c "*) sh_ "cmd activity stack remove $c" >/dev/null; say "close: canvas task $c removed (cmd activity stack remove)" ;; esac
+  done; OURS_C=""; }
+# A container left by an earlier run of this check: the only container there, and the host's last dock was exactly
+# this check's two apps (tasks.canvasState lastDock). Echoes its id, or nothing (a user's pair, or several: untouched).
+ours_leftover() { local all cs
+  all=$(canvas_tasks); [ "$(echo "$all" | grep -c .)" = 1 ] || return 0
+  cs=$(hcall tasks.canvasState "[]" "v=>JSON.stringify(v)")
+  python3 - "$cs" "$C" "$K" <<'PYO' && echo "$all"
+import json, sys
+try: d = (json.loads(sys.argv[1]) or {}).get("lastDock") or {}
+except Exception: sys.exit(1)
+sys.exit(0 if set((d.get("before") or {}).keys()) == {sys.argv[2], sys.argv[3]} else 1)
+PYO
+}
 wwc_extra() { close_canvas
   for t in $MINE_T; do hcall tasks.remove "[$t]" "()=>'ok'" >/dev/null; done; MINE_T=""; }
 # start <pkg>: its task (started now if it has none: then removed at the end); echoes the id.
@@ -121,12 +139,15 @@ case $sides in *"no such call"*|*"unknown"*) bad "sides: this APK has no tasks.c
 SID=$(tid $S)
 [ -n "$SID" ] && case $sides in *"$SID"*) bad "sides: Settings (task $SID, OxygenOS's split blocklist) is in $sides" ;; esac
 # A canvas left from an earlier dock closed first (OxygenOS reuses its container; it also showed as a card).
-for c in $(canvas_tasks); do r=$(hcall tasks.remove "[$c]" "v=>String(v)"); say "setup: stale canvas task $c removed: $r"; done
+# A pair an earlier run of this check left (Chrome + Calculator still in Open Canvas: no Chrome card) dissolved first;
+# any other canvas is the user's and stays as it is.
+for c in $(ours_leftover); do OURS_C="$c"; say "setup: canvas task $c is an earlier run's Chrome + Calculator pair: dissolving it"; close_canvas; sleep 1; done
 sh_ "logcat -c" >/dev/null
 sh_ "input keyevent KEYCODE_WAKEUP" >/dev/null
 
 # 3. The real drag on Chrome's card (the switcher opened over Chrome): docked, the picker up, no canvas till the pick.
 g=$(drag_card "$CID"); say "drag: chrome's card $g"
+case $g in none*no\ card*) [ -n "$(canvas_tasks)" ] && wwc_skip "Chrome has no card - it's in an Open Canvas pair that isn't this check's own (left untouched): $g" ;; esac
 case $g in none*) bad "drag: $g"; wwc_end "-" ;; esac
 SIDE=${g%% *}
 sleep 1
@@ -146,6 +167,7 @@ else say "pick: tasks.canvasDock($wid, $wside, $wother); latency press -> call $
   [ "${wpress:--1}" -gt 300 ] && bad "pick: press -> call took ${wpress} ms (want <= 300: the pick must feel instant)"; fi
 locked && say "pick: the lock screen is up after the tap (see dock-log.txt)"
 for _ in 1 2 3 4 5 6 7 8 9 10; do sleep 0.5; [ -n "$(canvas_task)" ] && break; done
+c=$(canvas_task); [ -n "$c" ] && OURS_C="$c"
 sleep 3   # CanvasDock.measure reads back at 2.5 s
 "$T/shot.sh" "$OUT/canvas.png" >/dev/null 2>&1
 cs=$(hcall tasks.canvasState "[]" "v=>JSON.stringify(v)")
