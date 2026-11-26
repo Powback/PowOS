@@ -14,6 +14,7 @@ export function Mark({ kind }: { kind: string }) {
     cellular: "M4 20v-3M9 20v-7M14 20V9M19 20V4", ethernet: "M4 5h16v10H4zM12 15v5M8 20h8",
     charging: "M14 2L5 13h7l-2 9 9-13h-7z",
     offline: "M5 5l14 14M5 19L19 5", vpn: "M7 10V7a5 5 0 0 1 10 0v3M5 10h14v11H5z",
+    keyboard: "M3 6h18v12H3z M7 10h.01M11 10h.01M15 10h.01M8 14h8",
   };
   return <svg viewBox="0 0 24 24" aria-hidden="true"><path d={paths[kind] ?? paths.offline} /></svg>;
 }

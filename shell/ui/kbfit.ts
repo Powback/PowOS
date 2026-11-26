@@ -56,3 +56,12 @@ export function fitAboveKeyboard(f: Frame, scale: number, o: Fit): Frame {
 export function keyboardTop(keyboard: number | undefined, viewH: number): number {
   return keyboard && keyboard > 0 ? viewH - keyboard : Infinity;
 }
+
+/**
+ * Whether window [key]'s bar has the keyboard button: a Linux window's ("l:"), with a host that takes it ([host]). X11 and
+ * Wine/Proton text fields give no per-field focus signal (a game's window holds KWin's asks), so this is the sure way
+ * to Android's keyboard for them (11-26: the EA app's code field raised nothing). Android apps raise their own.
+ */
+export function hasKeyboardButton(key: string, host: boolean): boolean {
+  return host && key.startsWith("l:");
+}

@@ -1451,6 +1451,8 @@ export interface Bridge {
     pageLayout?(page: number, record: string | null): Promise<boolean>;
     /** Host-optional: window [id] pressed (its bar or body; -1: home outside every window) - Back / Forward go to it (WindowKeys.kt). */
     focus?(id: number): Promise<boolean>;
+    /** Host-optional: Linux window [id]'s keyboard button - Android's keyboard up typing into it, or down if it is up for it. */
+    keyboard?(id: number): Promise<boolean>;
   };
   /**
    * The switcher, a layer of home (ui/recents.tsx). The host drives it: "recents.begin" ({ from, tasks }: a swipe up

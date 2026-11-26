@@ -451,6 +451,35 @@ public final class WebWindowSource {
             tapsOf(handle).setGame(game);
     }
 
+    /**
+     * Main thread: the user's keyboard button on window consumer [handle]'s title bar (ui/webwindows.tsx Controls) - the
+     * keyboard down if it is up for this window, else up typing into it, KWin's ask or not and a game's too. The one sure
+     * path for an X11 text field: Wine/Proton keep IBus's XIM focus on the whole window (no per-field signal), so a game
+     * window's asks are held ([TapKeyboard.setGame]) and the EA app's code field never raised it (11-26). True: up now.
+     */
+    public static boolean toggleKeyboard(long handle) {
+        if (handle == 0)
+            return false;
+        Activity a = hostOf(handle);
+        if (a == null) {
+            Log.w(TAG, "keyboard button for a web window: no home to host it");
+            return false;
+        }
+        SystemIME up = ime;
+        boolean bound;
+        synchronized (IME_LOCK) {
+            bound = imeHandle == handle;
+        }
+        if (bound && up != null && up.ownsKeyboard() && up.isImeVisible()) {
+            Log.i(TAG, "keyboard button: down for a web window");
+            lower(handle);
+            return false;
+        }
+        Log.i(TAG, "keyboard button: up for a web window");
+        raise(a, handle);
+        return true;
+    }
+
     /** Main thread: [nativeKeyboard]'s show or hide. */
     private static void keyboard(Activity a, long handle, boolean visible) {
         TapKeyboard t = tapsOf(handle);

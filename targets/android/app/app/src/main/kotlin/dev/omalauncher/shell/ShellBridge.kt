@@ -720,6 +720,8 @@ class ShellBridge(
             "quickpage.pages" -> QuickPageCatalog.pages(context)
             // The window the user is in (its bar or body pressed; -1: home): Back / Forward go to it (WindowKeys).
             "webwindows.focus" -> webWindowsMade && webWindows.focus(a.getInt(0))
+            // A Linux window's title-bar keyboard button (ui/webwindows.tsx Controls): Android's keyboard into it, or down.
+            "webwindows.keyboard" -> webWindowsMade && webWindows.keyboard(a.getInt(0))
             "qs.set" -> quick.set(a.getString(0), a.getDouble(1)).let { quick.state() }
             "qs.listening" -> quick.listening(a.getBoolean(0))
             // The touch controller overlay (andro.marchy.GamepadOverlay): the control centre's Controller tile.

@@ -17,7 +17,7 @@ import type { HostWebWindow, HostWebWindowsSnapshot, WebWindowRect } from "../ty
 import { Mark } from "./chrome.tsx";
 import { forgetQuickReturn, QuickBar, quickGone, quickIconKeys, quickPlace, quickShown, QUICK, type QuickInfo, type QuickRect } from "./quickpage.tsx";
 import { memo } from "./memo.ts";
-import { fitAboveKeyboard, keyboardTop } from "./kbfit.ts";
+import { fitAboveKeyboard, hasKeyboardButton, keyboardTop } from "./kbfit.ts";
 import { applyHomeKeyboard, setWindowTyping } from "./kbhome.ts";
 import { barReveal, edgeDown, edgeEnd, edgeMove, holdReveal, releaseReveal, revealGone, revealKept } from "./barreveal.ts";
 import { usePresence } from "./reveal.tsx";
@@ -1259,7 +1259,8 @@ function fullBarOn(page: number): WebWin | null {
 /**
  * TB2 (docs/WEB_WINDOWS.md "Title bar: native parity"): a full-screen Linux window's bar, slid in by a pull from the
  * top (WebWindows.revealFull: the host crops the app's layer under it - the app keeps its size - and hides it again
- * 2250 ms after the last touch on it). AOSP's immersive header: the app, then back to a window and close.
+ * 2250 ms after the last touch on it). AOSP's immersive header: the app, then its keyboard (a Linux window's, as the
+ * window bar's), back to a window and close.
  */
 function FullBar({ win, o }: { win: WebWin; o: { x: number; y: number } }) {
   const press = (f: () => void) => ({ onPointerDown: (e: PointerEvent) => e.stopPropagation(), onClick: (e: MouseEvent) => (e.stopPropagation(), f()) });
@@ -1268,6 +1269,11 @@ function FullBar({ win, o }: { win: WebWin; o: { x: number; y: number } }) {
       <BarLabel win={win} aimed={null} merged={false} />
       <div class="ww-spacer" />
       <div class="ww-controls">
+        {hasKeyboardButton(win.key, !!native.value && !!powos.webwindows?.keyboard) && (
+          <button class="ww-button" aria-label="Keyboard" {...press(() => void powos.webwindows?.keyboard?.(win.id))}>
+            <Mark kind="keyboard" />
+          </button>
+        )}
         <button class="ww-button" aria-label="Back to window" {...press(() => void backInWindow(win.id))}>
           <Mark kind="restore" />
         </button>
@@ -3266,16 +3272,21 @@ function snapSlot(x: number, y: number): Slot | null {
 }
 
 /**
- * Its bar's buttons, right to left: close, full screen, minimise, tile (the old native bar's order). Only the id and
- * whether it is maximised: the whole window re-rendered them (4 Marks) on every frame of its drag (render scan 10-31).
+ * Its bar's buttons, right to left: close, full screen, minimise, tile (the old native bar's order), then a Linux window's
+ * keyboard ([hasKeyboardButton]). Only the id and whether it is maximised: the whole window re-rendered them (4 Marks) on every frame of its drag (render scan 10-31).
  */
-const Controls = memo(function Controls({ id, restore }: { id: number; restore: boolean }) {
+const Controls = memo(function Controls({ id, restore, keyboard }: { id: number; restore: boolean; keyboard: boolean }) {
   const press = (f: () => void) => ({
     onPointerDown: (e: PointerEvent) => e.stopPropagation(),
     onClick: (e: MouseEvent) => (e.stopPropagation(), f()),
   });
   return (
     <div class="ww-controls">
+      {keyboard && (
+        <button class="ww-button" aria-label="Keyboard" {...press(() => void powos.webwindows?.keyboard?.(id))}>
+          <Mark kind="keyboard" />
+        </button>
+      )}
       <button class="ww-button" aria-label="Tile" {...press(() => (tileMenu.value = tileMenu.value === id ? null : id))}>
         <Mark kind="tile" />
       </button>
@@ -3513,7 +3524,7 @@ function TitleBar({ win, auto = false }: { win: WebWin; auto?: boolean }) {
       <BarLabel win={win} aimed={aimed} merged={merged} />
       <div class="ww-spacer" />
       <div class={merged ? "tile ww-controls-glass" : "ww-controls-glass"}>
-        <Controls id={win.id} restore={merged} />
+        <Controls id={win.id} restore={merged} keyboard={hasKeyboardButton(win.key, !!native.value && !!powos.webwindows?.keyboard)} />
       </div>
     </div>
   );

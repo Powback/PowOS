@@ -396,6 +396,7 @@ function native(host: NonNullable<Window["PowosHost"]>): Bridge {
       layout: (id, record) => call<boolean>("webwindows.layout", id, record),
       pageLayout: (page, record) => call<boolean>("webwindows.pageLayout", page, record),
       focus: (id) => call<boolean>("webwindows.focus", id),
+      keyboard: (id) => call<boolean>("webwindows.keyboard", id),
     },
     // Quick pages (ui/quickpage.tsx; QuickPages.kt): the phone's only.
     quickpage: host.name === "powos" ? undefined : {

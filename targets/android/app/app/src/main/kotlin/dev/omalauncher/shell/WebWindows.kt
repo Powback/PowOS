@@ -3717,6 +3717,19 @@ class WebWindows(
     }
 
     /**
+     * The page's "webwindows.keyboard": Linux window [id]'s title-bar keyboard button - Android's keyboard up typing into
+     * it (down again if it is up for it), whatever KWin asked: X11/Wine text fields give no per-field signal (11-26 EA
+     * app, a game's window: its asks are held). False: not a live Linux window.
+     */
+    fun keyboard(id: Int): Boolean {
+        val handle = wins[id]?.linux?.handle ?: return false
+        if (handle == 0L) return false
+        WindowLog.i(TAG, "window $id: keyboard button")
+        main.post { andro.marchy.WebWindowSource.toggleKeyboard(handle) }
+        return true
+    }
+
+    /**
      * [key] (Back / Forward) that reached PowOS: pressed on the display of the window the user is in
      * ([WindowKeys.target]) - its app goes back / forward a page, at its root it finishes and the window closes with its
      * task. False: no window is the user's (or no display maker), home's page has it. Any thread.

@@ -417,6 +417,11 @@ frame of drag latency; measure it before turning it on for drags (animations fir
 - The control channel is `WindowTasks.java:19-27`: `open/close/title/decor/move` from KWin, `closed/focus/hello` to it.
 - Text input: `SystemIME.java` (a 1x1 EditText whose ForwardingInputConnection sends text to KWin) plus kwin
   0010/0012/0016 (the Android keyboard follows text focus).
+- Keyboard button (11-26): a Linux window's bar (and its full-screen bar, TB2) has a keyboard button
+  (`kbfit.ts hasKeyboardButton`, `webwindows.keyboard` -> `WebWindowSource.toggleKeyboard`): Android's keyboard up
+  typing into that window's consumer, or down, whatever KWin asked. X11/Wine fields give no per-field focus: Wine keeps
+  IBus's XIM focus on the whole window, so a game window's asks are held (`TapKeyboard.setGame`) and the EA app's code
+  field (Proton, `steam_app_<id>`) raised nothing. The button is the sure path; auto-show stays where a signal exists.
 - `sources/powos-shell/src/desktops.cpp` maps KWin's VirtualDesktopManager over D-Bus (`:11-37`). That is the
   powos-shell (KWin desktop) host and is **not on this path**.
 

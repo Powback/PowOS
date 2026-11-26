@@ -1,7 +1,7 @@
 // KB1: shell/ui/kbfit.ts - the window being typed into ends at the keyboard's top (test-webwindows-kbfit.sh).
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { fitAboveKeyboard, keyboardTop } from "../ui/kbfit.ts";
+import { fitAboveKeyboard, hasKeyboardButton, keyboardTop } from "../ui/kbfit.ts";
 
 const side = { x: 410, y: 40, w: 410, h: 820 }; // a right-pinned tile on the unfolded 821x883 home
 const at = (kbTop: number, originY = 0) => ({ kbTop, originY, topLimit: 24, minH: 160 });
@@ -40,4 +40,12 @@ test("a zoomed window's height is in its unscaled px", () => {
   const f = fitAboveKeyboard({ x: 0, y: 100, w: 400, h: 1000 }, 0.5, at(553));
   assert.equal(f.h, 906); // 453 screen px / 0.5
   assert.equal(f.y, 100);
+});
+
+test("keyboard button: a Linux window's bar has it with a host that takes it; Android and web windows never", () => {
+  assert.equal(hasKeyboardButton("l:steam_app_1238820", true), true); // the EA app under Proton (11-26)
+  assert.equal(hasKeyboardButton("l:org.kde.kwrite", true), true);
+  assert.equal(hasKeyboardButton("l:xterm", false), false); // an older APK: no "webwindows.keyboard"
+  assert.equal(hasKeyboardButton("a:com.android.chrome", true), false);
+  assert.equal(hasKeyboardButton("w:notes", true), false);
 });
