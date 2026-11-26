@@ -860,6 +860,7 @@ class ShellBridge(
             "notifications.open" -> runtime.widgets.notifications.control("open", a.getString(0))
             "notifications.dismiss" -> runtime.widgets.notifications.control("dismiss", a.getString(0))
             "notifications.clearAll" -> runtime.widgets.notifications.clearAll()
+            "notifications.snooze" -> runtime.widgets.notifications.snooze(a.getString(0), a.getLong(1))
             "notifications.action" -> runtime.widgets.notifications.action(a.getString(0), a.getInt(1), a.optString(2).takeIf { !a.isNull(2) && it.isNotEmpty() })
             "notifications.access" -> runtime.widgets.notifications.askAccess()
             // Android widgets are home items too, kept by AppWidgets ("aw:" keys).
@@ -1488,7 +1489,7 @@ class ShellBridge(
         items: List<dev.omalauncher.widgets.runtime.Notifications.Item>,
     ): JSONObject {
         val apps = runtime.androidApps.apps.toList().groupBy { it.component.packageName }
-        return JSONObject().put("available", available).put("items", JSONArray(items.map { notificationJson(it, apps[it.pkg].orEmpty()) }))
+        return JSONObject().put("available", available).put("snooze", true).put("items", JSONArray(items.map { notificationJson(it, apps[it.pkg].orEmpty()) }))
     }
 
     /**

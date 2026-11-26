@@ -77,7 +77,7 @@
 /* The rest: folded to nothing, unfolded to its height. */
 /* No transition of its own: notifmotion.ts grows it (and the group, and its row) on the shell's spring. */
 .notif-rest { display: grid; grid-template-rows: 0fr; }
-.notif-rest > div { min-height: 0; overflow: hidden; display: flex; flex-direction: column; gap: 6px; }
+.notif-rest > div { min-height: 0; overflow: visible clip; /* clip, not hidden: a card slid part way shows its Snooze clock beside it */ display: flex; flex-direction: column; gap: 6px; }
 .notif-stack.open .notif-rest { grid-template-rows: 1fr; }
 .notif-rest > div > .notif:first-child { margin-top: 6px; }
 /*
@@ -167,3 +167,25 @@
 .privacy-kind[data-kind="screen"] { color: var(--privacy-screen); }
 .privacy-kind[data-kind="location"] { color: var(--color-accent); }
 .privacy-chip:not([data-active]) .privacy-kind { color: var(--color-muted); }
+
+/* Snooze (notifications.tsx): a card slid part way shows its clock in the room it left; the choices sit in place of its
+   actions, the clock first. */
+.notif { position: relative; }
+.notif-snooze-peek {
+  position: absolute;
+  top: 50%;
+  width: 44px;
+  height: 44px;
+  margin-top: -22px;
+  display: grid;
+  place-items: center;
+  color: var(--color-foreground);
+  background: var(--soft-fill);
+  border: 0;
+  border-radius: 999px;
+}
+.notif-snooze-peek.left { left: -54px; }
+.notif-snooze-peek.right { right: -54px; }
+.notif-snooze { align-items: center; }
+.notif-snooze > .icon:first-child { margin: 0 2px 0 8px; color: var(--color-muted); }
+.notif-snooze .notif-snooze-cancel { margin-left: auto; color: var(--color-muted); }

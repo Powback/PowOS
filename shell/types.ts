@@ -472,6 +472,8 @@ export interface DesktopWindow {
 export interface NotificationList {
   available: boolean;
   items: PhoneNotification[];
+  /** The host takes notifications.snooze (an older APK doesn't: no Snooze shown). */
+  snooze?: boolean;
 }
 
 /** The colors in use: the launcher's palette as CSS (background, surface, foreground, muted, accent, border, red, ...), and the theme's own by name (color0-15, cursor, ...). */
@@ -1102,6 +1104,8 @@ export interface Bridge {
     access(): Promise<void>;
     /** Presses [key]'s action [index]; [text] is the reply typed into it when it takes one. */
     action(key: string, index: number, text?: string): Promise<void>;
+    /** Snoozes [key] for [ms] (Android posts it again then); rejects when it couldn't. */
+    snooze(key: string, ms: number): Promise<void>;
   };
   /**
    * The assistant's screen (index.html?mode=assist, over another app): what that app's screen showed - its text, an

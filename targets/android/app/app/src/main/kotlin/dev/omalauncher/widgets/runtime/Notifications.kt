@@ -312,6 +312,25 @@ class Notifications(
         }
     }
 
+    /**
+     * Snoozes [key] for [ms] (the shade's and the lock face's Snooze: 15 min, 1 h, 2 h, tomorrow morning) - Android takes
+     * it out of the shade and posts it again then (NotificationListenerService.snoozeNotification). Throws (the bridge
+     * rejects, the page puts the card back) when it can't: no access, a duration out of [snoozeMs]'s range, the
+     * notification gone or one that can't be cleared (ongoing: stock offers no snooze for it either).
+     */
+    fun snooze(
+        key: String,
+        ms: Long,
+    ) {
+        val listener = MediaListener.connected
+        check(media.granted && listener != null) { "no notification access" }
+        val duration = checkNotNull(snoozeMs(ms)) { "can't snooze for $ms ms" }
+        val sbn = runCatching { listener.getActiveNotifications(arrayOf(key)) }.getOrNull()?.firstOrNull()
+        checkNotNull(sbn) { "the notification is gone" }
+        check(sbn.isClearable) { "that notification can't be snoozed" }
+        listener.snoozeNotification(key, duration)
+    }
+
     /** Clears every notification that can be cleared, as the shade's "clear all". */
     fun clearAll() {
         val listener = MediaListener.connected ?: return
@@ -343,6 +362,12 @@ class Notifications(
             keys: List<String>,
             text: String?,
         ): String = if (text.isNullOrBlank()) "nothing to send" else if (keys.isEmpty()) "that action takes no reply: open the app" else "not sent"
+
+        /** The longest snooze taken: "tomorrow morning" from just after midnight is ~32 h; two days leaves room. */
+        internal const val SNOOZE_MAX_MS = 48L * 60 * 60 * 1000
+
+        /** [ms] as a snooze: a minute up to [SNOOZE_MAX_MS]; null (refused) outside it - never a 0 or negative one. */
+        internal fun snoozeMs(ms: Long): Long? = ms.takeIf { it in 60_000L..SNOOZE_MAX_MS }
 
         private const val MAX_ITEMS = 50
         private const val MAX_ALERTED = 200

@@ -292,6 +292,7 @@ function native(host: NonNullable<Window["PowosHost"]>): Bridge {
       clearAll: () => call("notifications.clearAll"),
       access: () => call("notifications.access"),
       action: (key, index, text) => call("notifications.action", key, index, text ?? null),
+      snooze: (key, ms) => call("notifications.snooze", key, ms), // detect: shown only when the list says snooze
     },
     lock: {
       unlock: () => call("lock.unlock"),
@@ -1101,7 +1102,7 @@ function mock(): Bridge {
       list: async () => ({ now: Date.now(), items: [] }),
       open: async (pkg) => (console.log("[mock] permissions of", pkg), ((window as unknown as { __privacyOpened?: string[] }).__privacyOpened ??= []).push(pkg), true),
     },
-    // A few made-up notifications; dismissing and clearing work on them.
+    // A few made-up notifications; dismissing, snoozing (window.__mockSnoozeFail: refused) and clearing work on them.
     notifications: (() => {
       const now = Math.floor(Date.now() / 1000);
       let items: PhoneNotification[] = [
@@ -1145,9 +1146,9 @@ function mock(): Bridge {
         { key: "6", app: "PowOS AI", icon: null, title: "deploy", text: "Search can sit below the dock.", time: now - 300, clearable: true, profile: null },
         { key: "7", app: "PowOS AI", icon: null, title: "deploy", text: "Chat in the drawer is easier to read.", time: now - 900, clearable: true, profile: null },
       ];
-      const changed = () => events.emit("notifications.changed", { available: true, items });
+      const changed = () => events.emit("notifications.changed", { available: true, snooze: true, items });
       return {
-        list: async () => ({ available: true, items }),
+        list: async () => ({ available: true, snooze: true, items }),
         open: async (key: string) => console.log("[mock] open notification", key),
         dismiss: async (key: string) => {
           items = items.filter((n) => n.key !== key);
@@ -1159,6 +1160,7 @@ function mock(): Bridge {
         },
         access: async () => console.log("[mock] notification access"),
         action: async (key: string, index: number, text?: string) => console.log("[mock] notification action", key, index, text),
+        snooze: async (key: string) => (window as { __mockSnoozeFail?: boolean }).__mockSnoozeFail ? Promise.reject(new Error("snooze refused")) : ((items = items.filter((n) => n.key !== key)), changed()),
       };
     })(),
     // Three of Omarchy's themes; picking one recolors the page as the phone's would.

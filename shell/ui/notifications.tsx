@@ -14,6 +14,7 @@ import { useAnchoredOpen } from "./shadeanchor.ts";
 import { ControlCenter } from "./control.tsx";
 import { PrivacyRow } from "./privacy.tsx";
 import { Icon } from "./icons.tsx";
+import { tick } from "./haptics.ts";
 import { animateLayout, closeGap, foldAway } from "./notifmotion.ts";
 import { followNotif, notifOpen, notifShown } from "./gesture.ts";
 import { ago } from "./time.ts";
@@ -104,6 +105,72 @@ const toggleCard = (key: string) => {
   animateLayout(() => (openCards.value = s));
 };
 
+/**
+ * Snooze, as stock's (board task snooze-a-notification): a card slid part way shows a clock beside it, or a long press
+ * opens the choices - 15 min, 1 h, 2 h, tomorrow morning - in the shade and on the lock face. Android takes it out and
+ * posts it again then (notifications.snooze, NotificationListenerService.snoozeNotification). Optimistic: the card
+ * leaves at once ([snoozing] hides it); refused, it comes back.
+ */
+export const snoozing = signal<ReadonlySet<string>>(new Set());
+/** The card showing its Snooze choices; the card slid part way, its clock showing (side: -1 left, 1 right). */
+export const snoozeMenu = signal<string | null>(null);
+const snoozePeek = signal<{ key: string; side: number } | null>(null);
+/** Snoozed and gone from the host's list, or refused: [key] shown again (each change on the spring). */
+const unhide = (key: string) => snoozing.value.has(key) && animateLayout(() => (snoozing.value = new Set([...snoozing.value].filter((k) => k !== key))));
+/** [items] without the ones being snoozed. */
+export const unsnoozed = <T extends { key: string }>(items: T[], hidden: ReadonlySet<string> = snoozing.value) =>
+  hidden.size ? items.filter((n) => !hidden.has(n.key)) : items;
+/** Offered for a card the user could clear (stock: none for an ongoing one), and only by a host that takes it. */
+export const canSnooze = (n: PhoneNotification) => n.clearable && list.value.snooze === true;
+effect(() => {
+  if (!notif.value) snoozePeek.value = snoozeMenu.value = null;
+});
+
+/** Tomorrow at 8:00 (local), from [now]: the "tomorrow morning" choice, in ms. */
+export function untilTomorrowMorning(now = new Date()): number {
+  const at = new Date(now.getFullYear(), now.getMonth(), now.getDate() + 1, 8, 0, 0, 0);
+  return at.getTime() - now.getTime();
+}
+export const SNOOZE_CHOICES: { label: string; ms: () => number }[] = [
+  { label: "15 min", ms: () => 15 * 60_000 },
+  { label: "1 h", ms: () => 60 * 60_000 },
+  { label: "2 h", ms: () => 2 * 60 * 60_000 },
+  { label: "Tomorrow", ms: () => untilTomorrowMorning() },
+];
+
+export function snooze(n: PhoneNotification, ms: number) {
+  snoozeMenu.value = snoozePeek.value = null;
+  animateLayout(() => (snoozing.value = new Set(snoozing.value).add(n.key)));
+  powos.notifications.snooze(n.key, ms).then(
+    // Kept hidden until the host's list has let it go (no flash back in between); then shown again when it returns.
+    () => setTimeout(() => unhide(n.key), 4000),
+    (err) => {
+      console.warn("[notifications] snooze", err);
+      unhide(n.key);
+    },
+  );
+}
+powos.on("notifications.changed", (l: NotificationList) => {
+  for (const k of snoozing.peek()) if (!l.items.some((n) => n.key === k)) unhide(k);
+});
+
+/** A card's Snooze choices (in place of its actions while open); a touch on them is theirs. */
+function SnoozeMenu({ n }: { n: PhoneNotification }) {
+  return (
+    <div class="notif-buttons notif-snooze" role="menu" aria-label="Snooze" onPointerDown={(e) => e.stopPropagation()}>
+      <Icon name="clockOutline" size={16} />
+      {SNOOZE_CHOICES.map((c) => (
+        <button type="button" role="menuitem" key={c.label} onClick={(e) => (e.stopPropagation(), snooze(n, c.ms()))}>
+          {c.label}
+        </button>
+      ))}
+      <button type="button" class="notif-snooze-cancel" aria-label="cancel" onClick={(e) => (e.stopPropagation(), (snoozeMenu.value = null))}>
+        <Icon name="close" size={16} />
+      </button>
+    </div>
+  );
+}
+
 /** The reply typed in place: sent into the notification's action as its inline reply. */
 function Reply({ n, index }: { n: PhoneNotification; index: number }) {
   const [text, setText] = useState("");
@@ -153,6 +220,10 @@ powos.notifications.list().then((l) => (list.value = l), () => {});
 const DISMISS = 0.35;
 const FLICK = 0.6;
 const SLOP = 10;
+/** Slid part way (over 60% of this), let go, a snoozable card rests this far out with its clock beside it. */
+const PEEK_PX = 64;
+/** Held this long still: the Snooze choices. */
+const LONG_MS = 500;
 
 /** PowOS's own: the sender is the group's name already ("PowOS · coder") - not again as its title. */
 function titleIsName(n: PhoneNotification, name?: string): boolean {
@@ -175,58 +246,107 @@ interface CardProps {
   locked?: boolean;
 }
 
-type Drag = { x: number; y: number; t: number; dx: number; sideways: boolean | null };
+type Drag = { x: number; y: number; t: number; dx: number; base: number; sideways: boolean | null; long: boolean; timer: number };
 
-/** A card's touch: slid sideways (a clearable one, never [locked]) it's dismissed, a tap toggles it expanded. */
+/** Held still for [LONG_MS] (a snoozable card): its Snooze choices, and the finger's lift does nothing more. */
+function holdForMenu(n: PhoneNotification, d: Drag) {
+  if (!canSnooze(n)) return;
+  d.timer = window.setTimeout(() => {
+    d.long = true;
+    snoozePeek.value = null;
+    snoozeMenu.value = n.key;
+    tick();
+  }, LONG_MS);
+}
+
+/** The finger moved: past [SLOP], sideways (a card that can go or snooze, not [locked]) it slides the card. */
+function dragCard(card: HTMLElement, d: Drag, e: PointerEvent, slides: boolean) {
+  const dx = e.clientX - d.x;
+  if (d.sideways == null && Math.hypot(dx, e.clientY - d.y) > SLOP) {
+    clearTimeout(d.timer);
+    d.sideways = Math.abs(dx) > Math.abs(e.clientY - d.y) && slides;
+    if (d.sideways) card.setPointerCapture(e.pointerId);
+  }
+  if (!d.sideways) return;
+  d.dx = dx;
+  const x = d.base + dx;
+  card.style.transform = `translateX(${x}px)`;
+  card.style.opacity = String(1 - Math.min(1, Math.max(0, Math.abs(x) - PEEK_PX) / card.clientWidth));
+}
+
+/** Where a card goes back to: in place, out by [PEEK_PX] (its clock showing) or out of sight ([gone]). */
+function settleCard(card: HTMLElement | null, dx: number, gone = dx !== 0) {
+  if (!card) return;
+  card.style.transition = "transform var(--spring-fast-ms) var(--spring-fast), opacity var(--spring-fast-ms) var(--spring-fast)";
+  card.style.transform = dx ? `translateX(${dx}px)` : "";
+  card.style.opacity = gone ? "0" : "";
+}
+
+/** This card slid part way (its side, 0: not); another card slid, the shade shut or a choice made, it goes back. */
+function usePeek(n: PhoneNotification, el: { current: HTMLDivElement | null }, dragging: () => boolean) {
+  const peeked = snoozePeek.value?.key === n.key ? snoozePeek.value.side : 0;
+  const was = useRef(0);
+  useLayoutEffect(() => {
+    if (was.current && !peeked && !dragging()) settleCard(el.current, 0);
+    was.current = peeked;
+  }, [peeked]);
+  return peeked;
+}
+
+/**
+ * A card's touch: slid sideways (a clearable one, never [locked]) it's dismissed - or, let go part way, it rests out with
+ * its Snooze clock beside it; held still, its Snooze choices; a tap toggles it expanded (or puts a slid one back).
+ */
 function useCardGesture(n: PhoneNotification, locked = false) {
   const el = useRef<HTMLDivElement>(null);
   const drag = useRef<Drag | null>(null);
-  const settle = (dx: number) => {
-    const card = el.current!;
-    card.style.transition = "transform var(--spring-fast-ms) var(--spring-fast), opacity var(--spring-fast-ms) var(--spring-fast)";
-    card.style.transform = `translateX(${dx}px)`;
-    card.style.opacity = dx ? "0" : "";
-  };
+  const peeked = usePeek(n, el, () => drag.current != null);
   const release = (d: Drag) => {
     const w = el.current!.clientWidth;
+    const x = d.base + d.dx;
     const v = d.dx / Math.max(1, performance.now() - d.t);
-    if (Math.abs(d.dx) <= w * DISMISS && Math.abs(v) <= FLICK) return settle(0);
-    settle(Math.sign(d.dx) * w);
-    // Slid out, then its gap closes on the spring before it's dismissed (the cards around it move into its place).
-    setTimeout(() => closeGap(el.current!, () => powos.notifications.dismiss(n.key)), 180);
+    if (n.clearable && (Math.abs(x) > w * DISMISS || Math.abs(v) > FLICK)) {
+      snoozePeek.value = null;
+      settleCard(el.current, Math.sign(x) * w);
+      // Slid out, then its gap closes on the spring before it's dismissed (the cards around it move into its place).
+      setTimeout(() => closeGap(el.current!, () => powos.notifications.dismiss(n.key)), 180);
+      return;
+    }
+    const side = canSnooze(n) && Math.abs(x) >= PEEK_PX * 0.6 ? Math.sign(x) : 0;
+    settleCard(el.current, side * PEEK_PX, false);
+    if (side || peeked) snoozePeek.value = side ? { key: n.key, side } : null;
   };
   const handlers = {
     onPointerDown: (e: PointerEvent) => {
-      drag.current = { x: e.clientX, y: e.clientY, t: performance.now(), dx: 0, sideways: null };
+      drag.current = { x: e.clientX, y: e.clientY, t: performance.now(), dx: 0, base: peeked * PEEK_PX, sideways: null, long: false, timer: 0 };
+      holdForMenu(n, drag.current);
       el.current!.style.transition = "none";
     },
     onPointerMove: (e: PointerEvent) => {
       const d = drag.current;
-      if (!d) return;
-      const dx = e.clientX - d.x;
-      const dy = e.clientY - d.y;
-      if (d.sideways == null && Math.hypot(dx, dy) > SLOP) {
-        d.sideways = Math.abs(dx) > Math.abs(dy) && n.clearable && !locked;
-        if (d.sideways) el.current!.setPointerCapture(e.pointerId);
-      }
-      if (!d.sideways) return;
-      d.dx = dx;
-      el.current!.style.transform = `translateX(${dx}px)`;
-      el.current!.style.opacity = String(1 - Math.min(1, Math.abs(dx) / el.current!.clientWidth));
+      if (d && !d.long) dragCard(el.current!, d, e, (n.clearable || canSnooze(n)) && !locked);
     },
     onPointerUp: (e: PointerEvent) => {
       const d = drag.current;
       drag.current = null;
       if (!d) return;
+      clearTimeout(d.timer);
+      if (d.long) return;
       if (d.sideways) release(d);
-      else if (d.sideways == null && Math.hypot(e.clientX - d.x, e.clientY - d.y) <= SLOP) toggleCard(n.key);
+      else if (d.sideways == null && Math.hypot(e.clientX - d.x, e.clientY - d.y) <= SLOP) {
+        if (peeked) snoozePeek.value = null;
+        else toggleCard(n.key);
+      }
     },
     onPointerCancel: () => {
+      clearTimeout(drag.current?.timer);
       drag.current = null;
-      settle(0);
+      settleCard(el.current, peeked * PEEK_PX, false);
     },
+    // A long press is the Snooze choices, never the WebView's own menu.
+    onContextMenu: (e: MouseEvent) => canSnooze(n) && e.preventDefault(),
   };
-  return { el, handlers };
+  return { el, handlers, peeked };
 }
 
 /**
@@ -251,7 +371,7 @@ export function NotifGlyph({ n, fallback, ...attrs }: { n: GroupedNotification; 
 }
 
 export function Card({ n, name, more = 0, class: cls = "", small = false, locked = false }: CardProps) {
-  const { el, handlers } = useCardGesture(n, locked);
+  const { el, handlers, peeked } = useCardGesture(n, locked);
   const open = openCards.value.has(n.key);
   const icon = notifIconSrc(n);
   const picture = (n as GroupedNotification).picture;
@@ -290,9 +410,34 @@ export function Card({ n, name, more = 0, class: cls = "", small = false, locked
           grows the card to it and it fades in (notifications.css) - mounted on open it was 0 tall until it loaded, then
           popped in (§6). */}
       {picture && <img class="notif-picture" src={picture} alt="" />}
-      {!locked && <Actions n={n} onOpen={open ? () => openNotif(n) : undefined} />}
+      <CardFoot n={n} peeked={peeked} locked={locked} open={open} />
       {!locked && replying.value?.key === n.key && <Reply n={n} index={replying.value.index} />}
     </div>
+  );
+}
+
+/**
+ * A card's foot: its actions (an expanded one's Open first), or its Snooze choices while they're open; slid part way, the
+ * clock in the room it left (notifications.css), a tap on it the choices.
+ */
+function CardFoot({ n, peeked, locked, open }: { n: PhoneNotification; peeked: number; locked: boolean; open: boolean }) {
+  const peek = peeked !== 0 && (
+    <button
+      type="button"
+      class={`notif-snooze-peek ${peeked > 0 ? "left" : "right"}`}
+      aria-label="snooze"
+      onPointerDown={(e) => e.stopPropagation()}
+      onClick={(e) => (e.stopPropagation(), (snoozePeek.value = null), (snoozeMenu.value = n.key))}
+    >
+      <Icon name="clockOutline" size={22} />
+    </button>
+  );
+  if (snoozeMenu.value === n.key) return <SnoozeMenu n={n} />;
+  return (
+    <>
+      {peek}
+      {!locked && <Actions n={n} onOpen={open ? () => openNotif(n) : undefined} />}
+    </>
   );
 }
 
@@ -508,7 +653,8 @@ export function NotificationPanel() {
   useEffect(() => {
     if (!shown) replying.value = null;
   }, [shown]);
-  const { available, items } = list.value;
+  const { available } = list.value;
+  const items = unsnoozed(list.value.items);
   const clearable = items.some((n) => n.clearable);
   // The pull's ride (shell.css .notif-items): the room left under the cards and the panel's height, measured when they
   // change size - never per frame (the finger moves --q only).

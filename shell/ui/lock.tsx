@@ -37,7 +37,7 @@ import { powos } from "../bridge.ts";
 import { useMinuteClock } from "./time.ts";
 import type { Battery, NotificationList } from "../types.ts";
 import { chargeLine } from "./charge.ts";
-import { foldAll, grouped, Stack, type Group, type GroupedNotification } from "./notifications.tsx";
+import { foldAll, grouped, snoozing, Stack, unsnoozed, type Group, type GroupedNotification } from "./notifications.tsx";
 import { arrive, leave } from "./notifmotion.ts";
 import { signal } from "@preact/signals";
 import { MediaCard, askAppIcons, askMedia, lockSessions, media, mediaSeen, refreshMedia, useCardDots } from "./media.tsx";
@@ -220,7 +220,9 @@ export function Lock() {
   const seen = useRef(new WeakSet<Element>());
   const [rows, setRows] = useState<Row[]>([]);
   const playing = mediaShown.value;
-  useEffect(() => setRows((prev) => lockRows(prev, lockGroups(list.items as GroupedNotification[], playing))), [list, playing]);
+  // Snoozed from a card's long press (notifications.tsx snooze): gone at once, back if Android refused it.
+  const hidden = snoozing.value;
+  useEffect(() => setRows((prev) => lockRows(prev, lockGroups(unsnoozed(list.items as GroupedNotification[], hidden), playing))), [list, playing, hidden]);
   /** The face's hint line, for a moment something else (a corner shortcut tapped instead of held). */
   const [hint, setHint] = useState<string | null>(null);
   useEffect(() => {

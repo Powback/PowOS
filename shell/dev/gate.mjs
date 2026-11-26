@@ -17400,6 +17400,12 @@ try {
         fails.push(...(await call("stacksOpenEnd", `${label} bottom open`)), ...(await call("stacksMigrate", `${label} migrate`)));
         return fails;
       })));
+  // Snooze (dev/notif-snooze-check.js SZ1-SZ5; board task snooze-a-notification): long press and part-way slide open
+  // the choices, a choice takes the card out at once and a refusal brings it back.
+  if (process.env.SHELL_PAGES !== "0")
+    for (const [label, viewport] of [["folded", { width: 404, height: 900 }]])
+      runs.push(open(browser, `${ORIGIN}/index.html?mode=shade`, `shade-notif-snooze-${label}`, viewport).then((r) => whenReady(r, () =>
+        r.page.evaluate(async (at) => (await importShim("./dev/notif-snooze-check.js")).snooze(at), label))));
   // The pet (ui/pet.tsx): home with local.pet installed, driven through what the user does - shown, touched, each
   // state, a talk bubble, a deploy note, a move - so an error in its effects and timers (2026-10-21: a TDZ in the hop
   // timer's effect threw on every show) fails here; the plain home run never mounts it (the mock has no local.pet).
