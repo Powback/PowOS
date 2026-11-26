@@ -524,8 +524,12 @@ if [ "$CASE" = multi-instance ]; then
 fi
 
 # --- recent-drag -----------------------------------------------------------------------------------------------
-# rdfree <selector>: the first app cell under it with no web window (and not Calculator), "key x y" or "none".
-rdfree() { ev "$WW.then(m=>{const have=new Set(m.webWins.value.map(w=>w.key));const e=[...document.querySelectorAll('$1 .app[data-key]')].find(a=>!have.has(a.dataset.key)&&!a.dataset.key.startsWith('a:$CALC/'));if(!e)return 'none';const r=e.getBoundingClientRect(),d=devicePixelRatio;return e.dataset.key+' '+Math.round((r.x+r.width/2)*d)+' '+Math.round((r.y+r.height/2)*d)})"; }
+# rdfree <selector>: the first app cell under it with no web window (and not Calculator), "key x y" or "none". Never
+# PowOS's Plasma entry (l:$PLASMA): it opens the whole Plasma desktop full screen (DefaultApps PLASMA_COMMAND), not a
+# window - round 1126-1712 dragged it from Suggested, the desktop took the screen, the switcher came up over it, and
+# the letter drag after it pressed on the switcher ("opened no window", never the launcher's drag at all).
+PLASMA=org.powos.plasma
+rdfree() { ev "$WW.then(m=>{const have=new Set(m.webWins.value.map(w=>w.key));const e=[...document.querySelectorAll('$1 .app[data-key]')].find(a=>!have.has(a.dataset.key)&&!a.dataset.key.startsWith('a:$CALC/')&&a.dataset.key!=='l:$PLASMA');if(!e)return 'none';const r=e.getBoundingClientRect(),d=devicePixelRatio;return e.dataset.key+' '+Math.round((r.x+r.width/2)*d)+' '+Math.round((r.y+r.height/2)*d)})"; }
 # rddrag <what> <selector> <hold s> [setup JS]: drags that cell to the page's middle; a web window of its app must open.
 rddrag() {
   [ -n "${4:-}" ] && { ev "$4" >/dev/null; sleep 1.2; }
