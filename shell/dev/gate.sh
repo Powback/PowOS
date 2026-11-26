@@ -413,7 +413,11 @@ hostload_pid=$!
 # its gate was stopped. dev/preview.sh's container takes the label too (GATE_RUN_LABEL).
 # (dev/gate-containers.sh: the label, gc_kill, and the reap of a SIGKILLed gate's containers at the next gate's start.)
 kill_containers() { gc_kill; }
-trap 'kill $hostload_pid 2>/dev/null || true; kill_containers; job_cleanup; rm -rf "$work" ${slot:+"$slot"}' EXIT
+# The verdict line, always: an exit that skipped the summary (a shell error) says so, with its rc.
+# shellcheck disable=SC2154  # grc: assigned inside the trap string
+trap 'grc=$?; [ -n "${gate_verdict:-}" ] || echo "gate: FAIL - ended before its verdict (exit $grc; a gate.sh bug, not the change: see the lines above)"
+  kill $hostload_pid 2>/dev/null || true; kill_containers; job_cleanup; rm -rf "$work" ${slot:+"$slot"}' EXIT
+# From here on no set -e (the retry/widget blocks used to turn it back on until 11-26): every step's rc is read by hand.
 set +e
 # The Mac-wide build slot (tools/agents/build-slot.sh): booting the pages competes for CPU with
 # compile-check/build-pkgs/warm-builder's docker runs, and a fixed READY_MS can't tell a slow page from a
@@ -463,7 +467,6 @@ if [ $rc -ne 0 ] && [ "${GATE_RERUN:-2}" != 0 ] && grep -q '^FAIL ' "$browser_lo
   export GR_HEAD GR_LOAD GR_TREE
   gate_rerun "$browser_log" "$work"
   rc=$?
-  set -e
 elif [ $rc -ne 0 ] && grep -q '^FAIL ' "$browser_log"; then
   failing=$(grep '^FAIL ' "$browser_log" | sed 's/^FAIL \([^:]*\):.*/\1/' | sort -u)
   assert_fail="" retry_names=""
@@ -480,7 +483,6 @@ elif [ $rc -ne 0 ] && grep -q '^FAIL ' "$browser_log"; then
     ( GATE_SCENES=6 browser_run "$retry" "$names" 2 2>&1; echo $? > "$work/browser-retry.rc" ) | tee "$work/browser-retry.log" &
     wait $!
     rrc=$(cat "$work/browser-retry.rc" 2>/dev/null || echo 2)
-    set -e
     while IFS= read -r n; do
       [ -n "$n" ] || continue
       grep -qF "ok   $n (" "$work/browser-retry.log" || { echo "gate: retry: $n did not pass on its retry"; rrc=1; }
@@ -517,9 +519,10 @@ if [ "$widgets" = 1 ]; then
   ts=$(mark)
   "$SHELL_DIR/dev/preview.sh" "${wargs[@]}" > "$work/widgets.log" 2>&1
   wrc=$?
-  set -e
   t_widgets=$(( $(mark) - ts ))
-  grep -E "^(FAIL|known|       |preview:|     owl)" "$work/widgets.log" | sed 's/^FAIL /FAIL widget /' | head -80
+  # || true: a sweep that printed none of these made grep exit 1 - under the old set -e here that ended the gate
+  # silently, no verdict line, rc 1 (11-26 apps ship d3e7e83c1: four ok scenes, then nothing).
+  grep -E "^(FAIL|known|       |preview:|     owl)" "$work/widgets.log" | sed 's/^FAIL /FAIL widget /' | head -80 || true
   # A sweep that died before its verdict line (a shell error, docker refusing a flag) printed nothing the filter
   # above keeps, so the gate said "FAIL" with no reason (11-09 apps ships): show the log's tail then.
   if [ $wrc != 0 ] && ! grep -qE "^(FAIL |preview: )" "$work/widgets.log"; then
@@ -565,7 +568,8 @@ flaky=$(paste -sd' ' - 2>/dev/null < "$work/flaky.txt" || true) n_flaky=$(grep -
 n_retried=$(grep -c '^ok   ' "$work/browser-retry.log" 2>/dev/null || true); [ "${n_retried:-0}" != 0 ] || n_retried=
 echo "gate: summary: scenes $n_ok PASS${n_retried:+ ($n_retried on a retry)}, $(echo "$bad_scenes" | wc -w | tr -d ' ') FAIL${bad_scenes:+ ($bad_scenes)}, ${n_flaky:-0} flaky${flaky:+ ($flaky)}; slot wait ${slot_wait} s; tsc ${t_tsc} s, lints ${t_lint} s, browser ${t_browser} s, widgets ${t_widgets} s"
 [ $fail = 0 ] && [ -z "$shots" ] && echo "$(date +%F\ %T) $scope_note" > "$cache_dir/$cache_key"
-echo "gate: $([ $fail = 0 ] && echo pass || echo FAIL) in $(($(date +%s) - t0)) s ($base$([ -n "$overrides" ] && echo " + phone overrides")$([ ${#files[@]} -gt 0 ] && echo " + ${#files[@]} pushed file(s)"))"
+gate_verdict=1
+echo "gate: $([ $fail = 0 ] && echo pass || echo FAIL) in $(($(date +%s) - t0)) s ($base$([ -n "$overrides" ] && echo " + phone overrides")$([ ${#files[@]} -gt 0 ] && echo " + ${#files[@]} pushed file(s)")) - exit $fail"
 # A failure while the Mac is loaded (1-min load >= GATE_LOAD_FRICTION, 12) is friction: the gate may have failed for
 # the load, not the code (2026-10-23: loads 17-25 timed pages out). Logged in the background, never failing the gate.
 if [ $fail != 0 ]; then

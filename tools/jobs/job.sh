@@ -146,9 +146,12 @@ job_build() {
 # job_gc SVC [KEEP_ID]: SVC's labelled images on JOB_CTX beyond the newest JOB_KEEP_IMAGES (default 8) go, each with
 # the untagged parents its own build created (Created >= its powos.job.t0: the per-run layers). Skipped: KEEP_ID, the
 # gradle pool's image, anything a container uses (rmi refuses it) and any parent another image builds on (rmi refuses
-# it). --no-prune: a removal never cascades into the cached steps below. Prints one line per image removed.
+# it), anything built in the last JOB_GC_GRACE_S (3600) - a run between its build and its container keeps its image.
+# --no-prune: a removal never cascades into the cached steps below. Prints one line per image removed. Bookkeeping:
+# always returns 0, whatever docker says - it never changes a job's verdict.
 job_gc() {
   local svc=$1 keep_id=${2:-} keep=${JOB_KEEP_IMAGES:-8} ids list t0 id tags n=0 iso p next created ntags tag removed
+  local young=$(( $(date +%s) - ${JOB_GC_GRACE_S:-3600} ))
   ids=$(job_bounded 60 docker --context "$JOB_CTX" images -q --no-trunc --filter "label=powos.job=$svc" 2>/dev/null | sort -u) || return 0
   [ -n "$ids" ] || return 0
   # shellcheck disable=SC2086
@@ -159,6 +162,7 @@ job_gc() {
     [ "$n" -gt "$keep" ] || continue
     case "$id" in "$keep_id"|sha256:"$keep_id") continue ;; esac
     case ",$tags," in *:gradle-pool,*) continue ;; esac
+    [ "${t0:-0}" -lt "$young" ] 2>/dev/null || continue
     p=$(job_docker image inspect -f '{{.Parent}}' "$id" 2>/dev/null) || p=""
     removed=""
     if [ -n "$tags" ]; then
@@ -177,6 +181,7 @@ job_gc() {
       p=$next
     done
   done 3<<< "$list" < /dev/null
+  return 0
 }
 
 # job_disk_guard: 0 when the job machine has JOB_MIN_FREE_GB (default 50) free on /var (where its engine keeps images
@@ -190,7 +195,7 @@ job_disk_guard() {
   kb=$(job_bounded 10 ssh -o BatchMode=yes -o ConnectTimeout=5 "$host" df -Pk /var 2>/dev/null | awk 'NR==2 {print $4}') || return 0
   [ -n "$kb" ] || return 0
   gb=$((kb / 1048576))
-  [ "$gb" -lt "$min" ] || return 0
+  [ "$gb" -lt "$min" ] 2>/dev/null || return 0
   echo "job: REFUSED - $JOB_CTX ($host) has ${gb} GB free on /var, under the ${min} GB floor (JOB_MIN_FREE_GB); free space there first (podman system df; tools/jobs/job.sh gc <svc> drops old PowOS job images) - nothing ran" >&2
   return 1
 }
