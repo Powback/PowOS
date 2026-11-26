@@ -4,6 +4,8 @@ description: Use for the PowOS phone's SpacetimeDB (modules, vendored bindings, 
 ---
 
 ## Quick recipe
+- Find code fast: `tools/agents/where "<what>"` first (top files + line + why, ~1 s; `--files <path>` lists its tests/gate
+  scenes/verify scripts), never a wide grep/sed/cat sweep.
 - Files: `apps/<app>/src/lib.rs` (the STDB module), `shell/vendor/<db>.js`+`.d.ts`+`VERSIONS`, `shell/apps/stdb.ts`;
   comms: `lib/ai/comms/{comms.sh,comms-mcp.py}`, `lib/ai/agents/{powos-agents-cli,powos-agentsd}`,
   `lib/ai/manager/manager.py`, Kotlin `AgentMail.kt`; chat rendering: `shell/ui/{rich,chat,powai}.tsx`.

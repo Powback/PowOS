@@ -4,6 +4,8 @@ description: Use for games on the PowOS phone (OnePlus Open) - Steam/Proton unde
 ---
 
 ## Quick recipe
+- Find code fast: `tools/agents/where "<what>"` first (top files + line + why, ~1 s; `--files <path>` lists its tests/gate
+  scenes/verify scripts), never a wide grep/sed/cat sweep.
 - Files: `targets/android/steam/*` (fex-compat-tool, sysvipc), `targets/android/pkgs/steam`, `lib/game.sh`,
   `targets/android/kernel/` (dma-buf patches), checks in `tools/phone/verify/bf-*.sh` / `td-launch.sh`.
 - Build: `targets/android/build-pkgs.sh steam` (needs gitignored inputs from the shared build-inputs cache);

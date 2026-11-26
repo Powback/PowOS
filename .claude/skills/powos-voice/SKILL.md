@@ -10,6 +10,8 @@ that pool installation first; it must never overwrite/build/start/restart the po
 Its duplicate pool sources and manifest are reference-only. The topology below is historical.
 
 ## Quick recipe
+- Find code fast: `tools/agents/where "<what>"` first (top files + line + why, ~1 s; `--files <path>` lists its tests/gate
+  scenes/verify scripts), never a wide grep/sed/cat sweep.
 - Files: `targets/android/app/.../ui/{Speech,GpuSpeech}.kt`, `shell/ui/dictation.ts`, `WhisperJunk.kt`; GPU servers:
   `hosts/gpu-195/{install.sh,bench/*.py}`, `units/<host>/*.json`, `docs/GPU-SERVERS-PLAN.md`.
 - Build: dictation is Kotlin - `tools/phone/compile-check.sh` before pushing. GPU servers: deploy .195 with

@@ -117,7 +117,10 @@ column names the file to load; `.claude/skills/<skill>/SKILL.md` has a `## <old-
   via `idle.sh --wait` (ship-apk.sh, perf-window.sh, journey.sh, window-lock.sh) chunk it at ~4 min per call and
   print a progress line between chunks, instead of holding one Bash call past the model's 5-min prompt-cache
   window - follow that pattern for any new wait, never pass `idle.sh --wait` a multi-minute budget directly.
-- Read narrowly (grep, then `sed -n a,b`); never re-read a file you read. Change code with targeted edits (Edit), not
+- Find code with `tools/agents/where "<what>"` first (11-26: agents spent 30% of 100-150 calls on sed/grep/cat
+  orientation): top 8 files + line + why from commit history, symbols and docs/skills, ~1 s; `where --files <path>`
+  lists a file's tests, gate scenes and verify scripts. Eval: test/tier1/test-where.py (8 real tasks, 8/8 hit).
+- Then read narrowly (grep, then `sed -n a,b`); never re-read a file you read. Change code with targeted edits (Edit), not
   whole-file heredocs.
 - Git: rebase only right before you commit/push, not before every command. Commit subject <= 72 chars, a short body.
 - Tracked files under the gitignored `.claude/` (skills): `git add` refuses them; `git commit -m ... -- <path>` works.
@@ -642,6 +645,7 @@ widened first; out of scope here. `tools/emu/emu.sh` otherwise needed no change 
   ~/.cache/powos-verify-queue/emu/runner.log.
 
 ## Where things live
+- Don't know where? `tools/agents/where "<feature words>"` (see Efficiency).
 - Shell: shell/ (Preact+TS). Pages = modes (`index.html?mode=lock|shade|assist|glasses`, home = no mode). Bridge
   JS<->Kotlin: shell/bridge.ts + shell/types.ts (events list); Kotlin side ShellBridge.kt.
 - Page store: `powos.store.set(name, value)` writes files/shell-data/<name>.json; ShellBridge JSON-quotes a string

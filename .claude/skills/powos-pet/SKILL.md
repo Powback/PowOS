@@ -4,6 +4,8 @@ description: Load when changing or debugging the PowOS pet (shell/ui/pet*.tsx, p
 ---
 
 ## Quick recipe
+- Find code fast: `tools/agents/where "<what>"` first (top files + line + why, ~1 s; `--files <path>` lists its tests/gate
+  scenes/verify scripts), never a wide grep/sed/cat sweep.
 - Files: `shell/ui/pet.tsx`, `petbody.tsx`, `pet.css`, `apps/pet` (SpacetimeDB module `local-pet`), `lib/apps/powos-pet`
   (CLI), `system/PetOverlay.kt`; movement: `shell/ui/{petphys,petai,petmove,petperch}.ts`.
 - Build/regen bindings after a schema change: `apps/vendor.sh pet`; publish: `apps/install.sh pet publish --note "..."`

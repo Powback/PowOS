@@ -1,0 +1,563 @@
+#!/usr/bin/env python3
+"""tools/agents/where: find the code for a feature in one call, instead of 20-50 sed/grep/cat reads.
+
+  tools/agents/where "lock face media"        top ~8 files, each with a line anchor and why it matched
+  tools/agents/where -n 15 "app long-press menu"
+  tools/agents/where --files shell/ui/lock.tsx   tests, gate scenes and verify scripts that cover a file
+  tools/agents/where --before <rev> "..."     rank as of <rev> (history up to <rev>, the tree at <rev>): the eval
+  tools/agents/where --json "..."
+
+WHY: on 11-25 (tools/agents/efficiency.py) agents made 100-150 calls a task and 30% were orientation reads; powgraph
+was disabled on 10-24 and nothing replaced it. This combines three signals, ranked together:
+  1. git history - commit messages here are long and feature-specific: files touched by commits whose message
+     matches the words score, weighted by how much of the query the message covers, damped for huge commits and for
+     files every commit touches (gate.mjs, types.ts).
+  2. symbols - exported TS functions/components/consts, Kotlin classes/objects/funs, bridge calls (`call("x.y")`,
+     `"x.y" ->` in ShellBridge), shell and python functions (regex indexer, no ctags), plus the file's own path words.
+  3. docs + skills - headings and the paths each section of docs/*.md and .claude/skills/*/SKILL.md mentions.
+Index: <git-common-dir>/powos-where/ (shared by every worktree, never committed). History is appended for commits
+not seen yet; symbols are cached per blob sha, so a new HEAD re-reads only the files that changed. Stdlib only.
+Eval (fixed commit range, 8 real tasks from 11-23..11-26): test/tier1/test-where.py - 8/8 tasks hit, 50% recall@8.
+"""
+
+import json
+import math
+import os
+import pickle
+import re
+import subprocess
+import sys
+from collections import defaultdict
+
+STOP = set("the a an of to and in on for with is it its as at by be or from this that into via not no".split())
+CODE_EXT = {".ts", ".tsx", ".js", ".mjs", ".kt", ".java", ".sh", ".py", ".css", ".rs", ".c", ".cpp", ".h", ".json",
+            ".md", ".xml", ".toml", ".service", ".desktop", ".conf", ""}
+SYM_EXT = {".ts", ".tsx", ".js", ".mjs", ".kt", ".java", ".sh", ".py", ".rs", ".c", ".cpp", ".h", ""}
+MAX_FILES_PER_COMMIT = 60          # a sweep/rename commit says nothing about any one file
+VERSION = 3
+# Ranking weights (history, symbols/path, docs) and the damping for files many commits touch: tuned on
+# test/tier1/test-where.py (8/8 tasks hit, 50% recall@8); env overrides are for re-tuning only.
+W = [float(x) for x in os.environ.get('WHERE_W', '1,0.7,0.15').split(',')]
+TOUCH_EXP = float(os.environ.get('WHERE_TOUCH', '0.3'))
+DEBUG = {} if os.environ.get('WHERE_DEBUG') else None
+
+
+# /usr/bin/git is Apple's xcrun shim (an extra exec per call); the real binary when it's there
+GIT = next((g for g in ("/Library/Developer/CommandLineTools/usr/bin/git", "/Applications/Xcode.app/Contents/Developer/usr/bin/git")
+            if os.access(g, os.X_OK)), "git")
+
+
+def git(*args, inp=None):
+    # close_fds=False lets subprocess use posix_spawn (a fork of this process cost ~0.17 s each on the Mac)
+    return subprocess.run([GIT, *args], input=inp, capture_output=True, check=True, close_fds=False).stdout
+
+
+def split_ident(s):
+    """camelCase / snake / kebab / dotted -> lowercase words."""
+    s = re.sub(r"([a-z0-9])([A-Z])", r"\1 \2", s)
+    s = re.sub(r"([A-Z]+)([A-Z][a-z])", r"\1 \2", s)
+    return [w for w in re.split(r"[^A-Za-z0-9]+", s.lower()) if w]
+
+
+def stem(w):
+    if len(w) > 4 and w.endswith("ies"):
+        return w[:-3] + "y"
+    if len(w) > 3 and w.endswith("s") and not w.endswith("ss"):
+        return w[:-1]
+    return w
+
+
+def words(s):
+    return [stem(w) for w in split_ident(s) if len(w) >= 2 and w not in STOP and not w.isdigit()]
+
+
+# ---------------------------------------------------------------- symbols / docs extraction (per blob)
+
+SYM_RES = {
+    "ts": [
+        (re.compile(r"^\s*export\s+(?:default\s+)?(?:async\s+)?(?:function\*?|class|const|let|interface|type|enum)\s+([A-Za-z_$][\w$]*)"), "export"),
+        (re.compile(r"^(?:async\s+)?function\s+([A-Za-z_$][\w$]*)"), "fn"),
+        (re.compile(r"^const\s+([A-Z][\w$]*)\s*=\s*(?:\(|memo|forwardRef)"), "component"),
+        (re.compile(r"""\bcall(?:<[^>]*>)?\(\s*["']([a-zA-Z]\w*\.[\w.]+)["']"""), "bridge"),
+    ],
+    "kt": [
+        (re.compile(r"^\s*(?:(?:private|internal|public|open|abstract|sealed|data|enum|inner|annotation|value)\s+)*(?:class|object|interface)\s+([A-Za-z_]\w*)"), "class"),
+        (re.compile(r"^\s*(?:(?:private|internal|public|override|suspend|inline|operator|open|protected)\s+)*fun\s+(?:<[^>]*>\s*)?(?:[\w.]+\.)?([A-Za-z_]\w*)\s*\("), "fun"),
+        (re.compile(r"""^\s*"([a-zA-Z]\w*\.[\w.]+)"(?:\s*,\s*"[\w.]+")*\s*->"""), "bridge"),
+    ],
+    "sh": [
+        (re.compile(r"^\s*(?:function\s+)?([A-Za-z_][\w:-]*)\s*\(\)\s*\{?"), "fn"),
+    ],
+    "py": [
+        (re.compile(r"^\s*(?:async\s+)?def\s+([A-Za-z_]\w*)"), "def"),
+        (re.compile(r"^class\s+([A-Za-z_]\w*)"), "class"),
+    ],
+    "c": [
+        (re.compile(r"^[A-Za-z_][\w\s\*]*?\b([A-Za-z_]\w*)\s*\([^;]*$"), "fn"),
+    ],
+}
+LANG = {".ts": "ts", ".tsx": "ts", ".js": "ts", ".mjs": "ts", ".kt": "kt", ".java": "kt", ".sh": "sh", "": "sh",
+        ".py": "py", ".c": "c", ".cpp": "c", ".h": "c", ".rs": "c"}
+PATHISH = re.compile(r"(?<![\w/])((?:[\w.-]+/|\.\.\./)*[\w.-]*(?:\{[\w.,-]+\}[\w.-]*)?\.(?:tsx?|kt|sh|py|mjs|js|css|md|json|java|xml))\b"
+                     r"|(?<![\w/])((?:shell|lib|tools|targets|bin|docs|test|units|apps|config)/[\w./{},-]+)")
+
+
+def expand_braces(p):
+    m = re.search(r"\{([^{}]*)\}", p)
+    if not m:
+        return [p]
+    out = []
+    for alt in m.group(1).split(","):
+        out += expand_braces(p[:m.start()] + alt + p[m.end():])
+    return out
+
+
+def extract(path, text):
+    """-> list of (kind, line, name, words)."""
+    ext = os.path.splitext(path)[1]
+    out = []
+    lines = text.split("\n")
+    if ext == ".md":
+        head = ""
+        hline = 1
+        for i, ln in enumerate(lines, 1):
+            if ln.startswith("#"):
+                head = ln.lstrip("#").strip()
+                hline = i
+                out.append(("head", i, head[:100], words(head)))
+                continue
+            for m in PATHISH.finditer(ln):
+                ref = (m.group(1) or m.group(2)).rstrip(".,)`'\"")
+                for r in expand_braces(ref):
+                    out.append(("ref", i, r, words(head) + words(ln[:300])))
+        return out
+    lang = LANG.get(ext)
+    if lang is None or (ext == "" and not text.startswith("#!")):
+        return out
+    res = SYM_RES[lang]
+    for i, ln in enumerate(lines, 1):
+        if len(ln) > 400:
+            continue
+        for rx, kind in res:
+            for m in rx.finditer(ln) if kind == "bridge" else [rx.match(ln)]:
+                if m:
+                    name = m.group(1)
+                    if kind == "fn" and lang == "c" and name in ("if", "while", "for", "switch", "return"):
+                        continue
+                    out.append((kind, i, name, words(name)))
+    return out
+
+
+# ---------------------------------------------------------------- index
+
+class Index:
+    def __init__(self, rev=None):
+        # one spawn: process start-up dominates a warm run, so HEAD's sha and the index file key the caches below
+        self.top, common, gitdir, self.head = git("rev-parse", "--path-format=absolute", "--show-toplevel",
+                                                  "--git-common-dir", "--git-dir", rev or "HEAD").decode().split("\n")[:4]
+        self.index_file = os.path.join(gitdir, "index")
+        self.dir = os.environ.get("POWOS_WHERE_CACHE") or os.path.join(common, "powos-where")
+        os.makedirs(self.dir, exist_ok=True)
+        self.rev = rev
+        self.hist = self._load("history.pkl", {"v": VERSION, "commits": {}})
+        self.syms = self._load("symbols.pkl", {"v": VERSION, "blobs": {}})
+        self.dirty = set()
+
+    def _load(self, name, default):
+        try:
+            with open(os.path.join(self.dir, name), "rb") as f:
+                d = pickle.load(f)
+            if d.get("v") == VERSION:
+                return d
+        except Exception:
+            pass
+        return default
+
+    def save(self):
+        for name in self.dirty:
+            obj = self.hist if name == "history.pkl" else self.syms
+            tmp = os.path.join(self.dir, name + ".tmp%d" % os.getpid())
+            with open(tmp, "wb") as f:
+                pickle.dump(obj, f, protocol=pickle.HIGHEST_PROTOCOL)
+            os.replace(tmp, os.path.join(self.dir, name))
+
+    # history -----------------------------------------------------------
+    def commits(self):
+        tips = self.hist.setdefault("tips", {})
+        shas = tips.get(self.head)
+        if shas is None:
+            shas = git("rev-list", "--no-merges", self.head).decode().split()
+            if len(tips) > 20:
+                tips.clear()
+            tips[self.head] = shas
+            self.dirty.add("history.pkl")
+        known = self.hist["commits"]
+        missing = [s for s in shas if s not in known]
+        if missing:
+            raw = git("log", "--no-walk=unsorted", "--stdin", "--format=%x01%H%x02%ct%x02%B%x02", "--name-only",
+                      inp="\n".join(missing).encode()).decode("utf-8", "replace")
+            for rec in raw.split("\x01")[1:]:
+                parts = rec.split("\x02")
+                if len(parts) < 4:
+                    continue
+                sha, ct, msg, files = parts[0], int(parts[1]), parts[2], [f for f in parts[3].split("\n") if f]
+                known[sha] = (ct, msg.strip().split("\n")[0][:160], frozenset(words(msg)), tuple(files))
+            self.dirty.add("history.pkl")
+        return [(s, known[s]) for s in shas if s in known]
+
+    # tree --------------------------------------------------------------
+    def tree(self):
+        """-> {path: blob} for the index (worktree) or <rev>."""
+        if self.rev:
+            raw = git("ls-tree", "-r", "-z", self.rev).decode("utf-8", "replace")
+            out = {}
+            for ent in raw.split("\0"):
+                if not ent:
+                    continue
+                meta, path = ent.split("\t", 1)
+                mode, typ, blob = meta.split()
+                if typ == "blob":
+                    out[path] = blob
+            return out
+        try:
+            key = (self.index_file, os.stat(self.index_file).st_mtime_ns)
+        except OSError:
+            key = None
+        cached = self.syms.get("lsfiles")
+        if key and cached and cached[0] == key:
+            return cached[1]
+        raw = git("ls-files", "-s", "-z").decode("utf-8", "replace")
+        out = {}
+        for ent in raw.split("\0"):
+            if ent:
+                meta, path = ent.split("\t", 1)
+                out[path] = meta.split()[1]
+        self.syms["lsfiles"] = (key, out)
+        self.dirty.add("symbols.pkl")
+        return out
+
+    def symbols(self, tree):
+        blobs = self.syms["blobs"]
+        want = [(p, b) for p, b in tree.items() if b not in blobs and os.path.splitext(p)[1] in CODE_EXT
+                and "node_modules/" not in p]
+        if want:
+            proc = subprocess.Popen([GIT, "cat-file", "--batch"], stdin=subprocess.PIPE, stdout=subprocess.PIPE)
+            inp = ("\n".join(b for _, b in want) + "\n").encode()
+            import threading
+            threading.Thread(target=lambda: (proc.stdin.write(inp), proc.stdin.close()), daemon=True).start()
+            for p, b in want:
+                hdr = proc.stdout.readline().split()
+                if len(hdr) < 3 or hdr[1] != b"blob":
+                    blobs[b] = []
+                    continue
+                n = int(hdr[2])
+                data = proc.stdout.read(n)
+                proc.stdout.read(1)
+                if n > 600_000 or b"\0" in data[:8000]:
+                    blobs[b] = []
+                    continue
+                blobs[b] = extract(p, data.decode("utf-8", "replace"))
+            proc.wait()
+            self.dirty.add("symbols.pkl")
+        return {p: blobs.get(b, []) for p, b in tree.items()}
+
+
+# ---------------------------------------------------------------- ranking
+
+def match_strength(q, w):
+    """query word q vs indexed word w -> 0..1."""
+    if q == w:
+        return 1.0
+    a, b = (q, w) if len(q) <= len(w) else (w, q)
+    if len(a) >= 3 and b.startswith(a):
+        return 0.75 if len(a) >= 4 else 0.5
+    return 0.0
+
+
+def is_hub(path):
+    return path.endswith(("/types.ts", "dev/gate.mjs", "dev/shots.mjs", "/shell.css", "AndroidManifest.xml",
+                          "values/strings.xml", "detekt-baseline.xml", "complexity-baseline.json"))
+
+
+def rank(query, rev=None, n=8):
+    idx = Index(rev)
+    qw = []
+    for w in words(query):
+        if w not in qw:
+            qw.append(w)
+    if not qw:
+        return idx, [], []
+    commits = idx.commits()
+    tree = idx.tree()
+    syms = idx.symbols(tree)
+    idx.save()
+
+    # vocabulary -> idf over commit messages (common words like "shell" weigh less)
+    ncom = max(1, len(commits))
+    df = defaultdict(int)
+    for _, (_, _, ws, _) in commits:
+        for w in ws:
+            df[w] += 1
+    vocab_cache = {}
+
+    def expand(q):
+        if q not in vocab_cache:
+            vocab_cache[q] = {w: s for w in df if (s := match_strength(q, w)) > 0}
+        return vocab_cache[q]
+
+    idf = {}
+    for q in qw:
+        best = max(expand(q).items(), key=lambda kv: kv[1] * 10 + df[kv[0]] / ncom, default=None)
+        d = df.get(q) or (df[best[0]] if best else 0)
+        idf[q] = math.log((ncom + 1) / (d + 1)) + 0.5
+    tot_idf = sum(idf.values())
+
+    memo = {q: {} for q in qw}
+
+    def strength(q, w):
+        m = memo[q]
+        s = m.get(w)
+        if s is None:
+            s = m[w] = match_strength(q, w)
+        return s
+
+    def coverage(wordset):
+        """-> (weighted fraction of the query words present, per-word strengths)."""
+        got = {}
+        for q in qw:
+            if q in wordset:
+                got[q] = 1.0
+                continue
+            s = 0.0
+            for w in wordset:
+                t = strength(q, w)
+                if t > s:
+                    s = t
+            if s:
+                got[q] = s
+        return sum(idf[q] * s for q, s in got.items()) / tot_idf, got
+
+    # 1. history
+    hist = defaultdict(float)
+    hist_why = {}
+    touch = defaultdict(int)
+    newest = max((c[0] for _, c in commits), default=0)
+    for sha, (ct, subj, ws, files) in commits:
+        for f in files:
+            touch[f] += 1
+    for sha, (ct, subj, ws, files) in commits:
+        if not files or len(files) > MAX_FILES_PER_COMMIT:
+            continue
+        cov, _ = coverage(ws)
+        if cov < 0.34:
+            continue
+        age_days = (newest - ct) / 86400
+        w = cov ** 3 * (1.0 + 1.0 / (1.0 + age_days / 14)) / math.log2(2 + len(files))
+        for f in files:
+            if f not in tree:
+                continue
+            hist[f] += w / touch[f] ** TOUCH_EXP
+            if f not in hist_why or hist_why[f][0] < w:
+                hist_why[f] = (w, sha[:8], subj)
+
+    # 2. symbols + path words, 3. docs
+    stat = {}
+    stat_why = {}
+    docs = defaultdict(float)
+    doc_why = {}
+    by_base = defaultdict(list)
+    for p in tree:
+        by_base[os.path.basename(p)].append(p)
+    for p, ents in syms.items():
+        if "node_modules/" in p:
+            continue
+        pw = words(os.path.splitext(os.path.basename(p))[0])
+        dw = words(os.path.dirname(p))[-3:]
+        best_s, best_line, best_name = 0.0, 0, ""
+        pcov, _ = coverage(set(pw))
+        dcov, _ = coverage(set(dw))
+        for kind, line, name, ws in ents:
+            if kind == "ref" or kind == "head" or not ws:
+                continue
+            c, _ = coverage(set(ws))
+            if kind == "bridge":
+                c *= 1.1
+            if c > best_s:
+                best_s, best_line, best_name = c, line, "%s %s" % (kind, name)
+        s = max(pcov * 1.2, best_s, 0.4 * dcov) + 0.25 * min(pcov, best_s) + 0.1 * dcov
+        if s > 0:
+            stat[p] = s
+            stat_why[p] = (best_line, best_name if best_s >= pcov else "path")
+        if p.endswith(".md") and (p.startswith("docs/") or "/skills/" in p or p.count("/") == 0):
+            for kind, line, name, ws in ents:
+                if kind == "head":
+                    c, _ = coverage(set(ws))
+                    if c >= 0.5 and c * 0.8 > docs.get(p, 0):
+                        docs[p] = c * 0.8
+                        doc_why[p] = (line, "doc heading '%s'" % name[:60])
+                elif kind == "ref":
+                    c, _ = coverage(set(ws))
+                    if c < 0.5:
+                        continue
+                    r = name.replace(".../", "")
+                    targets = [r] if r in tree else [t for t in by_base.get(os.path.basename(r), [])
+                                                      if t.endswith(r.split("/", 1)[-1]) or "/" not in r]
+                    if len(targets) > 3:
+                        continue
+                    for t in targets:
+                        if c > docs.get(t, 0):
+                            docs[t] = c
+                            doc_why[t] = (0, "%s:%d" % (p, line))
+
+    hmax = max(hist.values(), default=0) or 1.0
+    scores = {}
+    for f in set(hist) | set(stat) | set(docs):
+        h = hist.get(f, 0) / hmax
+        s = stat.get(f, 0)
+        d = docs.get(f, 0)
+        sc = W[0] * math.sqrt(h) + W[1] * s ** 2 + W[2] * d
+        if DEBUG is not None: DEBUG[f] = (round(h, 3), round(s, 3), round(d, 3))
+        if is_hub(f):
+            sc *= 0.6
+        if "/test/" in f or f.startswith("test/") or "Test." in f:
+            sc *= 0.8
+        scores[f] = sc
+    top = sorted(scores, key=lambda f: -scores[f])[:n]
+
+    out = []
+    for f in top:
+        why = []
+        line = stat_why.get(f, (0, ""))[0]
+        if f in stat and stat_why[f][1] != "path":
+            why.append(stat_why[f][1])
+        elif f in stat and stat[f] >= 0.5:
+            why.append("name")
+        if f in hist:
+            why.append("%s '%s'" % (hist_why[f][1], hist_why[f][2][:70]))
+        if f in docs:
+            why.append(doc_why[f][1])
+            if not line and doc_why[f][0]:
+                line = doc_why[f][0]
+        if not line:
+            line = anchor(idx.top, f, qw, rev)
+        out.append({"file": f, "line": line or 1, "score": round(scores[f], 3), "why": "; ".join(why)})
+    return idx, qw, out
+
+
+def anchor(top, path, qw, rev):
+    """line with the most query words (first one), for files that matched only by history/docs."""
+    try:
+        if rev:
+            text = git("show", "%s:%s" % (rev, path)).decode("utf-8", "replace")
+        else:
+            with open(os.path.join(top, path), encoding="utf-8", errors="replace") as f:
+                text = f.read(400_000)
+    except Exception:
+        return 1
+    best, bl = 0, 1
+    for i, ln in enumerate(text.split("\n"), 1):
+        low = ln.lower()
+        k = sum(1 for q in qw if q in low)
+        if k > best:
+            best, bl = k, i
+            if k == len(qw):
+                break
+    return bl
+
+
+# ---------------------------------------------------------------- --files
+
+def covers(path, rev=None):
+    idx = Index(rev)
+    commits = idx.commits()
+    tree = idx.tree()
+    idx.save()
+    out = []
+    # gate scenes: shell/dev/gate-scope.map (first matching glob wins; none -> ALL)
+    if path.startswith("shell/"):
+        import fnmatch
+        rel = path[len("shell/"):]
+        scene = "ALL (no line in gate-scope.map)"
+        try:
+            with open(os.path.join(idx.top, "shell/dev/gate-scope.map")) as f:
+                for ln in f:
+                    ln = ln.strip()
+                    if not ln or ln.startswith("#"):
+                        continue
+                    g, s = ln.split(None, 1)
+                    if fnmatch.fnmatchcase(rel, g):
+                        scene = s
+                        break
+        except OSError:
+            pass
+        out.append(("gate", "shell/dev/gate.sh (scenes %s)" % scene, "gate-scope.map"))
+    stemw = os.path.splitext(os.path.basename(path))[0]
+    sl = stemw.lower()
+
+    def is_test(f):
+        return ("/test/" in f or f.startswith("test/") or "Test." in f or ".test." in f or "/verify/" in f
+                or f.endswith("-check.js") or "-test." in f)
+    for f in tree:
+        if not is_test(f) or f == path:
+            continue
+        b = os.path.basename(f).lower()
+        if len(sl) >= 3 and (b.startswith(sl + "test.") or b.startswith(sl + ".test.") or
+                             re.search(r"(^|[-_])%s([-_.]|$)" % re.escape(sl), b)):
+            out.append(("verify" if "/verify/" in f else "test", f, "name"))
+    co = defaultdict(int)
+    for _, (_, _, _, files) in commits:
+        if path in files and len(files) <= MAX_FILES_PER_COMMIT:
+            for f in files:
+                if f != path and is_test(f) and f in tree:
+                    co[f] += 1
+    seen = {o[1] for o in out}
+    for f, k in sorted(co.items(), key=lambda kv: -kv[1])[:12]:
+        if f not in seen:
+            out.append(("test" if "/verify/" not in f else "verify", f, "co-changed in %d commits" % k))
+    return out
+
+
+def main(argv):
+    rev, n, js, files = None, 8, False, None
+    rest = []
+    it = iter(argv)
+    for a in it:
+        if a == "--before":
+            rev = next(it)
+        elif a == "-n":
+            n = int(next(it))
+        elif a == "--json":
+            js = True
+        elif a == "--files":
+            files = next(it)
+        elif a in ("-h", "--help"):
+            print(__doc__)
+            return 0
+        else:
+            rest.append(a)
+    if files:
+        res = covers(files, rev)
+        if js:
+            print(json.dumps([{"kind": k, "what": w, "why": y} for k, w, y in res], indent=1))
+        else:
+            for k, w, y in res:
+                print("%-6s %s  (%s)" % (k, w, y))
+            if not res:
+                print("no tests found for %s" % files)
+        return 0
+    if not rest:
+        print(__doc__)
+        return 2
+    _, _, res = rank(" ".join(rest), rev, n)
+    if js:
+        print(json.dumps(res, indent=1))
+        return 0
+    for r in res:
+        print("%s:%d  %s" % (r["file"], r["line"], r["why"]))
+    if not res:
+        print("nothing matched; try other words (feature, screen, or a symbol name)")
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main(sys.argv[1:]))

@@ -4,6 +4,8 @@ description: Use to reach, inspect, ship to, verify, or measure perf on the PowO
 ---
 
 ## Quick recipe
+- Find code fast: `tools/agents/where "<what>"` first (top files + line + why, ~1 s; `--files <path>` lists its tests/gate
+  scenes/verify scripts), never a wide grep/sed/cat sweep.
 - Files: `tools/phone/{adb,root,user,idle,cdp,ship,ship-apk,shot,cpu,idle-sample,review-image,app-src,bindings-check,bridge-check}.sh`
   (one adb call each), `tools/phone/verify/*.sh` (131 checks, header says where it runs), `queue.sh`, shared libs
   `e2e-lib.sh`/`bf-lib.sh`.

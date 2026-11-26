@@ -4,6 +4,8 @@ description: Use when working on PowOS window tasks - floating Android windows (
 ---
 
 ## Quick recipe
+- Find code fast: `tools/agents/where "<what>"` first (top files + line + why, ~1 s; `--files <path>` lists its tests/gate
+  scenes/verify scripts), never a wide grep/sed/cat sweep.
 - Files: `targets/android/app/.../system/{WindowFrames,FreeformTasks,NavGesture,RecentsTransition,AppWindows,
   TaskLeash,WindowTasks,OemCaption}.kt`, `shell/ui/recents.tsx`, `shell/hosts/wide.ts`, `sources/powos-shell/` (Qt
   desktop host), `shell/hosts/desktop.ts`+`layout.ts`, `shell/ui/desktop.tsx`/`.css`. KWin:

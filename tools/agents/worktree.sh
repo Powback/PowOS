@@ -124,6 +124,8 @@ new)
   # needs it and a fresh worktree's offline gradle can't build it (friction f402). owl-jar.sh puts in the one built
   # from these exact sources - from the shared cache, or seeded from powos-multiplatform's when its sources match.
   [ ! -x "$d/shell/dev/owl-jar.sh" ] || OWL_JAR_FROM=$PMP "$d/shell/dev/owl-jar.sh" "$d" >/dev/null 2>&1 || true
+  # The hint goes to stderr: stdout stays just the path, for callers that capture it (d=$(worktree.sh new x)).
+  echo "find code fast: cd $d && tools/agents/where \"<what>\" (top files + line + why; --files <path> = its tests), never a wide grep" >&2
   echo "$d" ;;
 done)
   n=${2:?name}; d=$(find_wt "$n")

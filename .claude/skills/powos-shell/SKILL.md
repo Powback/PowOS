@@ -4,6 +4,8 @@ description: Use before any visual change on the PowOS phone shell - design lang
 ---
 
 ## Quick recipe
+- Find code fast: `tools/agents/where "<what>"` first (top files + line + why, ~1 s; `--files <path>` lists its tests/gate
+  scenes/verify scripts), never a wide grep/sed/cat sweep.
 - Files: `shell/theme.css`/`shell/ui/shell.css` (tokens, frost/CC/shade), `shell/ui/{shade,control,pending,drawer,
   gesture,owl,bridge,quicktools,pull}.tsx`/`.ts`, `shell/apps/native.ts`, native: `targets/android/app/.../shell/
   {GlassBlur,Frost,ShellHost}.kt`, `.../system/{EdgeGestures,OverlayHost,QuickToolsHost,PullHost,GestureMonitor}.kt`.
