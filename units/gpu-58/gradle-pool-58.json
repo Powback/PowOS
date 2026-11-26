@@ -1,0 +1,31 @@
+{
+  "id": "gradle-pool-58",
+  "name": "PowOS warm Gradle pool (.58)",
+  "kind": "container",
+  "owner": "system:powos-build",
+  "host": "pow58",
+  "purpose": "powos-gradle-pool: the gradle-pool service of tools/jobs/compose.yml - warm Gradle daemons for agents' Kotlin compile checks (tools/phone/compile-check.sh) and JVM unit tests (tools/agents/jvm-offload.sh), each worktree synced into its own /work/<checkout>, at most POOL_SLOTS (3) builds at once. Under nomad.slice (.58's 24-thread job cap). Idle: daemons exit after 2 h, the container ends itself after POOL_IDLE_H (2) h without a run; the next run starts it again",
+  "installedBy": "tools/jobs/gradle-pool.sh run (on demand, docker --context pow58 compose -p powos-gradle-pool up gradle-pool)",
+  "files": [
+    "podman volume powos-jobs-gradle-pool (its Gradle home, seeded once from powos-jobs-gradle)",
+    "podman volume powos-jobs-gradle-pool-work (per-worktree sources + build dirs)",
+    "podman image powos-jobs-apk:gradle-pool"
+  ],
+  "processes": [
+    {
+      "match": "podman container powos-gradle-pool"
+    }
+  ],
+  "limits": {
+    "memory": "20g",
+    "cpus": "8"
+  },
+  "remove": {
+    "stop": [
+      "tools/jobs/gradle-pool.sh stop"
+    ],
+    "files": [
+      "docker --context pow58 volume rm powos-jobs-gradle-pool powos-jobs-gradle-pool-work"
+    ]
+  }
+}

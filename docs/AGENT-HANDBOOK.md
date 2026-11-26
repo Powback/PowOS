@@ -163,7 +163,10 @@ column names the file to load; `.claude/skills/<skill>/SKILL.md` has a `## <old-
   (.58: rootless podman; the hub: dockerd); its `docker` is `tools/jobs/docker-sibling.sh` (bind mounts copied into
   the sibling containers), so complexity detekt/clippy, loopback-unix and publish-repo run there. The widget sweep
   (`shell/dev/preview.sh`) and the JVM tests (`tools/agents/jvm-offload.sh`) are jobs too (gate / apk services):
-  there is no ssh/rsync route to .58 any more (GATE_HOST and offload.sh are gone).
+  there is no ssh/rsync route to .58 any more (GATE_HOST and offload.sh are gone). `tools/phone/compile-check.sh` and
+  `jvm-offload.sh` run on the warm Gradle pool there first (`tools/jobs/gradle-pool.sh`, compose service
+  `gradle-pool`: ~5 s warm compile, 3 builds at once, each worktree incremental); the Mac warm builder is the fallback
+  and stays the ship's APK builder. A fresh `worktree.sh new` is ready for all of these (it prints `ready: ...`).
 - Run single tests with `python3 test/tier1/x.py` or `bash test/tier1/x.sh` when they don't need bash 4.
 - Phone checks only via `tools/phone/verify/queue.sh`, with the emulator first (`--dev emu`).
 - Colima's docker socket to mount into containers is `/var/run/docker.sock` (inside the VM); `~/.colima/default/docker.sock` is a Mac-side relay and can't be mounted.

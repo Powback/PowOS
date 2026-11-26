@@ -4,6 +4,7 @@
 #   tier1  test/tier1/run-all.sh                      (tools/agents/tier1.sh)
 #   gate   the shell gate's headless-Chromium runs    (shell/dev/gate.sh: gate.mjs scenes, shots.mjs renders)
 #   apk    the Android app's assembleDebug, unsigned  (targets/android/build-app.sh; signed on the hub, keys never leave it)
+#   gradle-pool  warm Gradle daemons for compile checks + JVM tests (tools/jobs/gradle-pool.sh), long-lived, idle-ended
 # Limits: .58 is shared with other projects - these three together stay at 24 of its 32 threads. cgroup_parent
 # nomad.slice puts every job under .58's one hard cap for all job work (the user unit nomad.slice: CPUQuota 2400%,
 # MemoryMax 128G, also where Nomad's podman jobs run; PowStation/docs/COMPUTE.md "Hard limits"); without it a job
@@ -38,6 +39,13 @@ x-pow:
       access:
         exposure: none
         authentication: none
+    gradle-pool:
+      role: build-job
+      lifecycle:
+        policy: job
+      access:
+        exposure: none
+        authentication: none
   datasets:
     gradle:
       role: cache
@@ -49,6 +57,23 @@ x-pow:
       cleanup: allowed
       mounts:
         - {service: tier1, target: /root/.npm}
+    gradle-pool:
+      role: cache
+      cleanup: allowed
+      note: The warm pool's Gradle home and each worktree's synced source + build dirs (/work); seeded from gradle.
+      mounts:
+        - {service: gradle-pool, target: /root/.gradle}
+    gradle-pool-work:
+      role: scratch
+      cleanup: allowed
+      mounts:
+        - {service: gradle-pool, target: /work}
+    gradle-seed:
+      role: borrowed-state
+      cleanup: never
+      note: The apk job's Gradle home, read once to seed a new pool's (downloaded dependencies, Gradle distributions).
+      mounts:
+        - {service: gradle-pool, target: /seed}
     gate-tx:
       role: cache
       cleanup: allowed
@@ -128,9 +153,39 @@ services:
       io.powos.unit: powos-jobs.apk
       io.powos.autosleep: never
 
+  # The warm Gradle pool (tools/jobs/gradle-pool.sh: compile-check.sh, jvm-offload.sh): one long-lived container whose
+  # Gradle daemons stay up between runs - no image build, JVM, Gradle or Kotlin start per check, and no one-at-a-time
+  # lock (the Mac warm builder's, up to 20 min of waiting 11-25). Each worktree syncs its working state into its own
+  # /work/<checkout> (incremental per worktree); at most POOL_SLOTS builds at once (flock inside, waits are printed).
+  # The image is the apk job's (same SDK). Its own Gradle home (another container's daemons can't be asked to
+  # release a shared one's locks: f62), seeded once from the apk job's. Ends itself after POOL_IDLE_H (2) idle hours.
+  gradle-pool:
+    image: powos-jobs-apk:gradle-pool
+    container_name: powos-gradle-pool
+    cgroup_parent: nomad.slice
+    cpus: 8
+    mem_limit: 20g
+    init: true
+    environment:
+      POOL_IDLE_H: "2"
+    entrypoint: ["bash", "-c"]
+    command:
+      - 'touch /tmp/last-run; while [ $$(( $$(date +%s) - $$(stat -c %Y /tmp/last-run) )) -lt $$(( POOL_IDLE_H * 3600 )) ]; do sleep 120; done'
+    volumes:
+      - gradle-pool:/root/.gradle
+      - gradle-pool-work:/work
+      - gradle:/seed:ro
+    labels:
+      io.powos.unit: powos-jobs.gradle-pool
+      io.powos.autosleep: never
+
 volumes:
   gradle:
     name: powos-jobs-gradle
+  gradle-pool:
+    name: powos-jobs-gradle-pool
+  gradle-pool-work:
+    name: powos-jobs-gradle-pool-work
   npm:
     name: powos-jobs-npm
   gate-tx:

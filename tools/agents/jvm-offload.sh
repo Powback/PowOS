@@ -5,7 +5,8 @@
 # (default pow58: .58; not answering within 5 s -> the hub, said so), the job's Gradle home volume, its cpus cap.
 #
 # WHY: the Mac at load 40-60 times the ship's JVM step out (rc=124); .58 runs it natively on amd64.
-# Exit: gradle's rc; 2 = staging or the image build failed.
+# Exit: gradle's rc; 2 = staging or the image build failed. Runs on the warm Gradle pool (tools/jobs/gradle-pool.sh) when
+# it's up, the one-shot job otherwise.
 #
 #   tools/agents/jvm-offload.sh                      # from any directory of a PowOS checkout
 #   tools/agents/jvm-offload.sh :app:testDebugUnitTest :owl:test
@@ -30,6 +31,13 @@ done
   echo "jvm-offload.sh: stale PowStream native staging; run bash sources/powstream/build-android.sh for the pinned revision" >&2
   exit 2
 }
+# The warm Gradle pool first (tools/jobs/gradle-pool.sh: no image build, a warm daemon, this worktree's incremental
+# state; several worktrees at once). Exit 3 = no pool: the one-shot apk job below. JVM_OFFLOAD_POOL=0 skips the pool.
+if [ "${JVM_OFFLOAD_POOL:-1}" != 0 ]; then
+  set +e; "$HERE/../jobs/gradle-pool.sh" run "$@"; rc=$?; set -e
+  [ $rc = 3 ] || exit $rc
+  echo "jvm-offload.sh: no Gradle pool - the one-shot apk job" >&2
+fi
 t0=$(date +%s)
 job_init jvm
 src=$(mktemp -d "${XDG_CACHE_HOME:-$HOME/.cache}/powos-jobs-src.XXXXXX")

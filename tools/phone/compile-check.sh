@@ -22,8 +22,18 @@ app=/Projects${root#$mnt}/targets/android/app
 # The warm path first (targets/android/tools/warm-builder.sh compile): a long-lived Gradle daemon, seconds instead of a
 # cold JVM + Gradle + Kotlin start, and it queues on its own tiny lock - no Mac-wide build slot. Exit 3 = the builder
 # itself was unavailable: fall back to the cold throwaway container below.
+# First the warm Gradle pool on the job machine (tools/jobs/gradle-pool.sh, .58): several checks at once, each worktree
+# incremental, ~5 s warm - 11-25 compile checks were 17% of agent tool time queued one at a time on the warm builder's
+# lock below (up to 20 min). Exit 3 = no pool (.58 down, POW_JOB_CONTEXT=hub): the warm builder. COMPILE_POOL=0 skips it.
 out=""
-if [ "${COMPILE_COLD:-0}" != 1 ]; then
+if [ "${COMPILE_COLD:-0}" != 1 ] && [ "${COMPILE_POOL:-1}" != 0 ]; then
+    tag=$(basename "$root" | tr 'A-Z' 'a-z' | tr -c 'a-z0-9_.\n-' _ | tr -d '\n' | cut -c1-60)
+    out=$(cd "$root" && "$root/tools/jobs/gradle-pool.sh" run :app:compileDebugKotlin 2>&1); prc=$?
+    if [ $prc = 3 ]; then echo "compile-check: no Gradle pool ($(echo "$out" | tail -1)) - the warm builder" >&2; out=""
+    else out=$(echo "$out" | sed "s|file:///work/$tag/|file://$root/|g; s|/work/$tag/|$root/|g")   # errors name this worktree's files
+    fi
+fi
+if [ -z "$out" ] && [ "${COMPILE_COLD:-0}" != 1 ]; then
     out=$("$root/targets/android/tools/warm-builder.sh" compile "$root/targets/android/app" 2>&1); wrc=$?
     [ $wrc = 3 ] && { echo "compile-check: warm builder unavailable, cold build" >&2; out=""; }
 fi
