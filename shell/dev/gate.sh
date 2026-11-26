@@ -88,7 +88,11 @@ host_load=$(sysctl -n vm.loadavg 2>/dev/null | awk '{print $2}'); host_cpus=$(sy
 # Under $HOME, not $TMPDIR: Colima's VM mounts the home folder only (a /var/folders path is empty in the container).
 mkdir -p "${XDG_CACHE_HOME:-$HOME/.cache}/powos-gate"
 # The slots (2026-10-23: ~8 agents gated at once, Mac load 17 - pages timed out and retried with longer READY_MS, and
-# the ship service's pre-gate of the user's APK install waited 10+ min). At most GATE_SLOTS (2) agent gates at once,
+# the ship service's pre-gate of the user's APK install waited 10+ min). The browser half runs as the gate job on .58
+# (below), so the Mac only carries tsc and the lints: when the job machine answers (a 5 s probe, as job.sh's), up to
+# GATE_SLOTS_JOB (6: .58's job cap is 24 threads, ~4 per gate) agent gates run at once; when it doesn't, or
+# POW_JOB_CONTEXT=hub, GATE_SLOTS (2) - the hub runs the browsers itself then. 11-25: gate waits were 21% of agent tool
+# time with 2 slots while .58 sat mostly idle. GATE_SLOTS set explicitly wins in both cases. At most that many agent gates at once,
 # the rest wait; the ship's gate (GATE_PRIORITY=ship: ship.sh, ship-apk.sh, push.sh --pre-gate) never waits - a slot
 # of its own - and while it runs no new agent gate starts. A slot is a mkdir lock under slots/ with its pid; a dead
 # pid's is reclaimed. Agent gates run niced, their containers at --cpu-shares 256 (the ship's at the default 1024).
@@ -104,20 +108,30 @@ reap() { local d; for d in "$slots"/*; do [ -d "$d" ] && ! slot_live "$d" && rm 
 running() { local d n=0; for d in "$slots"/*; do [ -d "$d" ] && slot_live "$d" && n=$((n + 1)); done; echo $n; }
 trap 'rm -rf ${slot:+"$slot"}' EXIT
 trap 'exit 130' INT TERM HUP ALRM
+# gate_slots: the agent slot count for this run (above). The probe's answer is exported as JOB_CTX_RESOLVED, so the
+# gate job below doesn't probe again.
+gate_slots() {
+  [ -z "${GATE_SLOTS:-}" ] || { echo "$GATE_SLOTS"; return; }
+  local want=${POW_JOB_CONTEXT:-pow58}
+  if [ "$want" != hub ] &&
+     perl -e 'alarm 5; exec @ARGV' docker --context "$want" version --format '{{.Server.Version}}' >/dev/null 2>&1; then
+    echo "${GATE_SLOTS_JOB:-6}"
+  else echo 2; fi
+}
 if [ "${GATE_PRIORITY:-}" = ship ]; then
   rm -rf "$slots/ship.$$"; slot_take "$slots/ship.$$"
   cpu=""
 else
-  said=""
+  said="" nslots=$(gate_slots)
   while :; do
     reap
     # The ship's gate used to stop every agent gate while it ran (GATE_SHIP_EXCLUSIVE=1 brings that back); its priority
     # is now CPU shares (1024 vs 256) and nice, so agents don't sit idle behind it.
     if [ -z "${GATE_SHIP_EXCLUSIVE:-}" ] || ! ls -d "$slots"/ship.* >/dev/null 2>&1; then
-      for i in $(seq 0 $((${GATE_SLOTS:-4} - 1))); do slot_take "$slots/agent.$i" && break; done
+      for i in $(seq 0 $((nslots - 1))); do slot_take "$slots/agent.$i" && break; done
       [ -n "$slot" ] && break
     fi
-    [ -n "$said" ] || { echo "gate: waiting for a slot ($(running) running)"; said=1; }
+    [ -n "$said" ] || { echo "gate: waiting for a slot ($(running) running, $nslots agent slots)"; said=1; }
     sleep "${GATE_SLOT_POLL_S:-2}"
   done
   slot_wait=$(($(date +%s) - t0))
