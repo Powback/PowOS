@@ -62,17 +62,7 @@ object SearchSources {
         val prefs = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
         if (missing.isEmpty() || prefs.getBoolean(ASKED, false)) return "done"
         prefs.edit().putBoolean(ASKED, true).apply()
-        if (andro.marchy.RootMode.enabled()) {
-            val pkg = context.packageName
-            Executors.newSingleThreadExecutor().execute {
-                for (p in missing) {
-                    val r = andro.marchy.RootShell.run("pm grant $pkg $p")
-                    Log.i(TAG, "pm grant $p: ${if (r.code == 0) "ok" else r.output}")
-                }
-                answered()
-            }
-            return "granted"
-        }
+        if (andro.marchy.RootMode.enabled()) return rootGrant(context.packageName, missing)
         // The launcher overlay has no activity of its own: a transparent one asks (as HealthGrantActivity does).
         if (activity != null) {
             activity.requestPermissions(missing.toTypedArray(), REQUEST)
@@ -80,6 +70,21 @@ object SearchSources {
             context.startActivity(Intent(context, SearchGrantActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
         }
         return "asked"
+    }
+
+    /** Rooted: granted with pm grant (no dialog), then the open searches run again. */
+    private fun rootGrant(
+        pkg: String,
+        missing: List<String>,
+    ): String {
+        Executors.newSingleThreadExecutor().execute {
+            for (p in missing) {
+                val r = andro.marchy.RootShell.run("pm grant $pkg $p")
+                Log.i(TAG, "pm grant $p: ${if (r.code == 0) "ok" else r.output}")
+            }
+            answered()
+        }
+        return "granted"
     }
 
     /** The answer came ([Activity.onRequestPermissionsResult]): every open search runs again with what it may read now. */
@@ -124,29 +129,35 @@ object SearchSources {
         val out = JSONArray()
         val q = text.trim().lowercase()
         if (q.isEmpty() || MEDIA.none { granted(context, it) }) return out
-        val recent = q == "recent" || q == "recent files"
-        val words = if (recent) emptyList() else q.split(Regex("\\s+")).filter { it.isNotEmpty() }
+        val query = fileQuery(q)
+        val cols = arrayOf(MediaStore.MediaColumns._ID, MediaStore.MediaColumns.DISPLAY_NAME, MediaStore.MediaColumns.MIME_TYPE, MediaStore.MediaColumns.RELATIVE_PATH, MediaStore.MediaColumns.DATE_MODIFIED, MediaStore.MediaColumns.SIZE)
+        runCatching {
+            context.contentResolver.query(MediaStore.Files.getContentUri(MediaStore.VOLUME_EXTERNAL), cols, query, null)?.use { c ->
+                while (c.moveToNext() && out.length() < LIMIT) fileRow(c)?.let { out.put(it) }
+            }
+        }.onFailure { Log.w(TAG, "files query failed", it) }
+        return out
+    }
+
+    /** The MediaStore query: every word in the name (LIKE, escaped), files only, newest first; "recent": any name. */
+    private fun fileQuery(q: String): Bundle {
+        val words = if (q == "recent" || q == "recent files") emptyList() else q.split(Regex("\\s+")).filter { it.isNotEmpty() }
         val selection = (listOf("${MediaStore.MediaColumns.MIME_TYPE} IS NOT NULL") +
             words.map { "${MediaStore.MediaColumns.DISPLAY_NAME} LIKE ? ESCAPE '\\'" }).joinToString(" AND ")
         val args = words.map { "%" + it.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_") + "%" }.toTypedArray()
-        val query = Bundle().apply {
+        return Bundle().apply {
             putString(ContentResolver.QUERY_ARG_SQL_SELECTION, selection)
             putStringArray(ContentResolver.QUERY_ARG_SQL_SELECTION_ARGS, args)
             putString(ContentResolver.QUERY_ARG_SQL_SORT_ORDER, "${MediaStore.MediaColumns.DATE_MODIFIED} DESC")
             putInt(ContentResolver.QUERY_ARG_LIMIT, LIMIT)
         }
-        val cols = arrayOf(MediaStore.MediaColumns._ID, MediaStore.MediaColumns.DISPLAY_NAME, MediaStore.MediaColumns.MIME_TYPE, MediaStore.MediaColumns.RELATIVE_PATH, MediaStore.MediaColumns.DATE_MODIFIED, MediaStore.MediaColumns.SIZE)
-        runCatching {
-            context.contentResolver.query(MediaStore.Files.getContentUri(MediaStore.VOLUME_EXTERNAL), cols, query, null)?.use { c ->
-                while (c.moveToNext() && out.length() < LIMIT) {
-                    out.put(
-                        JSONObject().put("id", c.getLong(0).toString()).put("name", c.getString(1) ?: continue).put("mime", c.getString(2))
-                            .put("folder", (c.getString(3) ?: "").trimEnd('/')).put("modified", c.getLong(4) * 1000).put("size", c.getLong(5)),
-                    )
-                }
-            }
-        }.onFailure { Log.w(TAG, "files query failed", it) }
-        return out
+    }
+
+    /** One row of [files]' cursor (id, name, mime, relative path, modified s, size); null: no name. */
+    private fun fileRow(c: android.database.Cursor): JSONObject? {
+        val name = c.getString(1) ?: return null
+        return JSONObject().put("id", c.getLong(0).toString()).put("name", name).put("mime", c.getString(2))
+            .put("folder", (c.getString(3) ?: "").trimEnd('/')).put("modified", c.getLong(4) * 1000).put("size", c.getLong(5))
     }
 
     /** Opens result [id] of [kind]: "contact" its card, "call" the dialer with its number, "file" in its viewer. False: it can't. */
@@ -169,16 +180,18 @@ object SearchSources {
         val n = id.toLongOrNull() ?: return null
         val any = ContentUris.withAppendedId(MediaStore.Files.getContentUri(MediaStore.VOLUME_EXTERNAL), n)
         val mime = runCatching { context.contentResolver.query(any, arrayOf(MediaStore.MediaColumns.MIME_TYPE), null, null, null)?.use { if (it.moveToFirst()) it.getString(0) else null } }.getOrNull() ?: return null
-        // The media's own collection where it is one: viewers take those URIs more readily than the generic files one.
-        val base = when {
+        val uri = mediaCollection(mime)?.let { ContentUris.withAppendedId(it, n) } ?: any
+        return Intent(Intent.ACTION_VIEW).setDataAndType(uri, mime).addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+    }
+
+    /** The media's own collection where it is one: viewers take those URIs more readily than the generic files one. */
+    private fun mediaCollection(mime: String): Uri? =
+        when {
             mime.startsWith("image/") -> MediaStore.Images.Media.EXTERNAL_CONTENT_URI
             mime.startsWith("video/") -> MediaStore.Video.Media.EXTERNAL_CONTENT_URI
             mime.startsWith("audio/") -> MediaStore.Audio.Media.EXTERNAL_CONTENT_URI
             else -> null
         }
-        val uri = base?.let { ContentUris.withAppendedId(it, n) } ?: any
-        return Intent(Intent.ACTION_VIEW).setDataAndType(uri, mime).addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
-    }
 
     /** "Search the web for [text]": the phone's web search (its search app), else the default browser's search page. */
     fun web(context: Context, text: String): Boolean {
