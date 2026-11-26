@@ -105,6 +105,9 @@ export function dropOut(c: Carry, x: number, y: number): boolean {
   tick();
   // A PowOS app is a page of home's own (no task to split or float): it opens as a tap opens it.
   if (a.key.startsWith(PREFIX)) void launch(a.key);
+  // Plasma (App.desktop): a window of its own on home where the ghost was (openDesktopPlaced); no half or Android
+  // floating window for it (it is PowOS's own activity, no app task to split) - there, as its tap opens it.
+  else if (byKey.value.get(a.key)?.desktop) void (a.place ? openDesktopPlaced(a.key, a.place) : launch(a.key));
   else if (a.place) void openPlaced(a.key, a.place);
   else void (a.zone === "window" ? openWindowed(a.key) : openSplit(a.key, a.zone));
   return true;
@@ -154,6 +157,12 @@ async function openWindowed(key: string) {
 async function openPlaced(key: string, p: Place) {
   const label = byKey.value.get(key)?.label ?? key;
   if (!(await openWindowAt(key, label, p))) await openWindowed(key);
+}
+
+/** Plasma at [p] (the ghost's rect): its desktop in a web window; where it can't be one, it opens as its tap does. */
+async function openDesktopPlaced(key: string, p: Place) {
+  const label = byKey.value.get(key)?.label ?? key;
+  if (!(await openWindowAt(key, label, p, true))) await launch(key);
 }
 
 /** The ghost of where the carried dock app goes ([outAim]): the tiles' drop look (webwindows.tsx DropPreview). */

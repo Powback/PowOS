@@ -518,6 +518,9 @@ class ShellBridge(
             "webwindows.enabled" -> (activity != null && webWindows.also { webWindowsMade = true }.enabled()).also { if (it) webWindows.warmHelper() else if (webWindowsMade) webWindows.coolHelper() }
             "webwindows.open" ->
                 if (activity == null) -1
+                // Plasma itself (PLASMA_COMMAND) carried out onto home: its desktop activity in a window of its own
+                // (WebWindows.openDesktop), never a KWin toplevel nor the full-screen desktop a tap opens.
+                else if (a.optInt(3, -1) < 0 && plasmaApp(a.getString(0)) != null) webWindows.also { webWindowsMade = true }.openDesktop(a.getString(0), plasmaApp(a.getString(0))!!.name, a.getJSONObject(1))
                 // A Linux window KWin opened ("webwindows.adopt" with its KWin id): its consumer in a web window.
                 else if (a.getString(0).startsWith("l:")) webWindows.also { webWindowsMade = true }.openLinux(a.optInt(3, -1), a.getJSONObject(1))
                 // A quick page's card (QuickPages, "quickpage.show"): its own display, its held page started there.
@@ -975,6 +978,10 @@ class ShellBridge(
         }
         return list
     }
+
+    /** Linux app [key] ("l:<id>") when it is Plasma itself (PLASMA_COMMAND: the whole desktop), else null. */
+    private fun plasmaApp(key: String) =
+        if (!key.startsWith("l:")) null else runtime.linuxApps.firstOrNull { "l:${it.id}" == key && it.exec == dev.omalauncher.linux.PLASMA_COMMAND }
 
     /** The launcher overlay up at once ([dev.omalauncher.system.PullHost.open]); false: no overlay host (no recents service). */
     private fun launcherOpen(kind: String, how: JSONObject?): Boolean {

@@ -221,6 +221,7 @@ class WebWindows(
         appOf: (ComponentName) -> Pair<String, String>?,
     ): Pair<String, String> =
         w.quick?.let { QuickPageRoute.key(it) to (QuickPages.entry(it)?.label ?: w.component.packageName) }
+            ?: w.desktop
             ?: w.web?.let { url -> WebApps.idOf(url)?.let { id -> "w:$id" to (WebApps.get(context, id)?.name ?: id) } }
             ?: appOf(w.component) ?: ("a:${w.component.packageName}" to w.component.packageName)
 
@@ -690,7 +691,7 @@ class WebWindows(
 
     /** One window: its container layer, its display (-1 until the helper made it), its mirror (once WM knows the display). */
     /** What [make]'s window shows besides its app: a quick page's token, or an installed web app's URL ([openWeb]). */
-    private class Made(val quick: String? = null, val web: String? = null)
+    private class Made(val quick: String? = null, val web: String? = null, val desktop: Pair<String, String>? = null)
 
     private class Win(
         val id: Int,
@@ -707,6 +708,9 @@ class WebWindows(
 
         /** An installed `.pow` web app's URL (WebApps; [openWeb]): its window shows WebAppActivity on it, null: an app's. */
         var web: String? = null
+
+        /** Plasma's desktop ([openDesktop]): its drawer key and name ("l:org.powos.plasma"), null: an app's window. */
+        var desktop: Pair<String, String>? = null
 
         /** TS1: its content zoom (the user's pinch, [zoom]) and its display's dpi at it ([WindowDpi.zoomed]): every resize at it. */
         var zoom = 1.0
@@ -1123,6 +1127,33 @@ class WebWindows(
         return make(component, rect, LaunchReuse.Decision.New, Made(web = url))
     }
 
+    /**
+     * Plasma (Linux app [key], PLASMA_COMMAND) carried out onto home (board dragging-plasma-out-of-the-launcher-opens-it-in,
+     * 11-26): its desktop activity ([andro.marchy.MainActivity], KWin's output) on a display of its own in a web window at
+     * [rect], [label] its title - never the full-screen desktop a tap opens. KWin's output follows the activity's surface,
+     * so a resize re-lays Plasma out at the window's size (MainActivity.surfaceChanged). One desktop: its window already
+     * is that one ("webwindows.show"); its task running elsewhere (behind home) moves in. -1: none (setting off).
+     */
+    fun openDesktop(
+        key: String,
+        label: String,
+        rect: JSONObject,
+    ): Int {
+        val component = ComponentName(context, andro.marchy.MainActivity::class.java)
+        if (!openable(component, component.packageName)) return -1
+        wins.values.firstOrNull { !it.closed && it.desktop != null }?.let {
+            WindowLog.i(TAG, "Plasma: window ${it.id} has the desktop already: raised")
+            emit("webwindows.show", it.id)
+            return it.id
+        }
+        @Suppress("DEPRECATION")
+        val task =
+            runCatching { context.getSystemService(android.app.ActivityManager::class.java).getRunningTasks(MAX_TASKS) }.getOrDefault(emptyList())
+                .firstOrNull { it.baseActivity == component || it.topActivity == component }?.taskId ?: -1
+        WindowLog.i(TAG, "Plasma as a web window: desktop task $task (-1: launched on the window's display)")
+        return make(component, rect, if (task >= 0) LaunchReuse.Decision.Adopt(task) else LaunchReuse.Decision.New, Made(desktop = key to label))
+    }
+
     /** Web windows on and [component] resizeable; else false, its held launch ([held]'s key) let go the old way. */
     private fun openable(
         component: ComponentName,
@@ -1158,6 +1189,7 @@ class WebWindows(
         win.adopt = adopt
         win.quick = made.quick
         win.web = made.web
+        win.desktop = made.desktop
         win.apart = how is LaunchReuse.Decision.Apart
         win.another = how is LaunchReuse.Decision.Another
         wins[id] = win
@@ -1192,7 +1224,7 @@ class WebWindows(
         task: Int,
     ): Int? {
         val pkg = component.packageName
-        val w = wins.values.firstOrNull { it.linux == null && !it.closed && it.quick == null && it.component.packageName == pkg } ?: return null
+        val w = wins.values.firstOrNull { it.linux == null && !it.closed && it.quick == null && it.desktop == null && it.component.packageName == pkg } ?: return null
         if (task >= 0 && task != w.taskId && !secondTask(w, task)) return null
         WindowLog.i(TAG, "open $pkg task $task: window ${w.id} (display ${w.displayId}) has the app already: raised, no second display")
         emit("webwindows.show", w.id)
@@ -1236,7 +1268,7 @@ class WebWindows(
 
     /** [LaunchReuse]'s windows: every live Android window (main thread). */
     private fun liveWindows(): List<LaunchReuse.Window> =
-        wins.values.filter { it.linux == null && !it.closed && it.quick == null }.map { LaunchReuse.Window(it.id, it.component.packageName, it.taskId, it.displayId) }
+        wins.values.filter { it.linux == null && !it.closed && it.quick == null && it.desktop == null }.map { LaunchReuse.Window(it.id, it.component.packageName, it.taskId, it.displayId) }
 
     /** [LaunchReuse]'s running tasks with their displays (empty: not readable - a new window then, as before). */
     private fun runningTasks(): List<LaunchReuse.Task> {

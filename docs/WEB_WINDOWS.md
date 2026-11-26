@@ -430,6 +430,20 @@ as an app natively". Trigger on the phone: the session D-Bus was restarted under
 detects that (KWin running > 30 s, no `org.kde.KWin` owner) and starts the command at once instead of waiting 30 s.
 Real fix of the trigger: the session restarts KWin with its bus (or never restarts the bus alone).
 
+**Plasma dragged out = Plasma in a web window (2026-11-26, board dragging-plasma-out-of-the-launcher-opens-it-in).**
+Plasma (`l:org.powos.plasma`, `App.desktop`) carried out of the launcher or the dock onto unfolded home took over the
+whole screen ("desktop 1", home stopped): the drop went `dockout.tsx dropOut -> openWindowAt -> linuxWindow ->
+linuxPlaceholder -> apps.launch`, and `Runtime.launch` opens `PLASMA_COMMAND` as `showDesktop()` (MainActivity full
+screen). Now a drop opens it like an Android app: `dockout.tsx openDesktopPlaced -> openWindowAt(.., desktop) ->
+desktopWindow -> openHost` -> host `webwindows.open` for Plasma's key (no KWin id) -> `WebWindows.openDesktop`:
+MainActivity on the window's display (its running task moved in, else launched there; one desktop window, a second drop
+fronts it). KWin's output follows MainActivity's surface (`surfaceChanged -> startNative`), so a resize re-lays Plasma
+out at the window's size. MainActivity off display 0 does not count as "the desktop on screen"
+(`MainActivity.countShown`): KWin stays at `desktop 0` / `export-new 1`, so windows opened from home - or from Kickoff
+inside that window - become home's web windows, and launches don't bring home in front of it (`Runtime.homeFirst`). A
+tap still opens Plasma full screen (`state.ts openAsWebWindow` declines `App.desktop`); folded / setting off a drop
+opens it as the tap does. Check: gate `dock-dragout-plasma`.
+
 **Key reuse:** the Linux producer already writes one toplevel into Android-owned buffers with no CPU copy. Web
 windows only change *whose* Surface that is: a child of home's surface instead of an activity's own.
 

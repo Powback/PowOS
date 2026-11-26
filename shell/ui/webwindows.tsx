@@ -1806,16 +1806,31 @@ export function placeWindow(id: number, rect: Box) {
  * Linux: a second process with its own placeholder (a new toplevel takes only a waiting placeholder, never the running
  * window). Its id, or null (not a web window).
  */
-export async function openNewWindow(key: string, label: string, page: number): Promise<number | null> {
+export async function openNewWindow(key: string, label: string, page: number, desktop = false): Promise<number | null> {
+  if (desktop) return desktopWindow(key, label, page);
   if (!webWins.value.some((w) => w.key === key && !w.failed)) return key.startsWith("l:") ? linuxWindow(key, label, page) : openWindow(key, label, page);
   if (!wideHome.value || !(await enabled())) return null;
   if (key.startsWith("l:")) return linuxPlaceholder(key, label, page);
   return key.startsWith("a:") ? openHost(key, label, page, true) : null;
 }
 
-/** A new window for app [key] on [page] at [p] (the dock's drag-out): false when it can't be a web window. */
-export async function openWindowAt(key: string, label: string, p: Place): Promise<boolean> {
-  const id = await openNewWindow(key, label, p.page);
+/**
+ * Plasma (App.desktop, "l:org.powos.plasma") carried out of the launcher or the dock (board dragging-plasma-out-of-the-
+ * launcher-opens-it-in, 11-26: it took over the whole screen, "desktop 1", home stopped): its desktop activity on a
+ * display of its own in a web window, as an Android app's - the host's "webwindows.open" for its key
+ * (WebWindows.openDesktop); KWin's output follows that window's size. Never a Linux placeholder: Plasma opens no KWin
+ * toplevel. Its window already: that one comes here (one desktop). A tap still opens it full screen (state.ts
+ * openAsWebWindow). Null: not a web window here (folded, the setting off).
+ */
+async function desktopWindow(key: string, label: string, page: number): Promise<number | null> {
+  if (!wideHome.value || !(await enabled())) return null;
+  for (const w of webWins.value.filter((v) => v.key === key && v.failed)) close(w.id);
+  return existingWindow(key, page) ?? openHost(key, label, page, false);
+}
+
+/** A new window for app [key] on [page] at [p] (the dock's drag-out; [desktop]: Plasma's): false when it can't be a web window. */
+export async function openWindowAt(key: string, label: string, p: Place, desktop = false): Promise<boolean> {
+  const id = await openNewWindow(key, label, p.page, desktop);
   if (id == null) return false;
   if (tiledOn(id) == null) placeWindow(id, p.rect);
   return true;

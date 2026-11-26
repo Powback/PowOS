@@ -964,18 +964,43 @@ public class MainActivity extends Activity
             mAudioManager.abandonAudioFocusRequest(mAudioFocusRequest);
     }
 
+    /**
+     * This instance counts as "the desktop on screen" (WindowTasks.desktopShown): started on the default display. Plasma
+     * in a web window on home (WebWindows.openDesktop, a display of its own; board dragging-plasma-out-of-the-launcher-
+     * opens-it-in, 11-26) does not: home stays in front, so KWin keeps "desktop 0" / "export-new 1" - a window opened
+     * from home (or from Plasma's own launcher in that window) is home's web window, as every window is
+     * (docs/WEB_WINDOWS.md), and launches never bring home to the front over it (Runtime.homeFirst).
+     */
+    private boolean countedShown;
+
+    private boolean onDefaultDisplay() {
+        Display d = getDisplay();
+        return d == null || d.getDisplayId() == Display.DEFAULT_DISPLAY;
+    }
+
+    /** [countedShown] made to match where it is now, while started ([on]) - KWin told when that changes. */
+    private void countShown(boolean on) {
+        boolean want = on && onDefaultDisplay();
+        if (want == countedShown)
+            return;
+        countedShown = want;
+        WindowTasks.desktopShown(this, want);
+        if (on && !want)
+            Log.i(TAG, "started on display " + getDisplay().getDisplayId() + " (a web window): not the desktop on screen");
+    }
+
     @Override
     protected void onStart() {
         super.onStart();
         // PowOS: the desktop (the Plasma app) is on screen - its windows are KDE windows on it, not floating tasks.
-        WindowTasks.desktopShown(this, true);
+        countShown(true);
         sShown = true;
     }
 
     @Override
     protected void onStop() {
         super.onStop();
-        WindowTasks.desktopShown(this, false);
+        countShown(false);
         sShown = false;
         // Left (home, another app, the screen off): a back-screen pad serving it goes, unless a game window still shows.
         CoverPadActivity.check();
@@ -1375,6 +1400,10 @@ public class MainActivity extends Activity
     @Override
     public void onConfigurationChanged(android.content.res.Configuration c) {
         super.onConfigurationChanged(c);
+        // Moved into a web window's display or back full screen on display 0 (a configuration change): KWin's
+        // "desktop" follows ([countShown]).
+        if (sShown)
+            countShown(true);
         if (onCoverScreen(c)) {
             Log.i(TAG, "folded: the desktop steps aside on the cover screen");
             moveTaskToBack(true);

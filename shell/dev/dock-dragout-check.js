@@ -14,6 +14,10 @@
  *   a tap then fronts one, never a third.
  * - "grid" (the same, the host answering with Chrome's running window: a singleTask app): that window moves here and its
  *   old page's tiling closes up - no empty half (11-03 "It moved the old one and it broke the grid").
+ * - "plasma" (home unfolded, a window open; board dragging-plasma-out-of-the-launcher-opens-it-in, 11-26): Plasma
+ *   (App.desktop, l:org.powos.plasma) carried out of the launcher - a web window on the ghost through the host's
+ *   webwindows.open for its key (its desktop activity on a display of its own), never apps.launch (the full-screen
+ *   desktop) nor a Linux placeholder; a second drag fronts that one window. A tap still opens it full screen.
  * - "home" (home folded, no app in front): onto home's grid - unpinned and placed there as before, no ghost, no split
  *   or float; back onto the dock - neither split nor float.
  */
@@ -41,10 +45,13 @@ async function env() {
 
 let pid = 40;
 /** A dock app [key] carried from [from] through [path] and let go at its end; the ghost's zone seen at the last move. */
+/** What [drag] carries besides its app: a dock app's (a launcher app's: { toWindow: true }, [plasmaCase]). */
+let carryFrom = { fromDock: true };
+
 async function drag(G, key, from, path) {
   const id = ++pid;
   const ev = (type, p) => new PointerEvent(type, { pointerId: id, clientX: p.x, clientY: p.y, bubbles: true });
-  G.startCarry({ app: key, fromDock: true }, ev("pointerdown", from), { x: 30, y: 30 });
+  G.startCarry({ app: key, ...carryFrom }, ev("pointerdown", from), { x: 30, y: 30 });
   for (const p of path) (window.dispatchEvent(ev("pointermove", p)), await frames(1));
   await sleep(250);
   // The ghost's spring between targets (shell.css .ww-drop) ended: a busy machine runs it late, so wait for it.
@@ -249,10 +256,58 @@ async function gridCase(e, fails, dockAt) {
   if (W.tiledOn(961) === there) fails.push("the moved window is still in its old page's tiling");
 }
 
+/** "plasma": Plasma carried out of the launcher onto unfolded home opens as a web window, never the full-screen desktop. */
+const PLASMA = "l:org.powos.plasma";
+
+/** [plasmaCase]'s home: unfolded with a window open, the host listing Plasma as the whole desktop; its open calls, or null. */
+async function plasmaSetup(e) {
+  const { S, powos } = e;
+  await placeSetup(e);
+  // ShellBridge.apps marks Plasma "desktop": true, as the phone's host does.
+  const list = powos.apps.list;
+  powos.apps.list = async () => [...(await list()).filter((a) => a.key !== PLASMA), { key: PLASMA, label: "Plasma", icon: null, kind: "linux", desktop: true }];
+  window.__mockEvents.emit("apps.changed", {});
+  if (!(await until(() => S.byKey.value.get(PLASMA)?.desktop))) return null;
+  const opens = [];
+  let next = 870;
+  powos.webwindows.open = async (k, rect, task, kwin) => (opens.push({ k, task, kwin }), ++next);
+  return opens;
+}
+
+/** Plasma carried out of the launcher (a launcher tile's carry: toWindow) and let go at [to]: the ghost seen, or null. */
+function plasmaDrag(e, dockAt, to) {
+  carryFrom = { toWindow: true };
+  return drag(e.G, PLASMA, dockAt, [{ x: innerWidth / 2, y: innerHeight - 200 }, to]).finally(() => (carryFrom = { fromDock: true }));
+}
+
+async function plasmaCase(e, fails, dockAt) {
+  const { W, calls } = e;
+  const key = PLASMA;
+  const opens = await plasmaSetup(e);
+  if (!opens) return void fails.push("the mock's Plasma entry never reached the page");
+  const a = W.tileArea();
+  const to = { x: a.left + (a.right - a.left) * 0.4, y: a.top + (a.bottom - a.top) * 0.6 };
+  if (!(await plasmaDrag(e, dockAt, to))) return void fails.push("Plasma carried out of the launcher: no ghost");
+  if (!(await until(() => W.webWins.value.some((v) => v.key === key)))) return void fails.push(`Plasma dropped on home: no web window (opens ${JSON.stringify(opens)}, launches ${JSON.stringify(calls.launch)})`);
+  await sleep(300);
+  if (calls.launch.includes(key)) fails.push("Plasma dropped on home launched it (apps.launch: the full-screen desktop over home)");
+  // One host open of its key, no KWin id: never a Linux placeholder waiting for a toplevel Plasma never opens.
+  if (opens.length !== 1 || opens[0].k !== key || opens[0].kwin != null) fails.push(`Plasma's drop asked the host ${JSON.stringify(opens)}, want one webwindows.open of ${key} with no KWin id`);
+  fails.push(...(await plasmaAgain(e, dockAt, to, opens)));
+}
+
+/** A second Plasma drag fronts the one desktop window: never a second window, host open or launch. */
+async function plasmaAgain(e, dockAt, to, opens) {
+  await plasmaDrag(e, dockAt, to);
+  await sleep(400);
+  const n = e.W.webWins.value.filter((u) => u.key === PLASMA).length;
+  return n !== 1 || opens.length !== 1 || e.calls.launch.includes(PLASMA) ? [`a second Plasma drag: ${n} Plasma windows, ${opens.length} host opens, launches ${JSON.stringify(e.calls.launch)} (want 1, 1, none)`] : [];
+}
+
 export async function dockDragOut(kind) {
   const e = await env();
   e.O.TASK_WAIT.ms = 3000;
   const fails = [];
-  await { split: splitCase, float: floatCase, window: windowCase, home: homeCase, place: placeCase, instance: instanceCase, grid: gridCase }[kind](e, fails, { x: innerWidth / 2, y: innerHeight - 30 });
+  await { split: splitCase, float: floatCase, window: windowCase, home: homeCase, place: placeCase, instance: instanceCase, grid: gridCase, plasma: plasmaCase }[kind](e, fails, { x: innerWidth / 2, y: innerHeight - 30 });
   return fails;
 }

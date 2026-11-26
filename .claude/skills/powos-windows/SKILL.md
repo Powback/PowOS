@@ -564,6 +564,9 @@ home unfolded / widescreen. powos-desktop-shell is disabled on the phone; the co
 ## Plasma as an app + the web launcher's Linux backend (plan: docs/DESKTOP-WEB-SHELL.md, last section)
 - Drawer "Plasma" = l:org.powos.plasma (session/plasma/org.powos.plasma.desktop, OnlyShowIn=X-PowOS so Kickoff hides
   it; the export accepts X-PowOS). Exec powos-plasma = PLASMA_COMMAND: Runtime.launch -> showDesktop() (MainActivity).
+- Plasma dragged out of the launcher/dock onto unfolded home = a web window (WebWindows.openDesktop: MainActivity on the
+  window's display; KWin's output follows its size); MainActivity off display 0 keeps KWin at "desktop 0". A tap stays
+  full screen. docs/WEB_WINDOWS.md "Plasma dragged out"; gate dock-dragout-plasma.
 - Linux list: powos-apps-export (KService's rules over XDG dirs) -> run/powos-apps. powos-apps-watch (autostart,
   python inotify on ~/.cache ksycoca6_*, which kded6 rebuilds on an app dir change) reruns it; the app's FileObserver
   on icons/.icon-names (the export's last rename) -> reloadPowosApps(). Unit android-apps. Launch: powos-open-task.
