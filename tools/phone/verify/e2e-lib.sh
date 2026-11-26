@@ -606,7 +606,9 @@ e2e_finish() {
   [ -n "$sk" ] && log "skipped / aborted in this round so far (not FAILs, re-queued):" && printf '%s\n' "$sk" | sed 's/^/  /' | tee -a "$OUT/log.txt"
   [ "$PART" = "$LAST" ] && mail_manager
   DONE=1
-  local s="e2e-$JOURNEY round $ROUND part $PART/$LAST: $NPASS passed, $NFAIL failed, $NSKIP skipped (interrupted) - $UDIR"
+  # "(interrupted)" only when steps really weren't judged (an all-pass round read "0 skipped (interrupted)", 1126-1850).
+  local s int=""; [ "${NSKIP:-0}" -gt 0 ] && int=" (interrupted)"
+  s="e2e-$JOURNEY round $ROUND part $PART/$LAST: $NPASS passed, $NFAIL failed, ${NSKIP:-0} skipped$int - $UDIR"
   # Mostly not judged is no verdict (11-08 03:48, round 251 part 1: the screen dozed, "2 passed, 0 failed, 6 skipped"
   # went to done/ as a PASS that tested nothing, and the round never ran that part again): rc 3, re-queued.
   [ $NFAIL = 0 ] && [ "${NSKIP:-0}" -gt 0 ] && [ "${NSKIP:-0}" -ge "$NPASS" ] && { echo "SKIP $s: most steps interrupted - not judged, re-queued"; exit 3; }

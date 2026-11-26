@@ -642,4 +642,6 @@ fi
 
 e2e_finish
 # recent-drag's precondition couldn't be made without closing the user's own: not judged (rc 2), never a FAIL.
-[ -n "$RDNJ" ] && [ "$NFAIL" = 0 ] && { echo "NOT JUDGED (rc 2): recent-drag - $RDNJ"; exit 2; }
+# An if, never a bare "[ ] && ..." as the script's last line: false, that test's 1 was the script's exit status - every
+# all-pass recent-drag round "FAIL rc=1" (1126-1850, 6 passed, 0 failed). test-verify-exit-status.sh keeps it so.
+if [ -n "$RDNJ" ] && [ "$NFAIL" = 0 ]; then echo "NOT JUDGED (rc 2): recent-drag - $RDNJ"; exit 2; fi
