@@ -126,7 +126,7 @@ fake_steam() {
     (exec -a steamwebhelper sleep 300) &
     bash -c "(exec -a Game.exe sleep 300) & wait" reaper SteamLaunch "AppId=$1" -- "$2/_v2-entry-point" &
     trap "exit 0" TERM; while :; do sleep 0.1; done' steam "$1" "$T") &
-  client=$!; pids+=("$client"); helper= sgame=
+  client=$!; pids+=("$client"); helper='' sgame=''
   for _ in $(seq 50); do
     helper=$(pgrep -P "$client" -f '^steamwebhelper' | head -1); sgame=$(pgrep -f '^Game.exe' | head -1)
     [[ -n "$helper" && -n "$sgame" ]] && break; sleep 0.1
