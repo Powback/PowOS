@@ -129,6 +129,11 @@ public class MainActivity extends Activity
         }
     }
 
+    /** The game-mode back-screen setting, from the controller editor's backpad chip (GamepadOverlay). */
+    static void setBackScreenGame(Context c, boolean on) {
+        c.getSharedPreferences(PREFS_NAME, MODE_PRIVATE).edit().putBoolean(KEY_BACK_GAME, on).apply();
+    }
+
     /** The desktop is on screen (started, not stopped). */
     private static volatile boolean sShown;
 
@@ -1893,6 +1898,9 @@ public class MainActivity extends Activity
 
     @Override
     public boolean dispatchKeyEvent(KeyEvent event) {
+        // Back leaves the controller editor (else it goes to the desktop as Esc and the editor can't be left, 11-26).
+        if (mGamepadOverlay != null && mGamepadOverlay.handleBack(event))
+            return true;
         if (isPowosPad(event))
             return true; // consumed: no fallback key either
         return super.dispatchKeyEvent(event);

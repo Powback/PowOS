@@ -31,8 +31,10 @@ import android.view.WindowManager;
  * actually touches, so the zones follow the user's grip over time.
  *
  * Fingers resting on the back only hold the phone; a finger that lifts and presses again within PRESS_WINDOW
- * presses its button and holds it until it lifts. Default buttons (Steam Deck controller, powos-padd): index ->
- * L4/R4, middle -> L5/R5, ring -> LB/RB.
+ * presses its button and holds it until it lifts. Default buttons: index -> L1/R1 (LB/RB), middle -> L2/R2 (LT/RT),
+ * ring -> L4/R4 (Deck paddles); each finger's button is set in the controller editor ("Backpad keys", [setOutput]).
+ * 11-26: the old defaults were paddles only (L4/L5/R4/R5), which games leave unbound - the user found the backpad
+ * "unmapped"; R1/R2 work in every game.
  *
  * {@link #start} turns both screens on (device state ALL, via root) and opens this on the cover display; closing it,
  * or starting to fold the phone (hinge sensor), puts the device state back - a forced state would otherwise keep
@@ -41,9 +43,54 @@ import android.view.WindowManager;
 public class CoverPadActivity extends Activity implements SensorEventListener {
 
     private static final String TAG = "CoverPad";
-    /** Slot -> button: L index, L middle, L ring, R index, R middle, R ring. */
-    static final int[] BUTTONS = {PadHub.L4, PadHub.L5, PadSender.LB, PadHub.R4, PadHub.R5, PadSender.RB};
-    static final String[] BUTTON_NAMES = {"L4", "L5", "LB", "R4", "R5", "RB"};
+    /** Slots: L index, L middle, L ring, R index, R middle, R ring. */
+    static final String[] SLOT_NAMES = {"Left index", "Left middle", "Left ring", "Right index", "Right middle", "Right ring"};
+    /** What a slot can press: a GamepadOverlay button output, a trigger (lt/rt, full on), or nothing. */
+    static final String[] OUTPUTS = {"rb", "rt", "lb", "lt", "r4", "r5", "l4", "l5", "a", "b", "x", "y", "rs", "ls",
+        "back", "start", "up", "down", "left", "right", "none"};
+    static final String[] OUTPUT_LABELS = {"R1 (RB)", "R2 (RT)", "L1 (LB)", "L2 (LT)", "R4 paddle", "R5 paddle",
+        "L4 paddle", "L5 paddle", "A", "B", "X", "Y", "R3 (stick click)", "L3 (stick click)", "Select", "Start",
+        "D-pad up", "D-pad down", "D-pad left", "D-pad right", "None"};
+    static final String[] DEFAULT_OUTPUTS = {"lb", "lt", "l4", "rb", "rt", "r4"};
+    private static final String PREFS = "powos_coverpad";
+
+    /** Slot [s]'s output (saved by the editor, else the default). */
+    static String output(Context c, int s) {
+        String o = c.getSharedPreferences(PREFS, Context.MODE_PRIVATE).getString("out" + s, DEFAULT_OUTPUTS[s]);
+        return outputIndex(o) >= 0 ? o : DEFAULT_OUTPUTS[s];
+    }
+
+    static void setOutput(Context c, int s, String out) {
+        c.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit().putString("out" + s, out).apply();
+        Log.i(TAG, SLOT_NAMES[s] + " -> " + out);
+        if (current != null) current.view.postInvalidate();
+    }
+
+    static int outputIndex(String o) {
+        for (int i = 0; i < OUTPUTS.length; i++) if (OUTPUTS[i].equals(o)) return i;
+        return -1;
+    }
+
+    static String outputLabel(String o) {
+        int i = outputIndex(o);
+        return i < 0 ? o : OUTPUT_LABELS[i];
+    }
+
+    /** The button bits the pressed slots hold (triggers and "none" carry no bit). */
+    static int buttonBits(String[] outs, boolean[] pressed) {
+        int bits = 0;
+        for (int s = 0; s < outs.length; s++) {
+            if (!pressed[s] || "lt".equals(outs[s]) || "rt".equals(outs[s]) || "none".equals(outs[s])) continue;
+            bits |= GamepadOverlay.buttonBit(outs[s]);
+        }
+        return bits;
+    }
+
+    /** A trigger ("lt"/"rt") is fully on while any pressed slot maps to it. */
+    static float trigger(String[] outs, boolean[] pressed, String which) {
+        for (int s = 0; s < outs.length; s++) if (pressed[s] && which.equals(outs[s])) return 1f;
+        return 0f;
+    }
     /** A press: the finger was off for PRESS_MIN..PRESS_MAX ms and came back within PRESS_RADIUS (fraction of the
      *  short side) of where it lifted. Regripping fingers bounce back within a few ms or land elsewhere. */
     static final long PRESS_MIN = 60, PRESS_MAX = 300;
@@ -73,13 +120,19 @@ public class CoverPadActivity extends Activity implements SensorEventListener {
 
     /** Both screens on, then this on the cover display (the built-in display that is not {@code from}'s); if it is
      *  already up, it just switches mode. */
-    static void start(Activity from, int mode) {
+    static void start(Context from, int mode) {
         if (current != null) {
             current.mode = mode;
             current.view.modeChanged();
             return;
         }
-        Display ownDisplay = from.getDisplay();
+        // An Activity or the pad's own window context (ControllerPad); any other context has no display of its own.
+        Display ownDisplay;
+        try {
+            ownDisplay = from.getDisplay();
+        } catch (UnsupportedOperationException e) {
+            ownDisplay = from.getSystemService(DisplayManager.class).getDisplay(Display.DEFAULT_DISPLAY);
+        }
         int own = ownDisplay != null ? ownDisplay.getDisplayId() : Display.DEFAULT_DISPLAY;
         // The other panel: same kind of display as ours ("Built-in Screen"), not a virtual one (scrcpy...).
         String panelName = ownDisplay != null ? ownDisplay.getName() : "";
@@ -127,7 +180,7 @@ public class CoverPadActivity extends Activity implements SensorEventListener {
      */
     static boolean wanted(int mode) {
         return mode == MODE_DESKTOP ? MainActivity.desktopShown()
-            : PowosWindowActivity.gameShown() || MainActivity.gameShown();
+            : PowosWindowActivity.gameShown() || MainActivity.gameShown() || GamepadOverlay.floatingShown();
     }
 
     /** A running pad that serves nothing on screen any more ([wanted]) goes, with its task (any thread). */
@@ -291,7 +344,7 @@ public class CoverPadActivity extends Activity implements SensorEventListener {
         }
         if (displays != null) displays.unregisterDisplayListener(displayListener);
         sensors.unregisterListener(this);
-        PadHub.get(this).setButtons(PadHub.COVER, 0);
+        PadHub.get(this).setCover(0, 0, 0);
         view.releaseMouseButtons();
         current = null;
         SU.execute(() -> su("cmd device_state state reset"));
@@ -326,7 +379,7 @@ public class CoverPadActivity extends Activity implements SensorEventListener {
         FingerView(CoverPadActivity c) {
             super(c);
             act = c;
-            prefs = c.getSharedPreferences("powos_coverpad", Context.MODE_PRIVATE);
+            prefs = c.getSharedPreferences(PREFS, Context.MODE_PRIVATE);
             setBackgroundColor(Color.BLACK);
         }
 
@@ -586,7 +639,7 @@ public class CoverPadActivity extends Activity implements SensorEventListener {
                         }
                         // t= is the touch's own timestamp (uptime ms, CLOCK_MONOTONIC: comparable with powos-padd's).
                         regrip();
-                        Log.i(TAG, "down " + HAND[s / 3] + " " + FINGER[s % 3] + (pressed[s] ? " -> " + BUTTON_NAMES[s] : "")
+                        Log.i(TAG, "down " + HAND[s / 3] + " " + FINGER[s % 3] + (pressed[s] ? " -> " + output(getContext(), s) : "")
                             + " t=" + e.getEventTime());
                     }
                     break;
@@ -644,9 +697,10 @@ public class CoverPadActivity extends Activity implements SensorEventListener {
                 }
                 return;
             }
-            int bits = 0;
-            for (int s = 0; s < 6; s++) if (pressed[s]) bits |= BUTTONS[s];
-            PadHub.get(getContext()).setButtons(PadHub.COVER, bits);
+            String[] outs = new String[6];
+            for (int s = 0; s < 6; s++) outs[s] = output(getContext(), s);
+            PadHub.get(getContext()).setCover(buttonBits(outs, pressed), trigger(outs, pressed, "lt"),
+                trigger(outs, pressed, "rt"));
         }
 
         @Override
@@ -688,7 +742,7 @@ public class CoverPadActivity extends Activity implements SensorEventListener {
                 paint.setTextSize(u * 0.045f);
                 // Two lines: the finger, then what it does (one line overlapped the next zone's label).
                 c.drawText(HAND[s / 3] + " " + FINGER[s % 3], cx, cy - u * 0.10f, paint);
-                c.drawText(desktop() ? MOUSE_NAMES[s] : BUTTON_NAMES[s], cx, cy - u * 0.05f, paint);
+                c.drawText(desktop() ? MOUSE_NAMES[s] : outputLabel(output(getContext(), s)), cx, cy - u * 0.05f, paint);
                 if (active[s]) {
                     paint.setColor(pressed[s] ? Color.WHITE : COLORS[s]);
                     c.drawCircle(tx[s], ty[s], u * (pressed[s] ? 0.09f : 0.07f), paint);

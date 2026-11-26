@@ -33,6 +33,8 @@ final class PadHub {
     private final PadSender sender;
     private final int[] buttons = new int[2];
     private float lx, ly, rx, ry, lt, rt;
+    /** The cover screen's triggers (a backpad finger mapped to L2/R2): full on, merged with the overlay's. */
+    private float coverLt, coverRt;
 
     private PadHub(String socket) {
         sender = new PadSender(socket);
@@ -42,6 +44,15 @@ final class PadHub {
     synchronized void setButtons(int source, int bits) {
         if (buttons[source] == bits) return;
         buttons[source] = bits;
+        send();
+    }
+
+    /** The cover screen's whole state: its buttons and its two triggers. */
+    synchronized void setCover(int bits, float lt, float rt) {
+        if (buttons[COVER] == bits && coverLt == lt && coverRt == rt) return;
+        buttons[COVER] = bits;
+        coverLt = lt;
+        coverRt = rt;
         send();
     }
 
@@ -68,6 +79,6 @@ final class PadHub {
     }
 
     private void send() {
-        sender.post(buttons[OVERLAY] | buttons[COVER], lx, ly, rx, ry, lt, rt);
+        sender.post(buttons[OVERLAY] | buttons[COVER], lx, ly, rx, ry, Math.max(lt, coverLt), Math.max(rt, coverRt));
     }
 }

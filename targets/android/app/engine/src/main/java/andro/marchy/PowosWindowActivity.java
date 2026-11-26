@@ -898,6 +898,7 @@ public class PowosWindowActivity extends Activity implements SurfaceHolder.Callb
 
     @Override
     public boolean dispatchKeyEvent(KeyEvent event) {
+        if (padOverlay != null && padOverlay.handleBack(event)) return true; // Back leaves the controller editor
         long h = handle;
         int code = event.getKeyCode();
         if (h == 0 || code == KeyEvent.KEYCODE_BACK || code == KeyEvent.KEYCODE_VOLUME_UP

@@ -32,9 +32,12 @@ import java.util.List;
  * lifts; a touch outside every module is not consumed and reaches the desktop as usual. The modules write one
  * shared pad state, sent to powos-padd (virtual gamepad in PowOS) by {@link PadSender} whenever it changes.
  *
- * Edit mode ({@link #setEditing}): drag a control to move it, drag its corner handle to resize, long-press it for
- * its options (output, mode, delete); the toolbar adds controls, resets to the preset, and saves (Done). The
- * layout is stored as JSON in the app's preferences.
+ * Edit mode ({@link #setEditing}) is select-then-edit: nothing shows handles until the user taps one control; then
+ * only that control gets its outline, resize handle and tools (Mapping/Options, Delete), and tapping empty space
+ * deselects (11-26: "a bunch of dots everywhere" when every control showed its handle at once). Drag a control to
+ * move it, drag the selected one's corner handle to resize, long-press for its options. The toolbar adds controls,
+ * resets to the preset, turns the backpad (the cover screen, {@link CoverPadActivity}) on/off, maps its buttons,
+ * and saves (Done). Android Back leaves the editor like Done. The layout is stored as JSON in the app's preferences.
  */
 public final class GamepadOverlay extends View {
 
@@ -781,9 +784,14 @@ public final class GamepadOverlay extends View {
     // Edit mode
     private boolean editing;
     private Module editTarget;
+    /** The one control whose handle and tools show (select-then-edit); null = none. */
+    private Module selected;
     private boolean resizing;
     private float lastX, lastY, downX, downY;
-    private final RectF btnAdd = new RectF(), btnReset = new RectF(), btnDone = new RectF(), btnBack = new RectF();
+    private final RectF btnAdd = new RectF(), btnReset = new RectF(), btnDone = new RectF(), btnBack = new RectF(),
+        btnBackKeys = new RectF();
+    /** The selected control's tools, laid out next to it ([layoutTools]). */
+    private final RectF toolMap = new RectF(), toolDelete = new RectF();
     private final Handler handler = new Handler(Looper.getMainLooper());
     private final Runnable longPress = () -> {
         if (editTarget != null && !resizing) {
@@ -836,6 +844,7 @@ public final class GamepadOverlay extends View {
 
     private void load(String json) {
         modules.clear();
+        selected = null;
         try {
             modules.addAll(parse(json));
         } catch (JSONException | IllegalArgumentException e) {
@@ -875,6 +884,7 @@ public final class GamepadOverlay extends View {
     /** A standalone window accepts touches only in its controls, leaving the game reachable between them. */
     public void setFloating(boolean value) {
         floating = value;
+        if (value) floatingPad = this;
         getViewTreeObserver().addOnPreDrawListener(() -> {
             if (floating && android.os.Build.VERSION.SDK_INT >= 33 && getRootSurfaceControl() != null) {
                 android.graphics.Region region = controlRegion();
@@ -885,6 +895,15 @@ public final class GamepadOverlay extends View {
             }
             return true;
         });
+    }
+
+    /** The standalone (window) pad, if any: CoverPadActivity serves it too ([floatingShown]). */
+    private static volatile GamepadOverlay floatingPad;
+
+    /** A standalone pad is up with its controls showing - a game played under it, so the backpad has work. */
+    static boolean floatingShown() {
+        GamepadOverlay p = floatingPad;
+        return p != null && p.isAttachedToWindow() && p.getVisibility() == VISIBLE;
     }
 
     public android.graphics.Region controlRegion() {
@@ -915,6 +934,7 @@ public final class GamepadOverlay extends View {
     public void setEditing(boolean on) {
         if (on == editing) return;
         editing = on;
+        selected = null;
         Log.i(TAG, on ? "editor opened" : "editor closed, layout saved");
         if (on) {
             releaseAll();
@@ -922,7 +942,61 @@ public final class GamepadOverlay extends View {
         } else {
             save();
         }
+        setWindowFocusable(on);
         invalidate();
+    }
+
+    /**
+     * A standalone window is not focusable (keys go to the game under it), so Back never reached the editor and the
+     * user could not leave it (11-26). While editing it takes focus, and Back with it; play gives it back.
+     */
+    private void setWindowFocusable(boolean on) {
+        if (!floating || !(getLayoutParams() instanceof android.view.WindowManager.LayoutParams) || !isAttachedToWindow()) return;
+        android.view.WindowManager.LayoutParams lp = (android.view.WindowManager.LayoutParams) getLayoutParams();
+        int flags = on ? lp.flags & ~android.view.WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE
+            : lp.flags | android.view.WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE;
+        if (flags == lp.flags) return;
+        lp.flags = flags;
+        try {
+            getContext().getSystemService(android.view.WindowManager.class).updateViewLayout(this, lp);
+        } catch (RuntimeException e) {
+            Log.w(TAG, "could not change the pad window's focus", e);
+        }
+    }
+
+    /** Whether a key leaves the editor: Back (down and up both consumed, the up acts) while editing. */
+    static boolean backLeavesEditor(boolean editing, int keyCode) {
+        return editing && keyCode == android.view.KeyEvent.KEYCODE_BACK;
+    }
+
+    /**
+     * Back while editing: leave the editor like Done (saves). The host activities call this first in their
+     * dispatchKeyEvent (the overlay is never their focused view); a standalone window gets it in its own.
+     */
+    public boolean handleBack(android.view.KeyEvent e) {
+        if (!backLeavesEditor(editing, e.getKeyCode())) return false;
+        if (e.getAction() == android.view.KeyEvent.ACTION_UP && !e.isCanceled()) finishEditing();
+        return true;
+    }
+
+    @Override
+    public boolean dispatchKeyEvent(android.view.KeyEvent e) {
+        return handleBack(e) || super.dispatchKeyEvent(e);
+    }
+
+    private void finishEditing() {
+        setEditing(false);
+        if (onEditDone != null) onEditDone.run();
+    }
+
+    /** Select-then-edit: a tap on a control selects it, a tap on empty space (null) deselects. */
+    static <T> T nextSelection(T selected, T tapped) {
+        return tapped;
+    }
+
+    /** Only the selected control shows its outline, handle and tools. */
+    static boolean showsHandle(Object module, Object selected) {
+        return module != null && module == selected;
     }
 
     private void releaseAll() {
@@ -943,11 +1017,25 @@ public final class GamepadOverlay extends View {
     protected void onSizeChanged(int w, int h, int oldw, int oldh) {
         for (Module m : modules) m.layout(w, h);
         float u = Math.min(w, h), bw = u * 0.16f, bh = u * 0.055f, gap = u * 0.02f, top = u * 0.02f;
-        float left = (w - (4 * bw + 3 * gap)) / 2f;
-        btnAdd.set(left, top, left + bw, top + bh);
-        btnReset.set(left + bw + gap, top, left + 2 * bw + gap, top + bh);
-        btnBack.set(left + 2 * (bw + gap), top, left + 3 * bw + 2 * gap, top + bh);
-        btnDone.set(left + 3 * (bw + gap), top, left + 4 * bw + 3 * gap, top + bh);
+        bw = Math.min(bw, (w - 6 * gap) / 5f);
+        float left = (w - (5 * bw + 4 * gap)) / 2f;
+        RectF[] row = {btnAdd, btnReset, btnBack, btnBackKeys, btnDone};
+        for (int i = 0; i < row.length; i++) row[i].set(left + i * (bw + gap), top, left + i * (bw + gap) + bw, top + bh);
+        layoutTools();
+    }
+
+    /** The selected control's tools: a row under it, or over it when it sits at the bottom. */
+    private void layoutTools() {
+        if (selected == null) return;
+        float u = Math.min(getWidth(), getHeight()), bw = u * 0.15f, bh = u * 0.055f, gap = u * 0.015f;
+        RectF z = selected.zone;
+        float rowW = 2 * bw + gap;
+        float left = Math.max(gap, Math.min(getWidth() - rowW - gap, z.centerX() - rowW / 2f));
+        float top = z.bottom + gap + handleRadius();
+        if (top + bh > getHeight() - gap) top = z.top - gap - bh;
+        top = Math.max(btnAdd.bottom + gap, top);
+        toolMap.set(left, top, left + bw, top + bh);
+        toolDelete.set(left + bw + gap, top, left + rowW, top + bh);
     }
 
     @Override
@@ -957,15 +1045,20 @@ public final class GamepadOverlay extends View {
         for (Module m : modules) m.draw(canvas, paint, unit, editing);
         if (!editing) return;
         Paint p = paint;
-        p.setStyle(Paint.Style.STROKE);
-        p.setStrokeWidth(unit * 0.003f);
-        p.setPathEffect(new DashPathEffect(new float[]{unit * 0.01f, unit * 0.008f}, 0));
-        p.setColor(0xCCFFFFFF);
-        for (Module m : modules) canvas.drawRect(m.zone, p);
-        p.setPathEffect(null);
-        p.setStyle(Paint.Style.FILL);
-        p.setColor(0xFF4FC3F7);
-        for (Module m : modules) canvas.drawCircle(m.zone.right, m.zone.bottom, handleRadius(), p);
+        if (selected != null) { // select-then-edit: only the selected control shows its outline, handle and tools
+            p.setStyle(Paint.Style.STROKE);
+            p.setStrokeWidth(unit * 0.003f);
+            p.setPathEffect(new DashPathEffect(new float[]{unit * 0.01f, unit * 0.008f}, 0));
+            p.setColor(0xCCFFFFFF);
+            canvas.drawRect(selected.zone, p);
+            p.setPathEffect(null);
+            p.setStyle(Paint.Style.FILL);
+            p.setColor(0xFF4FC3F7);
+            canvas.drawCircle(selected.zone.right, selected.zone.bottom, handleRadius(), p);
+            layoutTools();
+            drawChip(canvas, toolMap, selected instanceof ButtonModule ? "Mapping" : "Options", 0xCC1565C0, unit);
+            drawChip(canvas, toolDelete, "Delete", 0xCCC62828, unit);
+        }
         p.setStyle(Paint.Style.STROKE);
         p.setStrokeWidth(unit * 0.003f);
         p.setColor(0xFFFF2BD6); // guide magenta
@@ -974,8 +1067,9 @@ public final class GamepadOverlay extends View {
         if (sizeMatch != null) canvas.drawRect(sizeMatch.zone, p);
         drawChip(canvas, btnAdd, "+ Add", 0xCC2E7D32, unit);
         drawChip(canvas, btnReset, "Reset", 0xCC6D4C41, unit);
-        drawChip(canvas, btnBack, CoverPadActivity.running() ? "Back: on" : "Back: off",
+        drawChip(canvas, btnBack, CoverPadActivity.running() ? "Backpad: on" : "Backpad: off",
             CoverPadActivity.running() ? 0xCC6A1B9A : 0xCC424242, unit);
+        drawChip(canvas, btnBackKeys, "Backpad keys", 0xCC424242, unit);
         drawChip(canvas, btnDone, "Done", 0xCC1565C0, unit);
         // Which layout is being edited: in the toolbar row, left of the chips (clear of the controls below).
         drawLabel(canvas, p, "Layout: " + (gameKey.isEmpty() ? "default" : gameKey), btnAdd.left / 2f,
@@ -1151,29 +1245,26 @@ public final class GamepadOverlay extends View {
             case MotionEvent.ACTION_DOWN: {
                 if (btnAdd.contains(x, y)) { showAdd(); return true; }
                 if (btnReset.contains(x, y)) { confirmReset(); return true; }
-                if (btnBack.contains(x, y)) { // the cover screen as a controller (both screens on)
-                    if (CoverPadActivity.running()) CoverPadActivity.stop();
-                    else if (getContext() instanceof android.app.Activity) CoverPadActivity.start((android.app.Activity) getContext());
-                    postDelayed(this::invalidate, 1500);
-                    return true;
-                }
-                if (btnDone.contains(x, y)) {
-                    setEditing(false);
-                    if (onEditDone != null) onEditDone.run();
+                if (btnBack.contains(x, y)) { toggleBackpad(); return true; }
+                if (btnBackKeys.contains(x, y)) { showBackpadKeys(); return true; }
+                if (btnDone.contains(x, y)) { finishEditing(); return true; }
+                if (selected != null && toolMap.contains(x, y)) { showMapping(selected); return true; }
+                if (selected != null && toolDelete.contains(x, y)) {
+                    modules.remove(selected);
+                    selected = null;
+                    invalidate();
                     return true;
                 }
                 editTarget = null;
                 resizing = false;
-                float hr = handleRadius() * 1.8f;
-                for (int i = modules.size() - 1; i >= 0; i--) { // corner handles first
-                    Module m = modules.get(i);
-                    if (Math.hypot(x - m.zone.right, y - m.zone.bottom) < hr) {
-                        editTarget = m;
-                        resizing = true;
-                        break;
-                    }
+                // Only the selected control has a handle to grab.
+                if (selected != null && Math.hypot(x - selected.zone.right, y - selected.zone.bottom) < handleRadius() * 1.8f) {
+                    editTarget = selected;
+                    resizing = true;
                 }
                 if (editTarget == null) editTarget = moduleAt(x, y);
+                if (!resizing) selected = nextSelection(selected, editTarget); // empty space deselects
+                invalidate();
                 if (editTarget != null) System.arraycopy(editTarget.frac, 0, dragStart, 0, 4);
                 lastX = downX = x;
                 lastY = downY = y;
@@ -1279,6 +1370,46 @@ public final class GamepadOverlay extends View {
         }));
     }
 
+    /** "Mapping" on a selected button picks its output; other controls open their options. */
+    private void showMapping(Module m) {
+        if (!(m instanceof ButtonModule)) { showOptions(m); return; }
+        ButtonModule b = (ButtonModule) m;
+        showDialog(new AlertDialog.Builder(getContext()).setTitle("Button output")
+            .setItems(BUTTON_LABELS, (d, i) -> { b.setOutput(BUTTON_OUTPUTS[i]); invalidate(); }));
+    }
+
+    /**
+     * The backpad (cover screen as a controller, both screens on) on or off. The pad's own window (ControllerPad)
+     * has no Activity for a context, and the chip used to need one: it did nothing there (11-26 "can't enable the
+     * backpad"). The choice is kept as the game-mode back-screen setting, so the desktop's toggle agrees.
+     */
+    private void toggleBackpad() {
+        boolean on = !CoverPadActivity.running();
+        MainActivity.setBackScreenGame(getContext(), on);
+        if (!on) CoverPadActivity.stop();
+        else CoverPadActivity.start(getContext(), CoverPadActivity.MODE_GAME);
+        postDelayed(this::invalidate, 1500);
+        if (on) postDelayed(() -> {
+            invalidate();
+            if (editing && !CoverPadActivity.running())
+                android.widget.Toast.makeText(getContext(), "No back screen came up (unfold the phone)",
+                    android.widget.Toast.LENGTH_SHORT).show();
+        }, 4000);
+    }
+
+    /** Each backpad finger's button (CoverPadActivity.output): defaults R1/R2 (L1/L2 on the left hand). */
+    private void showBackpadKeys() {
+        String[] rows = new String[CoverPadActivity.SLOT_NAMES.length];
+        for (int s = 0; s < rows.length; s++)
+            rows[s] = CoverPadActivity.SLOT_NAMES[s] + ": " + CoverPadActivity.outputLabel(CoverPadActivity.output(getContext(), s));
+        showDialog(new AlertDialog.Builder(getContext()).setTitle("Backpad buttons").setItems(rows, (d, s) ->
+            showDialog(new AlertDialog.Builder(getContext()).setTitle(CoverPadActivity.SLOT_NAMES[s])
+                .setItems(CoverPadActivity.OUTPUT_LABELS, (d2, i) -> {
+                    CoverPadActivity.setOutput(getContext(), s, CoverPadActivity.OUTPUTS[i]);
+                    showBackpadKeys();
+                }))));
+    }
+
     private void confirmReset() {
         showDialog(new AlertDialog.Builder(getContext()).setTitle("Reset controls?")
             .setMessage("Go back to the default gamepad layout.")
@@ -1321,7 +1452,7 @@ public final class GamepadOverlay extends View {
             actions.add(() -> g.invertY = !g.invertY);
         }
         items.add("Delete");
-        actions.add(() -> { modules.remove(m); invalidate(); });
+        actions.add(() -> { modules.remove(m); if (selected == m) selected = null; invalidate(); });
         showDialog(new AlertDialog.Builder(getContext()).setTitle("Control")
             .setItems(items.toArray(new String[0]), (d, i) -> actions.get(i).run()));
     }

@@ -100,7 +100,12 @@ without clutter.
 Entered from a long-press on the overlay toggle. The game stays visible behind it (paused if it pauses on
 focus loss).
 
-- Drag to move, corner handles to resize, snap to a grid and to other modules' edges.
+- Select-then-edit (11-26): no handles show until a control is tapped; then only that one shows its outline,
+  corner resize handle and tools (Mapping/Options, Delete). Tapping empty space deselects.
+- Drag to move, the selected control's corner handle to resize, snap to a grid and to other modules' edges.
+- Android Back leaves the editor like Done (saves); the standalone pad window takes focus while editing for it.
+- Toolbar: Add, Reset, Backpad on/off (the cover screen as a controller, `CoverPadActivity`), Backpad keys (each
+  finger's button; defaults index L1/R1, middle L2/R2, ring L4/R4 paddles), Done.
 - Tap a module → settings sheet for its type (output picker, mode, sensitivity, opacity, haptics) with a live
   test area (the stick vector / mouse delta is shown as you touch it).
 - Palette to add modules; duplicate; delete; group.
