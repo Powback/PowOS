@@ -13,6 +13,7 @@ import { AddDevice } from "../lib/add";
 import { ThisPhone } from "../lib/thisphone";
 import { Join, useApprover, useRealm } from "../lib/join";
 import { KIND, S } from "../lib/ui";
+import { AccountCard, useAccount } from "../lib/account";
 
 interface Props {
   host: Host;
@@ -43,6 +44,9 @@ export default function Main({ host, close }: Props) {
   const liveS = Object.fromEntries(Object.entries(live).map(([k, v]) => [k, v.s]));
   const by = useApprover(net, list, liveS, host.thisDevice);
   const realm = useRealm(by);
+  // The account's signed-in devices (the AI page's Devices tab's list); the paired ones draw their own card below.
+  const account = useAccount(host.thisDevice);
+  const unpaired = account.filter((a) => !list.some((d) => d.id === a.id));
   const drop = (d: Device) => {
     update(list.filter((x) => x.id !== d.id));
     forget(net, d);
@@ -55,7 +59,10 @@ export default function Main({ host, close }: Props) {
       </header>
       <ThisPhone dev={host.thisDevice} />
       <Join by={by} />
-      {list.length === 0 && <div style={S.muted}>No devices yet. Add one below: it shows a code on its own screen.</div>}
+      {list.length === 0 && account.length === 0 && <div style={S.muted}>No devices yet. Add one below: it shows a code on its own screen.</div>}
+      {unpaired.map((a) => (
+        <AccountCard key={a.id} d={a} td={host.thisDevice} />
+      ))}
       {list.map((d) => (
         <DeviceCard
           key={d.id}

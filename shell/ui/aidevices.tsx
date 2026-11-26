@@ -15,6 +15,7 @@ import { stored } from "../state.ts";
 import { Icon } from "./icons.tsx";
 import { optimistic } from "./pending.tsx";
 import { Reveal } from "./reveal.tsx";
+import { MissingApps } from "./shared/missingapps.tsx";
 import { devicesView, kindIcon, presence, relAgo, syncLine, whatIs, withDevice, type AccountDevice } from "./devicesview.ts";
 
 /** What the tab knows: the list as last seen (shown at once when the page comes back), and how the last read went. */
@@ -138,16 +139,20 @@ function Name({ d }: { d: AccountDevice }) {
   );
 }
 
-/** Its muted line: online / seen when, its sync (missing apps stand out), what it is. */
+/** Its muted line: online / seen when, its sync (missing apps: a toggle opening which ones, missingapps.tsx), what it is. */
 function Sub({ d, now }: { d: AccountDevice; now: number }) {
   const sync = syncLine(d, now);
   const what = whatIs(d);
+  const missing = /missing/.test(sync);
   return (
-    <span class="dv-sub">
-      <span data-presence>{presence(d, now)}</span>
-      {sync && <span data-sync class={/missing|not/.test(sync) ? "dv-warn" : ""}>{sync}</span>}
-      {what && <span class="dv-what">{what}</span>}
-    </span>
+    <>
+      <span class="dv-sub">
+        <span data-presence>{presence(d, now)}</span>
+        {sync && !missing && <span data-sync class={/not/.test(sync) ? "dv-warn" : ""}>{sync}</span>}
+        {what && <span class="dv-what">{what}</span>}
+      </span>
+      {missing && <MissingApps d={d} known={thisDevice.known()} label={sync} />}
+    </>
   );
 }
 

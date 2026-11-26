@@ -46,7 +46,9 @@ function usePoll<T>(by: Approver | null, load: (by: Approver) => Promise<T>, emp
   ref.current = by;
   const reload = () => {
     const d = ref.current;
-    if (d) load(d).then((x) => ref.current === d && setV(x), () => {});
+    // Same approver by key, not by object: the page builds a new one on every render (a re-render while the call was
+    // out - the account list arriving - dropped its answer, and the join card waited a whole poll).
+    if (d) load(d).then((x) => ref.current?.key === d.key && setV(x), () => {});
   };
   useEffect(() => {
     if (!by) return setV(empty);

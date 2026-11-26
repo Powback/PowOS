@@ -31,6 +31,8 @@ export interface ThisDevice {
    * / "revoke" {id} -> the realm's answer, a refusal rejects with the realm's words. Missing on older shells/APKs.
    */
   realm?(op: RealmOp, body?: object): Promise<any>;
+  /** This device's PowOS apps by id (name, icon URL), for the missing-apps lists. Missing on older shells. */
+  known?(): Record<string, { name: string; icon?: string }>;
 }
 export type RealmOp = "state" | "pending" | "devices" | "approve" | "revoke";
 export interface Host {

@@ -294,6 +294,26 @@ min ago" / "3 apps missing"), model; removed devices folded under "Removed".
   `/v1/enroll/devices` is the place to add it. Gate `ai-devices-{folded,unfolded}` (dev/ai-devices-check.js); shots
   ai-tab-devices, ai-devices-confirm, ai-devices-removed (mock realm in shots.mjs DEVICES_MOCK).
 
+### Which apps are missing, and one list in both Devices views (2026-11-26)
+
+The user, 11-26: "only a COUNT - no way to see WHICH apps are missing", and the Devices app said "No devices yet"
+while the tab showed 3.
+- "N apps missing" is a toggle (shell/ui/shared/missingapps.tsx, `@powos/shared/missingapps`) opening one line per
+  app: its icon and name when this device has it (thisDevice.known(): the launcher's PowOS apps), else its initial and
+  a name made from the id; and how it gets onto that device (devicesview.ts missingNote): `dev.powos.*` comes with
+  PowOS's next update there, a `.pow` web app is added by the catalog, anything else was installed from a folder
+  (`powos app install <folder>` on that device). Ids come from the realm's `sync.missing` (powos-account-sync's report,
+  up to 64; "and N more" past that).
+- The Devices app reads the same list as the tab: `host.thisDevice.realm("devices")` every 30 s (apps/devices/ui/lib/
+  account.tsx); a signed-in device it hasn't paired gets a card (presence, sync, missing apps); "No devices yet" only
+  when nothing is paired AND the account lists nobody. Pure parts moved to shell/ui/shared/devicesview.ts (the shell's
+  ui/devicesview.ts re-exports them).
+- Not yet: an Install / Sync all action. No channel installs an app on ANOTHER device today: the realm stores only the
+  missing ids, and a folder app's files exist only on the device that has it. The design to build: a ("powos",
+  "wanted") account row per device+app that the target's powos-account-sync installs from, plus a way to carry the
+  app's built bundle (the realm's account store or PowApps). Gates `ai-devices-*` (the tab's list opens) and
+  `app local.devices account {folded,unfolded}` (dvAccount in gate.mjs).
+
 ## Devices in Dolphin's sidebar (`powos-places`)
 
 Dolphin (and every KDE file dialog) shows this device's storage and the owner's other devices in its Places panel

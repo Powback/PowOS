@@ -17476,6 +17476,15 @@ try {
   // device's words and a retry, sleep while busy offered as "Sleep anyway"; tokens only ever as ${secret:dev-<id>}.
   if (apps().some((a) => a.id === "local.devices"))
     runs.push(open(browser, `${ORIGIN}/__gate_app.html`, "app local.devices", { width: 404, height: 899 }).then((r) => settleDevices(r)));
+  // Devices app = the Devices tab's list (the user, 11-26: the tab showed 3 devices, this app "No devices yet"): the
+  // account's signed-in devices from the realm (thisDevice.realm "devices") as cards, no "No devices yet" with nothing
+  // paired, and a device's "N apps missing" opening into which ones (name, icon, how), folded and unfolded.
+  if (apps().some((a) => a.id === "local.devices"))
+    for (const [label, view] of [
+      ["folded", { width: 404, height: 899 }],
+      ["unfolded", { width: 821, height: 883 }],
+    ])
+      runs.push(open(browser, `${ORIGIN}/__gate_app.html`, `app local.devices account ${label}`, view).then((r) => settleDevicesAccount(r, label)));
   if (opening.length) console.log(`gate: ${opening.length} page(s) opened outside runs.push (their scene slots are held to the end)`);
   for (const r of (await Promise.all(runs)).filter(Boolean)) {
     if (r.problems.length) {
@@ -17543,6 +17552,87 @@ async function settleDevices(r) {
   }
   r.problems.push(...r.uncaught);
   return { ...r, ready: true, ms: Date.now() - r.started };
+}
+
+/** The Devices app's account list (dvAccount) alone, on [label]'s viewport; its shot /cache/devices-account-<label>.png. */
+async function settleDevicesAccount(r, label) {
+  try {
+    await r.page.evaluate(() => new Promise((ok) => (window.importShim ? ok() : addEventListener("load", ok))));
+    await r.page.evaluate([dvWait, dvSleep, dvFails, dvAccountMount, dvAccountOpen].map((f) => `window.${f.name} = ${f}`).join(";\n"));
+    r.problems.push(...(await r.page.evaluate(dvAccount)));
+    await r.page.screenshot({ path: `/cache/devices-account-${label}.png` }).catch(() => {});
+  } catch (e) {
+    r.problems.push(`evaluate: ${e.message.split("\n")[0]}`);
+  }
+  r.problems.push(...r.uncaught);
+  return { ...r, ready: true, ms: Date.now() - r.started };
+}
+
+/**
+ * Nothing paired here, three devices signed in to the account (this one, the S25 missing three apps, a desktop): a
+ * card each, never "No devices yet"; the S25's "3 apps missing" opens into the three by name - the one this device
+ * has with its name and icon, the others named from their ids - each saying how it gets there.
+ */
+async function dvAccount() {
+  const root = await dvAccountMount();
+  if (!(await dvWait('[data-account-device="s25"]', 3000))) return [`the account's devices aren't listed: "${root.textContent.slice(0, 200)}"`];
+  const ids = [...root.querySelectorAll("[data-account-device]")].map((e) => e.dataset.accountDevice).join();
+  const toggle = root.querySelector('[data-account-device="s25"] [data-missing-toggle]');
+  const out = dvFails([
+    [ids === "fold,s25,pc", `account cards ${ids}, want fold,s25,pc (revoked left out)`],
+    [!/No devices yet/.test(root.textContent), "says No devices yet while the account lists three"],
+    [toggle?.textContent.trim() === "3 apps missing", `the S25's toggle: "${toggle?.textContent}"`],
+  ]);
+  if (!toggle) return out;
+  toggle.click();
+  await dvSleep(500);
+  return out.concat(dvAccountOpen(root, toggle));
+}
+
+/** The S25's opened list: by name, the app this device has with its icon, how each gets there, on the page. */
+function dvAccountOpen(root, toggle) {
+  const card = root.querySelector('[data-account-device="s25"]');
+  const names = [...card.querySelectorAll("[data-missing-name]")].map((e) => e.textContent).join("|");
+  const shop = card.querySelector('[data-missing-app="local.shopping"]');
+  const img = shop?.querySelector("img")?.getBoundingClientRect();
+  const box = card.querySelector("[data-missing-list]")?.getBoundingClientRect();
+  const how = `${shop?.textContent}|${card.querySelector('[data-missing-app="dev.powos.agents"]')?.textContent}`;
+  return dvFails([
+    [toggle.getAttribute("aria-expanded") === "true", "the toggle didn't open"],
+    [names === "Agents|Oslo temp|Shopping list", `missing apps by name: "${names}"`],
+    [img?.width > 20, "the app this device has shows no icon"],
+    [/powos app install.*update PowOS/.test(how), `the rows don't say how each app gets there ("${how}")`],
+    [box?.height > 60 && box.right <= innerWidth, "the opened list has no height or runs off the page"],
+  ]);
+}
+
+/** The Devices app mounted on a host whose realm lists four devices (one revoked) and nothing paired here. */
+async function dvAccountMount() {
+  const { h, render } = await window.importShim("preact");
+  try { localStorage.removeItem("powos.devices.v1"); } catch {}
+  const now = Math.floor(Date.now() / 1000);
+  const list = [
+    { id: "fold", name: "Razr Fold", kind: "phone", self: true, last_seen: now - 5, sync: { at: now - 60, ok: true, missing_n: 0, missing: [] } },
+    { id: "s25", name: "Galaxy S25", kind: "phone", last_seen: now - 30, sync: { at: now - 30, ok: true, missing_n: 3, missing: ["local.shopping", "dev.powos.agents", "local.oslo-temp"] } },
+    { id: "pc", name: "Desk", kind: "desktop", last_seen: now - 7200 },
+    { id: "gone", name: "Old", kind: "phone", revoked: now - 99 },
+  ];
+  const icon = "data:image/svg+xml," + encodeURIComponent('<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 8 8"><rect width="8" height="8" fill="#4a8"/></svg>');
+  const answers = { state: { enrolled: true, approver: false, id: "fold" }, devices: { devices: list } };
+  const thisDevice = {
+    realm: async (op) => answers[op] ?? { pending: [] },
+    known: () => ({ "local.shopping": { name: "Shopping list", icon } }),
+    onLock: () => () => {},
+    lock: async () => ({ available: false }),
+  };
+  const host = { net: { fetch: async () => new Response("{}", { status: 404 }), mdns: async () => [], forget: async () => {} }, thisDevice };
+  const mod = await window.importShim("./_app/local.devices/pages/main.js");
+  document.querySelector("#dv-root")?.remove();
+  const root = Object.assign(document.createElement("div"), { id: "dv-root", style: "position:fixed;inset:0;background:var(--color-background);color:var(--color-foreground)" });
+  document.body.append(root);
+  window.__dv = { root };
+  render(h(mod.default, { host, app: "local.devices", close: () => {} }), root);
+  return root;
 }
 
 /** In the page: [sel] under the Devices root within [ms], or null. */

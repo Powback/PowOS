@@ -8,6 +8,8 @@
     "strict": true,
     "skipLibCheck": true,
     "noEmit": true,
+    // shell/ui/shared/missingapps.tsx imports its siblings by their file name, as the shell does.
+    "allowImportingTsExtensions": true,
     // @powos/shared: apps/build.sh's esbuild alias for shell/ui/shared (friction f179) - mirrored here so tsc
     // resolves the same import (apps/typecheck.sh).
     "baseUrl": ".",

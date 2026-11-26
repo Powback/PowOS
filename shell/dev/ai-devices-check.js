@@ -9,7 +9,7 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 function mockRealm(approver) {
   const now = Math.floor(Date.now() / 1000);
   const list = [
-    { id: "desk", name: "Desk", kind: "desktop", platform: "bazzite", last_seen: now - 2 * 86400, sync: { at: now - 2 * 86400, ok: true, missing_n: 3 } },
+    { id: "desk", name: "Desk", kind: "desktop", platform: "bazzite", last_seen: now - 2 * 86400, sync: { at: now - 2 * 86400, ok: true, missing_n: 3, missing: ["local.tally", "dev.powos.registry", "local.hello-web"] } },
     { id: "old", name: "OnePlus Open", kind: "phone", revoked: now - 5 * 86400, last_seen: now - 6 * 86400 },
     { id: "s25", name: "Galaxy S25", kind: "phone", model: "SM-S931B", last_seen: now - 40, sync: { at: now - 40, ok: true, missing_n: 0 } },
     { id: "fold", name: "Razr Fold", kind: "phone", model: "XT2651-1", self: true, last_seen: now - 5, sync: { at: now - 120, ok: true, missing_n: 0 } },
@@ -70,6 +70,25 @@ function listFails() {
   return checks.filter(([ok]) => !ok).map(([, why]) => why);
 }
 
+/** The desktop's "3 apps missing" opens into the three by name, each saying how it gets there (the user, 11-26). */
+async function missingFails() {
+  const toggle = rowOf("desk")?.querySelector("[data-missing-toggle]");
+  if (!toggle) return ["the desktop's apps missing: no toggle to open which ones"];
+  toggle.click();
+  await sleep(500);
+  const apps = [...rowOf("desk").querySelectorAll("[data-missing-app]")];
+  const names = apps.map((a) => text(a.querySelector("[data-missing-name]"))).join("|");
+  const list = rowOf("desk").querySelector("[data-missing-list]")?.getBoundingClientRect();
+  const fails = [
+    [names === "Hello web|Registry|Tally", `missing apps by name: "${names}"`],
+    [!!list && list.height > 60 && list.right <= innerWidth, "the opened list has no height or runs off the page"],
+    [apps.every((a) => text(a).length > a.querySelector("[data-missing-name]").textContent.length + 8), "a missing app doesn't say how it gets there"],
+  ].filter(([ok]) => !ok).map(([, why]) => why);
+  toggle.click();
+  await sleep(400);
+  return fails;
+}
+
 /** Rename this device to "Pocket": shown at once; [refuse]: the old name back with why, else kept. */
 async function renameFails(m, refuse) {
   m.refuse = refuse;
@@ -122,6 +141,7 @@ export async function aiDevicesCheck() {
   const m = mockRealm(true);
   const S = await open(m);
   const fails = listFails();
+  fails.push(...(await missingFails()));
   for (const refuse of [true, false]) fails.push(...(await renameFails(m, refuse)));
   for (const refuse of [true, false]) fails.push(...(await removeFails(m, refuse)));
   await open(mockRealm(false));

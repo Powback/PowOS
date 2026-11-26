@@ -1,7 +1,7 @@
 // The AI page's Devices tab, pure (shell/ui/devicesview.ts): node --test shell/test/devicesview.test.ts
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { devicesView, kindIcon, presence, syncLine, whatIs, withDevice, type AccountDevice } from "../ui/devicesview.ts";
+import { appName, devicesView, howOf, kindIcon, missingApps, missingNote, presence, syncLine, whatIs, withDevice, type AccountDevice } from "../ui/devicesview.ts";
 
 const now = 2_000_000_000;
 const list: AccountDevice[] = [
@@ -39,4 +39,20 @@ test("kind icons, what it is, an edit leaves the rest", () => {
   assert.equal(out[2].name, "Mine");
   assert.equal(list[2].name, "S25");
   assert.equal(out[0], list[0]);
+});
+
+test("missing apps: named from this device's apps, else from the id; sorted; how each gets there", () => {
+  const d: AccountDevice = { id: "s", name: "S25", sync: { missing: ["local.oslo-temp", "dev.powos.agents", "w:cdn.pow", "local.shop"], missing_n: 70 } };
+  const { apps, more } = missingApps(d, { "local.shop": { name: "Shopping", icon: "x.svg" } });
+  assert.deepEqual(apps.map((a) => [a.name, a.how, a.icon]), [
+    ["Agents", "powos", ""],
+    ["Cdn pow", "web", ""],
+    ["Oslo temp", "folder", ""],
+    ["Shopping", "folder", "x.svg"],
+  ]);
+  assert.equal(more, 66);
+  assert.equal(appName("local.hue-rooms-on"), "Hue rooms on");
+  assert.equal(howOf("dev.powos.registry"), "powos");
+  assert.match(missingNote(apps[3], "S25"), /powos app install .* on S25/);
+  assert.deepEqual(missingApps({ id: "x" }, {}), { apps: [], more: 0 });
 });

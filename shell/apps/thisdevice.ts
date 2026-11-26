@@ -5,7 +5,9 @@
  */
 import { powos } from "../bridge.ts";
 import { importLayout, type LayoutExport } from "../homeimport.ts";
-import { dock, setDock } from "../state.ts";
+import { apps, dock, setDock } from "../state.ts";
+import type { KnownApps } from "../ui/shared/devicesview.ts";
+import { PREFIX } from "./pages.ts";
 import type { LockAccess } from "../types.ts";
 
 export interface ThisDevice {
@@ -23,6 +25,8 @@ export interface ThisDevice {
    * This phone's own enrollment as an approver (PowStation.kt): the Devices app's "New device wants to join" card and
    * Revoke on a phone, with no server command. Rejects on an APK without it (the card then stays hidden).
    */
+  /** This device's PowOS apps by app id (name, icon URL): the missing-apps lists name and draw the ones it has. */
+  known(): KnownApps;
   realm(op: "state" | "pending" | "devices" | "approve" | "revoke" | "rename", body?: object): Promise<any>;
 }
 
@@ -33,6 +37,8 @@ export const thisDevice: ThisDevice = {
   allowLock: () => powos.devices?.allowLock() ?? none(),
   stopLock: () => powos.devices?.stopLock() ?? none(),
   realm: (op, body) => powos.devices?.realm(op, body) ?? none(),
+  known: () =>
+    Object.fromEntries(apps.value.filter((a) => a.key.startsWith(PREFIX)).map((a) => [a.key.slice(PREFIX.length), { name: a.label, icon: a.icon }])),
   onLock: (on) => powos.on("devices.lock", (s) => on(s as LockAccess)),
   importHome: (layout) =>
     importLayout(layout, {
