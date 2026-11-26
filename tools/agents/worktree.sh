@@ -103,7 +103,7 @@ ready_line() {
   rev=$(cat "$d/targets/android/app/engine/powstream-native/include/powstream-source-revision" 2>/dev/null) || rev=""
   [ -n "$want" ] && [ "$rev" != "$want" ] && bad+=" powstream-natives"
   want_n=$(sed 's/#.*//' "$d/apps/bundled.list" 2>/dev/null | grep -c '[^[:space:]]') || want_n=0
-  n=$(find "$d/targets/android/app/app/bundled-apps/apps" -mindepth 1 -maxdepth 1 -type d 2>/dev/null | wc -l | tr -d ' ')
+  n=$({ find "$d/targets/android/app/app/bundled-apps/apps" -mindepth 1 -maxdepth 1 -type d 2>/dev/null || true; } | wc -l | tr -d ' ')
   [ "$n" -ge "$want_n" ] || bad+=" bundled-apps($n/$want_n)"
   [ -s "$d/targets/android/app/app/shell-build.txt" ] || bad+=" shell-build.txt"
   [ -f "$d/targets/android/app/owl/build/cli/owl.jar" ] || bad+=" owl.jar"
