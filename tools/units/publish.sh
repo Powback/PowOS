@@ -29,14 +29,17 @@ if ! mkdir "$S/lock" 2>/dev/null; then
 fi
 echo $$ > "$S/lock/pid"; trap 'rm -rf "$S/lock"' EXIT
 
-# The code: origin's lib/apps + lib/ai/agents (powos-units loads its siblings and finds the board's CLI from there).
+# The code: origin's lib/apps + lib/ai/agents + lib/powos_py (powos-units loads its siblings and finds the board's CLI
+# from there; the CLI imports lib/powos_py - without it every publish failed from 11-02 on) + units/mac (the Mac's
+# own units, read by its check: what its deploy scripts installed is not drift).
 src=$S/src
 if [ -n "$R" ] && with_timeout 60 git -C "$R" fetch -q origin "${REF#origin/}" 2>/dev/null &&
    rm -rf "$src.new" && mkdir -p "$src.new" &&
-   git -C "$R" archive "$REF" lib/apps lib/ai/agents | tar -x -C "$src.new" 2>/dev/null; then
+   git -C "$R" archive "$REF" lib/apps lib/ai/agents lib/powos_py units/mac | tar -x -C "$src.new" 2>/dev/null; then
   rm -rf "$src" && mv "$src.new" "$src"
-elif [ ! -x "$src/lib/apps/powos-units" ] && [ -n "$R" ] && [ -x "$R/lib/apps/powos-units" ]; then
-  rm -rf "$src" && mkdir -p "$src/lib/ai" && cp -R "$R/lib/apps" "$src/lib/" && cp -R "$R/lib/ai/agents" "$src/lib/ai/"
+elif { [ ! -x "$src/lib/apps/powos-units" ] || [ ! -d "$src/lib/powos_py" ]; } && [ -n "$R" ] && [ -x "$R/lib/apps/powos-units" ]; then
+  rm -rf "$src" && mkdir -p "$src/lib/ai" "$src/units" && cp -R "$R/lib/apps" "$R/lib/powos_py" "$src/lib/" &&
+    cp -R "$R/lib/ai/agents" "$src/lib/ai/" && cp -R "$R/units/mac" "$src/units/"
 fi
 U=$src/lib/apps/powos-units
 [ -x "$U" ] || { log "no powos-units (no checkout at '$R')"; exit 1; }

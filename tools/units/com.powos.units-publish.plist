@@ -1,18 +1,27 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  The units publisher (tools/units/publish.sh all, every 15 min; unit units/mac/units-publish-mac.json). A LaunchDaemon
+  run as @USER@ (UserName), not a LaunchAgent: this Mac is headless and launchd loads LaunchAgents only for a GUI
+  login, so after the 11-08 reboot the agent was simply never loaded again and mac/colima/powstation went stale for
+  24 days. A daemon is started by launchd itself at every boot. Installed by tools/units/publish-deploy.sh, which fills
+  in @USER@, @HOME@, @BIN@ and @R@.
+-->
 <plist version="1.0">
 <dict>
   <key>Label</key><string>com.powos.units-publish</string>
+  <key>UserName</key><string>@USER@</string>
   <key>ProgramArguments</key>
   <array><string>/bin/bash</string><string>@BIN@/publish.sh</string><string>all</string></array>
   <key>EnvironmentVariables</key>
   <dict>
+    <key>HOME</key><string>@HOME@</string>
+    <key>USER</key><string>@USER@</string>
     <key>PATH</key><string>@HOME@/.local/bin:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin</string>
     <key>POWOS_UNITS_REPO</key><string>@R@</string>
   </dict>
   <key>StartInterval</key><integer>900</integer>
   <key>RunAtLoad</key><true/>
-  <key>LimitLoadToSessionType</key><string>Background</string>
   <key>ProcessType</key><string>Background</string>
   <key>LowPriorityIO</key><true/>
   <key>Nice</key><integer>10</integer>

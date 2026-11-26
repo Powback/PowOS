@@ -260,6 +260,11 @@ def load(host=None):
     units = load_dir(UNITS_DIR)
     for d in user_dirs():
         units += load_dir(d)
+    # The Mac is where the repo lives, and its deploy scripts (`# powos-units: deploy host=mac`) install what
+    # units/mac/*.json declares without registering it: read those too, so an installed agent that is stopped between
+    # runs or not loaded (its plist, its idle state) is a known unit, never drift. A registered copy wins (dedupe).
+    if HOST == "mac" and not os.environ.get("POWOS_UNITS_DIR"):
+        units += load_dir(os.path.join(REPO_UNITS, "mac"))
     units = dedupe(units)
     if HOST == "phone-android":  # a Magisk module carries its own manifest (the system module)
         for p in sorted(glob.glob("/data/adb/modules/*/powos-units/*.json")):
