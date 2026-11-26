@@ -253,6 +253,24 @@ if [ -n "${GATE_SCOPE_DRY:-}" ]; then
   [ -z "${GATE_COMPOSE_DUMP:-}" ] || { mkdir -p "$GATE_COMPOSE_DUMP" && (cd "$S" && tar --exclude ./node_modules -cf - .) | tar -xf - -C "$GATE_COMPOSE_DUMP"; }
   echo "gate: GATE_ONLY=${GATE_ONLY:-} skip_tsc=${skip_tsc:-0}"; exit 0
 fi
+# 0b. The push gate's lints on the branch's changed files (tools/lint/changed-lints.sh, what tools/git-hooks/pre-push
+# runs): Kotlin complexity, the shellcheck ratchet, the hack registry, apps' UI complexity - the shell's own tsc and
+# complexity run below over the composed tree. Agent gates of HEAD + the working tree only (not the ship's, --tree/--dir, a
+# boot gate or GATE_LINT=0); before the pass cache, since the files it reads aren't all in the shell tree it keys on.
+# 11-25: these failed only at push, after a passing gate - one refactor commit and a second gate round each time.
+if [ "${GATE_PRIORITY:-}" != ship ] && [ "$base" = head ] && [ "${GATE_SCOPE:-}" != boot ] && [ "${GATE_LINT:-1}" != 0 ] &&
+   [ -z "${GATE_NO_CHANGED_LINTS:-}" ] && top=$(git -C "$SHELL_DIR" rev-parse --show-toplevel 2>/dev/null) &&
+   mb=$(git -C "$top" merge-base HEAD origin/main 2>/dev/null) && [ -x "$top/tools/lint/changed-lints.sh" ]; then
+  changed=()
+  while IFS= read -r f; do [ -n "$f" ] && changed+=("$f"); done < <({ git -C "$top" diff --name-only --diff-filter=AM "$mb" HEAD
+    git -C "$top" status --porcelain --untracked-files=all | grep -v '^ D\|^D ' | sed 's/^...//; s/.* -> //'; } | sort -u)
+  if [ ${#changed[@]} -gt 0 ]; then
+    tl=$(date +%s)
+    if out=$(cd "$top" && bash tools/lint/changed-lints.sh --no-shell "${changed[@]}" 2>&1); then echo "$out" | tail -1
+    else echo "$out" | grep -v '^ok ' | head -40; echo "FAIL lints: the push gate's lints fail on this branch's changed files (above) - fix them now, pre-push refuses the same"; fail=1; fi
+    echo "     changed-file lints: ${#changed[@]} file(s) in $(( $(date +%s) - tl )) s"
+  fi
+fi
 # The pass cache: the same composed tree (+ scope + flags) that passed once passes again at once - an agent's rerun
 # (a flaky tool timeout, a re-check before landing) costs nothing. Failures are never cached.
 cache_dir="${XDG_CACHE_HOME:-$HOME/.cache}/powos-gate/pass"
@@ -262,7 +280,7 @@ cache_key=$( { (cd "$S" && find . -path ./node_modules -prune -o -type f -print0
   [ -n "${app:-}" ] && (cd "$app" && find out powos-app.json -type f -print0 2>/dev/null | sort -z | xargs -0 shasum 2>/dev/null)
   shasum "$SHELL_DIR/dev/gate.mjs" "$SHELL_DIR/dev/preview/sheet.tsx" "$SHELL_DIR/dev/preview/preview.mjs" 2>/dev/null
   echo "$IMAGE|${GATE_ONLY:-}|${widgets:-}|${app:-}|${GATE_SHELL_PAGES:-1}|${IDLE_MS:-}|${GATE_THROTTLE:-}|$skip_tsc"; } | shasum | cut -c1-24)
-if [ -z "$shots" ] && [ -z "${GATE_NOCACHE:-}" ] && [ -f "$cache_dir/$cache_key" ]; then
+if [ -z "$shots" ] && [ -z "${GATE_NOCACHE:-}" ] && [ $fail = 0 ] && [ -f "$cache_dir/$cache_key" ]; then
   echo "gate: pass in 0 s (cached: this exact tree already passed, $(cat "$cache_dir/$cache_key")) (slot wait $slot_wait s)"; exit 0
 fi
 t_tsc=0 t_lint=0 t_browser=0 t_widgets=0

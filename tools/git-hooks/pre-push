@@ -7,54 +7,18 @@
 set -uo pipefail
 root=$(git rev-parse --show-toplevel)
 zero=0000000000000000000000000000000000000000
-files=() apps="" kt="" sh=()
+changed=()
 while read -r _lref lsha _rref rsha; do
   [ "$lsha" = "$zero" ] && continue
   base=$rsha
   [ "$rsha" = "$zero" ] && base=$(git merge-base "$lsha" origin/main 2>/dev/null || echo "$lsha")
-  while IFS= read -r f; do
-    sh+=("$f")   # every changed file: the shellcheck ratchet keeps the shell scripts among them
-    case "$f" in
-      shell/*.ts|shell/*.tsx|shell/*.mjs|shell/*.js) files+=("${f#shell/}") ;;
-      apps/*/ui/*) apps=--apps ;;
-      targets/android/app/*/test/*) ;;
-      targets/android/app/*.kt) kt+="${kt:+,}${f#targets/android/app/}" ;;
-    esac
-  done < <(git diff --name-only --diff-filter=AM "$base" "$lsha" 2>/dev/null)
+  while IFS= read -r f; do changed+=("$f"); done < <(git diff --name-only --diff-filter=AM "$base" "$lsha" 2>/dev/null)
 done
+# The lints themselves (complexity: shell TS + apps UIs + Kotlin; tsc; the shellcheck ratchet; the hack registry) live in
+# tools/lint/changed-lints.sh, which the agent's scoped gate (shell/dev/gate.sh) also runs - same verdict, one gate round
+# earlier.
 s=0
-if [ ${#files[@]} -gt 0 ] || [ -n "$apps" ]; then
-  "$root/shell/dev/lint-complexity.sh" $apps ${files[@]+"${files[@]}"} || s=$?
-fi
-if [ ${#files[@]} -gt 0 ] && [ "${GATE_LINT:-1}" != 0 ]; then
-  tsc=$root/shell/node_modules/.bin/tsc
-  if [ ! -x "$tsc" ]; then echo "pre-push: tsc skipped (no shell/node_modules)" >&2
-  elif ! out=$(cd "$root/shell" && "$tsc" --noEmit -p . 2>&1); then echo "$out" | grep -v '^ ' | head -30 | sed 's/^/FAIL tsc: /'; s=1
-  fi
-fi
-if [ -n "$kt" ]; then
-  # need_docker (f35: brew upgrade unlinks docker, lint-complexity.sh's own `command -v docker` then fails "no
-  # docker" even though the binary's still in the Cellar) fixes PATH for THIS shell, which lint-complexity.sh
-  # inherits as a child process - one check here covers it without duplicating the probe in every lint script.
-  . "$root/tools/lib/need-docker.sh"
-  need_docker
-  k=0; "$root/targets/android/lint-complexity.sh" --only "$kt" || k=$?
-  [ $k = 1 ] && s=1
-fi
-# The shellcheck ratchet (tools/lint/shellcheck-ratchet.py; CI runs it over every script) on the pushed shell scripts:
-# no new finding, no file worse than tools/lint/shellcheck-baseline.txt, no stale or raised entry. Its shellcheck is
-# pinned (0.9.0; on the Mac the koalaman/shellcheck-alpine image through docker, ~1 s per file).
-if [ ${#sh[@]} -gt 0 ] && [ "${GATE_LINT:-1}" != 0 ]; then
-  . "$root/tools/lib/need-docker.sh"; need_docker 2>/dev/null || true   # a native shellcheck 0.9.0 needs no docker
-  c=0; out=$(cd "$root" && python3 tools/lint/shellcheck-ratchet.py --check "${sh[@]}" 2>&1) || c=$?
-  [ $c = 0 ] || echo "$out" | grep -v '^ok ' >&2
-  [ $c = 0 ] || s=1
-fi
-# 11-09: five ships in one night failed only on test-hack-registry (a new `HACK:` marker with no row in REMOTE-POWOS.md §4) -
-# it is a ~1 s file scan, so it runs on every push here instead of 15 min later in the ship.
-if ! out=$(bash "$root/test/tier1/test-hack-registry.sh" 2>&1); then
-  echo "$out" | grep -E "FAIL" | sed 's/^ */FAIL hack registry: /'; s=1
-fi
+bash "$root/tools/lint/changed-lints.sh" ${changed[@]+"${changed[@]}"} || s=1
 [ $s = 1 ] && echo "pre-push: refused - the lint / tsc fails on what you push (above)." >&2
 [ $s = 1 ] && exit 1
 exit 0

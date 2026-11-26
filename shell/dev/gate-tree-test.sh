@@ -2,6 +2,7 @@
 # gate.sh's composed tree (dry: GATE_SCOPE_DRY + GATE_COMPOSE_DUMP) in a throwaway sparse clone of this checkout: an
 # agent's default gate tests HEAD + the uncommitted shell changes (modified, staged, untracked, deleted); --head and a
 # push naming its files test HEAD (+ those files) and say which uncommitted files they leave out. ~10 s.
+# shellcheck disable=SC2034  # out is read inside ok's eval strings
 set -uo pipefail
 D=$(cd "$(dirname "$0")" && pwd); top=$(git -C "$D" rev-parse --show-toplevel)
 T=$(mktemp -d); trap 'rm -rf "$T"' EXIT
