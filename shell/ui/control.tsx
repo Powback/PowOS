@@ -163,6 +163,8 @@ function usePress(t: QuickTile, hold = true) {
       // Another app's tile not hosted yet (no state from it): its own settings, or its app. Hosted, it switches here.
       if (t.app && t.on == null) return (shut(), powos.qs.open(t.id));
       if (LEAVES.has(t.id) || t.on == null) shut();
+      // A switch flipping is a commit (§7): the stock / iOS toggle tick. A run-once action (no on/off) has none.
+      if (t.on != null) tick();
       powos.qs.toggle(t.id).then(update);
     },
   };
@@ -347,8 +349,27 @@ function arranged(tiles: QuickTile[]) {
 }
 
 
+/** Which end of 0..1 [v] is at: -1, 1, or 0 for neither. */
+const endOf = (v: number) => (v <= 0 ? -1 : v >= 1 ? 1 : 0);
+
 /**
- * A slider sending its value at most once a frame while it moves. Its icon can be a button of its own ([onIcon]: the
+ * A slider's detents: a tick as the thumb reaches either end (stock's / iOS's slider stop), once per arrival - not again
+ * while it rests there, not for a drag that starts there ([value]: where it was when the drag began). [done] at release.
+ */
+function useDetents(value: number) {
+  const last = useRef<number | null>(null);
+  return {
+    at(v: number) {
+      const end = endOf(v);
+      if (end && end !== (last.current ?? endOf(value))) tick();
+      last.current = end;
+    },
+    done: () => void (last.current = null),
+  };
+}
+
+/**
+ * A slider sending its value at most once a frame while it moves, with a tick at either end (its detents). Its icon can be a button of its own ([onIcon]: the
  * volume's cycles silent / vibrate / ring), and something can sit at its end ([end]: the brightness's auto "A").
  */
 export function Slider({
@@ -369,6 +390,7 @@ export function Slider({
   const [local, setLocal] = useState<number | null>(null);
   const frame = useRef(0);
   const next = useRef(0);
+  const detent = useDetents(value);
   useEffect(() => () => cancelAnimationFrame(frame.current), []);
   const send = (v: number) => {
     next.current = v;
@@ -389,10 +411,11 @@ export function Slider({
         value={Math.round(shown * 1000)}
         onInput={(e) => {
           const v = Number((e.currentTarget as HTMLInputElement).value) / 1000;
+          detent.at(v);
           setLocal(v);
           send(v);
         }}
-        onChange={() => setLocal(null)}
+        onChange={() => (detent.done(), setLocal(null))}
       />
       {onIcon ? (
         <button type="button" class="cc-slider-icon tap" aria-label={label} onClick={onIcon}>
@@ -790,7 +813,7 @@ function Categories() {
               type="button"
               aria-label="auto brightness"
               class={`cc-auto ${b.auto ? "on" : ""}`}
-              onClick={() => powos.qs.set("auto-brightness", b.auto ? 0 : 1).then(update)}
+              onClick={() => (tick(), powos.qs.set("auto-brightness", b.auto ? 0 : 1).then(update))}
             >
               A
             </button>
@@ -875,9 +898,11 @@ const SCREENS: Record<string, () => void> = { [GLASSES_ID]: openGlasses, [REMOTE
 
 /** What a tap on a control does: the phone checks stop or resume in place (the shade stays), a screen opens, or [own]. */
 function tapOf(t: QuickTile, own: () => void): () => void {
-  if (t.id === TESTS_ID) return toggleTests;
-  if (t.id === PAD_ID) return togglePad;
-  if (t.id === FPS_ID) return toggleFps;
+  // The phone checks / pad / fps switches flip in place: the toggle tick, as usePress's (§7).
+  const flip = (f: () => unknown) => () => void (tick(), f());
+  if (t.id === TESTS_ID) return flip(toggleTests);
+  if (t.id === PAD_ID) return flip(togglePad);
+  if (t.id === FPS_ID) return flip(toggleFps);
   const open = SCREENS[t.id];
   return open ? () => (shut(), open()) : own;
 }
@@ -1033,7 +1058,7 @@ function Controls() {
               type="button"
               aria-label="auto brightness"
               class={`cc-auto ${b.auto ? "on" : ""}`}
-              onClick={() => powos.qs.set("auto-brightness", b.auto ? 0 : 1).then(update)}
+              onClick={() => (tick(), powos.qs.set("auto-brightness", b.auto ? 0 : 1).then(update))}
             >
               A
             </button>

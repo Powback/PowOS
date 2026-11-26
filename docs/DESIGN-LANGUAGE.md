@@ -145,6 +145,10 @@ Checks:
 
 - **Haptics only at commit points.** A haptic fires on lift-out, on a snap (a threshold crossed, a window snapped),
   on a long-press opening, and on push-to-talk start. It never fires on page changes, scrolling or reordering steps.
+  - The full list (gate haptics-pass, dev/haptics-pass-check.js): a long-press lift and edit mode starting; a carry
+    snapping into a drop zone (a folder or stack, the dock, a switcher split half) and its drop; a control-center
+    switch flipping; a slider reaching either end; the pages' rubber band past the first or last page; the launcher's
+    and shade's pull crossing open; a lock shortcut's hold; the keyboard's ✨ hold (swipe-keyboard's own tick).
   - Use `ui/haptics.ts` `tick()` and `confirm()`, plus `panelTicks()` for pulls.
   - Never `navigator.vibrate()` (silent in the phone's WebView): lint-design blocks it outside `ui/haptics.ts`.
 - **Long-press opens a menu or edit mode.** A menu shows only what no tab or button already offers.

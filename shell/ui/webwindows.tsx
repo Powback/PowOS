@@ -4184,6 +4184,8 @@ function appDragMove(id: number, e: PointerEvent): boolean {
     d.hold = window.setTimeout(() => {
       if (appDrags.get(id) !== d || d.moved) return;
       appDrags.delete(id);
+      // A long press opening a menu (§7), as home's.
+      hapticTick();
       tileMenu.value = id;
     }, HOLD_MS);
     return true;

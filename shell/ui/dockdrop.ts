@@ -74,15 +74,22 @@ function slotAt(el: HTMLElement, r: DOMRect, point: { x: number; y: number }, n:
   return Math.max(0, Math.min(n - 1, slotPast(Math.floor(((point.x - s.left) / s.width) * cells), n)));
 }
 
-/** Follows the finger: the dock makes room as it comes and goes, with a tick for each new slot. */
-export function hoverDock(c: Carry, x: number, y: number) {
+/**
+ * Follows the finger: the dock makes room as it comes and goes. A tick as it snaps into the dock (the drop zone opening
+ * under the finger), not for each slot it moves along after that (§7: no haptic on reordering steps), nor where the
+ * carry starts ([snap] false: the lift had its own).
+ */
+export function hoverDock(c: Carry, x: number, y: number, snap = true) {
   // The search widget makes room too: a gap where its button would go (searchwidget.tsx; its drop is the foot's).
   const a = aimDock(c, x, y) ?? aimSearch(c, x, y);
   const was = dockAim.value;
-  if (a?.slot !== was?.slot || a?.key !== was?.key) {
-    dockAim.value = a;
-  }
+  if (sameAim(a, was)) return;
+  if (a && !was && snap) tick();
+  dockAim.value = a;
 }
+
+type DockAim = typeof dockAim.value;
+const sameAim = (a: DockAim, b: DockAim) => a?.slot === b?.slot && a?.key === b?.key;
 
 /** Lets [c] go over the dock at [x], [y]: true when it was pinned there (the drop was the dock's). */
 export function dropOnDock(c: Carry, x: number, y: number): boolean {

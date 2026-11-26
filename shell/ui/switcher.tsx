@@ -126,6 +126,8 @@ export const TaskCard = memo(function TaskCard({
     onDockHover?.(null);
     const at = (shot.current ?? card).getBoundingClientRect();
     if (onDock?.(t.id, side, at) === false) return springBack(dy, dx);
+    // Dropped into the half: the snap's commit (§7), as home's drops.
+    tick();
     gone.current = true;
     card.style.transform = "";
     card.style.opacity = "";

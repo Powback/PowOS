@@ -1928,6 +1928,17 @@ async function launcherHapticsCheck(page) {
   return fails;
 }
 
+/** haptics-pass: dev/haptics-pass-check.js's [steps], one evaluate each (no long-pending promise); a failed setup stops. */
+async function hapticsPassSteps(page, steps) {
+  const fails = [];
+  for (const fn of steps) {
+    const f = await page.evaluate(async (s) => (await importShim("./dev/haptics-pass-check.js"))[s](), fn);
+    fails.push(...f.map((m) => `${fn}: ${m}`));
+    if (fn === "setup" && f.length) break;
+  }
+  return fails;
+}
+
 /** At rest: no animation in the panel, nothing the pull left inline. */
 async function overpullRest() {
   const o = window.__op;
@@ -2416,6 +2427,9 @@ async function switcherCanvasDragCheck(r) {
 
 const gateSleep = (ms) => new Promise((ok) => setTimeout(ok, ms));
 
+/** The mock host's haptic calls so far (bridge.ts window.__hapticsMock: tick + confirm). */
+const hapticCount = (page) => page.evaluate(() => (window.__hapticsMock ? window.__hapticsMock.tick + window.__hapticsMock.confirm : 0));
+
 /** switcher-canvas-drag's switcher: five cards, card [from] in front; the host's dock answers [refuse] (null: ok). */
 function canvasDragSetup({ r }, refuse, from = 1201) {
   return r.page.evaluate(
@@ -2495,8 +2509,12 @@ async function canvasDragPreviews(t) {
   const at = await canvasDragSetup(t, null);
   if (!at) return ["no card for task 1201 in the switcher"];
   const fails = [];
+  const t0 = await hapticCount(t.r.page);
   await canvasDragTo(t, at, await edgePoint(t, "left"));
   for (const side of ["left", "right", "top", "bottom"]) fails.push(...(await previewAt(t, side)));
+  // haptics-everywhere: each half snapping in under the finger ticks (switcher.tsx hover).
+  const snaps = (await hapticCount(t.r.page)) - t0;
+  if (snaps < 4) fails.push(`the split zones snapping in under the finger: ${snaps} haptic ticks over 4 halves, want one each`);
   const mid = await t.r.page.evaluate(() => ({ x: innerWidth / 2, y: innerHeight / 2 }));
   for (let i = 1; i <= 6; i++) (await touchOf(t)("touchMove", [{ x: mid.x, y: mid.y - i, id: 1 }]), await gateSleep(20));
   await gateSleep(200);
@@ -2573,11 +2591,14 @@ async function canvasDropPick(t) {
   const at = await canvasDragSetup(t, null);
   if (!at) return ["no card for task 1201 in the switcher"];
   await canvasDragTo(t, at, await edgePoint(t, "left"));
+  const t0 = await hapticCount(t.r.page);
   await canvasRelease(t);
+  const dropTicks = (await hapticCount(t.r.page)) - t0;
   const s = await pickerState(t);
   console.log(`     switcher-canvas-drag: dropped left -> ${JSON.stringify(s)}`);
   if (!s) return ["let go at the left edge: no picker (.canvas-pick) - the app didn't dock"];
   const fails = pickListFails(s);
+  if (dropTicks < 1) fails.push("dropped into the left half: no haptic tick (switcher.tsx dockAway)");
   const dock = await t.r.page.evaluate(() => window.__dock);
   if (dock.length) fails.push(`the drop alone started a pair (auto-picked partner): ${JSON.stringify(dock)}`);
   return [...fails, ...(await pickFiles(t))];
@@ -16653,6 +16674,11 @@ try {
     runs.push(open(browser, `${ORIGIN}/index.html?mode=pull`, "scroll-fade", { width: 404, height: 440 }).then((r) => whenReady(r, () => r.page.evaluate(scrollFadeCheck))));
   if (process.env.SHELL_PAGES !== "0")
     runs.push(open(browser, `${ORIGIN}/index.html?mode=pull`, "launcher-haptics", { width: 404, height: 900 }).then((r) => whenReady(r, () => launcherHapticsCheck(r.page))));
+  // haptics-everywhere (dev/haptics-pass-check.js): lift, folder + dock zones, edit-mode enter, control center toggles
+  // and slider ends, the page edge's bounce, the shade's pull, a lock shortcut - each ticks through the mock bridge.
+  if (process.env.SHELL_PAGES !== "0")
+    for (const [name, query, steps] of [["haptics-pass", "", ["setup", "liftAndZones", "editEnter", "edgeBounce", "lockShortcut"]], ["haptics-pass-shade", "?mode=shade", ["controlCenter", "shadePull"]]])
+      runs.push(open(browser, `${ORIGIN}/index.html${query}`, name, { width: 404, height: 900 }).then((r) => whenReady(r, () => hapticsPassSteps(r.page, steps))));
     runs.push(open(browser, `${ORIGIN}/index.html`, "close-up", { width: 404, height: 560 }).then((r) => whenReady(r, () => r.page.evaluate(closeUpCheck))));
   // Unfolded home is one wide page with one bar (hosts/wide.ts, home.tsx; the user, 2026-10-22), migrated from the two
   // side-by-side pages without moving a tile.

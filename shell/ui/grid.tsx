@@ -320,7 +320,8 @@ const minCells = (i: HomeItem): [number, number] => (i.appWidget ? appWidgetMin(
 export function startCarry(what: { item?: HomeItem; app?: string; fromDock?: boolean; lifted?: boolean; toWindow?: boolean; fromFolder?: string }, e: PointerEvent, grab = { x: 0, y: 0 }) {
   const g = geometry.value;
   carry.value = { ...what, x: e.clientX - g.left, y: e.clientY - g.top, grab };
-  hoverDock(carry.value, e.clientX, e.clientY);
+  hoverDock(carry.value, e.clientX, e.clientY, false);
+  const join = joinSnap();
   let edgeSince = 0;
   const turner = window.setInterval(() => {
     const c = carry.value;
@@ -345,6 +346,7 @@ export function startCarry(what: { item?: HomeItem; app?: string; fromDock?: boo
     // Off the dock, a dock app's ghost shows the half (split screen) or the middle (a window) it would open in.
     hoverOut(carry.value, ev.clientX, ev.clientY);
     hoverFoot(carry.value, ev.clientX, ev.clientY);
+    join(carry.value);
   };
   const release = ownTouch(e);
   const up = async (ev: PointerEvent) => {
@@ -377,6 +379,17 @@ function ownTouch(e: PointerEvent) {
   return () => {
     window.removeEventListener("touchmove", own, true);
     target?.removeEventListener("touchmove", own as EventListener);
+  };
+}
+
+/** The folder / stack zone under a carry (aim: a group or a stack): a tick as it snaps onto a new one (§7). */
+function joinSnap() {
+  let joining = "";
+  return (c: Carry) => {
+    const t = dockAim.peek() || outAim.peek() ? null : aim(c);
+    const key = t?.group ?? t?.stack?.key ?? "";
+    if (key && key !== joining) tick();
+    joining = key;
   };
 }
 

@@ -21,7 +21,7 @@ import { computed, effect, signal } from "@preact/signals";
 import { powos } from "../bridge.ts";
 import { dropKeyboard } from "./keyboard.ts";
 import { viewport } from "./viewport.ts";
-import { panelTicks } from "./haptics.ts";
+import { crossing, panelTicks } from "./haptics.ts";
 import { overPull, overRelease } from "./overpull.ts";
 import { inWindow } from "./desktops.ts";
 import { stackSwipeAt } from "./stackmodel.ts";
@@ -107,7 +107,7 @@ export function widthOf(el: Element | null): number {
 // Haptics (haptics.ts): a tick as a finger crosses what letting go would commit - the launcher's openness (the host's
 // pull.drag or home's own swipe: OPEN_AT, PanelPull.kt's too; shutting it, CLOSE_KEEP) and the shade's (its pull, its
 // swipe shut). Once per crossing, never while held. Page changes are silent (the user, 10-31: "Don't need haptics
-// when changing page"; gate page-swipe-no-haptic).
+// when changing page"; gate page-swipe-no-haptic) - only the rubber band past the first / last page ticks (pageOffset).
 panelTicks(drawerDrag, () => drawer.peek() > 0, OPEN_AT, CLOSE_KEEP);
 panelTicks(notifDrag, () => notif.peek(), OPEN_AT, CLOSE_KEEP);
 
@@ -455,6 +455,7 @@ function abandon() {
   drawerDrag.value = null;
   notifDrag.value = null;
   pageDrag.value = null;
+  edgeBounce.reset();
 }
 
 /** The drawer's way, closed to open: its rise (shell.css --rise, a length: px computed), not its height - it opens
@@ -886,10 +887,18 @@ function dragTo(gs: Gesture, dx: number, dy: number) {
   }
 }
 
-/** The pages under the finger: past the first and last page they resist. */
+/**
+ * Finger px past the first / last page where the rubber band ticks once (haptics.ts crossing: the stock bounce's "end
+ * of the pages" feel): far enough that a page swipe's start never reaches it, so changing page stays silent.
+ */
+const EDGE_BOUNCE_PX = 48;
+const edgeBounce = crossing();
+
+/** The pages under the finger: past the first and last page they resist (and tick once as the band stretches). */
 function pageOffset(dx: number) {
   const last = pageCount.value - 1;
   const edge = (page.value === -1 && dx > 0) || (page.value === last && dx < 0);
+  edgeBounce.at(edge && Math.abs(dx) >= EDGE_BOUNCE_PX);
   return edge ? dx / 3 : dx;
 }
 
@@ -981,6 +990,7 @@ function settlePages(gs: Gesture) {
   const total = pageDrag.value ?? 0;
   const width = widthOf(document.querySelector(".pages")) || viewport().w;
   pageDrag.value = null;
+  edgeBounce.reset();
   const dx = gs.last[0] - gs.x0;
   const vx = releaseVx(gs);
   const { dir, why } = pageDecision(total, dx, vx, width);
