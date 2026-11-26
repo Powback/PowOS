@@ -5,6 +5,7 @@
  * the phone, so the shell still runs.
  */
 import type {
+  AppShortcut,
   FilePlace,
   Clip,
   BackgroundApp,
@@ -152,6 +153,8 @@ function native(host: NonNullable<Window["PowosHost"]>): Bridge {
       stopBackground: (key) => call<boolean>("apps.stopBackground", key),
       permissions: (key) => call<string[]>("apps.permissions", key),
       revoke: (key, kind) => call<boolean>("apps.revoke", key, kind),
+      shortcuts: (key) => call<AppShortcut[]>("apps.shortcuts", key),
+      startShortcut: (key, id) => call<boolean>("apps.startShortcut", key, id),
     },
     usage: { recent: (limit) => call<string[]>("usage.recent", limit), frequent: (limit) => call<string[]>("usage.frequent", limit) },
     files: { places: () => call<FilePlace[]>("files.places"), open: (id) => call<boolean>("files.open", id) },
@@ -678,6 +681,12 @@ function mock(): Bridge {
         g[key] = (g[key] ?? []).filter((k) => k !== kind);
         return had;
       },
+      // An Android app's own shortcuts (AppShortcuts.kt): Chrome's three, as on the phone; none for the others.
+      shortcuts: async (key) =>
+        key === "a:chrome"
+          ? ([["new_tab", "New tab"], ["new_incognito", "New Incognito tab"], ["bookmarks", "Bookmarks"]] as const).map(([id, label]): AppShortcut => ({ id, label, icon: icon(label), enabled: true }))
+          : [],
+      startShortcut: async (key, id) => (console.log("[mock] shortcut", key, id), true),
       ...mockBackground(icon),
     },
     // Most used: some recent, some opened less lately (the launcher's Suggested leaves out what Recent shows).

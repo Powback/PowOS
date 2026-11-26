@@ -16,7 +16,7 @@ import { closeApp, windowsOf } from "./desktops.ts";
 import { inLaunchers, toggleLauncher } from "./launchers.tsx";
 import { powos } from "../bridge.ts";
 import { memo } from "./memo.ts";
-import type { App, AppWindow } from "../types.ts";
+import type { App, AppShortcut, AppWindow } from "../types.ts";
 import { usePresence } from "./reveal.tsx";
 import { POW_FOLDER, powGroups } from "./launcherview.ts";
 import { addToHome } from "./powtiles.ts";
@@ -322,6 +322,68 @@ function grantItems(app: App): Item[] {
   ]);
 }
 
+/**
+ * An Android app's own shortcuts (Chrome "New tab"; Bridge apps.shortcuts, AppShortcuts.kt), by app key: read each
+ * time its menu opens, the last answer shown meanwhile; undefined: never answered yet (placeholder rows show).
+ */
+const shortcutsOf = signal<Record<string, AppShortcut[]>>({});
+
+/** The host lists app shortcuts and [app] is an Android app. */
+const hasShortcuts = (app: App) => app.kind === "android" && !!powos.apps.shortcuts;
+
+async function loadShortcuts(key: string) {
+  const list = await powos.apps.shortcuts!(key).catch(() => [] as AppShortcut[]);
+  shortcutsOf.value = { ...shortcutsOf.value, [key]: list.slice(0, SHORTCUTS_MAX) };
+}
+
+/** As many as stock launchers show (Launcher3's popup; AppShortcuts.MAX). */
+const SHORTCUTS_MAX = 4;
+/** Rows shown while an app's shortcuts are read for the first time. */
+const SHORTCUTS_PENDING = 2;
+
+function startShortcut(key: string, id: string) {
+  menu.value = null;
+  void powos.apps.startShortcut?.(key, id).then(() => closeDrawer(true));
+}
+
+/** Reads the open menu's app's shortcuts each time it opens; how many rows they take (placeholders until answered). */
+function useShortcuts(m: { app: App } | null, leaving: boolean) {
+  const key = m && hasShortcuts(m.app) ? m.app.key : null;
+  useEffect(() => {
+    if (key && !leaving) void loadShortcuts(key);
+  }, [key, leaving]);
+  if (!key) return 0;
+  return shortcutsOf.value[key]?.length ?? SHORTCUTS_PENDING;
+}
+
+/** The menu's top: [app]'s own shortcuts, a tap starts one; placeholder rows until the first answer (never a blank wait). */
+function ShortcutRows({ app }: { app: App }) {
+  if (!hasShortcuts(app)) return null;
+  const list = shortcutsOf.value[app.key];
+  if (!list)
+    return (
+      <div class="menu-shortcuts pending" aria-busy="true">
+        {Array.from({ length: SHORTCUTS_PENDING }, () => (
+          <div class="menu-shortcut">
+            <span class="menu-shortcut-icon" />
+            <span class="pending-skel-row" />
+          </div>
+        ))}
+      </div>
+    );
+  if (!list.length) return null;
+  return (
+    <div class="menu-shortcuts">
+      {list.map((s) => (
+        <button class="menu-shortcut" disabled={!s.enabled} onClick={() => startShortcut(app.key, s.id)}>
+          {s.icon ? <img class="menu-shortcut-icon" src={s.icon} alt="" draggable={false} /> : <span class="menu-shortcut-icon" />}
+          <span class="menu-shortcut-label">{s.label}</span>
+        </button>
+      ))}
+    </div>
+  );
+}
+
 /** What the app menu offers for [app]. */
 function menuItems(app: App): Item[] {
   const docked = dock.value.includes(app.key);
@@ -364,13 +426,14 @@ function useMenuPresence() {
 export function AppMenu() {
   const { m, leaving } = useMenuPresence();
   const webKey = m?.app.kind === "web" ? m.app.key : null;
+  const cuts = useShortcuts(m, leaving);
   useEffect(() => {
     if (webKey && !leaving) void loadGrants(webKey);
   }, [webKey, leaving]);
   if (!m) return null;
   const { app, at } = m;
   const items = menuItems(app);
-  const below = at.bottom + 48 * items.length + 16 < innerHeight;
+  const below = at.bottom + 48 * (items.length + cuts) + 16 < innerHeight;
   const left = Math.max(8, Math.min(innerWidth - 188, at.left + at.width / 2 - 90));
   const close = () => (menu.value = null);
   return (
@@ -379,6 +442,7 @@ export function AppMenu() {
       <div class={`menu tile sheet pop${leaving ? " leaving" : ""}`} inert={leaving || undefined} style={{ left: `${left}px`, ...(below ? { top: `${at.bottom + 4}px` } : { bottom: `${innerHeight - at.top + 4}px` }) }}>
         <div class="menu-title">{app.label}</div>
         {app.kind === "web" && <div class="menu-sub">{webInfo(app)}</div>}
+        <ShortcutRows app={app} />
         {items.map(([label, run]) => (
           <button
             class="menu-item"

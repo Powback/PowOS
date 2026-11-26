@@ -578,6 +578,13 @@ class ShellBridge(
             "apps.revoke" -> a.getString(0).startsWith("w:") && WebAppPermissions.revoke(context, a.getString(0).removePrefix("w:"), a.getString(1))
             // App API's "+ add app": the deep links an app opens, read from its manifest - nothing fired (AppLinks.kt).
             "apps.links" -> AppLinks.read(context, a.getString(0))
+            // The app's own shortcuts for its long-press menu (Chrome "New tab"), and starting one (AppShortcuts.kt).
+            "apps.shortcuts" -> android(a.getString(0))?.let { AppShortcuts.read(context, it) } ?: JSONArray()
+            "apps.startShortcut" -> android(a.getString(0))?.let { app ->
+                runtime.usage.record(a.getString(0))
+                dev.omalauncher.system.Switcher.launched("shortcut ${a.getString(0)}")
+                AppShortcuts.start(context, app, a.getString(1))
+            } ?: false
             "usage.recent" -> JSONArray(installed(runtime.usage.recent).take(a.optInt(0, 5)))
             // The launcher's "Suggested" (shell/ui/drawer.tsx): most used first, by the same decayed launch counts.
             "usage.frequent" -> JSONArray(installed(runtime.usage.frequent()).take(a.optInt(0, 8)))
@@ -2304,7 +2311,7 @@ class ShellBridge(
         // and a 58 ms frame landed 54 ms after it (perf-1793456386286): looked up here; only the recognizer binding,
         // which Android requires on the main thread, is posted back there (NativeSpeech.warm).
         // quickpage.pages: a resolveActivity and an icon drawn per settings page (QuickPageCatalog).
-        private val LOOKUPS = setOf("apps.local", "qs.destinations", "speech.warm", "quickpage.pages", "apps.background", "apps.stopBackground")
+        private val LOOKUPS = setOf("apps.local", "qs.destinations", "speech.warm", "quickpage.pages", "apps.background", "apps.stopBackground", "apps.shortcuts")
         private val lookups = java.util.concurrent.Executors.newSingleThreadExecutor { r -> Thread(r, "shell-lookups").apply { isDaemon = true } }
 
         /** The hub's network calls (devices.realm: up to 10 s on a slow LAN), on their own thread: never the UI's, nor a lookup's. */

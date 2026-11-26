@@ -12,6 +12,14 @@ export interface PageRect {
   height: number;
 }
 
+/** One of an Android app's own shortcuts (Bridge apps.shortcuts): [icon] a data URL, null: none. */
+export interface AppShortcut {
+  id: string;
+  label: string;
+  icon: string | null;
+  enabled: boolean;
+}
+
 export interface AppLinks {
   pkg: string;
   label: string;
@@ -729,6 +737,14 @@ export interface Bridge {
     permissions?(key: string): Promise<string[]>;
     /** Takes [kind] back from web app [key] ([permissions]); the site asks again next time. False: it didn't have it. */
     revoke?(key: string, kind: string): Promise<boolean>;
+    /**
+     * An Android app's own shortcuts (Chrome "New tab", Gmail "Compose"), as stock launchers list them on a long press:
+     * at most 4, stock order (AppShortcuts.kt). None unless PowOS is the shortcut host (the default launcher). Android
+     * only; an older APK rejects it ("no such call").
+     */
+    shortcuts?(key: string): Promise<AppShortcut[]>;
+    /** Starts [key]'s shortcut [id] (into its window on the web desktop, as a launch); false: not the shortcut host. */
+    startShortcut?(key: string, id: string): Promise<boolean>;
   };
   usage: {
     /** Keys, last opened first. */

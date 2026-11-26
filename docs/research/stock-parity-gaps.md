@@ -60,7 +60,7 @@ signature/privileged permission) for the full version; **nr-gap** = works rooted
 
 | feature | status | evidence | impact | root |
 |---|---|---|---|---|
-| App shortcuts on long-press (Android's static/dynamic/pinned) | missing | apps.tsx `menuItems`: windows, dock, quick launch, home, app info, uninstall - no `LauncherApps.getShortcuts` (PowosShortcuts.kt only publishes PowOS's own) | H | any (default launcher) |
+| App shortcuts on long-press (Android's static/dynamic/pinned) | done (11-26) | apps.tsx `ShortcutRows` at the menu's top (max 4, stock order, icons, placeholder rows while read) via `apps.shortcuts`/`apps.startShortcut` (shell/AppShortcuts.kt, `LauncherApps.getShortcuts`/`startShortcut`); drag-out to home not done | H | any (default launcher) |
 | Notification dots on Android app icons | missing | badge.ts: `host.badge` from PowOS apps only; Android apps' notifications never mark their icon | M | any (listener already granted) |
 | App info, uninstall | done | apps.tsx `app info`, `uninstall` | - | any |
 | Work / clone profile apps | done | AndroidApps.kt `work`, `clone` | - | any |

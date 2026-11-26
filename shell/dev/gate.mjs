@@ -8614,6 +8614,81 @@ async function webAppGrantsCheck() {
 }
 
 /**
+ * In the page: an Android app's own shortcuts (apps.tsx ShortcutRows, the host's "apps.shortcuts", AppShortcuts.kt)
+ * at the top of its long-press menu - placeholder rows while they're read (no blank wait), then the app's three with
+ * their icons, above the menu's own lines; a tap starts that one ("apps.startShortcut") and the menu closes. A Linux
+ * app's menu has none.
+ */
+async function appShortcutsSetup() {
+  const { powos } = await window.__gw.mod("./bridge.ts");
+  const px = "data:image/svg+xml," + encodeURIComponent('<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><rect width="24" height="24" fill="teal"/></svg>');
+  const KEY = "a:gate.cuts/.Main";
+  const g = { KEY, px, asked: [], started: [], answer: () => {}, was: { shortcuts: powos.apps.shortcuts, startShortcut: powos.apps.startShortcut } };
+  const cuts = { [KEY]: [{ id: "compose", label: "Compose", icon: px, enabled: true }, { id: "inbox", label: "Inbox", icon: px, enabled: true }, { id: "search", label: "Search mail", icon: null, enabled: true }] };
+  powos.apps.shortcuts = (key) => (g.asked.push(key), new Promise((ok) => (g.answer = () => ok(cuts[key] ?? []))));
+  powos.apps.startShortcut = async (key, id) => (g.started.push(`${key} ${id}`), true);
+  g.rows = () => [...document.querySelectorAll(".menu .menu-shortcuts:not(.pending) .menu-shortcut")];
+  g.open = (app) => ((g.S.menu.value = { app, at: new DOMRect(100, 200, 60, 60) }), window.__gw.until(() => document.querySelector(".menu:not(.leaving)"), 2000));
+  g.mail = { key: KEY, label: "Gate Mail", icon: "", kind: "android" };
+  g.S = await window.__gw.mod("./state.ts");
+  window.__cutsGate = g;
+  return [];
+}
+
+/** The first open: placeholder rows, then the three in order with their icons, at the menu's top; a tap starts one. */
+async function appShortcutsFirst() {
+  const g = window.__cutsGate;
+  const fails = [];
+  const want = (ok, msg) => ok || fails.push(msg);
+  await g.open(g.mail);
+  await window.__gw.until(() => g.asked.length > 0, 2000);
+  want(document.querySelectorAll(".menu .menu-shortcuts.pending .menu-shortcut").length > 0, "no placeholder rows while the shortcuts are read (a blank wait)");
+  g.answer();
+  await window.__gw.until(() => g.rows().length === 3, 2000);
+  const labels = g.rows().map((b) => b.textContent.trim()).join("|");
+  want(labels === "Compose|Inbox|Search mail", `shortcuts [${labels}], not [Compose|Inbox|Search mail]`);
+  want(!document.querySelector(".menu .menu-shortcuts.pending"), "placeholder rows stayed after the answer");
+  const icons = g.rows().map((b) => (b.querySelector("img.menu-shortcut-icon")?.getAttribute("src") === g.px ? "img" : "none")).join();
+  want(icons === "img,img,none", `shortcut icons [${icons}], not [img,img,none]`);
+  const group = document.querySelector(".menu .menu-shortcuts");
+  const first = document.querySelector(".menu .menu-item");
+  want(Boolean(group.compareDocumentPosition(first) & Node.DOCUMENT_POSITION_FOLLOWING), "the shortcuts aren't at the menu's top, above its own lines");
+  const box = document.querySelector(".menu").getBoundingClientRect();
+  want(box.top >= 0 && box.bottom <= innerHeight, `the menu with shortcuts leaves the screen (${Math.round(box.top)}..${Math.round(box.bottom)} of ${innerHeight})`);
+  g.rows()[0].click();
+  await window.__gw.until(() => g.started.length > 0, 2000);
+  want(g.started.join() === `${g.KEY} compose`, `tapping "Compose" started [${g.started.join()}]`);
+  want(!g.S.menu.value, "the menu stayed open after starting a shortcut");
+  return fails;
+}
+
+/** Opened again: the last answer at once (no placeholders), read afresh; a Linux app's menu has none. Restores the bridge. */
+async function appShortcutsAgain() {
+  const g = window.__cutsGate;
+  const { powos } = await window.__gw.mod("./bridge.ts");
+  const fails = [];
+  const want = (ok, msg) => ok || fails.push(msg);
+  try {
+    await window.__gw.frames(2);
+    g.asked.length = 0;
+    await g.open(g.mail);
+    want(g.rows().length === 3, `opened again, the menu shows ${g.rows().length} shortcuts before the fresh read, not the last 3`);
+    await window.__gw.until(() => g.asked.length > 0, 2000);
+    want(g.asked.length > 0, "opened again, the shortcuts weren't read afresh");
+    g.answer();
+    g.S.menu.value = null;
+    await window.__gw.frames(2);
+    g.asked.length = 0;
+    await g.open({ key: "l:gate.tool", label: "Tool", icon: "", kind: "linux" });
+    want(!document.querySelector(".menu .menu-shortcuts") && !g.asked.length, "a Linux app's menu shows or reads shortcuts");
+  } finally {
+    g.S.menu.value = null;
+    Object.assign(powos.apps, g.was);
+  }
+  return fails;
+}
+
+/**
  * In the page: a touch inside a floating window is the app's (ui/gesture.ts startGesture, desktops.ts inWindow) - a
  * swipe up there never opens the launcher, down never the shade; the same swipe outside every window still does.
  */
@@ -15672,6 +15747,19 @@ try {
           const fails = await r.page.evaluate(termPasteCheck);
           await r.page.screenshot({ path: "/cache/term-paste.png" }).catch(() => {});
           return fails;
+        }),
+      ),
+    );
+  // An Android app's own shortcuts at the top of its long-press menu (apps.tsx ShortcutRows): a mock app with three.
+  if (process.env.SHELL_PAGES !== "0")
+    runs.push(
+      open(browser, `${ORIGIN}/index.html`, "app-shortcuts", { width: 412, height: 915 }).then((r) =>
+        whenReady(r, async () => {
+          for (const step of [appShortcutsSetup, appShortcutsFirst, appShortcutsAgain]) {
+            const fails = await r.page.evaluate(step);
+            if (fails.length) return fails;
+          }
+          return [];
         }),
       ),
     );
