@@ -7,6 +7,7 @@ import { tick } from "./haptics.ts";
 import { placement, shapeOf, type Shape } from "./iconshape.ts";
 import { running, runOf } from "./running.ts";
 import { badgeOf } from "../apps/badge.ts";
+import { notifCountOf } from "../apps/notifdots.ts";
 import { useEffect, useLayoutEffect, useRef, useState } from "preact/hooks";
 import { apps, closeDrawer, dock, launch, menu, setDocked, shownHomePage } from "../state.ts";
 import { computed, signal } from "@preact/signals";
@@ -136,7 +137,9 @@ const ICON_GIVE_UP_MS = 4000;
  * The host draws icons in the background, so an icon asked for early may not be there yet (a 404); the list comes
  * again when it is (its URL changes), and loads it then. One that fails and stays failed (no new URL within
  * ICON_GIVE_UP_MS) ends as the app's initial, never as a tile loading forever; a new URL tries the picture again.
- * [app] (its launcher key): the app's unread dot over the corner while its count is above 0 (host.badge, apps/badge.ts).
+ * [app] (its launcher key): the app's unread dot over the corner while its count is above 0 (host.badge, apps/badge.ts),
+ * or, an Android app's, while it has notifications stock would dot (apps/notifdots.ts). The Pow folder: while any of
+ * its apps has one.
  */
 export function AppIcon(props: { src: string; label?: string; app?: string }) {
   return props.app === POW_FOLDER ? <PowFolderIcon /> : <AppImage {...props} />;
@@ -144,12 +147,15 @@ export function AppIcon(props: { src: string; label?: string; app?: string }) {
 
 const collator = new Intl.Collator(undefined, { sensitivity: "base", numeric: true });
 /** The Pow folder's first four apps, in the folder's order (launcherview.ts powGroups): its icon's minis. */
-const powMinis = computed(() => powGroups(apps.value, collator.compare).flatMap((g) => g.apps).slice(0, 4));
+const powApps = computed(() => powGroups(apps.value, collator.compare).flatMap((g) => g.apps));
+const powMinis = computed(() => powApps.value.slice(0, 4));
+/** Any app in the Pow folder with a dot: the folder's icon has one too. */
+const powDot = computed(() => powApps.value.some((a) => badgeOf(a.key) > 0 || notifCountOf(a.key) > 0));
 
 /**
  * The Pow folder's icon (launcherview.ts POW_FOLDER), wherever an app icon goes - the launcher, the dock, a home tile,
  * a carried ghost: its first four apps small on the icon plate, as a folder shows them, and PowOS's mark on the corner
- * where a web app's kind mark sits. Static.
+ * where a web app's kind mark sits, and the unread dot while any of its apps has one. Static.
  */
 function PowFolderIcon() {
   return (
@@ -160,6 +166,7 @@ function PowFolderIcon() {
         ))}
       </span>
       <img class="pow-mark" src="./icons/powos.svg" alt="" draggable={false} />
+      {powDot.value && <span class="app-badge" />}
     </span>
   );
 }
@@ -209,7 +216,7 @@ function AppImage({ src, label, app }: { src: string; label?: string; app?: stri
         }}
       />
       </span>
-      {badgeOf(app) > 0 && <span class="app-badge" />}
+      {(badgeOf(app) > 0 || notifCountOf(app) > 0) && <span class="app-badge" />}
       <WebMarkChip app={app} />
     </span>
   );

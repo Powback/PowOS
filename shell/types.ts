@@ -331,6 +331,11 @@ export interface PhoneNotification {
   groupConversation?: boolean;
   /** It has a tap action: open() opens the conversation. */
   tappable?: boolean;
+  /**
+   * Stock's launcher would count it on its app's icon dot (Ranking: not silent - importance above LOW, not minimised -
+   * and its channel allows dots). false: no dot (apps/notifdots.ts); absent (an older host): counted.
+   */
+  dot?: boolean;
 }
 /**
  * A recent task, as the switcher (ui/recents.tsx) shows it: [id] the system's, [key] and [icon] its app's in the drawer (null when it

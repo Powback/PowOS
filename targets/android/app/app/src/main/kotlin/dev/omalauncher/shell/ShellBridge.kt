@@ -1472,7 +1472,7 @@ class ShellBridge(
     /**
      * A notification as the page shows it: { key, app, icon, title, text, time, clearable, profile, actions: [{ title,
      * input, semantic }], category, pkg, group, conversation, messages: [{ sender, text, time }], conversationTitle,
-     * groupConversation, tappable, picture?, smallIcon?, color } - picture and smallIcon (URLs, NotificationPicture)
+     * groupConversation, tappable, picture?, smallIcon?, color, dot } - picture and smallIcon (URLs, NotificationPicture)
      * only when it has one, color its tint for that icon (null: none) - the
      * panel's (grouped: notifications.tsx), and the shade's
      * heads-up banner's ("shade.peek").
@@ -1501,7 +1501,9 @@ class ShellBridge(
                 .put("group", item.group ?: JSONObject.NULL)
                 .put("conversation", item.conversation)
                 // A media player's own (MediaStyle with a session): the lock face shows its media card instead.
-                .put("media", item.media),
+                .put("media", item.media)
+                // Stock would count it on its app's icon dot (not silent, dots allowed): shell/apps/notifdots.ts.
+                .put("dot", item.dot),
         )
     }
 

@@ -9459,6 +9459,65 @@ async function petOverlayOffScene() {
  * What needs me's icon on home (a tile), in the dock and in the drawer carries the shell's dot only while the app's
  * count is above 0 - none at 0, one at 2, gone again at 0, live with each call - and the count survives a reload.
  */
+// An Android app's notification dot (apps/notifdots.ts): a notification stock would dot puts the dot on its icon
+// (home tile, dock), a silent one (dot: false) doesn't, and dismissing it takes the dot off. A change draws again
+// only the affected app's icons: no other icon's DOM moves.
+async function notifDotScene() {
+  const S = await window.__gw.mod("./state.ts");
+  const key = "a:signal", quiet = "a:chrome";
+  S.dock.value = [...S.dock.value.filter((k) => k !== key && k !== quiet), key, quiet];
+  const pageNo = S.pages.value[S.page.value] ?? 1;
+  S.home.value = { ...S.home.value, items: [...S.home.value.items.filter((i) => i.key !== "gate-ndot"), { key: "gate-ndot", kind: "app", app: key, label: "Signal", page: pageNo, cell: { x: 0, y: 0, w: 1, h: 1 }, resizable: false, minSize: [1, 1], size: null }] };
+  const places = { home: `.page:not(.away) [data-key="gate-ndot"] .app-icon`, dock: `.dock .app[data-key="${key}"] .app-icon` };
+  const quietIcon = `.dock .app[data-key="${quiet}"] .app-icon`;
+  const fails = [];
+  const now = Math.floor(Date.now() / 1000);
+  const note = (k, pkg, extra = {}) => ({ key: k, app: pkg, pkg, icon: null, title: "Mats", text: "hi", time: now, clearable: true, profile: null, ...extra });
+  const emit = async (items) => {
+    window.__mockEvents.emit("notifications.changed", { available: true, items });
+    await window.__gw.frames(3);
+  };
+  const check = (label, want) => {
+    for (const [where, q] of Object.entries(places)) {
+      const el = document.querySelector(q);
+      if (!el) fails.push(`${label}: no Signal icon in the ${where}`);
+      else if (!!el.querySelector(".app-badge") !== want) fails.push(`${label}: the ${where} icon ${want ? "has no dot" : "shows a dot"}`);
+    }
+  };
+  await window.__gw.settled(() => [...Object.values(places), quietIcon].every((q) => document.querySelector(q)));
+  await emit([]);
+  check("no notifications", false);
+  // Only the affected icons change: every mutation in an app icon is in one of Signal's (wherever it shows: a home
+  // tile, the dock, a library folder's minis) - told by its picture.
+  const signalSrc = S.apps.value.find((a) => a.key === key)?.icon;
+  const touched = new Set();
+  const mo = new MutationObserver((ms) => {
+    for (const m of ms) {
+      const t = m.target.nodeType === 1 ? m.target : m.target.parentElement;
+      const icon = t?.closest?.(".app-icon");
+      if (icon) touched.add(icon);
+    }
+  });
+  mo.observe(document.body, { subtree: true, childList: true, attributes: true, characterData: true });
+  await emit([note("n1", "signal"), note("n2", "chrome", { dot: false })]);
+  mo.disconnect();
+  check("a Signal notification", true);
+  if (fails.length) {
+    const N = await window.__gw.mod("./apps/notifdots.ts");
+    fails.push(`(count for ${key}: ${N.notifCountOf(key)})`);
+  }
+  if (document.querySelector(quietIcon)?.querySelector(".app-badge")) fails.push("a silent (dot: false) Chrome notification shows a dot");
+  const others = [...touched].filter((el) => ![...el.querySelectorAll("img")].some((i) => i.getAttribute("src") === signalSrc));
+  if (others.length) fails.push(`a Signal notification drew other icons again: ${others.map((el) => el.closest("[data-key]")?.getAttribute("data-key") ?? el.className).join(", ")}`);
+  // Dismissed: the dot goes.
+  await emit([note("n2", "chrome", { dot: false })]);
+  check("dismissed", false);
+  window.__notifDot = fails.length ? "failed" : "home, dock: dot on a notification, none for silent, off on dismiss, only its icons drawn";
+  S.home.value = { ...S.home.value, items: S.home.value.items.filter((i) => i.key !== "gate-ndot") };
+  S.dock.value = S.dock.value.filter((k) => k !== key && k !== quiet);
+  return fails;
+}
+
 async function appBadgeScene() {
   const P = await window.__gw.mod("./apps/pages.ts");
   const S = await window.__gw.mod("./state.ts");
@@ -15945,7 +16004,7 @@ try {
       return fails;
     })));
     // PERF5 (perf-1793474464493): no pet.overlay with the pet off, stable registry rows, the glass measure after layout.
-    for (const [name, fn, out] of [["pet-overlay-off", petOverlayOffScene, "__petOverlay"], ["stdb-rows-stable", stdbRowsStableScene, "__stdbStable"], ["app-badge-home", appBadgeScene, "__appBadge"], ["glass-frame-layout", glassFrameLayoutScene, "__glassLayout"]])
+    for (const [name, fn, out] of [["pet-overlay-off", petOverlayOffScene, "__petOverlay"], ["stdb-rows-stable", stdbRowsStableScene, "__stdbStable"], ["app-badge-home", appBadgeScene, "__appBadge"], ["notif-dot-home", notifDotScene, "__notifDot"], ["glass-frame-layout", glassFrameLayoutScene, "__glassLayout"]])
       runs.push(open(browser, `${ORIGIN}/index.html`, name, { width: 404, height: 900 }).then((r) => whenReady(r, async () => {
         const fails = await r.page.evaluate(fn);
         console.log(`     ${name}: ${await r.page.evaluate((k) => window[k], out).catch(() => "?")}`);

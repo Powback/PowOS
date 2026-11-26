@@ -96,6 +96,11 @@ class Notifications(
         val color: Int = Notification.COLOR_DEFAULT,
         /** A media player's (it names a MediaSession): the lock face shows that session's media card in its place. */
         val media: Boolean = false,
+        /**
+         * Stock's launcher would count it on its app's icon dot: not silent (importance above LOW), not minimised
+         * (ambient), and its channel allows dots (Ranking.canShowBadge). The page's dots (shell/apps/notifdots.ts).
+         */
+        val dot: Boolean = true,
     )
 
     data class Action(
@@ -158,7 +163,16 @@ class Notifications(
             sbn.notification.smallIcon != null,
             sbn.notification.color,
             sbn.notification.extras.containsKey(Notification.EXTRA_MEDIA_SESSION),
+            dot(sbn),
         )
+
+    /** [sbn] counts on its app's icon dot, as stock's launcher counts ([Item.dot]); no ranking known: it does. */
+    private fun dot(sbn: StatusBarNotification): Boolean {
+        val map = runCatching { MediaListener.connected?.currentRanking }.getOrNull() ?: return true
+        val r = Ranking()
+        if (!map.getRanking(sbn.key, r)) return true
+        return r.canShowBadge() && !r.isAmbient && r.importance > NotificationManager.IMPORTANCE_LOW
+    }
 
     /** [key]'s big picture as a JPEG (NotificationPicture.jpeg), null: no such notification, or none. */
     fun picture(key: String): ByteArray? {
