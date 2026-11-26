@@ -3,7 +3,10 @@
 #   worktree.sh new <name>   worktree at $POWOS_WT_ROOT/<name> (default ~/pw/<name>, OUTSIDE the repo - an agent
 #                            in it never picks up ~/Projects/CLAUDE.md or any ancestor .claude/ skill catalog) on
 #                            branch agent/<name>, from origin's tip, shell/node_modules linked from
-#                            powos-multiplatform (no per-worktree install)
+#                            powos-multiplatform (no per-worktree install), the APK's gitignored inputs staged
+#                            (targets/android/prep-app.sh: PowStream natives, bundled apps - cached, seconds), and a
+#                            "ready: ..." self-check line on stderr
+#   worktree.sh ready [name] that self-check line again (this worktree when no name)
 #   worktree.sh done <name>  remove it; refuses while it has uncommitted or unpushed work; lists the phone checks
 #                            queued from it (they run in the verify checkout, so removing it is fine); looks under
 #                            $POWOS_WT_ROOT first, then the old .claude/worktrees location (pre-move worktrees)
@@ -92,6 +95,21 @@ rmlog() {
 # find_wt <name>: echoes the existing worktree's path (new root first, then the legacy $WT location), or nothing.
 find_wt() { [ -e "$WTR/$1/.git" ] && { echo "$WTR/$1"; return; }; [ -e "$WT/$1/.git" ] && echo "$WT/$1"; }
 
+# ready_line <dir>: one line saying whether a worktree has what the gate, tsc, jvm-offload and compile-check need.
+ready_line() {
+  local d=$1 bad="" rev want n want_n
+  [ -x "$d/shell/node_modules/.bin/tsc" ] || bad+=" shell/node_modules"
+  want=$(sed -n 's/^ANDROID_CLIENT_REV="\(.*\)"/\1/p' "$d/sources/powstream/source.conf" 2>/dev/null)
+  rev=$(cat "$d/targets/android/app/engine/powstream-native/include/powstream-source-revision" 2>/dev/null) || rev=""
+  [ -n "$want" ] && [ "$rev" != "$want" ] && bad+=" powstream-natives"
+  want_n=$(sed 's/#.*//' "$d/apps/bundled.list" 2>/dev/null | grep -c '[^[:space:]]') || want_n=0
+  n=$(find "$d/targets/android/app/app/bundled-apps/apps" -mindepth 1 -maxdepth 1 -type d 2>/dev/null | wc -l | tr -d ' ')
+  [ "$n" -ge "$want_n" ] || bad+=" bundled-apps($n/$want_n)"
+  [ -s "$d/targets/android/app/app/shell-build.txt" ] || bad+=" shell-build.txt"
+  [ -f "$d/targets/android/app/owl/build/cli/owl.jar" ] || bad+=" owl.jar"
+  if [ -z "$bad" ]; then echo "ready: node_modules, powstream ${rev:0:8}, $n bundled apps, shell stamp, owl.jar - gate/tsc/jvm-offload/compile-check can run"
+  else echo "NOT ready, missing:$bad (bash targets/android/prep-app.sh; see .git/worktrees/<name>/powos-prep.log)"; fi
+}
 case "${1:-}" in
 new)
   n=${2:?name}; d=$WTR/$n
@@ -124,9 +142,24 @@ new)
   # needs it and a fresh worktree's offline gradle can't build it (friction f402). owl-jar.sh puts in the one built
   # from these exact sources - from the shared cache, or seeded from powos-multiplatform's when its sources match.
   [ ! -x "$d/shell/dev/owl-jar.sh" ] || OWL_JAR_FROM=$PMP "$d/shell/dev/owl-jar.sh" "$d" >/dev/null 2>&1 || true
+  # The APK's gitignored inputs (targets/android/prep-app.sh: the pinned PowStream natives, the bundled apps, the shell
+  # stamp), so jvm-offload.sh, compile-check.sh and the gate run at once: 11-25 four agents hand-copied the natives
+  # from other worktrees first. Both come from the build-inputs cache when this source was built before (seconds); a
+  # miss builds them (minutes) and fills it. POWOS_WT_PREP=0 skips it; a failure never fails `new` (log kept).
+  plog=$(git -C "$d" rev-parse --absolute-git-dir)/powos-prep.log
+  if [ "${POWOS_WT_PREP:-1}" != 0 ] && [ -f "$d/targets/android/prep-app.sh" ]; then
+    t0=$SECONDS
+    bash "$d/targets/android/prep-app.sh" "$d" > "$plog" 2>&1 || echo "worktree.sh: prep-app.sh failed ($plog) - jvm-offload/compile-check need it: bash targets/android/prep-app.sh" >&2
+    echo "worktree.sh: prep-app.sh in $((SECONDS - t0)) s" >&2
+  fi
+  ready_line "$d" >&2
   # The hint goes to stderr: stdout stays just the path, for callers that capture it (d=$(worktree.sh new x)).
   echo "find code fast: cd $d && tools/agents/where \"<what>\" (top files + line + why; --files <path> = its tests), never a wide grep" >&2
   echo "$d" ;;
+ready)
+  # worktree.sh ready [name]: the self-check line `new` prints (this worktree when no name).
+  if [ -n "${2:-}" ]; then d=$(find_wt "$2"); else d=$(git rev-parse --show-toplevel); fi
+  ready_line "$d" ;;
 done)
   n=${2:?name}; d=$(find_wt "$n")
   [ -n "$d" ] && [ -d "$d" ] || { echo "no worktree: $n (looked in $WTR and $WT)" >&2; exit 1; }
