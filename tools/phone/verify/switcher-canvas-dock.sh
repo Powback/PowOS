@@ -39,7 +39,7 @@ dock_watch() { ev "(()=>{globalThis.__dockCalls=[];globalThis.__dockT0=Date.now(
 dock_calls() { ev "(globalThis.__dockCalls||[]).join(';')||'none'" | tr -d '"'; }
 # The keyguard is up (the 11-26 run: the lock screen came up right at the pick - adopt gate keyguard=true - and the
 # tap never reached the picker). Not the check's to judge: "not now".
-locked() { sh_ "dumpsys window" | grep -qE "mDreamingLockscreen=true|isKeyguardShowing=true|mShowingLockscreen=true"; }
+locked() { sh_ "dumpsys window" | awk '/mDreamingLockscreen=true|isKeyguardShowing=true|mShowingLockscreen=true/{f=1} END{exit !f}'; }
 close_canvas() { local c r
   sh_ "input keyevent KEYCODE_HOME" >/dev/null; sleep 1
   c=$(canvas_task)
