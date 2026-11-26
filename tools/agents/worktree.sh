@@ -108,7 +108,7 @@ ready_line() {
   [ -s "$d/targets/android/app/app/shell-build.txt" ] || bad+=" shell-build.txt"
   [ -f "$d/targets/android/app/owl/build/cli/owl.jar" ] || bad+=" owl.jar"
   if [ -z "$bad" ]; then echo "ready: node_modules, powstream ${rev:0:8}, $n bundled apps, shell stamp, owl.jar - gate/tsc/jvm-offload/compile-check can run"
-  else echo "NOT ready, missing:$bad (bash targets/android/prep-app.sh; see .git/worktrees/<name>/powos-prep.log)"; fi
+  else echo "NOT ready, missing:$bad (natives/apps/stamp: bash targets/android/prep-app.sh, log .git/worktrees/<name>/powos-prep.log; owl.jar - only the widget sweep needs it: shell/dev/owl-jar.sh . --build)"; fi
 }
 case "${1:-}" in
 new)
