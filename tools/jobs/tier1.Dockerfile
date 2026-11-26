@@ -7,7 +7,7 @@
 FROM docker.io/library/ubuntu:24.04
 ENV DEBIAN_FRONTEND=noninteractive
 RUN apt-get update && apt-get install -y --no-install-recommends \
-      bash python3 python3-pip jq shellcheck mksh git tmux ca-certificates curl gnupg zip unzip rsync g++ \
+      bash python3 python3-pip python3-cryptography jq shellcheck mksh git tmux ca-certificates curl gnupg zip unzip rsync g++ \
     && curl -fsSL https://deb.nodesource.com/setup_22.x | bash - \
     && apt-get install -y --no-install-recommends nodejs \
     && apt-get clean && rm -rf /var/lib/apt/lists/* \

@@ -1,0 +1,332 @@
+#!/usr/bin/env python3
+"""powos-drop - the universal clipboard and Send to my device on a PowOS Linux device (docs/DEVICES.md "Clipboard and
+Send to"). The phone's side is the PowOS app (devices/Drops.kt, ClipShare.kt, DropInbox.kt, SendToDeviceActivity.kt);
+the store is the realm on PowStation (enroll/powos-enroll.py /v1/account/drop*), which only ever holds ciphertext.
+
+Same envelope as Drops.kt, sealed here with the account's drop key (account secret powos.drop/key, kept in STATE):
+  ct = nonce(12) || AES-256-GCM(key, plaintext, aad "powos.drop/1/<kind>")
+  plaintext = u32 BE header length || header JSON {v, type: text|link|image|file, name, mime, size, at} || body
+
+  powos-drop devices                         the account's other devices (id, name) a send can go to
+  powos-drop send <device> FILE | -t TEXT    one device (id or name); a file over 16 MB goes on the NAS
+                                             (/mnt/nas/cdn/powos-drop/<random>/<name>) and its cdn.pow link is sent;
+                                             without the NAS here it is refused with the reason
+  powos-drop inbox [--dir DIR]               what was sent here: saved into DIR (~/Downloads), text printed; a
+                                             desktop notification each (notify-send)
+  powos-drop clip [-t TEXT]                  offer TEXT (else stdin) as this device's copy for 2 min
+  powos-drop clips                           the other devices' clips of the last 2 min (JSON)
+  powos-drop watch                           the agent: this desktop's copies (wl-paste --watch) are offered to the
+                                             other devices, theirs land on this clipboard (wl-copy) so paste just works;
+                                             sends become notifications. Off: `powos-drop off` (per device), `on`
+
+Env: POWOS_DEVICED_DIR (the enrollment), POWOS_DROP_DIR (state, ~/.local/state/powos/drop).
+"""
+import base64
+import json
+import mimetypes
+import os
+import re
+import secrets
+import select
+import shutil
+import struct
+import subprocess
+import sys
+import time
+import urllib.error
+import urllib.parse
+import urllib.request
+
+DEVICED = os.environ.get("POWOS_DEVICED_DIR") or os.path.expanduser("~/.local/state/powos/deviced")
+STATE = os.environ.get("POWOS_DROP_DIR") or os.path.expanduser("~/.local/state/powos/drop")
+CLIP_MAX = 1024 * 1024
+SEND_MAX = 16 * 1024 * 1024 - 64 * 1024
+NAS = "/mnt/nas/cdn"
+NAS_URL = "http://cdn.pow"
+POLL = 5
+
+
+class Refused(Exception):
+    pass
+
+
+def _aead(key):
+    try:
+        from cryptography.hazmat.primitives.ciphers.aead import AESGCM
+    except ImportError:
+        raise Refused("python-cryptography is missing on this device (pacman -S python-cryptography)")
+    return AESGCM(key)
+
+
+def seal(key, kind, typ, body, name="", mime=""):
+    head = json.dumps({"v": 1, "type": typ, "name": name, "mime": mime, "size": len(body),
+                       "at": int(time.time() * 1000)}).encode()
+    nonce = secrets.token_bytes(12)
+    return nonce + _aead(key).encrypt(nonce, struct.pack(">I", len(head)) + head + body, f"powos.drop/1/{kind}".encode())
+
+
+def open_(key, kind, ct):
+    """(header, body), or None when it isn't sealed with this key for this kind."""
+    try:
+        plain = _aead(key).decrypt(ct[:12], ct[12:], f"powos.drop/1/{kind}".encode())
+        n = struct.unpack(">I", plain[:4])[0]
+        return json.loads(plain[4:4 + n]), plain[4 + n:]
+    except Refused:
+        raise
+    except Exception:
+        return None
+
+
+def text_item(s):
+    return ("link" if re.fullmatch(r"https?://\S+", s.strip()) else "text"), s.encode()
+
+
+def safe_name(h):
+    n = re.sub(r'[\x00-\x1f:*?"<>|]', "_", (h.get("name") or "").replace("\\", "/").rsplit("/", 1)[-1]).strip().lstrip(".")
+    if n:
+        return n[:120]
+    if h.get("type") in ("text", "link"):
+        return "text.txt"
+    return "image." + (re.sub(r"\W", "", (h.get("mime") or "").partition("/")[2]) or "png") if h.get("type") == "image" else "file"
+
+
+class Realm:
+    def __init__(self):
+        try:
+            with open(os.path.join(DEVICED, "enrollment.json")) as f:
+                e = json.load(f)
+        except (OSError, ValueError):
+            e = {}
+        self.base, self.token = (e.get("realm") or "").rstrip("/"), e.get("device_token") or ""
+        if not self.base or not self.token:
+            raise Refused("this device hasn't joined a PowStation (powos devices enroll)")
+
+    def call(self, method, path, body=None, ctype="application/json"):
+        data = body if isinstance(body, bytes) or body is None else json.dumps(body).encode()
+        h = {"Authorization": f"Bearer {self.token}"}
+        if data is not None:
+            h["Content-Type"] = ctype
+        req = urllib.request.Request(self.base + path, data=data, headers=h, method=method)
+        try:
+            with urllib.request.urlopen(req, timeout=30) as r:
+                return r.status, r.read()
+        except urllib.error.HTTPError as e:
+            return e.code, e.read()
+        except OSError as e:
+            raise Refused(f"PowStation isn't reachable ({e})")
+
+    def json(self, method, path, body=None, ctype="application/json"):
+        st, b = self.call(method, path, body, ctype)
+        try:
+            r = json.loads(b or b"{}")
+        except ValueError:
+            r = {}
+        if st == 401:
+            forget()
+            raise Refused("this device isn't in the account any more (revoked or left)")
+        if st != 200:
+            raise Refused(r.get("error_description") or f"PowStation answered {st}")
+        return r
+
+    def key(self):
+        p = os.path.join(STATE, "drop.key")
+        try:
+            k = base64.b64decode(open(p).read().strip())
+            if len(k) == 32:
+                return k
+        except (OSError, ValueError):
+            pass
+        mine = base64.b64encode(secrets.token_bytes(32)).decode()
+        r = self.json("POST", "/v1/account/secret", {"app": "powos.drop", "name": "key", "value": mine, "keep": True})
+        v = r.get("value") or mine
+        os.makedirs(STATE, mode=0o700, exist_ok=True)
+        fd = os.open(p, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+        with os.fdopen(fd, "w") as f:
+            f.write(v)
+        return base64.b64decode(v)
+
+    def put(self, kind, typ, body, to="*", name="", mime=""):
+        q = f"kind={kind}" + (f"&to={urllib.parse.quote(to)}" if kind == "send" else "")
+        return self.json("POST", f"/v1/account/drop?{q}", seal(self.key(), kind, typ, body, name, mime),
+                         "application/octet-stream")
+
+    def waiting(self, kind):
+        return self.json("GET", f"/v1/account/drops?kind={kind}")["drops"]
+
+    def take(self, d):
+        st, b = self.call("GET", f"/v1/account/drop/{d['id']}")
+        return open_(self.key(), d["kind"], b) if st == 200 else None
+
+    def devices(self):
+        return [(d["id"], d.get("name") or d["id"]) for d in self.json("GET", "/v1/devices")["devices"]
+                if not d.get("self") and not d.get("revoked")]
+
+
+def forget():
+    try:
+        os.remove(os.path.join(STATE, "drop.key"))
+    except FileNotFoundError:
+        pass
+
+
+def switch_file():
+    return os.path.join(STATE, "clipboard-off")
+
+
+def clip_on():
+    return not os.path.exists(switch_file())
+
+
+def send(realm, to, path=None, text=None):
+    devs = realm.devices()
+    match = [d for d in devs if to in d]
+    if len(match) != 1:
+        raise Refused(f"no single device named {to!r}: " + ", ".join(n for _, n in devs))
+    did, dname = match[0]
+    if text is not None:
+        typ, body = text_item(text)
+        realm.put("send", typ, body, did)
+        return f"sent to {dname}"
+    size = os.path.getsize(path)
+    name, mime = os.path.basename(path), mimetypes.guess_type(path)[0] or "application/octet-stream"
+    if size > SEND_MAX:
+        if not os.access(NAS, os.W_OK):
+            raise Refused(f"{name} is {size >> 20} MB: too big to send through PowStation (16 MB max), and the NAS "
+                          f"({NAS}) isn't writable here")
+        # HACK: the NAS copy is not sealed (cdn.pow serves it read-only to the LAN/VPN under an unguessable folder).
+        # Real fix: seal it like a drop and let the receiver open it from the NAS.
+        rel = f"powos-drop/{secrets.token_urlsafe(12)}/{name}"
+        os.makedirs(os.path.dirname(f"{NAS}/{rel}"), exist_ok=True)
+        shutil.copyfile(path, f"{NAS}/{rel}")
+        realm.put("send", "link", f"{NAS_URL}/{urllib.parse.quote(rel)}".encode(), did)
+        return f"sent to {dname} as a NAS link ({size >> 20} MB)"
+    with open(path, "rb") as f:
+        body = f.read()
+    realm.put("send", "image" if mime.startswith("image/") else "file", body, did, name, mime)
+    return f"sent to {dname}"
+
+
+def inbox(realm, out_dir):
+    got = []
+    for d in realm.waiting("send"):
+        r = realm.take(d)
+        if not r:
+            continue
+        h, body = r
+        frm = d.get("from_name") or "your other device"
+        if h.get("type") in ("text", "link"):
+            text = body.decode(errors="replace")
+            got.append({"from": frm, "type": h["type"], "text": text})
+            notify(f"From {frm}", text[:200])
+        else:
+            os.makedirs(out_dir, exist_ok=True)
+            dest, n = os.path.join(out_dir, safe_name(h)), 1
+            while os.path.exists(dest):
+                base, ext = os.path.splitext(safe_name(h))
+                dest, n = os.path.join(out_dir, f"{base} ({n}){ext}"), n + 1
+            with open(dest, "wb") as f:
+                f.write(body)
+            got.append({"from": frm, "type": h["type"], "saved": dest})
+            notify(f"From {frm}", f"saved {os.path.basename(dest)}")
+        realm.json("POST", f"/v1/account/drop/{d['id']}/done", {})
+    return got
+
+
+def clips(realm):
+    out = []
+    for d in realm.waiting("clip"):
+        r = realm.take(d)
+        if r:
+            h, body = r
+            o = {"id": d["id"], "from": d.get("from_name"), "type": h["type"], "at": d["at"], "expires": d["expires"]}
+            o.update({"text": body.decode(errors="replace")} if h["type"] in ("text", "link") else
+                     {"mime": h.get("mime"), "size": len(body)})
+            out.append(o)
+    return out
+
+
+def notify(title, body):
+    if shutil.which("notify-send"):
+        subprocess.run(["notify-send", "-a", "PowOS", title, body], check=False)
+
+
+def watch():
+    """The desktop agent: copies here go out, the other devices' newest clip lands on this clipboard."""
+    seen, mine = set(), None
+    proc = None
+    if shutil.which("wl-paste"):
+        # one line per change; the content itself is read with a second wl-paste (text, or an image type)
+        proc = subprocess.Popen(["wl-paste", "--watch", "sh", "-c", "echo changed"], stdout=subprocess.PIPE, text=True)
+    while True:
+        try:
+            realm = Realm()
+            changed = proc and select.select([proc.stdout], [], [], 0)[0] and proc.stdout.readline()
+            if changed and clip_on():
+                types = subprocess.run(["wl-paste", "-l"], capture_output=True, text=True).stdout.split()
+                img = next((t for t in types if t.startswith("image/")), None)
+                body = subprocess.run(["wl-paste", "-n"] + (["-t", img] if img else []), capture_output=True).stdout
+                if body and body != mine and len(body) <= CLIP_MAX:
+                    typ, b = ("image", body) if img else text_item(body.decode(errors="replace"))
+                    realm.put("clip", typ, b, mime=img or "text/plain")
+                    mine = body
+            if clip_on():
+                for d in realm.waiting("clip"):
+                    if d["id"] in seen:
+                        continue
+                    seen.add(d["id"])
+                    r = realm.take(d)
+                    if r and shutil.which("wl-copy"):
+                        h, body = r
+                        mine = body  # don't offer it back
+                        subprocess.run(["wl-copy"] + (["-t", h.get("mime")] if h["type"] == "image" else []),
+                                       input=body, check=False)
+            inbox(realm, os.path.expanduser("~/Downloads"))
+            time.sleep(POLL)
+        except Refused as e:
+            sys.stderr.write(f"powos-drop: {e}\n")
+            time.sleep(60)
+
+
+def main(argv):
+    cmd = argv[1] if len(argv) > 1 else "help"
+    try:
+        if cmd in ("on", "off"):
+            os.makedirs(STATE, mode=0o700, exist_ok=True)
+            if cmd == "off":
+                open(switch_file(), "w").close()
+            elif os.path.exists(switch_file()):
+                os.remove(switch_file())
+            print(f"shared clipboard: {cmd}")
+            return 0
+        if cmd == "watch":
+            return watch()
+        realm = Realm()
+        if cmd == "devices":
+            print(json.dumps([{"id": i, "name": n} for i, n in realm.devices()], indent=1))
+        elif cmd == "send" and len(argv) >= 4:
+            print(send(realm, argv[2], text=argv[4] if argv[3] == "-t" and len(argv) > 4 else None,
+                       path=None if argv[3] == "-t" else argv[3]))
+        elif cmd == "inbox":
+            out = argv[argv.index("--dir") + 1] if "--dir" in argv else os.path.expanduser("~/Downloads")
+            print(json.dumps(inbox(realm, out), indent=1))
+        elif cmd == "clip":
+            if not clip_on():
+                raise Refused("the shared clipboard is off on this device (powos-drop on)")
+            text = argv[3] if len(argv) > 3 and argv[2] == "-t" else sys.stdin.read()
+            typ, body = text_item(text)
+            if len(body) > CLIP_MAX:
+                raise Refused("too big for the shared clipboard (1 MB max)")
+            print(json.dumps(realm.put("clip", typ, body)))
+        elif cmd == "clips":
+            print(json.dumps(clips(realm), indent=1))
+        else:
+            print(__doc__)
+            return 0 if cmd == "help" else 2
+        return 0
+    except Refused as e:
+        print(f"powos-drop: {e}", file=sys.stderr)
+        return 1
+
+
+if __name__ == "__main__":
+    sys.exit(main(sys.argv))

@@ -481,6 +481,28 @@
             android:theme="@style/Theme.Omalauncher.Window"
             android:windowSoftInputMode="adjustResize" />
 
+        <!-- Send to my device (devices/SendToDeviceActivity.kt, docs/DEVICES.md "Clipboard and Send to"): the share
+             sheet's target, plus one sharing shortcut per device of the account ("Send to Desk", DropInbox). -->
+        <activity
+            android:name=".devices.SendToDeviceActivity"
+            android:label="Send to my device"
+            android:theme="@android:style/Theme.Translucent.NoTitleBar"
+            android:excludeFromRecents="true"
+            android:taskAffinity=""
+            android:exported="true">
+            <intent-filter>
+                <action android:name="android.intent.action.SEND" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <data android:mimeType="*/*" />
+            </intent-filter>
+            <meta-data
+                android:name="android.app.shortcuts"
+                android:resource="@xml/send_to_device" />
+        </activity>
+        <receiver
+            android:name=".devices.DropInbox$Action"
+            android:exported="false" />
+
         <!-- The swipe keyboard's AI reply button (system/KeyboardAi.kt): exported, every call checked in code
              (KeyboardAi.admit: the keyboard's package + signer while it is the input method, PowOS, root/shell). -->
         <provider

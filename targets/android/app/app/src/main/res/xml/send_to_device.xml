@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Send to my device: the share sheet shows each of the account's devices (DropInbox's sharing shortcuts) directly. -->
+<shortcuts xmlns:android="http://schemas.android.com/apk/res/android">
+    <share-target android:targetClass="dev.omalauncher.devices.SendToDeviceActivity">
+        <data android:mimeType="*/*" />
+        <category android:name="dev.omalauncher.category.SEND_TO_DEVICE" />
+    </share-target>
+</shortcuts>

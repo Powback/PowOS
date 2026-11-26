@@ -48,6 +48,9 @@ class App : Application() {
         // The device agent (docs/DEVICES.md): Desk's Devices app sees this phone's battery/screen and can wake or ring
         // it. Without root the app serves it itself; a rooted phone's system tier runs lib/devices/powos-deviced.
         if (Application.getProcessName() == packageName && !RootedGuest.enabled) dev.omalauncher.devices.DeviceAgentHost.start(this)
+        // Send to my device (docs/DEVICES.md "Clipboard and Send to"): what the owner's other devices sent here, as
+        // notifications, and the share sheet's "Send to <device>" targets. Rooted and not alike: the app's own realm token.
+        if (Application.getProcessName() == packageName) dev.omalauncher.devices.DropInbox.start(this)
         if (RootedGuest.enabled) {
             AgentMail.start(this, File(filesDir, "run"))
             // Desktop mode switched while the session runs: powos-shell's roles, Plasma's panels and Meta follow at once.

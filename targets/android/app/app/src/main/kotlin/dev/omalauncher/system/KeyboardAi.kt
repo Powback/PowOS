@@ -141,7 +141,11 @@ object KeyboardAi {
     }
 
     /** Every method the provider answers; each one goes through [gate] first. */
-    val METHODS = setOf("probe", "capture", "drafts", "outcome", "cancel", "release", "chat.send", "chat.poll", "chat.stop", "chat.history")
+    val METHODS =
+        setOf(
+            "probe", "capture", "drafts", "outcome", "cancel", "release", "chat.send", "chat.poll", "chat.stop", "chat.history",
+            "clip.push", "clip.offered", "clip.image", "clip.switch",
+        )
 
     /** The most messages one chat.poll / chat.history answers. */
     const val CHAT_PAGE = 50

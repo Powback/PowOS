@@ -49,7 +49,7 @@ class KeyboardAiProvider : ContentProvider() {
         }
         val ask = runCatching { JSONObject(arg ?: "{}") }.getOrNull() ?: return answer(KeyboardAi.error("bad-request", "arg isn't JSON"))
         return answer(
-            runCatching { dispatch(c, method, ask) }.getOrElse {
+            runCatching { if (method.startsWith("clip.")) clip(c, method, ask, extras) else dispatch(c, method, ask) }.getOrElse {
                 Log.w(TAG, "$method failed", it)
                 KeyboardAi.error("failed", it.toString())
             },
@@ -70,6 +70,40 @@ class KeyboardAiProvider : ContentProvider() {
             "release" -> KeyboardAi.ok().also { shots.drop(ask.optString("shot")) }
             else -> chat(c, method, ask)
         }
+
+    /**
+     * The universal clipboard ([dev.omalauncher.devices.ClipShare], docs/DEVICES.md "Clipboard and Send to"): "clip.push"
+     * {text} or an image in extras ("image" bytes, "mime") - a copy made here, offered to the owner's other devices;
+     * "clip.offered" - theirs, for the clipboard panel; "clip.image" {id} - one of their images onto this phone's
+     * clipboard, for the keyboard to paste; "clip.switch" {on?} - this device's switch (absent: just read it).
+     */
+    private fun clip(
+        c: Context,
+        method: String,
+        ask: JSONObject,
+        extras: Bundle?,
+    ): JSONObject {
+        val cs = dev.omalauncher.devices.ClipShare
+        return when (method) {
+            "clip.push" -> {
+                val img = extras?.getByteArray("image")
+                val item =
+                    when {
+                        img != null -> dev.omalauncher.devices.Drops.Item("image", img, mime = extras.getString("mime").orEmpty().ifBlank { "image/png" })
+                        ask.optString("text").isNotEmpty() -> dev.omalauncher.devices.Drops.Item.ofText(ask.optString("text"))
+                        else -> return KeyboardAi.error("bad-request", "nothing to share")
+                    }
+                KeyboardAi.ok().put("clip", cs.push(c, item))
+            }
+            "clip.offered" -> cs.offered(c)
+            "clip.image" -> KeyboardAi.ok().put("pasteable", cs.image(c, ask.optString("id")))
+            "clip.switch" -> {
+                if (ask.has("on")) cs.setEnabled(c, ask.optBoolean("on"))
+                KeyboardAi.ok().put("on", cs.enabled(c))
+            }
+            else -> KeyboardAi.error("bad-request", "no method $method")
+        }
+    }
 
     /** The chat panel's calls ([KeyboardAi]'s "Chat"): the AI page's conversation. */
     private fun chat(
@@ -141,6 +175,7 @@ class KeyboardAiProvider : ContentProvider() {
         return KeyboardAi.ok()
             .put("contract", KeyboardAi.CONTRACT)
             .put("chat", true)
+            .put("clips", true)
             .put("capture", via)
             .put("access", if (via == "none") KeyboardAccess.why(restricted(c)) else JSONObject.NULL)
             .put("ai", Guest.enabled)

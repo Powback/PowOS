@@ -1,0 +1,27 @@
+{
+  "id": "powos-drop",
+  "name": "Shared clipboard and Send to",
+  "version": "1.0.0",
+  "description": "The universal clipboard and Send to my device on a Linux device (lib/apps/powos-drop watch; docs/DEVICES.md \"Clipboard and Send to\"): this desktop's copies are offered sealed to the owner's other devices for 2 min, theirs land on this clipboard, sends become notifications and land in ~/Downloads. Through the realm's /v1/account/drop* with this device's own realm token. Idle until the device has joined; `powos-drop off` stops sharing this device's clipboard. Outbound only, no port.",
+  "backend": {
+    "user": "powos",
+    "env": {
+      "HOME": "/home/powos"
+    },
+    "exec": [
+      "/usr/bin/python3",
+      "/usr/lib/powos/apps/powos-drop",
+      "watch"
+    ]
+  },
+  "needs": {
+    "network": "host",
+    "listen": []
+  },
+  "budget": {
+    "desktop": {
+      "memMB": 48
+    }
+  },
+  "autosleep": "never"
+}

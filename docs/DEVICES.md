@@ -86,6 +86,7 @@ server command.
 | WireGuard peer | PowStation `wireguard` | not built (needs a PowAuth path, below) | with the device | its wg config |
 | apps' data + settings (tables an app marks `sync`: Lights' bridge + rooms, Keyboard AI) | the account store in the realm (`/v1/account/rows`) | on any change, by `powos-account-sync` (REMOTE-POWOS §2.5 "As built") | with the device (its realm token: 401) | the app's own tables |
 | apps' secrets (the Hue bridge key) | the realm, AES-GCM at rest (`/v1/account/secret`) | captured on one device, taken by the others on first use (ShellNet.kt) | with the device: dropped on its next check | the PowOS app's per-app secrets |
+| clipboard + sends (drops) | the realm, ciphertext only (`/v1/account/drop*`, below) | on copy / share, sealed with the account's drop key | with the device: 401, key dropped | the keyboard's panel / a notification |
 | settings/themes | PowOS owner profile | not built | - | local copy + overrides |
 | backups | NAS copy of app data | not built | - | restored data |
 
@@ -97,6 +98,36 @@ drops every tunnel for a few seconds; a `wg set` + `wg0.conf` append helper avoi
 `powauth:latest` is a 2026-05-10 build; this is a PowAuth rebuild + redeploy, a new public API surface on
 auth.powback.com, and a privileged helper - so it waits for the owner's yes. The on-LAN alternative (a realm
 `POST /v1/device/wireguard` over `.pow`) needs none of that and comes first.
+
+## Clipboard and Send to (2026-11-26)
+
+Two things on top of the account (the realm's `/v1/account/*`, the device's own realm token): the **universal
+clipboard** (copy on one signed-in device, the clip is offered on the others for 2 min) and **Send to my device** (the
+share sheet's "Send to my device" / "Send to <device>", and `powos-drop send` on Linux: text, links, images and files to
+one chosen device, which shows a notification to open or save). Both work without root.
+
+- **Sealed on the device.** Every drop is AES-256-GCM with the account's drop key (account secret `powos.drop/key`,
+  made by the first device that needs one - create-if-absent - and kept on each device, 0600). The realm holds only
+  ciphertext plus who sent it, for whom and until when; the text, image and file name are inside. HACK: the key itself
+  is an account secret, so the realm process could open a drop; real fix: wrap the key per device (realm CA, P4).
+- **Realm** (PowStation `enroll/powos-enroll.py`, "drops"): `POST /v1/account/drop?kind=clip|send&to=<id>` (raw
+  ciphertext), `GET /v1/account/drops`, `GET /v1/account/drop/<id>`, `POST /v1/account/drop/<id>/done`. Clips: to every
+  other device, <= 1.5 MB sealed, in the realm's memory only for 2 min (never on disk; the newest 16). Sends: one
+  enrolled device, <= 16 MB, on disk until the target took it or 24 h. A revoked device gets 401 and drops its key.
+- **Phone** (PowOS app): the swipe keyboard is the clipboard source (Android lets only the input method read it): each
+  copy goes to `KeyboardAiProvider` `clip.push` (text, or an image <= ~900 KB in the call's extras), the clipboard panel
+  asks `clip.offered` when it opens and shows the other devices' clips on top; an image is put on the clipboard by
+  `clip.image` and pasted. `clip.switch {on}` is the per-device switch (`devices/ClipShare.kt`). Sends: `DropInbox`
+  polls every 15 s while the screen is on, keeps the file in the app's cache and notifies (Open / Save to Downloads, or
+  Copy for text); `SendToDeviceActivity` is the share target, with one sharing shortcut per device of the account.
+  Over 16 MB the phone refuses with the reason (it can't write the NAS).
+- **Linux** (`lib/apps/powos-drop`, service `powos-drop` = `powos-drop watch`): `wl-paste --watch` copies go out, the
+  other devices' clips land on this clipboard (`wl-copy`) so paste just works, sends land in `~/Downloads` with a
+  notification. `powos-drop send <device> FILE|-t TEXT`; over 16 MB the file goes to `/mnt/nas/cdn/powos-drop/<random>/`
+  and its `cdn.pow` link is sent (HACK: that copy is not sealed), or it is refused when the NAS isn't writable.
+  `powos-drop off|on` is the switch. Needs `python-cryptography`.
+- Tests: PowStation `enroll/test_powos_enroll.py` (store, expiry, isolation, revocation), `test/tier1/test-drops.py`,
+  `DropsTest` (JVM; opens a drop sealed by the Linux tool), the keyboard's `RemoteClipsTest`.
 
 ## The owner config: standalone until enrolled (issue #1)
 
