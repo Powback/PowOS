@@ -12,10 +12,13 @@ import android.net.Uri
 import android.os.Binder
 import android.os.Build
 import android.os.Bundle
+import android.os.Handler
+import android.os.Looper
 import android.os.Process
 import android.provider.Settings
 import android.util.Base64
 import android.util.Log
+import dev.omalauncher.PowosAiChat
 import dev.omalauncher.assist.LiveCapture
 import dev.omalauncher.linux.Guest
 import org.json.JSONObject
@@ -65,8 +68,70 @@ class KeyboardAiProvider : ContentProvider() {
             "outcome" -> outcome(ask)
             "cancel" -> cancel(ask.optString("shot"), drop = true)
             "release" -> KeyboardAi.ok().also { shots.drop(ask.optString("shot")) }
+            else -> chat(c, method, ask)
+        }
+
+    /** The chat panel's calls ([KeyboardAi]'s "Chat"): the AI page's conversation. */
+    private fun chat(
+        c: Context,
+        method: String,
+        ask: JSONObject,
+    ): JSONObject =
+        when (method) {
+            "chat.send" -> chatSend(c, ask)
+            "chat.poll" -> onMain { page(c, KeyboardAi.ChatCursor(ask.optInt("after", -1), ask.optInt("epoch", -1), ask.optInt("turn", -1))) }
+            "chat.history" -> onMain { page(c, KeyboardAi.ChatCursor(last = ask.optInt("n", CHAT_PAGE))) }
+            "chat.stop" -> onMain { KeyboardAi.ok().put("stopping", PowosAiChat.busy.also { if (it) PowosAiChat.stop() }) }
             else -> KeyboardAi.error("bad-request", "no method $method")
         }
+
+    /**
+     * The keyboard's chat message into the AI page's conversation ([PowosAiChat.send]: a turn now, or queued behind the
+     * one under way). "turn": the cursor its items start at.
+     */
+    private fun chatSend(
+        c: Context,
+        ask: JSONObject,
+    ): JSONObject {
+        val text = KeyboardAi.chatText(ask) ?: return KeyboardAi.error("bad-request", "nothing to send")
+        return onMain {
+            PowosAiChat.load(c)
+            val queued = PowosAiChat.busy
+            val turn = PowosAiChat.trimmed + PowosAiChat.items.size
+            PowosAiChat.send(c, text)
+            KeyboardAi.ok().put("turn", turn).put("queued", queued).put("epoch", PowosAiChat.epoch)
+        }
+    }
+
+    /** On main: [PowosAiChat]'s state is the page's (Compose state), read and changed there only. */
+    private fun page(
+        c: Context,
+        cursor: KeyboardAi.ChatCursor,
+    ): JSONObject {
+        PowosAiChat.load(c)
+        val state =
+            KeyboardAi.ChatState(PowosAiChat.items.map { it.json() }, PowosAiChat.trimmed, PowosAiChat.epoch, PowosAiChat.busy, PowosAiChat.queued.size)
+        return KeyboardAi.chatPage(state, cursor)
+    }
+
+    private fun onMain(block: () -> JSONObject): JSONObject {
+        if (Looper.myLooper() == Looper.getMainLooper()) return block()
+        var out: JSONObject? = null
+        var failed: Throwable? = null
+        val done = CountDownLatch(1)
+        Handler(Looper.getMainLooper()).post {
+            try {
+                out = block()
+            } catch (t: Throwable) {
+                failed = t
+            } finally {
+                done.countDown()
+            }
+        }
+        if (!done.await(CHAT_MAIN_MS, TimeUnit.MILLISECONDS)) return KeyboardAi.error("timeout", "PowOS is busy - try again")
+        failed?.let { throw it }
+        return out ?: KeyboardAi.error("failed", "no answer")
+    }
 
     private fun answer(o: JSONObject) = Bundle().apply { putString("json", o.toString()) }
 
@@ -75,6 +140,7 @@ class KeyboardAiProvider : ContentProvider() {
         val via = captureVia()
         return KeyboardAi.ok()
             .put("contract", KeyboardAi.CONTRACT)
+            .put("chat", true)
             .put("capture", via)
             .put("access", if (via == "none") KeyboardAccess.why(restricted(c)) else JSONObject.NULL)
             .put("ai", Guest.enabled)
@@ -290,6 +356,8 @@ class KeyboardAiProvider : ContentProvider() {
         const val DRAFTS_MS = 75_000L
         const val OUTCOME_MS = 180_000L
         const val MAX_SIDE = 1600
+        const val CHAT_MAIN_MS = 5_000L
+        const val CHAT_PAGE = KeyboardAi.CHAT_PAGE
         val shots = KeyboardAi.Shots()
         val running = HashMap<String, java.lang.Process>()
         val outcomes: java.util.concurrent.ExecutorService = java.util.concurrent.Executors.newSingleThreadExecutor()

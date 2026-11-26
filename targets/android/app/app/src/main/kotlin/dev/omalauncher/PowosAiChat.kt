@@ -63,6 +63,16 @@ object PowosAiChat {
 
     val items = mutableStateListOf<Item>()
 
+    /**
+     * Where [items] stand for a reader outside the page (the keyboard's chat, [dev.omalauncher.system.KeyboardAi.chatPage]):
+     * [epoch] changes when another conversation's items are shown (load, a thread opened/closed), [trimmed] counts the
+     * items dropped off the head since then ([KEEP]), so `trimmed + index` is a cursor that stays put.
+     */
+    var epoch = 0
+        private set
+    var trimmed = 0
+        private set
+
     /** A message sent while a turn was under way: it waits here, in order, and becomes the next turn ([send]). */
     data class Queued(val id: Long, val text: String, val prompt: String, val at: Long = System.currentTimeMillis()) {
         fun json() = JSONObject().put("id", id).put("text", text)
@@ -237,6 +247,8 @@ object PowosAiChat {
         val t = thread
         val f = if (t == null) File(context.filesDir, "powos-ai/chat.jsonl") else File(context.filesDir, "powos-ai/threads/${t.dir.replace('/', '_')}.jsonl")
         file = f
+        epoch++
+        trimmed = 0
         items.clear()
         runCatching {
             f.readLines().mapNotNull { runCatching { Item.from(JSONObject(it)) }.getOrNull() }
@@ -537,7 +549,10 @@ object PowosAiChat {
 
     private fun add(item: Item) {
         items.add(item)
-        while (items.size > KEEP) items.removeAt(0)
+        while (items.size > KEEP) {
+            items.removeAt(0)
+            trimmed++
+        }
         save()
     }
 

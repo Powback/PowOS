@@ -33,6 +33,17 @@ import org.json.JSONObject
  *  - cancel  {"shot"}                              -> {} the shot's running draft killed, the shot dropped
  *  - release {"shot"}                              -> {} the shot dropped (chips dismissed)
  *
+ * Chat (the keyboard's chat panel): the SAME PowOS AI conversation the AI page shows ([dev.omalauncher.PowosAiChat]: the
+ * manager, which has the board and comms tools). Cursors count the conversation's items ([chatPage]):
+ *  - chat.send    {"text"}                         -> {"turn": cursor, "queued": bool}; "turn" is where the turn's items
+ *                                                      start (queued: a turn is under way, this one follows it)
+ *  - chat.poll    {"after": cursor, "epoch"?, "turn"?} -> {"messages": [{"kind", "text", ...}], "next", "epoch",
+ *                                                      "reset", "busy", "done", "stopped"}; "reset": the cursor was for
+ *                                                      another conversation (or trimmed away) - the messages are the
+ *                                                      latest [CHAT_PAGE] instead; "stopped": a stop after "turn"
+ *  - chat.stop    {}                               -> {"stopping": bool} (`powos manager --stop`, as the AI page's stop)
+ *  - chat.history {"n"}                            -> as chat.poll, the last n (at most [CHAT_PAGE]) messages
+ *
  * Who may call ([admit]): the swipe keyboard signed with [KEYBOARD_SIGNER] while it is the current input method, PowOS
  * itself, and root/shell (which can screencap anyway - the device check calls `content call` from adb).
  *
@@ -130,7 +141,72 @@ object KeyboardAi {
     }
 
     /** Every method the provider answers; each one goes through [gate] first. */
-    val METHODS = setOf("probe", "capture", "drafts", "outcome", "cancel", "release")
+    val METHODS = setOf("probe", "capture", "drafts", "outcome", "cancel", "release", "chat.send", "chat.poll", "chat.stop", "chat.history")
+
+    /** The most messages one chat.poll / chat.history answers. */
+    const val CHAT_PAGE = 50
+
+    /** The longest message the keyboard may send. */
+    const val CHAT_MAX_TEXT = 8000
+
+    /** The conversation as the keyboard's chat reads it: [PowosAiChat]'s items ([PowosAiChat.Item.json]) and state. */
+    data class ChatState(
+        val items: List<JSONObject>,
+        /** Items dropped off the head ([PowosAiChat.trimmed]): item i is at cursor trimmed + i. */
+        val trimmed: Int,
+        /** The conversation shown ([PowosAiChat.epoch]). */
+        val epoch: Int,
+        val busy: Boolean,
+        val queued: Int,
+    ) {
+        val end get() = trimmed + items.size
+
+        fun at(cursor: Int) = items[cursor - trimmed]
+    }
+
+    /** The keyboard's place: messages after [after] (< 0: just the last [last]), in conversation [epoch], its [turn]. */
+    data class ChatCursor(
+        val after: Int = -1,
+        val epoch: Int = -1,
+        val turn: Int = -1,
+        val last: Int = CHAT_PAGE,
+    ) {
+        fun stale(s: ChatState) = after >= 0 && (epoch != s.epoch || after < s.trimmed || after > s.end)
+    }
+
+    /** One chat.poll / chat.history answer (contract above). "done": no turn under way or waiting. */
+    fun chatPage(
+        s: ChatState,
+        c: ChatCursor,
+    ): JSONObject {
+        val reset = c.stale(s)
+        val msgs = JSONArray()
+        for (i in chatFrom(s, c, reset) until s.end) msgs.put(s.at(i))
+        return ok()
+            .put("messages", msgs)
+            .put("next", s.end)
+            .put("epoch", s.epoch)
+            .put("reset", reset)
+            .put("busy", s.busy)
+            .put("done", !s.busy && s.queued == 0)
+            .put("stopped", chatStopped(s, c))
+    }
+
+    private fun chatFrom(
+        s: ChatState,
+        c: ChatCursor,
+        reset: Boolean,
+    ) = if (c.after < 0 || reset) maxOf(s.trimmed, s.end - c.last.coerceIn(0, CHAT_PAGE)) else maxOf(c.after, s.end - CHAT_PAGE)
+
+    /** A "stopped" note after the keyboard's turn (same conversation only). */
+    private fun chatStopped(
+        s: ChatState,
+        c: ChatCursor,
+    ) = c.turn >= 0 && c.epoch == s.epoch &&
+        (maxOf(c.turn, s.trimmed) until s.end).any { s.at(it).let { o -> o.optString("kind") == "note" && o.optString("text") == "stopped" } }
+
+    /** What chat.send passes on: the text trimmed, null when there's nothing to send. */
+    fun chatText(ask: JSONObject): String? = ask.optString("text").trim().take(CHAT_MAX_TEXT).takeIf { it.isNotEmpty() }
 
     /** The refusal for [method] from [caller] (null: go ahead): the same [admit] for every method, new ones included. */
     fun gate(

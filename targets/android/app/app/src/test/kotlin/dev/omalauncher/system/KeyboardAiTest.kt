@@ -158,4 +158,63 @@ class KeyboardAiTest {
         shots.drop(id2)
         assertEquals(0, shots.size())
     }
+
+    private fun msgs(vararg kt: Pair<String, String>) = kt.map { (k, t) -> JSONObject().put("kind", k).put("text", t) }
+
+    @Test fun chatCallsAreGatedLikeTheButton() {
+        val other = KeyboardAi.Caller(kb, listOf("com.evil"), signer, ime)
+        for (m in listOf("chat.send", "chat.poll", "chat.stop", "chat.history")) {
+            assertTrue(m, m in KeyboardAi.METHODS)
+            assertEquals(m, "denied", KeyboardAi.gate(m, other, me)!!.getString("error"))
+            assertEquals(m, "denied", KeyboardAi.gate(m, KeyboardAi.Caller(kb, pkg, signer, "x/.Y"), me)!!.getString("error"))
+            assertNull(m, KeyboardAi.gate(m, KeyboardAi.Caller(kb, pkg, signer, ime), me))
+        }
+    }
+
+    @Test fun chatTextIsTrimmedAndCapped() {
+        assertNull(KeyboardAi.chatText(JSONObject().put("text", "   ")))
+        assertNull(KeyboardAi.chatText(JSONObject()))
+        assertEquals("hi", KeyboardAi.chatText(JSONObject().put("text", " hi ")))
+        assertEquals(KeyboardAi.CHAT_MAX_TEXT, KeyboardAi.chatText(JSONObject().put("text", "a".repeat(9000)))!!.length)
+    }
+
+    @Test fun chatPollAnswersWhatCameAfterTheCursor() {
+        val items = msgs("user" to "status?", "assistant" to "all green", "user" to "thanks", "assistant" to "np")
+        // 2 items trimmed off the head: cursors 2..5 are items 0..3.
+        val p = KeyboardAi.chatPage(KeyboardAi.ChatState(items, 2, 7, true, 0), KeyboardAi.ChatCursor(4, 7, 4))
+        assertEquals(2, p.getJSONArray("messages").length())
+        assertEquals("thanks", p.getJSONArray("messages").getJSONObject(0).getString("text"))
+        assertEquals(6, p.getInt("next"))
+        assertFalse(p.getBoolean("reset"))
+        assertFalse(p.getBoolean("done"))
+        val idle = KeyboardAi.chatPage(KeyboardAi.ChatState(items, 2, 7, false, 0), KeyboardAi.ChatCursor(6, 7, 4))
+        assertEquals(0, idle.getJSONArray("messages").length())
+        assertTrue(idle.getBoolean("done"))
+        assertFalse(KeyboardAi.chatPage(KeyboardAi.ChatState(items, 2, 7, false, 1), KeyboardAi.ChatCursor(6, 7, 4)).getBoolean("done"))
+    }
+
+    @Test fun chatPollResetsOnAnotherConversationOrATrimmedCursor() {
+        val items = msgs("user" to "a", "assistant" to "b")
+        val other = KeyboardAi.chatPage(KeyboardAi.ChatState(items, 0, 3, false, 0), KeyboardAi.ChatCursor(1, 2, -1))
+        assertTrue(other.getBoolean("reset"))
+        assertEquals(2, other.getJSONArray("messages").length())
+        assertEquals(3, other.getInt("epoch"))
+        assertTrue(KeyboardAi.chatPage(KeyboardAi.ChatState(items, 5, 3, false, 0), KeyboardAi.ChatCursor(2, 3, -1)).getBoolean("reset"))
+        assertTrue(KeyboardAi.chatPage(KeyboardAi.ChatState(items, 0, 3, false, 0), KeyboardAi.ChatCursor(9, 3, -1)).getBoolean("reset"))
+    }
+
+    @Test fun chatHistoryIsTheLastN() {
+        val items = (1..80).map { JSONObject().put("kind", "assistant").put("text", "m$it") }
+        val h = KeyboardAi.chatPage(KeyboardAi.ChatState(items, 0, 1, false, 0), KeyboardAi.ChatCursor(-1, -1, -1, 3))
+        assertEquals(listOf("m78", "m79", "m80"), (0 until 3).map { h.getJSONArray("messages").getJSONObject(it).getString("text") })
+        assertFalse(h.getBoolean("reset"))
+        assertEquals(KeyboardAi.CHAT_PAGE, KeyboardAi.chatPage(KeyboardAi.ChatState(items, 0, 1, false, 0), KeyboardAi.ChatCursor(-1, -1, -1, 500)).getJSONArray("messages").length())
+    }
+
+    @Test fun chatStoppedOnlyCountsAfterTheTurn() {
+        val items = msgs("user" to "x", "note" to "stopped", "user" to "y", "assistant" to "z")
+        assertFalse(KeyboardAi.chatPage(KeyboardAi.ChatState(items, 0, 1, false, 0), KeyboardAi.ChatCursor(2, 1, 2)).getBoolean("stopped"))
+        val after = items + JSONObject().put("kind", "note").put("text", "stopped")
+        assertTrue(KeyboardAi.chatPage(KeyboardAi.ChatState(after, 0, 1, false, 0), KeyboardAi.ChatCursor(2, 1, 2)).getBoolean("stopped"))
+    }
 }
