@@ -1,4 +1,5 @@
 #!/bin/bash
+# shellcheck disable=SC2010,SC2034,SC2154,SC2155  # lint fixture: unused/unset names and local x=$(...) are the point
 # lint fixture: every grep below may match nothing; under set -e + pipefail the script then ends with no message
 set -euo pipefail
 changed=$(git status --porcelain | grep -v node_modules | sort)

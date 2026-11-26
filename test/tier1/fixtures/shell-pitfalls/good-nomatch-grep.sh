@@ -1,4 +1,5 @@
 #!/bin/bash
+# shellcheck disable=SC2034,SC2154,SC2155  # lint fixture: unused/unset names and local x=$(...) are the point
 # lint fixture: none of these is a hit - the no-match status is handled, tested, or can't end the script
 set -euo pipefail
 changed=$(git status --porcelain | grep -v node_modules | sort || true)
@@ -18,7 +19,7 @@ f() {
 echo "found: $(grep -o 'a=[0-9]*' f | head -1)"
 for w in $(grep -l widget ./*.tsx | sort); do echo "$w"; done
 while read -r l; do echo "$l"; done < <(grep -v '^#' list.txt)
-x=$(grep -c y f | sort; echo done)
+x=$(grep -c y f | sort; echo finished)
 grep TODO notes.txt
 out=$(git log | grep fix | head -3) || out=
 grep x f | sort # lint-ok: fixture escape on the line itself
