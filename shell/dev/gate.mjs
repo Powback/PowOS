@@ -10411,6 +10411,103 @@ async function lmUnlockStep({ f, r, st, until }, label, fails) {
   if (!(await until((x) => x.lm.unlock > 0)).lm.unlock) fails.push(`LM1 ${label}: a swipe up starting on the media card didn't unlock`);
 }
 /**
+ * AOD1 (board "Always-on display shows now playing and the fingerprint spot"): index.html?mode=aod (the screen-off
+ * display, aod.tsx). The mock plays "Teardrop": one dim line (title · artist) inside the screen, display only (no
+ * transport: the doze window takes no touch); a track change pushed ("media.changed", as ShellMedia.whileOff sends)
+ * shows the new title, a pause hides the line. A side sensor (the mock's, the OnePlus Open) draws no spot; an
+ * in-display one (lock.sensor, asked again when the page is shown) draws it at the sensor, unmoved by the drift.
+ */
+function aodRead() {
+  const box = (el) => el?.getBoundingClientRect() ?? null;
+  const text = (sel) => document.querySelector(sel)?.textContent ?? null;
+  const t = box(document.querySelector(".aod-track"));
+  const fp = box(document.querySelector(".aod-fp"));
+  const title = document.querySelector(".aod-title");
+  return {
+    title: text(".aod-media .aod-title"),
+    artist: text(".aod-media .aod-artist"),
+    buttons: document.querySelectorAll(".aod-transport button").length,
+    track: t && { left: t.left, right: t.right },
+    color: title ? getComputedStyle(title).color : "",
+    fp: fp?.width > 0 ? { x: Math.round(fp.left + fp.width / 2), y: Math.round(fp.top + fp.height / 2), w: Math.round(fp.width) } : null,
+    W: innerWidth,
+  };
+}
+/** AOD1's waits: [ok] of the page's state, polled up to [ms]. */
+async function aodUntil(r, ok, ms = 3000) {
+  const end = Date.now() + ms;
+  let s = await r.page.evaluate(aodRead);
+  while (!ok(s) && Date.now() < end) await new Promise((d) => setTimeout(d, 60)), (s = await r.page.evaluate(aodRead));
+  return s;
+}
+const aodInside = (s) => !!s.track && s.track.left >= -0.5 && s.track.right <= s.W + 0.5;
+const aodMedia = (title, playing) => {
+  const one = { available: true, playing, title, artist: "Air", app: "Spotify", package: "spotify" };
+  return { ...one, sessions: [one] };
+};
+/** Pushed as the host does, and what the mock answers from now on (the page reads it again on the minute's turn). */
+const aodPush = (r, title, playing) =>
+  r.page.evaluate(async (x) => {
+    const { powos } = await window.__gw.mod("./bridge.ts");
+    powos.media.state = async () => x;
+    window.__mockEvents.emit("media.changed", x);
+  }, aodMedia(title, playing));
+
+/** AOD1's first look: the mock's track on one dim line inside the screen, no transport, no spot for a side sensor. */
+function aodFirstFails(s, label) {
+  const fails = [];
+  if (!/Massive Attack/.test(s.artist ?? "")) fails.push(`AOD1 ${label}: no artist on the line (${s.artist})`);
+  if (s.buttons !== 0) fails.push(`AOD1 ${label}: ${s.buttons} transport buttons on the doze screen (it takes no touch)`);
+  if (!aodInside(s)) fails.push(`AOD1 ${label}: the line is past the screen (${JSON.stringify(s.track)})`);
+  const alpha = Number((s.color.match(/[\d.]+/g) ?? [])[3] ?? 1);
+  if (!(alpha < 0.95)) fails.push(`AOD1 ${label}: the line isn't dim (${s.color})`);
+  if (s.fp) fails.push(`AOD1 ${label}: a spot drawn for a side sensor`);
+  return fails;
+}
+
+/** AOD1's pushes: a long new title replaces the line (cut, inside the screen); a pause hides it. */
+async function aodPushFails(r, label) {
+  const fails = [];
+  const long = "A very long title that has to be cut on the folded screen, never wrapped onto a second line";
+  await aodPush(r, long, true);
+  let s = await aodUntil(r, (x) => x.title === long);
+  if (s.title !== long) fails.push(`AOD1 ${label}: a track change pushed, the line still ${JSON.stringify(s.title)}`);
+  else if (!aodInside(s)) fails.push(`AOD1 ${label}: a long title runs past the screen`);
+  await aodPush(r, long, false);
+  s = await aodUntil(r, (x) => x.title === null);
+  if (s.title !== null) fails.push(`AOD1 ${label}: paused, the line still shows`);
+  return fails;
+}
+
+/** AOD1's in-display sensor: lock.sensor says udfps, the page shown again draws the spot right at it. */
+async function aodSpotFails(r, label) {
+  const spot = await r.page.evaluate(async () => {
+    const { powos } = await window.__gw.mod("./bridge.ts");
+    const sp = { x: Math.round(innerWidth / 2), y: innerHeight - 140, r: 32 };
+    powos.lock.sensor = async () => ({ kind: "udfps", enrolled: true, spot: sp });
+    document.dispatchEvent(new Event("visibilitychange"));
+    return sp;
+  });
+  const s = await aodUntil(r, (x) => x.fp);
+  console.log(`     aod-${label}: ${JSON.stringify({ track: s.track, fp: s.fp })}`);
+  if (!s.fp) return [`AOD1 ${label}: no spot for an in-display sensor`];
+  const off = Math.max(Math.abs(s.fp.x - spot.x), Math.abs(s.fp.y - spot.y), Math.abs(s.fp.w - 2 * spot.r));
+  return off > 1 ? [`AOD1 ${label}: the spot at ${JSON.stringify(s.fp)}, the sensor at ${JSON.stringify(spot)}`] : [];
+}
+
+async function aodScene(r, label) {
+  const s = await aodUntil(r, (x) => x.title);
+  if (s.title !== "Teardrop") return [`AOD1 ${label}: playing "Teardrop", the line shows ${JSON.stringify(s.title)}`];
+  const fails = aodFirstFails(s, label);
+  await r.page.screenshot({ path: `/cache/aod-${label}.png` }).catch(() => {});
+  fails.push(...(await aodPushFails(r, label)), ...(await aodSpotFails(r, label)));
+  await aodPush(r, "Teardrop", true);
+  await aodUntil(r, (x) => x.title === "Teardrop");
+  await r.page.screenshot({ path: `/cache/aod-udfps-${label}.png` }).catch(() => {});
+  return fails;
+}
+
+/**
  * LG1 (board "Lock screen shows next alarm, weather and next event"): the glance under the date (lockglance.tsx), a
  * mock "lock.glance" pushed as the native side does. All three: three chips on one line, under the date, inside the
  * screen and centred, a long event title cut (never wrapped, never past the edge). Only the weather: one chip. Nothing:
@@ -10520,6 +10617,9 @@ async function sbyTapFails(r, label, s) {
   if ((await r.page.evaluate(sbyRead)).exits !== 1) fails.push(`SBY1 ${label}: a tap didn't end StandBy`);
   await r.page.setViewport({ width: Math.min(s.W, s.H), height: Math.max(s.W, s.H) + 1 });
   await r.page.waitForSelector(".aod", { timeout: 3000 }).catch(() => fails.push(`SBY1 ${label}: upright, no screen-off display`));
+  // Upright the dream takes touches: the screen-off display's now-playing line has its transport there.
+  const buttons = await r.page.waitForFunction(() => document.querySelectorAll(".aod-transport button").length === 3, { timeout: 3000 }).then(() => 3, () => 0);
+  if (buttons !== 3) fails.push(`SBY1 ${label}: upright, the now-playing line has no previous / play / next`);
   return fails;
 }
 
@@ -16601,6 +16701,10 @@ try {
   if (process.env.SHELL_PAGES !== "0")
     for (const [label, viewport] of [["folded", { width: 900, height: 404 }], ["unfolded", { width: 883, height: 821 }]])
       runs.push(open(browser, `${ORIGIN}/index.html?mode=standby`, `standby-${label}`, viewport).then((r) => whenReady(r, () => standbyScene(r, label))));
+  // AOD1: the screen-off display's now-playing line and an in-display fingerprint sensor's spot. Folded and unfolded.
+  if (process.env.SHELL_PAGES !== "0")
+    for (const [label, viewport] of [["folded", { width: 404, height: 900 }], ["unfolded", { width: 821, height: 883 }]])
+      runs.push(open(browser, `${ORIGIN}/index.html?mode=aod`, `aod-${label}`, viewport).then((r) => whenReady(r, () => aodScene(r, label))));
   // TI1: tiled windows' bars, the w.f touch rects, the divider's pill (the user's layout, 10-31 15:08, unfolded).
   if (process.env.SHELL_PAGES !== "0")
     runs.push(open(browser, `${ORIGIN}/index.html`, "tile-bars-unfolded", { width: 821, height: 883 }).then((r) => whenReady(r, () => tileBarsScene(r))));

@@ -13,7 +13,7 @@ import dev.omalauncher.App
 
 /**
  * The screen-off display (Android's doze component, docs/NATIVE-SYSTEM-UI.md): the shell's "aod" screen (shell/ui/
- * aod.tsx - the time, what's new, the battery) on the dark, low-power screen Android shows while the phone sleeps.
+ * aod.tsx - the time, what's new, the battery, what's playing, an in-display fingerprint sensor's spot) on the dark, low-power screen Android shows while the phone sleeps.
  * A thin host: the slot's window and its power state here, everything shown is the shell, hot-reloaded as anywhere.
  *
  * Android uses it as the doze component when the PowOS system module's overlay names it (config_dozeComponent); it's
@@ -43,6 +43,8 @@ class PowosDozeService : DreamService() {
         host =
             ShellHost(this, null, runtime, if (dozing) MODE else STANDBY).also {
                 if (!dozing) it.bridge.standbyExit = { main.post { finish() } }
+                // Its now-playing line follows the track while the screen is off (changes only, not the position).
+                it.bridge.mediaWhileOff = true
                 setContentView(it.web)
             }
     }

@@ -35,7 +35,7 @@ signature/privileged permission) for the full version; **nr-gap** = works rooted
 | Smart Lock / trust agents | stock | `requestDismissKeyguard` honours a trusted state; the face still asks for the swipe | L | any |
 | Lockdown | stock | power menu is SystemUI's | L | any |
 | NFC payment while locked | stock | HCE is independent of the face | L | any |
-| AOD / ambient display | partial | `aod.tsx` + PowosDozeService: time, date, battery, notification icons. No now-playing, no fingerprint target, no tap/lift-to-wake choices | M | any |
+| AOD / ambient display | partial (now playing + fingerprint spot done 11-27, device check queued) | `aod.tsx` + PowosDozeService: time, date, battery, notification icons, a dim now-playing line (title · artist while playing; previous/play/next where the window takes touches - StandBy upright; ShellMedia.whileOff tells track/play changes with the screen off, never the position), an in-display sensor's spot at the sensor (lock.sensor, outline, not drifting; none on a side sensor). Gate AOD1, tools/phone/verify/aod.sh. Left: tap/lift-to-wake choices | M | any |
 | Face shows without root | done | LockFace.kt full-screen-intent fallback (razr 11-08) | - | any |
 
 ### Notification shade + control center (`shell/ui/shade.tsx`, `notifications.tsx`, `control.tsx`, `QuickSettings.kt`)
@@ -136,7 +136,7 @@ signature/privileged permission) for the full version; **nr-gap** = works rooted
 14. ~~StandBy on charge + landscape~~ - done 11-27 (standby.tsx, PowosDozeService), device check pending.
 15. Notification snooze - any, M.
 16. Screen record on S25/razr (MediaProjection, own recorder) - any, M.
-17. AOD: now playing + fingerprint target - any, M.
+17. AOD: now playing + fingerprint target - any, M. (done 11-27: AOD1; tap/lift-to-wake left)
 18. Haptics audit across the shell - any, M.
 19. Handoff (continue page/app on another device) - any, M.
 20. Lock face customization - any, M.

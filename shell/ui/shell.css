@@ -2232,6 +2232,20 @@ html[data-mode="aod"], html[data-mode="aod"] body { background: #000; }
 .aod-date, .aod-battery { font-size: var(--text-small); }
 .aod-apps { display: flex; gap: var(--gap); margin-top: 14px; }
 .aod-apps img { width: 22px; height: 22px; border-radius: 8px; opacity: 0.7; filter: grayscale(0.4); }
+/* What's playing (aod.tsx AodMedia): one dim line, cut to the screen; the transport only where the window takes touches. */
+.aod-media { display: flex; flex-direction: column; align-items: center; gap: 4px; max-width: min(86vw, 420px); margin-top: 8px; }
+.aod-track { display: flex; align-items: center; gap: 6px; max-width: 100%; font-size: var(--text-small); white-space: nowrap; overflow: hidden; }
+.aod-track .icon { flex: none; width: 14px; height: 14px; opacity: 0.8; }
+.aod-title, .aod-artist { overflow: hidden; text-overflow: ellipsis; }
+.aod-title { flex: 0 1 auto; color: color-mix(in srgb, var(--color-foreground) 85%, transparent); }
+.aod-artist { flex: 0 2 auto; }
+.aod-transport { display: flex; gap: 8px; }
+.aod-transport button { display: grid; place-items: center; width: 44px; height: 44px; border: 0; border-radius: 50%; background: none; color: inherit; }
+.aod-transport .icon { width: 22px; height: 22px; }
+/* An in-display fingerprint sensor's spot (aod.tsx AodFingerprint): at the sensor (host numbers), outline only and dim -
+   it marks where the sensor is, so it doesn't wander; the icon's thin strokes are all it lights. */
+.aod-fp { position: fixed; display: grid; place-items: center; color: color-mix(in srgb, var(--color-foreground) 40%, transparent); }
+.aod-fp .icon { width: 62%; height: 62%; }
 
 /*
  * StandBy (standby.tsx, the charging screensaver): black, the clock big on the left, two stacks of cards beside it, each

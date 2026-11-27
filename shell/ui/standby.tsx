@@ -136,7 +136,7 @@ export function Standby() {
     q.addEventListener("change", on);
     return () => q.removeEventListener("change", on);
   }, []);
-  return landscape ? <StandbyFace /> : <Aod />;
+  return landscape ? <StandbyFace /> : <Aod controls />;
 }
 
 function StandbyFace() {

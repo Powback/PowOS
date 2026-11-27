@@ -46,6 +46,7 @@ ui/library*             ^(library-.*|add-app-.*)$
 ui/folder*              ^(home-folder-.*|home-select-.*)$
 ui/lock*                ^(lock-.*|standby-.*)$
 ui/standby.*            ^standby-.*$
+ui/aod.*                ^(aod-.*|standby-.*)$
 # Layout-bearing CSS / tokens: every scene but the PowOS apps' own pages (--app runs those).
 theme.css               ^(?!app )
 ui/shell.css            ^(?!app )

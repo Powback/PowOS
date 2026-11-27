@@ -37,6 +37,15 @@ class ShellMedia(
     private var listening: Job? = null
 
     /**
+     * Told while the screen is off too (the screen-off display's page, PowosDozeService): only when the track or
+     * play/pause changes, never each second's position - its now-playing line has no seek line to move.
+     */
+    @Volatile var whileOff = false
+
+    /** The last screen-off change sent ([whileOff]): title, artist, playing. */
+    private var offKey: String? = null
+
+    /**
      * The session shown (as before), with every active one up to [SESSIONS] under "sessions": the control center's cards
      * (it shows two) and the lock face's (it swipes between them all).
      */
@@ -44,7 +53,10 @@ class ShellMedia(
         if (listening == null) {
             // Screen off, the page isn't told each second's position (the lock face's page stays warm all night); the
             // screen back on, it's told what it missed at once (screenOn), whatever changed meanwhile (a headset's pause).
-            listening = scope.launch { media.updates { if (power.isInteractive) read() else null }.drop(1).collect { v -> v?.let { emit("media.changed", json(it)) } } }
+            listening =
+                scope.launch {
+                    media.updates { if (power.isInteractive || whileOff) read() else null }.drop(1).collect { v -> v?.let(::changed) }
+                }
             context.registerReceiver(screenOn, IntentFilter(Intent.ACTION_SCREEN_ON))
         }
         return json(read()) as JSONObject
@@ -90,6 +102,23 @@ class ShellMedia(
     fun close() {
         if (listening != null) runCatching { context.unregisterReceiver(screenOn) }
         listening?.cancel()
+    }
+
+    /** A change to tell the page: every one with the screen on; screen off ([whileOff]) only a new track / play-pause. */
+    private fun changed(v: Value) {
+        if (power.isInteractive) {
+            offKey = null
+        } else {
+            val k = offKeyOf(v)
+            if (k == offKey) return
+            offKey = k
+        }
+        emit("media.changed", json(v))
+    }
+
+    private fun offKeyOf(v: Value): String {
+        val f = (v as? Obj)?.fields ?: return ""
+        return listOf("title", "artist", "playing").joinToString("\u0001") { k -> f[k]?.let { scalar(it).toString() } ?: "" }
     }
 
     private fun json(x: Value): Any =

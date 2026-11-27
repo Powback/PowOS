@@ -248,6 +248,13 @@ class ShellBridge(
     /** Set by the screensaver (PowosDozeService) while it shows StandBy: a tap on it ends the dream (to the lock face). */
     var standbyExit: (() -> Unit)? = null
 
+    /** The screen-off display's page: hears a track / play-pause change while the screen is off (ShellMedia.whileOff). */
+    var mediaWhileOff: Boolean
+        get() = media.whileOff
+        set(v) {
+            media.whileOff = v
+        }
+
     /** Only the status/frame host assigns this scoped interface. */
     var chrome: ChromeSlot? = null
 

@@ -308,6 +308,13 @@ that bypass `requestDismissKeyguard`.
   interactive: swipes are the stacks', a tap calls `standby.exit` (the dream finishes, the lock screen shows). The
   light sensor (< 5 lux) sends `standby.dark`: a dim red night look. The user picks PowOS once under Settings >
   Display > Screen saver ("when charging"); adb's `settings put secure screensaver_components` does it for checks.
+- **Now playing + fingerprint spot on the aod (2026-11-27):** a dim line under the date (title · artist, only while
+  playing); dozing it is display only (the doze window takes no touch), StandBy upright adds previous/play/next. The
+  dream's bridge sets `ShellMedia.whileOff`: with the screen off it still sends `media.changed`, but only when the
+  title, artist or play state changes (never the second-by-second position), and the page re-reads on each minute's
+  turn for an older host. An in-display sensor's spot is drawn from `lock.sensor` (FingerprintSensor.kt, the lock
+  face's geometry) as a dim outline at the sensor, outside the burn-in drift; a side sensor (OnePlus Open) draws none.
+  Gate AOD1; device check `tools/phone/verify/aod.sh` (the screensaver held upright, no root).
 
 Effort: about 1 week. Risk: the lowest of all slots, since a broken doze dream only means no AOD.
 
