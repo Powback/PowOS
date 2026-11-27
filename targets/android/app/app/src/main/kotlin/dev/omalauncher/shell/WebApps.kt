@@ -228,26 +228,48 @@ object WebApps {
             again = false
         }
         try {
-            val (probe, catalog) = fetchCatalog(base, why)
-            val (result, changed) = applyCatalog(context, catalog)
-            val now = synchronized(this) { reach.after(probe).also { reach = it } }
-            // Greyed only once [WebAppSync.OFFLINE_AFTER] tries in a row got no answer; the first answer clears it.
-            val ok = if (now.offline) false else if (probe == WebAppSync.Probe.NO_ANSWER) reachable else true
-            val flipped = reachable != ok
-            reachable = ok
-            if (changed) Log.i(TAG, "sync ($why): ${result.apps.size} apps, added ${result.added}, removed ${result.removed}")
-            if (flipped) Log.i(TAG, "sync ($why): .pow apps ${if (ok == false) "unreachable after ${now.misses} tries" else "reachable"} ($probe)")
-            if (changed || flipped) version.intValue++
-            for (id in result.iconsToFetch) result.apps.firstOrNull { it.id == id }?.let { fetchIcon(context, it, wake = false) }
-            // One retry timer at a time (each try replaces the last one's), none once it answered.
-            synchronized(this) {
-                retry?.cancel(false)
-                retry = now.retryInSec()?.let { sec -> io.schedule({ runCatching { syncSoon(context, 0) } }, sec, TimeUnit.SECONDS) }
-            }
+            syncFrom(context, base, why)
         } finally {
-            val more = synchronized(this) { running = false; again.also { again = false } }
+            val more =
+                synchronized(this) {
+                    running = false
+                    again.also { again = false }
+                }
             if (more) syncSoon(context, 0)
         }
+    }
+
+    /** One try at [base]'s catalog: applied, the reachability updated, a retry timed after a miss. */
+    private fun syncFrom(
+        context: Context,
+        base: String,
+        why: String,
+    ) {
+        val (probe, catalog) = fetchCatalog(base, why)
+        val (result, changed) = applyCatalog(context, catalog)
+        if (changed) Log.i(TAG, "sync ($why): ${result.apps.size} apps, added ${result.added}, removed ${result.removed}")
+        val flipped = noteReach(context, probe, why)
+        if (changed || flipped) version.intValue++
+        for (id in result.iconsToFetch) result.apps.firstOrNull { it.id == id }?.let { fetchIcon(context, it, wake = false) }
+    }
+
+    /** [probe] counted ([reachable] per WebAppSync.Reach.shown) and the next retry timed; true: [reachable] changed. */
+    private fun noteReach(
+        context: Context,
+        probe: WebAppSync.Probe,
+        why: String,
+    ): Boolean {
+        val now = synchronized(this) { reach.after(probe).also { reach = it } }
+        val ok = now.shown(reachable, probe)
+        val flipped = reachable != ok
+        reachable = ok
+        if (flipped) Log.i(TAG, "sync ($why): .pow apps ${if (ok == false) "unreachable after ${now.misses} tries" else "reachable"} ($probe)")
+        // One retry timer at a time (each try replaces the last one's), none once it answered.
+        synchronized(this) {
+            retry?.cancel(false)
+            retry = now.retryInSec()?.let { sec -> io.schedule({ runCatching { syncSoon(context, 0) } }, sec, TimeUnit.SECONDS) }
+        }
+        return flipped
     }
 
     /**

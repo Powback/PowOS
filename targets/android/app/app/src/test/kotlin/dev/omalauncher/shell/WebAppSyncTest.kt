@@ -147,6 +147,17 @@ class WebAppSyncTest {
     }
 
     @Test
+    fun `what the launcher shows - a single miss keeps the last state`() {
+        val miss = WebAppSync.Reach().after(WebAppSync.Probe.NO_ANSWER)
+        assertEquals(true, miss.shown(true, WebAppSync.Probe.NO_ANSWER))
+        assertNull(miss.shown(null, WebAppSync.Probe.NO_ANSWER))
+        val off = miss.after(WebAppSync.Probe.NO_ANSWER)
+        assertEquals(false, off.shown(true, WebAppSync.Probe.NO_ANSWER))
+        val back = off.after(WebAppSync.Probe.ANSWERED)
+        assertEquals(true, back.shown(false, WebAppSync.Probe.ANSWERED))
+    }
+
+    @Test
     fun `offline retries back off to five minutes`() {
         var r = WebAppSync.Reach()
         val delays =

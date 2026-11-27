@@ -9,7 +9,7 @@
 # 45 s to clear (the 3 s / 30 s retry). Prints the app's PowosWebApps log lines.
 # Exit 0 PASS, 1 FAIL, 3 can't judge (phone off the LAN/VPN).
 set -uo pipefail
-cd "$(dirname "$0")/../../.."
+cd "$(dirname "$0")/../../.." || exit 1
 A=tools/phone/adb.sh
 export CDP_TIMEOUT_S=30
 ev() { tools/phone/cdp.sh eval home "$1" 2>&1 | tail -1 | tr -d '\r\\' | sed -E 's/^"(.*)"$/\1/'; }

@@ -151,6 +151,15 @@ object WebAppSync {
         fun after(p: Probe) = Reach(if (p == Probe.NO_ANSWER) misses + 1 else 0)
 
         /**
+         * What the launcher shows after [p] (this Reach being the state after it): greyed (false) only when offline,
+         * reachable (true) after any answer, and a single miss keeps what was shown [before] (null: not tried yet).
+         */
+        fun shown(
+            before: Boolean?,
+            p: Probe,
+        ): Boolean? = if (offline) false else if (p == Probe.NO_ANSWER) before else true
+
+        /**
          * Seconds to the next try: soon after a miss (3 s: confirm or clear it before anything is greyed), then 30 s,
          * doubling to 5 min while it stays unreachable (off the LAN/VPN for hours costs a GET every 5 min, not every
          * 30 s); null after an answer (the periodic sync and network changes are enough).
