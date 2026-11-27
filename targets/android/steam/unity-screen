@@ -42,7 +42,9 @@
 # launch at render scale 100, before the game starts, its own settings say windowed at the container's size -
 #   generic: Unity's PlayerPrefs in the prefix's user.reg ("Screenmanager Is Fullscreen mode" 0 / "Fullscreen mode" 3 =
 #     windowed, "Screenmanager Resolution Width/Height" = the container; only keys already there);
-#   per game (WM_FILES, keep it tiny): the game's own settings file, e.g. Besiege's Config.xml.
+#   per game (WM_FILES, keep it tiny): the game's own settings file, e.g. Besiege's Config.xml; Broforce's Saves/Options.xml
+#     (resolutionW/H 1920x1080 fullscreen=true: it applies them after start over these arguments, so the unfolded
+#     2268x2440 window drew a 2268x1276 16:9 band, 582 px bars top and bottom, until the first rotate - bf-resize 11-25).
 # The values there before are kept in ~/.local/share/powos/window-mode/<appid>.json and put back by "default" (at once
 # when the game isn't running, else at its next launch), by any launch with it off, and by a launch at scale < 100
 # (that launch is the full-screen one, untouched otherwise). Not at the game's exit: the game and its wineserver write
@@ -55,7 +57,8 @@ mode, appid = sys.argv[1], sys.argv[2]
 w, h, gamedir = (int(sys.argv[3]), int(sys.argv[4]), sys.argv[5]) if mode == "apply" else (0, 0, "")
 data = os.environ.get("XDG_DATA_HOME") or os.path.join(os.path.expanduser("~"), ".local/share")
 rec_path = os.path.join(data, "powos/window-mode", appid + ".json")
-WM_FILES = {"346010": [("Besiege_Data/Config.xml", {"WindowedMode": "true", "ScreenWidth": "%W", "ScreenHeight": "%H"})]}
+WM_FILES = {"346010": [("Besiege_Data/Config.xml", {"WindowedMode": "true", "ScreenWidth": "%W", "ScreenHeight": "%H"})],
+            "274190": [("Saves/Options.xml", {"fullscreen": "false", "resolutionW": "%W", "resolutionH": "%H"})]}
 REG = {"Screenmanager Is Fullscreen mode": 0, "Screenmanager Fullscreen mode": 3,
        "Screenmanager Resolution Width": "%W", "Screenmanager Resolution Height": "%H"}
 def val(v):

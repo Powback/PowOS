@@ -171,6 +171,18 @@ grep -q '<WindowedMode>true' "$T/bes/Besiege_Data/Config.xml" && ok "POWOS_WINDO
 bes
 grep -q '<WindowedMode>false' "$T/bes/Besiege_Data/Config.xml" && cmp -s "$REGF" "$T/reg0" && ok "the next launch without it: values put back" || bad "wm env restore" "$(cat "$T/err")"
 
+# Broforce (274190): its own Saves/Options.xml (1920x1080 fullscreen) letterboxed the launch (bf-resize 11-25).
+mkdir -p "$T/bro/Saves"; cp "$T/game" "$T/bro/Broforce_beta.exe"
+printf '<?xml version="1.0" encoding="us-ascii"?>\r\n<PlayerOptions>\r\n  <musicVolume>0.3</musicVolume>\r\n  <resolutionW>1920</resolutionW>\r\n  <resolutionH>1080</resolutionH>\r\n  <fullscreen>true</fullscreen>\r\n</PlayerOptions>' > "$T/bro/Saves/Options.xml"
+cp "$T/bro/Saves/Options.xml" "$T/bro0"
+bro() { PATH="$T/bin:$PATH" DISPLAY=:9 SteamAppId=274190 sh "$US" "$T/bro/Broforce_beta.exe" > "$T/out" 2> "$T/err"; }
+POWOS_WINDOW_MODE=borderless bro
+grep -q '<resolutionW>2268</resolutionW>' "$T/bro/Saves/Options.xml" && grep -q '<resolutionH>2440</resolutionH>' "$T/bro/Saves/Options.xml" \
+  && grep -q '<fullscreen>false</fullscreen>' "$T/bro/Saves/Options.xml" && grep -q '<musicVolume>0.3' "$T/bro/Saves/Options.xml" \
+  && ok "borderless: Broforce's Options.xml windowed at the container's size" || bad "wm bro" "$(cat "$T/bro/Saves/Options.xml") / $(cat "$T/err")"
+bro
+cmp -s "$T/bro/Saves/Options.xml" "$T/bro0" && ok "Broforce: the next launch without it puts Options.xml back" || bad "wm bro restore" "$(cat "$T/err")"
+
 # End to end with a real X server: the root's _POWOS_SCREEN_SIZE (kwin 0051) wins over the root size.
 if command -v Xvfb >/dev/null && command -v xprop >/dev/null && command -v python3 >/dev/null; then
   Xvfb :93 -screen 0 1116x2358x24 -noreset >/dev/null 2>&1 & XP=$!
