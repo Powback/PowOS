@@ -7,9 +7,11 @@
 #   .58  the measurement image (tools/research/remoting, Compose project rmm, profile phone: a job in nomad.slice, no
 #        tc) runs bin/phone-serve: socat on .58's TCP 15100 -> waypipe server -> the app (Kate/Dolphin lossless `gpu`
 #        mode, Firefox `video` = the ARGB-patched build with --video=h264). Never gpu-195.
-#   phone in the chroot as the session user: `waypipe --debug -s /tmp/wpw/wp.sock client` on KWin's wayland-0, plus
-#        `socat TCP:192.168.50.58:15100 UNIX-CONNECT:/tmp/wpw/wp.sock` (unit waypipe: our packages, pkgs/waypipe +
-#        pkgs/socat). The window must come up as a NATIVE CHILD SURFACE OF A WEB WINDOW (docs/WEB_WINDOWS.md S6: a new
+#   phone in the chroot as the session user: `powos-remote-app --log /tmp/wpw/client.log 192.168.50.58:15100 <app id>`
+#        - PowOS's own launch path for a remote app (targets/android/session/powos-remote-app): powos-open-task around
+#        `waypipe --debug client` on KWin's wayland-0 + socat from the TCP connection, so KWin is asked to SHOW the
+#        window like a launched local app's (unit waypipe: pkgs/waypipe + pkgs/socat). 11-26 00:12 the bare client got
+#        Kate's toplevel to KWin, but nothing showed it: folded ("export-new 0") it stayed on KWin's hidden desktop. The window must come up as a NATIVE CHILD SURFACE OF A WEB WINDOW (docs/WEB_WINDOWS.md S6: a new
 #        "l:" entry in home's webwindows.list, floating, its .webwindow element with the PowOS title bar and a LIVE body
 #        - KWin's buffers on the consumer, not the placeholder); screenshot.
 #   input through the phone's own path (no touch): KWin shows the Android keyboard for a focused text field (Kate's
@@ -61,11 +63,14 @@ DC="$ROOT/tools/research/remoting/dc"
 H58=${WP_HOST:-192.168.50.58} PORT=${WP_PORT:-15100}
 APPS=${*:-kate dolphin firefox}
 mode_of() { case $1 in firefox) echo video ;; *) echo gpu ;; esac; }
+appid_of() { case $1 in firefox) echo firefox ;; *) echo "org.kde.$1" ;; esac; }
 rs() { local f; f=$(mktemp "${TMPDIR:-/tmp}/wprs.XXXXXX"); printf '%s\n' "$1" > "$f"; "$T/root.sh" "$f" 2>/dev/null | tr -d '\r'; rm -f "$f"; }
 dc() { "$DC" --profile phone "$@"; }
 # The phone side as the session user (ww_us: powos-run.sh, the session's environment), KWin's socket named.
 PENV='export XDG_RUNTIME_DIR=/run/powos-app WAYLAND_DISPLAY=wayland-0'
-phone_stop() { ww_us "pkill -f 'waypipe --debug -s /tmp/wpw/' ; pkill -f 'UNIX-CONNECT:/tmp/wpw/'; sleep 0.3; pgrep -af 'waypipe|socat' | grep /tmp/wpw || true" >/dev/null; }
+# Only this check's own powos-remote-app (its --log /tmp/wpw/), its socat and waypipe client first (bash runs its trap
+# only once the foreground socat is gone), never a remote app the user started.
+phone_stop() { ww_us "for p in \$(pgrep -f 'powos-remote-app --connect --log /tmp/wpw/'); do pkill -P \$p; kill \$p; done; pkill -f 'powos-open-task --app-id [^ ]* -- [^ ]*powos-remote-app --connect --log /tmp/wpw/'; sleep 0.3; true" >/dev/null; }
 wwc_extra() { phone_stop; dc exec -T phone phone-stop >/dev/null 2>&1; dc rm -sf phone >/dev/null 2>&1
   local left; left=$(ww_us "pgrep -af 'waypipe|socat' | grep /tmp/wpw" ); [ -z "$left" ] || say "left on the phone: $left"
   say "cleaned: .58 container $(docker --context "${POW_JOB_CONTEXT:-pow58}" ps -q --filter name=rmm-phone | awk 'NF{f=1} END{exit !f}' && echo STILL UP || echo removed), phone waypipe/socat ended"; }
@@ -78,9 +83,14 @@ keyboard_up() { [ "$(sh_ "dumpsys input_method" | grep -m1 -oE "mInputShown=(tru
 phase packages
 pre=$(cap 30 rs 'pacman -Q waypipe socat 2>&1 | tr "\n" " "')
 case $pre in *"waypipe 0.11.3"*socat*) say "phone: $pre" ;; *) echo "SKIP: waypipe/socat not deployed on the phone yet ($pre) - stays queued"; exit 3 ;; esac
+[ -n "$(cap 30 rs 'command -v powos-remote-app')" ] || { echo "SKIP: powos-remote-app not deployed on the phone yet - stays queued"; exit 3; }
 docker --context "${POW_JOB_CONTEXT:-pow58}" image inspect localhost/rmm/remoting:latest >/dev/null 2>&1 ||
   { say "building the measurement image on .58 (tools/research/remoting)"; dc build phone >/dev/null 2>&1 || { echo "SKIP: the .58 image didn't build"; exit 5; }; }
-phase home; wwc_start; result "setup: packages + home $(took) s"
+phase home; wwc_start
+# Web windows need the unfolded home (AppWindows.floating: display 0's smaller side): ww_ready answers folded too, so
+# 11-26 00:12 ran on the cover screen. Unfolded here, put back by wwc_clean.
+[ "$(cap 10 sh_ 'cmd device_state print-state' | tr -dc 0-9)" = 0 ] && { fold 3; UNFOLDED=1; sleep 2; say "unfolded (device_state 3)"; }
+result "setup: packages + home $(took) s"
 phase .58-up
 cap 60 dc up -d phone >/dev/null 2>&1 || bad "the .58 container didn't start (rmm phone) in $(took) s"
 WPV=$(cap 20 dc exec -T phone sh -c 'waypipe --version; waypipe-argbvideo --version' 2>/dev/null | tr '\n' ' ')
@@ -93,6 +103,8 @@ for app in $APPS; do
   # An app needs ~150 s (connect 30 + window 60 + live 25 + idle/typing/scroll ~35 + close/logs); one that can't fit
   # before the steps' deadline isn't started - the apps measured keep their results.
   [ $((WW_DEADLINE - SECONDS)) -ge 150 ] || { result "$app: not run - $((WW_DEADLINE - SECONDS)) s left before the deadline, it needs ~150 s"; continue; }
+  # powos-open-task brings back an existing window of the app id: the user's own local Kate would be raised instead.
+  ww_running "$app" && { result "$app: not run - the phone's own $app runs (its window would be raised, not .58's)"; continue; }
   say "== $app ($mode)"
   phase "$app: .58 serve"
   cap 20 dc exec -T -d -u u phone phone-serve "$app" "$mode" "$PORT" >/dev/null 2>&1 || say "$app: phone-serve start rc $? after $(took) s"
@@ -100,20 +112,18 @@ for app in $APPS; do
   before=$(WW_DEADLINE=$((SECONDS + 20)) CDP_TIMEOUT_S=10 cap 25 wwids l:)
   phase "$app: phone connect"
   cap 30 ww_us "$PENV; rm -rf /tmp/wpw; mkdir -p /tmp/wpw
-setsid -f waypipe --debug -s /tmp/wpw/wp.sock client > /tmp/wpw/client.log 2>&1 < /dev/null
-for i in \$(seq 50); do [ -S /tmp/wpw/wp.sock ] && break; sleep 0.1; done
-setsid -f socat TCP:$H58:$PORT,nodelay UNIX-CONNECT:/tmp/wpw/wp.sock > /tmp/wpw/socat.log 2>&1 < /dev/null
-sleep 1; pgrep -af 'waypipe --debug|UNIX-CONNECT:/tmp/wpw' | head -3" | tee -a "$N/phone-start.txt" >/dev/null
+setsid -f powos-remote-app --log /tmp/wpw/client.log $H58:$PORT $(appid_of "$app") > /tmp/wpw/open.log 2>&1 < /dev/null
+sleep 2; pgrep -af 'powos-remote-app|waypipe --debug|socat TCP' | head -5" | tee -a "$N/phone-start.txt" >/dev/null
   ss0=$(cap 15 ss_sample)
   st=$(cap 15 dc exec -T phone cat /tmp/run/serve.state 2>/dev/null)
   say "$app: .58 serve state ${st:-?}, phone tcp $ss0"
   result "$app: connected in $(took) s, serve state ${st:-?}, phone tcp acked/received/retrans ${ss0:-?}"
-  case $st in connected|started) ;; *) bad "$app: the phone's socat never reached $H58:$PORT (serve state ${st:-?}; $(ww_us 'cat /tmp/wpw/socat.log' | tail -1))"; break ;; esac
+  case $st in connected|started) ;; *) bad "$app: the phone's socat never reached $H58:$PORT (serve state ${st:-?}; $(ww_us 'tail -1 /tmp/wpw/open.log'))"; break ;; esac
   phase "$app: window"
   W=$(wait_new 60 "$before")
   if [ -z "$W" ]; then
     ssW=$(cap 15 ss_sample)
-    bad "$app: no new Linux web window within $(took) s ($(front); phone tcp ${ssW:-?}; client: $(cap 15 ww_us 'grep -m3 -E "Wrn|ERR" /tmp/wpw/client.log' | tr '\n' ' '))"
+    bad "$app: no new Linux web window within $(took) s ($(front); phone tcp ${ssW:-?}; open-task: $(cap 15 ww_us 'tail -3 /tmp/wpw/open.log' | tr '\n' ' '); toplevel: $(cap 15 ww_us 'grep -m1 -oE "set_app_id\([^)]*\)" /tmp/wpw/client.log'))"
     result "$app: no window after $(took) s; phone tcp ${ssW:-?}"
     cap 30 "$T/shot.sh" "$N/no-window.png" >/dev/null 2>&1; break
   fi

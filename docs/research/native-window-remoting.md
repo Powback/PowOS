@@ -618,6 +618,34 @@ exists now (commit 56c3a324):
 | dolphin | gpu | pending | | | | | | | |
 | firefox | video | pending | | | | | | | |
 
+### 8.8 First phone run (11-26 00:12): the window reached KWin, nothing showed it; launch path `powos-remote-app`
+
+The queued run failed twice the same way: `FAIL kate: no new Linux web window within 66 s`, with the TCP link up
+(phone acked 8 KB / received 4.5 KB, `serve state started`). The phone's own `client.log` (left in `/tmp/wpw`)
+shows the remote side worked: Kate bound `xdg_wm_base`, made its toplevel (`set_app_id("org.kde.kate")`,
+`set_title("Kate")`), committed buffers and KWin released them. So waypipe, the patched build and the TCP transport
+are fine; the gap was PowOS's: the bare `waypipe client` is not a launch, so nothing asked KWin to show the window.
+KWin only exports a new window by itself with `export-new 1` (the unfolded home, `AppWindows.floating`), and the
+run was on the cover screen (the failure shot is 1116x2484): `ww_ready` answers folded too, so the check never
+unfolded, and Kate stayed on KWin's hidden desktop.
+
+Fix (the smallest launch path, PowOS's own): **`powos-remote-app [--log FILE] HOST[:PORT] APP_ID`**
+(`targets/android/session/powos-remote-app`, installed to `/usr/local/bin` by the rooted deploy, unit `waypipe`).
+It runs `powos-open-task --app-id APP_ID -- powos-remote-app --connect HOST:PORT`: the same helper the launcher
+uses for every Linux app, so KWin is asked to show the window when it opens - a web window on the unfolded home, its
+own task folded - and the connection (`waypipe client` + `socat TCP:HOST:PORT UNIX-CONNECT:...`) lives as long as
+the app's window. Closing the window ends the remote app, then socat and the client. The check now launches through
+it, unfolds when the phone is folded, skips an app whose local twin runs (powos-open-task raises an existing window
+of that app id: waypipe passes Kate's `org.kde.kate` through unchanged), and on a miss says open-task's last lines
+and the toplevel's app id.
+
+Still open (not in this slice): the far end is the measurement image's `phone-serve` on .58 started from the Mac
+(`tools/research/remoting/dc --profile phone`), so a drawer entry can't start it by itself yet. Making it a real
+drawer entry needs either `waypipe ssh` (waypipe on .58's host - Bazzite has none - and the phone's key authorised
+there, ideally a forced command limited to `waypipe server`) or a small `.58` serve unit reached through
+powos-deviced's paired token instead of ssh keys (§2.1's "auth via PowAuth/deviced"). The transport is still plain
+unauthenticated TCP on the LAN while a check runs.
+
 ---
 
 ## Sources

@@ -1,0 +1,60 @@
+#!/bin/bash
+# powos-remote-app [--log FILE] HOST[:PORT] APP_ID: a Linux app running on another machine (.58) shown as a PowOS window
+# on this phone, over waypipe (board task remote-linux-window-from-58-on-the-oneplus-via-w,
+# docs/research/native-window-remoting.md §8.8).
+#
+# The far end serves the app: `waypipe server` behind a TCP listener on HOST:PORT (default port 15100). Today that is
+# the measurement image's `bin/phone-serve APP MODE` on .58 (tools/research/remoting, Compose project rmm, profile
+# phone), started from the Mac. This end dials it: `waypipe client` on KWin's socket plus socat from the TCP
+# connection to the client's unix socket.
+#
+# Run through powos-open-task with the remote app's Wayland app id (org.kde.kate, org.kde.dolphin, firefox): KWin
+# shows the window it opens exactly as it shows a local app's - a web window on the unfolded home, its own task folded.
+# Before (11-26 00:12, waypipe-window.sh): the client was started bare, Kate's toplevel reached KWin (set_app_id,
+# buffers committed and released) but nothing asked KWin to show it - with "export-new 0" (folded: the cover screen)
+# it stayed on KWin's hidden desktop and no web window ever came.
+#
+# Like any launch through powos-open-task, a window that app id already has here (the phone's own Kate) comes back
+# instead: waypipe passes the remote app id through unchanged.
+#
+# Stays in the foreground for the connection's life (powos-open-task counts a COMMAND that ends with no window as a
+# failed launch); the client goes with it. --log FILE: waypipe --debug to FILE (the check's key->commit stamps).
+#   powos-remote-app 192.168.50.58:15100 org.kde.kate
+# Internal: powos-remote-app --connect [--log FILE] HOST:PORT is what powos-open-task runs.
+set -u
+connect=0 log=/dev/null debug=""
+while [ $# -gt 0 ]; do
+  case $1 in
+    --connect) connect=1; shift ;;
+    --log) log=$2 debug=--debug; shift 2 ;;
+    *) break ;;
+  esac
+done
+usage() { echo "usage: powos-remote-app [--log FILE] HOST[:PORT] APP_ID" >&2; exit 2; }
+[ $# -ge 1 ] || usage
+target=$1; case $target in *:*) ;; *) target=$target:15100 ;; esac
+logopt=(); [ -n "$debug" ] && logopt=(--log "$log")
+
+if [ "$connect" = 0 ]; then
+  [ $# -ge 2 ] || usage
+  exec powos-open-task --app-id "$2" -- "$0" --connect "${logopt[@]}" "$target"
+fi
+
+export XDG_RUNTIME_DIR=${XDG_RUNTIME_DIR:-/run/powos-app} WAYLAND_DISPLAY=${WAYLAND_DISPLAY:-wayland-0}
+dir=$(mktemp -d "${TMPDIR:-/tmp}/powos-remote.XXXXXX") || exit 1
+sock=$dir/wp.sock
+client=""
+cleanup() { [ -n "$client" ] && kill "$client" 2>/dev/null; rm -rf "$dir"; }
+trap cleanup EXIT
+trap 'exit 143' TERM INT HUP
+waypipe $debug -s "$sock" client >>"$log" 2>&1 </dev/null &
+client=$!
+for _ in $(seq 50); do [ -S "$sock" ] && break; sleep 0.1; done
+[ -S "$sock" ] || { echo "powos-remote-app: waypipe client didn't start" >&2; exit 1; }
+echo "powos-remote-app: connecting to $target" >&2
+socat "TCP:$target,nodelay" "UNIX-CONNECT:$sock"
+rc=$?
+# The app's window(s) closed or the far end went: the client's connection process finishes its last messages; its
+# main process would keep listening for another connection, so it goes with this (cleanup).
+sleep 1
+exit $rc

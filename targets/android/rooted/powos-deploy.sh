@@ -51,6 +51,8 @@ install -m 755 $T/powos-plasma-bridge $R/usr/local/bin/powos-plasma-bridge
 install -m 644 $T/powos-plasma-bridge.desktop $R/etc/xdg/autostart/powos-plasma-bridge.desktop
 # A PowOS app tapped on Android opens in its own Android task, like a phone app (the PowOS app runs this).
 install -m 755 $T/powos-open-task $R/usr/local/bin/powos-open-task
+# Another machine's Linux app as a PowOS window over waypipe (unit waypipe; docs/research/native-window-remoting.md §8.8).
+install -m 755 $T/powos-remote-app $R/usr/local/bin/powos-remote-app
 # A swiped window task's app ends (KWin 0042 "quit" runs it 3 s after closing the window, if it's still there).
 install -m 755 $T/powos-app-quit $R/usr/local/bin/powos-app-quit
 install -m 644 $T/powos-android-tasks.desktop $R/etc/xdg/autostart/powos-android-tasks.desktop
@@ -136,7 +138,7 @@ rm -f $T/fex-Config.json $T/fex-thunks.json
 rm -f $T/powos-start.sh $T/powos-session.sh $T/powos-run.sh $T/powos-rooted-session $T/powos-android-app $T/powos-android-tasks \
   $T/powos-units.sh $T/powos-vpn-keep.sh $T/powos-periodic.sh $T/powos-appdata.sh $T/powos-idle-sysupdate.sh \
   $T/adb-key-heal.sh $T/powos-adbkey-heal.sh \
-  $T/powos-android-tasks.desktop $T/powos-padd $T/powos-focus-watch $T/powos-apps-export $T/powos-open-task \
+  $T/powos-android-tasks.desktop $T/powos-padd $T/powos-focus-watch $T/powos-apps-export $T/powos-open-task $T/powos-remote-app \
   $T/powos-apps-watch $T/powos-apps-watch.desktop $T/powos-plasma-bridge $T/powos-plasma-bridge.desktop \
   $T/powos-ime-bridge $T/powos-ime-bridge.desktop $T/powos-output-scale $T/android-nm \
   $T/powos-android-open $T/powos-android-open.desktop $T/powos-app-quit
