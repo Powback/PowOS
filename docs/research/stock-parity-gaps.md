@@ -50,7 +50,7 @@ signature/privileged permission) for the full version; **nr-gap** = works rooted
 | Notification snooze | missing | no `snooze` in shade/notifications | M | any (NotificationListenerService.snoozeNotification) |
 | Notification history | missing | none | L | any |
 | Silent / priority sections, conversation priority | partial | conversations grouped first (grouped()), no silent section | L | any |
-| Screen record | partial | tile opens `com.oplus.screenrecorder` only (OnePlus); S25/razr nothing | M | any (MediaProjection) |
+| Screen record | done (11-27, device-check pending) | no OnePlus recorder app (S25, razr): own recorder, system/ScreenRecord.kt - audio sheet (none/device/mic/both, remembered), Android's consent per recording, mediaProjection FGS, H.264 + AAC (AudioPlaybackCapture + mic mixed) to Movies/*.mp4, Stop in the notification + the tile (on while recording), "saved" notification opens/shares it; OnePlus keeps `com.oplus.screenrecorder`. Check: tools/phone/verify/screen-record-nonroot.sh (razr, consent reached) | M | any (MediaProjection) |
 | Device controls | partial | opens SystemUI's ControlsActivity | L | any |
 | Volume panel (hardware keys) | stock | SystemUI's dialog (NATIVE-SYSTEM-UI.md "Leave to SystemUI") | - | - |
 | Power menu | stock | same | - | - |

@@ -263,7 +263,8 @@ class QuickSettings(
             "controls" -> sw("Device controls", null)
             "wallet" -> sw("Wallet", null)
             "screenshot" -> sw("Screenshot", null)
-            "screenrecord" -> sw("Screen record", null)
+            // A switch with PowOS's own recorder (on while recording); the phone's recorder app's tile opens it.
+            "screenrecord" -> sw("Screen record", if (oplusRecorder()) null else dev.omalauncher.system.ScreenRecord.active())
             "calculator" -> sw("Calculator", null)
             "lockscreen" -> sw("Lock", null)
             "qr_code_scanner" -> sw("Scan QR code", null)
@@ -300,7 +301,8 @@ class QuickSettings(
     fun toggle(name: String) {
         when (name) {
             "torch", "flashlight" -> torchCamera?.let { cameras.setTorchMode(it, !torch) }
-            "hotspot" -> open("hotspot")
+            // Screen record: the recorder app, or PowOS's own recording started / stopped ([screenRecord]).
+            "hotspot", "screenrecord" -> open(name)
             else -> {
                 val on = realOn(name, sysNow())
                 val caps = caps()
@@ -585,7 +587,7 @@ class QuickSettings(
                 "flashlight", "torch" -> null
                 "controls" -> Intent().setComponent(ComponentName("com.android.systemui", "com.android.systemui.controls.ui.ControlsActivity"))
                 "wallet" -> launch("com.google.android.apps.walletnfcrel") ?: Intent("android.settings.NFC_PAYMENT_SETTINGS")
-                "screenrecord" -> launch("com.oplus.screenrecorder")
+                "screenrecord" -> screenRecord()
                 "calculator" -> Intent.makeMainSelectorActivity(Intent.ACTION_MAIN, Intent.CATEGORY_APP_CALCULATOR)
                 "qr_code_scanner" -> qrScanner()
                 "settings" -> Intent(Settings.ACTION_SETTINGS)
@@ -601,6 +603,18 @@ class QuickSettings(
     }
 
     private fun launch(pkg: String): Intent? = context.packageManager.getLaunchIntentForPackage(pkg)
+
+    /** OnePlus's recorder app where it's installed (what worked there), else PowOS's own (MediaProjection, no root). */
+    private fun screenRecord(): Intent? {
+        launch(OPLUS_RECORDER)?.let { return it }
+        dev.omalauncher.system.ScreenRecord.toggle(context)
+        return null
+    }
+
+    /** OnePlus's own screen recorder app is installed (its tile opens it; elsewhere PowOS records - S25, razr). */
+    private fun oplusRecorder(): Boolean = hasOplusRecorder
+
+    private val hasOplusRecorder: Boolean by lazy { launch(OPLUS_RECORDER) != null }
 
     /** The phone's QR scanner, as SystemUI's tile finds it (config_defaultQrCodeComponent). */
     private fun qrScanner(): Intent? {
@@ -671,6 +685,7 @@ class QuickSettings(
 
     companion object {
         private const val TAG = "PowosQuick"
+        private const val OPLUS_RECORDER = "com.oplus.screenrecorder"
         private const val BRIGHTNESS_MIN = 1
 
         /** The panel's slide away, before a screenshot is taken. */

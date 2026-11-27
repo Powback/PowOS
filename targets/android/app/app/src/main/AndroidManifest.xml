@@ -27,6 +27,8 @@
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_SPECIAL_USE" />
     <!-- PowOS AI's live mode: the screen, with the user's consent each session (assist/LiveCapture.kt). -->
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PROJECTION" />
+    <!-- Screen record's microphone (system/ScreenRecord.kt), while recording only. -->
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MICROPHONE" />
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
     <!-- The lock face without root (shell/LockFace.kt): a refused screen-off start goes through a full-screen intent. -->
     <uses-permission android:name="android.permission.USE_FULL_SCREEN_INTENT" />
@@ -579,6 +581,24 @@
         <service
             android:name=".system.KeyboardShareService"
             android:foregroundServiceType="mediaProjection"
+            android:exported="false" />
+
+        <!-- Screen record without root (system/ScreenRecord.kt): the control center's tile (QuickSettings) starts the
+             activity - its audio sheet, then Android's capture consent; the service records to Movies/. -->
+        <activity
+            android:name=".system.ScreenRecordConsentActivity"
+            android:theme="@android:style/Theme.Translucent.NoTitleBar"
+            android:excludeFromRecents="true"
+            android:taskAffinity=""
+            android:exported="true">
+            <intent-filter>
+                <action android:name="com.powos.app.action.SCREEN_RECORD" />
+                <category android:name="android.intent.category.DEFAULT" />
+            </intent-filter>
+        </activity>
+        <service
+            android:name=".system.ScreenRecordService"
+            android:foregroundServiceType="mediaProjection|microphone"
             android:exported="false" />
 
         <provider
