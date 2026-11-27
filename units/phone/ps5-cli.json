@@ -1,0 +1,21 @@
+{
+  "id": "ps5-cli",
+  "name": "powos ps5 (PS5 Remote Play)",
+  "kind": "system",
+  "owner": "system:powos-deploy",
+  "purpose": "`powos ps5 status|find|guide|update|rollback`: PS5 Remote Play through chiaki-ng (docs/PS-REMOTE.md) - finds the PS5 on the LAN (UDP 9302 discovery), explains the one-time pairing, tracks upstream's latest from the pin in upstream/chiaki-ng.json. On the phone chiaki-ng is the PowApps APK (dev.powos.chiaki); this unit is only the command-line tool, nothing running",
+  "installedBy": "targets/android/rooted/powos-deploy.sh (lib/apps/powos-ps5, lib/apps/upstream/chiaki-ng.json)",
+  "files": [
+    "/usr/lib/powos/apps/powos-ps5",
+    "/usr/lib/powos/apps/upstream/chiaki-ng.json",
+    "/home/powos/.local/state/powos/ps5.json (installed/previous build for rollback; desktop flatpak only)"
+  ],
+  "remove": {
+    "commands": [
+      "rm -f /usr/lib/powos/apps/powos-ps5 /usr/lib/powos/apps/upstream/chiaki-ng.json"
+    ],
+    "keep": [
+      "/home/powos/.local/state/powos/ps5.json"
+    ]
+  }
+}
