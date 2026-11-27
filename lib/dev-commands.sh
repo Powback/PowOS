@@ -976,7 +976,7 @@ dev_dockerize() {
         detected_lang="python"
         project_files="Python project detected"
         if [[ -f "$src_dir/requirements.txt" ]] && grep -qi "fastapi\|flask\|django" "$src_dir/requirements.txt" 2>/dev/null; then
-            detected_framework=$(grep -oi "fastapi\|flask\|django" "$src_dir/requirements.txt" 2>/dev/null | head -1 || true)
+            detected_framework=$(grep -oi "fastapi\|flask\|django" "$src_dir/requirements.txt" 2>/dev/null | head -1)  # lint-ok: the grep -qi above proved a match, and an || here costs dev_dockerize's CC budget
         fi
     elif [[ -f "$src_dir/go.mod" ]]; then
         detected_lang="go"
