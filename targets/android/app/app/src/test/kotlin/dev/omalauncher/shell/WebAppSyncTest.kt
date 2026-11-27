@@ -112,4 +112,49 @@ class WebAppSyncTest {
         assertEquals("cdn.pow", WebAppSync.hostOf("http://CDN.pow:80/x?y"))
         assertNull(WebAppSync.hostOf("ftp://cdn.pow/"))
     }
+
+    // --- Reachability (the user 11-27: "Pow apps all greyed out as offline while the network works")
+
+    @Test
+    fun `probe - a catalog, the hub without one, nothing`() {
+        val cat = listOf(app("a.pow"))
+        assertEquals(WebAppSync.Probe.CATALOG, WebAppSync.probeOf(200, cat))
+        // Traefik up, the catalog service down/restarting: the sites behind it work.
+        assertEquals(WebAppSync.Probe.ANSWERED, WebAppSync.probeOf(502, null))
+        assertEquals(WebAppSync.Probe.ANSWERED, WebAppSync.probeOf(404, null))
+        assertEquals(WebAppSync.Probe.ANSWERED, WebAppSync.probeOf(301, null, "https://powstation.pow/v1/apps"))
+        // No DNS/connection/timeout, the .pow LAN-only gate, a captive portal.
+        assertEquals(WebAppSync.Probe.NO_ANSWER, WebAppSync.probeOf(null, null))
+        assertEquals(WebAppSync.Probe.NO_ANSWER, WebAppSync.probeOf(403, null))
+        assertEquals(WebAppSync.Probe.NO_ANSWER, WebAppSync.probeOf(302, null, "http://login.hotspot.example/"))
+        assertEquals(WebAppSync.Probe.NO_ANSWER, WebAppSync.probeOf(200, null))
+    }
+
+    @Test
+    fun `one failed try never greys the apps, the next answer clears it`() {
+        var r = WebAppSync.Reach()
+        assertFalse(r.offline)
+        assertNull(r.retryInSec())
+        r = r.after(WebAppSync.Probe.NO_ANSWER)
+        assertFalse("one miss (a network still settling) greys nothing", r.offline)
+        assertEquals(3L, r.retryInSec())
+        r = r.after(WebAppSync.Probe.NO_ANSWER)
+        assertTrue(r.offline)
+        assertEquals(30L, r.retryInSec())
+        r = r.after(WebAppSync.Probe.ANSWERED)
+        assertFalse("the hub answering clears it at once", r.offline)
+        assertNull(r.retryInSec())
+    }
+
+    @Test
+    fun `offline retries back off to five minutes`() {
+        var r = WebAppSync.Reach()
+        val delays =
+            (1..10).map {
+                r = r.after(WebAppSync.Probe.NO_ANSWER)
+                r.retryInSec()
+            }
+        assertEquals(listOf(3L, 30L, 60L, 120L, 240L, 300L, 300L, 300L, 300L, 300L), delays)
+        assertFalse(r.after(WebAppSync.Probe.CATALOG).offline)
+    }
 }

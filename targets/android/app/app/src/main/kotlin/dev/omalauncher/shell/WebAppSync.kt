@@ -100,4 +100,66 @@ object WebAppSync {
             icons.filter { id -> byHost.getValue(id).let { it.web != SLEEPS || it.icon.isNotEmpty() } },
         )
     }
+
+    // --- Reachability: whether the launcher greys the .pow apps out as "not reachable right now".
+    // The user, 11-27: "Pow apps all greyed out as offline while the network works". It used to be one catalog GET's
+    // outcome: any failure (a try during a network change before Wi-Fi/VPN/DNS settled, the catalog service down
+    // behind a working Traefik, a slow answer) greyed every app until the next network change or the 15-minute
+    // periodic sync, and a network change during an in-flight try was folded into it and lost. Now: only "nothing on
+    // the .pow network answered", twice in a row, greys them, and the next answer clears it at once.
+
+    /** What one try at the hub's catalog said about the `.pow` network. */
+    enum class Probe {
+        /** The catalog came back. */
+        CATALOG,
+
+        /** The hub answered but with no catalog (its catalog service down/restarting behind Traefik): the network works. */
+        ANSWERED,
+
+        /** Nothing on the .pow network answered: no DNS, no connection, a timeout, the LAN-only gate (403), a portal. */
+        NO_ANSWER,
+    }
+
+    /**
+     * One try's [code] (the HTTP status; null: no HTTP answer at all) and [location] (a redirect's target) as a [Probe];
+     * [catalog]: the 200's body parsed. 403 is PowStation's `.pow` LAN/VPN-only gate (pow-local-only.yml): the request
+     * came from outside, so the sites answer 403 too - not reachable. A redirect counts only to a `.pow` host (an
+     * http -> https upgrade on the hub); anywhere else is a captive portal.
+     */
+    fun probeOf(
+        code: Int?,
+        catalog: List<WebApps.App>?,
+        location: String? = null,
+    ): Probe =
+        when {
+            code == null -> Probe.NO_ANSWER
+            code == 200 && catalog != null -> Probe.CATALOG
+            code == 403 -> Probe.NO_ANSWER
+            code in 300..399 -> if (isPowHost(location?.let(::hostOf))) Probe.ANSWERED else Probe.NO_ANSWER
+            // 200 that isn't a catalog: a portal's page served in place.
+            code == 200 -> Probe.NO_ANSWER
+            else -> Probe.ANSWERED
+        }
+
+    /** Tries in a row with no answer before the apps are greyed: one failed try (a network still settling) never does. */
+    const val OFFLINE_AFTER = 2
+
+    /** The reachability after one more try: [misses] tries in a row with no answer, and whether that greys the apps. */
+    data class Reach(val misses: Int = 0) {
+        val offline get() = misses >= OFFLINE_AFTER
+
+        fun after(p: Probe) = Reach(if (p == Probe.NO_ANSWER) misses + 1 else 0)
+
+        /**
+         * Seconds to the next try: soon after a miss (3 s: confirm or clear it before anything is greyed), then 30 s,
+         * doubling to 5 min while it stays unreachable (off the LAN/VPN for hours costs a GET every 5 min, not every
+         * 30 s); null after an answer (the periodic sync and network changes are enough).
+         */
+        fun retryInSec(): Long? =
+            when {
+                misses == 0 -> null
+                misses < OFFLINE_AFTER -> 3L
+                else -> minOf(300L, 30L shl minOf(4, misses - OFFLINE_AFTER))
+            }
+    }
 }

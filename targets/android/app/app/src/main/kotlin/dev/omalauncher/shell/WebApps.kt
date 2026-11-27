@@ -1,6 +1,9 @@
 package dev.omalauncher.shell
 
+import android.content.BroadcastReceiver
 import android.content.Context
+import android.content.Intent
+import android.content.IntentFilter
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import android.net.ConnectivityManager
@@ -29,7 +32,8 @@ import java.util.concurrent.TimeUnit
  * whether its pwa or whatever". That replaces the owner decision of 11-09 ("Nothing is added on pairing: only what the
  * user installs"). [sync] runs at app start, on every network/VPN change and every [PERIOD_MIN] minutes: a new host is
  * added, one the catalog no longer lists is removed - only after a successful, non-empty fetch (WebAppSync.apply).
- * Off the LAN/VPN the apps stay, shown unreachable. One the user removes stays removed (webapps-removed.json) until
+ * Off the LAN/VPN the apps stay, shown unreachable - only once nothing on the .pow network answered twice in a row
+ * (WebAppSync.Reach), retried within seconds and on every screen-on/network change so the mark clears at once. One the user removes stays removed (webapps-removed.json) until
  * PowApps installs it again. Nothing syncs on a device set up standalone (PowStation.catalogBase).
  *
  * Kept in files/webapps.json, each icon a PNG beside it (webapps/<id>.png), read from the site's manifest/favicon URL
@@ -58,9 +62,15 @@ object WebApps {
     /** Moves on every install/uninstall/icon/sync/reachability change: ShellBridge sends the page apps.changed. */
     val version = mutableIntStateOf(0)
 
-    /** The catalog answered on the last try (true), didn't (false: off the LAN/VPN, the hub down), not tried yet (null). */
+    /**
+     * The .pow network answered (true), didn't on [WebAppSync.OFFLINE_AFTER] tries in a row (false: off the LAN/VPN,
+     * the hub down - the launcher greys the apps), not tried yet (null). A hub that answers without its catalog is
+     * reachable: the sites behind the same Traefik work.
+     */
     @Volatile var reachable: Boolean? = null
         private set
+
+    private var reach = WebAppSync.Reach()
 
     private val io = Executors.newSingleThreadScheduledExecutor { Thread(it, "powos-webapps").apply { isDaemon = true } }
     private var apps: List<App>? = null
@@ -68,6 +78,10 @@ object WebApps {
     private val icons = HashMap<String, ImageBitmap>()
     private var started = false
     private var pending: ScheduledFuture<*>? = null
+    private var pendingAt = 0L
+    private var running = false
+    private var retry: ScheduledFuture<*>? = null
+    private var again = false
 
     /** A web app's id from its URL: the host ("powscan.pow"); null: not an http(s) `.pow` URL (nothing else installs). */
     fun idOf(url: String): String? =
@@ -148,15 +162,47 @@ object WebApps {
                 },
             )
         }.onFailure { Log.w(TAG, "no network callback: ${it.message}") }
+        // The screen coming on: an offline mark from while it was off (a try during a network change, Wi-Fi asleep)
+        // is checked again now, before the user reads the launcher.
+        runCatching {
+            val f = IntentFilter().apply { addAction(Intent.ACTION_SCREEN_ON); addAction(Intent.ACTION_USER_PRESENT) }
+            val r =
+                object : BroadcastReceiver() {
+                    override fun onReceive(
+                        ctx: Context,
+                        intent: Intent,
+                    ) = recheck(c)
+                }
+            if (android.os.Build.VERSION.SDK_INT >= 33) c.registerReceiver(r, f, Context.RECEIVER_NOT_EXPORTED) else c.registerReceiver(r, f)
+        }.onFailure { Log.w(TAG, "no screen-on receiver: ${it.message}") }
     }
 
-    /** One sync [delaySec] from now; calls before it runs fold into it (a network change fires several callbacks). */
+    /** A try that missed (or an offline mark): try again now. Nothing when the last try answered. */
+    fun recheck(context: Context) {
+        if (synchronized(this) { reach.misses } > 0) syncSoon(context, 0)
+    }
+
+    /**
+     * One sync [delaySec] from now; calls before it runs fold into it (a network change fires several callbacks), an
+     * earlier one moves it up. A call while a sync is running runs another right after it: a network change mid-try
+     * (the VPN coming up while the try on the old network times out) was folded into that failing try and lost, the
+     * apps then stayed greyed until the periodic sync.
+     */
     fun syncSoon(
         context: Context,
         delaySec: Long,
     ) {
         synchronized(this) {
-            if (pending?.isDone == false) return
+            if (running) {
+                again = true
+                return
+            }
+            val at = System.currentTimeMillis() + delaySec * 1000
+            if (pending?.isDone == false) {
+                if (pendingAt <= at) return
+                pending?.cancel(false)
+            }
+            pendingAt = at
             pending = io.schedule({ runCatching { sync(context, "soon") } }, delaySec, TimeUnit.SECONDS)
         }
     }
@@ -177,31 +223,56 @@ object WebApps {
         why: String,
     ) {
         val base = dev.omalauncher.devices.PowStation.catalogBase(context) ?: return
-        val catalog = fetchCatalog(base, why)
-        val (result, changed) = applyCatalog(context, catalog)
-        val flipped = reachable != (catalog != null)
-        reachable = catalog != null
-        if (changed) Log.i(TAG, "sync ($why): ${result.apps.size} apps, added ${result.added}, removed ${result.removed}")
-        if (changed || flipped) version.intValue++
-        for (id in result.iconsToFetch) result.apps.firstOrNull { it.id == id }?.let { fetchIcon(context, it, wake = false) }
+        synchronized(this) {
+            running = true
+            again = false
+        }
+        try {
+            val (probe, catalog) = fetchCatalog(base, why)
+            val (result, changed) = applyCatalog(context, catalog)
+            val now = synchronized(this) { reach.after(probe).also { reach = it } }
+            // Greyed only once [WebAppSync.OFFLINE_AFTER] tries in a row got no answer; the first answer clears it.
+            val ok = if (now.offline) false else if (probe == WebAppSync.Probe.NO_ANSWER) reachable else true
+            val flipped = reachable != ok
+            reachable = ok
+            if (changed) Log.i(TAG, "sync ($why): ${result.apps.size} apps, added ${result.added}, removed ${result.removed}")
+            if (flipped) Log.i(TAG, "sync ($why): .pow apps ${if (ok == false) "unreachable after ${now.misses} tries" else "reachable"} ($probe)")
+            if (changed || flipped) version.intValue++
+            for (id in result.iconsToFetch) result.apps.firstOrNull { it.id == id }?.let { fetchIcon(context, it, wake = false) }
+            // One retry timer at a time (each try replaces the last one's), none once it answered.
+            synchronized(this) {
+                retry?.cancel(false)
+                retry = now.retryInSec()?.let { sec -> io.schedule({ runCatching { syncSoon(context, 0) } }, sec, TimeUnit.SECONDS) }
+            }
+        } finally {
+            val more = synchronized(this) { running = false; again.also { again = false } }
+            if (more) syncSoon(context, 0)
+        }
     }
 
-    /** GET <base>/v1/apps; null when it didn't answer with a catalog (off the LAN/VPN, the hub down, a portal page). */
+    /**
+     * GET <base>/v1/apps: what it said about the .pow network (WebAppSync.probeOf) and the catalog (null without one:
+     * off the LAN/VPN, the hub's catalog service down, a portal page).
+     */
     private fun fetchCatalog(
         base: String,
         why: String,
-    ): List<App>? =
+    ): Pair<WebAppSync.Probe, List<App>?> =
         runCatching {
             val c = URL("$base/v1/apps").openConnection() as HttpURLConnection
-            c.connectTimeout = 5000
+            c.connectTimeout = 8000
             c.readTimeout = 10000
             c.instanceFollowRedirects = false
             try {
-                if (c.responseCode != 200) null else WebAppSync.parse(c.inputStream.bufferedReader().use { it.readText() })
+                val code = c.responseCode
+                val catalog = if (code == 200) WebAppSync.parse(c.inputStream.bufferedReader().use { it.readText() }) else null
+                val probe = WebAppSync.probeOf(code, catalog, c.getHeaderField("Location"))
+                if (catalog == null) Log.i(TAG, "sync ($why): $base answered $code without a catalog ($probe)")
+                probe to catalog
             } finally {
                 c.disconnect()
             }
-        }.onFailure { Log.i(TAG, "sync ($why): $base unreachable: ${it.message}") }.getOrNull()
+        }.onFailure { Log.i(TAG, "sync ($why): $base unreachable: ${it.message}") }.getOrElse { WebAppSync.Probe.NO_ANSWER to null }
 
     /** [catalog] applied to the kept list (WebAppSync.apply), saved when something changed; (the result, changed). */
     private fun applyCatalog(
