@@ -225,6 +225,38 @@ class ScreenRecordService : Service() {
             finishRecording()
             return START_NOT_STICKY
         }
+        val audio = intent?.getStringExtra(ScreenRecord.EXTRA_AUDIO) ?: "none"
+        foreground(audio)
+        if (recording != null) return START_NOT_STICKY
+        @Suppress("DEPRECATION")
+        val data = intent?.getParcelableExtra<Intent>(EXTRA_RESULT)
+        val p = data?.let { runCatching { getSystemService(MediaProjectionManager::class.java).getMediaProjection(Activity.RESULT_OK, it) }.getOrNull() }
+        val r = p?.let { record(it, audio) }
+        ScreenRecord.pendingSince = 0
+        if (r == null) {
+            if (p == null) ScreenRecord.warn("no projection from the consent")
+            p?.stop()
+            stopSelf()
+            return START_NOT_STICKY
+        }
+        recording = r
+        ScreenRecord.service = this
+        return START_NOT_STICKY
+    }
+
+    private fun record(
+        p: MediaProjection,
+        audio: String,
+    ): Recording? {
+        val t = HandlerThread("powos-screen-rec").apply { start() }
+        thread = t
+        return runCatching { Recording(this, p, audio, Handler(t.looper)) { finishRecording() } }
+            .onFailure { ScreenRecord.warn("can't start the recording", it) }
+            .getOrNull()
+    }
+
+    /** The ongoing "Recording the screen" notification (Stop; a tap stops too), as a mediaProjection(+microphone) service. */
+    private fun foreground(audio: String) {
         val nm = getSystemService(NotificationManager::class.java)
         nm.createNotificationChannel(NotificationChannel(CHANNEL, "Screen recording", NotificationManager.IMPORTANCE_LOW))
         nm.createNotificationChannel(NotificationChannel(SAVED_CHANNEL, "Saved screen recordings", NotificationManager.IMPORTANCE_DEFAULT))
@@ -240,7 +272,6 @@ class ScreenRecordService : Service() {
                 .setContentIntent(stop)
                 .addAction(Notification.Action.Builder(null, "Stop", stop).build())
                 .build()
-        val audio = intent?.getStringExtra(ScreenRecord.EXTRA_AUDIO) ?: "none"
         val mic = (audio == "mic" || audio == "both") && checkSelfPermission(Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED
         val type = ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PROJECTION or (if (mic) ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE else 0)
         runCatching { startForeground(NOTE_ID, note, type) }
@@ -248,31 +279,6 @@ class ScreenRecordService : Service() {
                 ScreenRecord.warn("foreground with the microphone refused, without it", it)
                 startForeground(NOTE_ID, note, ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PROJECTION)
             }
-        if (recording != null) return START_NOT_STICKY
-        @Suppress("DEPRECATION")
-        val data = intent?.getParcelableExtra<Intent>(EXTRA_RESULT)
-        val p = data?.let { runCatching { getSystemService(MediaProjectionManager::class.java).getMediaProjection(Activity.RESULT_OK, it) }.getOrNull() }
-        if (p == null) {
-            ScreenRecord.warn("no projection from the consent")
-            ScreenRecord.pendingSince = 0
-            stopSelf()
-            return START_NOT_STICKY
-        }
-        val t = HandlerThread("powos-screen-rec").apply { start() }
-        thread = t
-        val r =
-            runCatching { Recording(this, p, audio, Handler(t.looper)) { finishRecording() } }
-                .onFailure { ScreenRecord.warn("can't start the recording", it) }
-                .getOrNull()
-        ScreenRecord.pendingSince = 0
-        if (r == null) {
-            p.stop()
-            stopSelf()
-            return START_NOT_STICKY
-        }
-        recording = r
-        ScreenRecord.service = this
-        return START_NOT_STICKY
     }
 
     /** Ends the recording (Stop, the tile, Android ending the projection), saves it, says so. */
@@ -516,51 +522,76 @@ private class Recording(
 
     /** Reads every source, mixes them (16-bit sum, clamped), feeds the AAC encoder and drains it. */
     private fun pumpAudio(enc: MediaCodec) {
-        val shorts = CHUNK / 2
-        val mix = ShortArray(shorts)
-        val read = ShortArray(shorts)
-        val acc = IntArray(shorts)
+        val mix = ShortArray(CHUNK / 2)
         val info = MediaCodec.BufferInfo()
         var eos = false
         while (true) {
-            if (!eos) {
-                acc.fill(0)
-                var n = 0
-                for (s in sources) {
-                    val got = s.read(read, 0, shorts, AudioRecord.READ_BLOCKING)
-                    for (k in 0 until max(got, 0)) acc[k] += read[k].toInt()
-                    n = max(n, got)
-                }
-                for (k in 0 until n) mix[k] = acc[k].coerceIn(Short.MIN_VALUE.toInt(), Short.MAX_VALUE.toInt()).toShort()
-                val idx = runCatching { enc.dequeueInputBuffer(10_000) }.getOrElse { return }
-                if (idx >= 0) {
-                    val buf = enc.getInputBuffer(idx)!!
-                    buf.clear()
-                    val bytes = max(n, 0) * 2
-                    buf.asShortBuffer().put(mix, 0, max(n, 0))
-                    // The surface's clock (System.nanoTime), as the video frames: the muxer lines the tracks up by it.
-                    val pts = System.nanoTime() / 1_000
-                    if (running) {
-                        enc.queueInputBuffer(idx, 0, bytes, pts, 0)
-                    } else {
-                        enc.queueInputBuffer(idx, 0, 0, pts, MediaCodec.BUFFER_FLAG_END_OF_STREAM)
-                        eos = true
-                    }
-                }
-            }
-            while (true) {
-                val o = runCatching { enc.dequeueOutputBuffer(info, if (eos) 10_000 else 0) }.getOrElse { return }
-                when {
-                    o == MediaCodec.INFO_OUTPUT_FORMAT_CHANGED -> addTrack(enc.outputFormat, false)
-                    o >= 0 -> {
-                        write({ audioTrack }, enc, o, info)
-                        if (info.flags and MediaCodec.BUFFER_FLAG_END_OF_STREAM != 0) return
-                    }
-                    o == MediaCodec.INFO_TRY_AGAIN_LATER && eos -> continue
-                    else -> break
-                }
-            }
+            if (!eos) eos = feed(enc, mix, readMix(mix)) ?: return
+            if (drainAudio(enc, info, eos)) return
         }
+    }
+
+    private val scratch = ShortArray(CHUNK / 2)
+    private val acc = IntArray(CHUNK / 2)
+
+    /** One chunk from every source, summed and clamped into [mix]; the samples read. */
+    private fun readMix(mix: ShortArray): Int {
+        acc.fill(0)
+        var n = 0
+        for (s in sources) {
+            val got = max(s.read(scratch, 0, scratch.size, AudioRecord.READ_BLOCKING), 0)
+            for (k in 0 until got) acc[k] += scratch[k].toInt()
+            n = max(n, got)
+        }
+        for (k in 0 until n) mix[k] = acc[k].coerceIn(Short.MIN_VALUE.toInt(), Short.MAX_VALUE.toInt()).toShort()
+        return n
+    }
+
+    /** [n] samples of [mix] into the encoder (end of stream once stopped): whether that was the end; null: codec gone. */
+    private fun feed(
+        enc: MediaCodec,
+        mix: ShortArray,
+        n: Int,
+    ): Boolean? {
+        val idx = runCatching { enc.dequeueInputBuffer(10_000) }.getOrElse { return null }
+        if (idx < 0) return false
+        val buf = enc.getInputBuffer(idx) ?: return false
+        buf.clear()
+        buf.asShortBuffer().put(mix, 0, n)
+        // The surface's clock (System.nanoTime), as the video frames: the muxer lines the tracks up by it.
+        val pts = System.nanoTime() / 1_000
+        if (running) {
+            enc.queueInputBuffer(idx, 0, n * 2, pts, 0)
+            return false
+        }
+        enc.queueInputBuffer(idx, 0, 0, pts, MediaCodec.BUFFER_FLAG_END_OF_STREAM)
+        return true
+    }
+
+    /** Everything the encoder has ready into the muxer (after the end: until its end comes); true when done. */
+    private fun drainAudio(
+        enc: MediaCodec,
+        info: MediaCodec.BufferInfo,
+        eos: Boolean,
+    ): Boolean {
+        while (true) {
+            val o = runCatching { enc.dequeueOutputBuffer(info, if (eos) 10_000 else 0) }.getOrElse { return true }
+            if (audioOut(enc, info, o)) return true
+            // Nothing ready: on to the next chunk (after the end: wait for the encoder's end).
+            if (o == MediaCodec.INFO_TRY_AGAIN_LATER && !eos) return false
+        }
+    }
+
+    /** One dequeue's answer [o] handled: a new format added, a buffer muxed; true when it was the end of the stream. */
+    private fun audioOut(
+        enc: MediaCodec,
+        info: MediaCodec.BufferInfo,
+        o: Int,
+    ): Boolean {
+        if (o == MediaCodec.INFO_OUTPUT_FORMAT_CHANGED) addTrack(enc.outputFormat, false)
+        if (o < 0) return false
+        write({ audioTrack }, enc, o, info)
+        return info.flags and MediaCodec.BUFFER_FLAG_END_OF_STREAM != 0
     }
 
     /** Stops everything; the saved video's uri, or null (nothing written: the entry is removed). */
