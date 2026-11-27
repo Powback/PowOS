@@ -68,6 +68,7 @@ class DropsTest {
                     .put(JSONObject().put("id", "s25").put("name", "S25").put("self", true))
                     .put(JSONObject().put("id", "desk").put("name", "Desk"))
                     .put(JSONObject().put("id", "tv").put("name", "TV").put("revoked", true))
+                    .put(JSONObject().put("id", "verify-drops-peer").put("name", "PowOS verify").put("kind", "test"))
                     .put(JSONObject().put("id", "fold")),
             )
         assertEquals(listOf("desk" to "Desk", "fold" to "fold"), Drops.targets(r))

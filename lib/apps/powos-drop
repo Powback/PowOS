@@ -159,7 +159,7 @@ class Realm:
 
     def devices(self):
         return [(d["id"], d.get("name") or d["id"]) for d in self.json("GET", "/v1/devices")["devices"]
-                if not d.get("self") and not d.get("revoked")]
+                if not d.get("self") and not d.get("revoked") and d.get("kind") != "test"]  # test: the verify peer
 
 
 def forget():

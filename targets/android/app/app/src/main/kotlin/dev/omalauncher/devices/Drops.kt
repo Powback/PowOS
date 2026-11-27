@@ -116,11 +116,14 @@ object Drops {
         }
     }
 
-    /** Where a send can go (GET /v1/devices): the account's other devices, not revoked - (id, name). */
+    /**
+     * Where a send can go (GET /v1/devices): the account's other devices, not revoked, not a test device (kind "test":
+     * tools/phone/verify/drops-peer.py, never a share-sheet target) - (id, name).
+     */
     fun targets(r: JSONObject): List<Pair<String, String>> {
         val a = r.optJSONArray("devices") ?: JSONArray()
         return (0 until a.length()).mapNotNull { a.optJSONObject(it) }
-            .filter { !it.optBoolean("self") && !it.optBoolean("revoked") && it.optString("id").isNotBlank() }
+            .filter { !it.optBoolean("self") && !it.optBoolean("revoked") && it.optString("kind") != "test" && it.optString("id").isNotBlank() }
             .map { it.optString("id") to it.optString("name").ifBlank { it.optString("id") } }
     }
 
