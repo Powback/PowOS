@@ -88,7 +88,8 @@ docker --context "${POW_JOB_CONTEXT:-pow58}" image inspect localhost/rmm/remotin
   { say "building the measurement image on .58 (tools/research/remoting)"; dc build phone >/dev/null 2>&1 || { echo "SKIP: the .58 image didn't build"; exit 5; }; }
 phase home; wwc_start
 # Web windows need the unfolded home (AppWindows.floating: display 0's smaller side): ww_ready answers folded too, so
-# 11-26 00:12 ran on the cover screen. Unfolded here, put back by wwc_clean.
+# 11-26 00:12 ran on the cover screen. Unfolded here, put back by wwc_clean (wwc-lib.sh reads UNFOLDED).
+# shellcheck disable=SC2034
 [ "$(cap 10 sh_ 'cmd device_state print-state' | tr -dc 0-9)" = 0 ] && { fold 3; UNFOLDED=1; sleep 2; say "unfolded (device_state 3)"; }
 result "setup: packages + home $(took) s"
 phase .58-up
