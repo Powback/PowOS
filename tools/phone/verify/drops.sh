@@ -59,7 +59,7 @@ if [ -n "$pc" ]; then
     r=$(call clip.offered '{}')
     echo "clip.offered: ${r:0:300}"
     grep -q "\"text\":\"powos-verify-clip-down-$N\"" <<<"$r" && ok "peer's copy opened in the phone's clipboard panel" || bad "clip.offered doesn't show the peer's clip ($r)"
-    peer done "$pc" >/dev/null 2>&1
+    peer "done" "$pc" >/dev/null 2>&1
 fi
 
 # --- 3./4. Send to: the share sheet's target, text then a file
@@ -79,13 +79,13 @@ adb "su -c 'rm -rf $dir'" >/dev/null 2>&1
 
 # --- 5. send peer -> phone (DropInbox)
 back=""
-if adb "dumpsys power" 2>/dev/null | grep -q 'mWakefulness=Awake'; then
+if adb "dumpsys power" 2>/dev/null | awk '/mWakefulness=Awake/{f=1} END{exit !f}'; then
     sid=$(peer send "$pid" "powos-verify-send-down-$N" 2>&1) || bad "the peer couldn't send to the phone ($sid)"
     if [ -n "$sid" ]; then
         st=waiting; for _ in $(seq 1 12); do sleep 4; st=$(peer state "$sid" 2>&1); [ "$st" = gone ] && break; done
         land=$(adb "su -c 'cat /data/data/$PKG/cache/share/drops/$sid/text.txt'" 2>/dev/null)
         if [ "$st" = gone ] && [ "$land" = "powos-verify-send-down-$N" ]; then ok "the phone took the peer's send and opened it (cache/share/drops/$sid)"
-        else bad "the phone didn't take the peer's send in 48 s (realm: $st, landed: '${land:0:80}')"; peer done "$sid" >/dev/null 2>&1; fi
+        else bad "the phone didn't take the peer's send in 48 s (realm: $st, landed: '${land:0:80}')"; peer "done" "$sid" >/dev/null 2>&1; fi
     fi
 else
     back="the phone's screen is off, so DropInbox doesn't poll (leg 5 not judged)"
