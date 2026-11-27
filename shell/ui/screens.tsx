@@ -488,6 +488,8 @@ function SettingsScreen() {
     ["robotOutline", "coding agents", installed ? (s?.agent ? `default: ${s.agent}` : "Claude Code, OpenCode, …") : "needs linux", needs("coding")],
     ["packageVariant", "packages", installed ? "pacman and the AUR" : "needs linux", needs("aur")],
     ["harddisk", "storage", "PowOS parts: gaming, apps, languages", () => openScreen("storage")],
+    // Passwords and passkeys: PowPass fills apps and Chrome (its own autofill + passkey provider); the tap picks it.
+    ["keyVariant", "passwords", s?.passwords?.line ?? "passwords and passkeys", () => act("settings", "passwords")],
     ["cellphoneCog", "android settings", "the phone's own", () => act("settings", "android")],
     ["arrowLeft", "gestures", "edge gestures, quick tools", () => openScreen("gestures")],
     ["minusCircleOutline", "focus", focusOn.value ? `${focusOn.value.label.toLowerCase()} on` : "modes: which apps get through", () => openScreen("focus")],

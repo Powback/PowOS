@@ -181,6 +181,8 @@ class ShellScreens(
             "settings.update" -> updateNow()
             "settings.retryUpdates" -> runtime.retryUpdates()
             "settings.android" -> start(Intent(Settings.ACTION_SETTINGS))
+            // Passwords and passkeys: PowPass is the vault and the fill provider (system/Passwords.kt).
+            "settings.passwords" -> dev.omalauncher.system.Passwords.open(context, ::start)
             "style.apply" -> theme(text)?.let { scope.launch { runtime.themes.apply(it) } }.let { null }
             "style.download" -> scope.launch { runtime.themes.ensureRelease() }.let { null }
             "style.install" -> installTheme(text)
@@ -251,6 +253,7 @@ class ShellScreens(
             .put("setup", job(runtime.bootstrap.updates.value).takeIf { it != JSONObject.NULL && installed } ?: JSONObject.NULL)
             .put("version", dev.omalauncher.AppVersion.name(context))
             .put("join", dev.omalauncher.devices.PowStation.json(context))
+            .put("passwords", dev.omalauncher.system.Passwords.json(context))
     }
 
     /** Pending pacman and agent updates, from the last check; "update all" runs them as one job. */

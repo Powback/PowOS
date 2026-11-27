@@ -113,7 +113,7 @@ signature/privileged permission) for the full version; **nr-gap** = works rooted
 | Interactive widgets | done | PowOS islands are live Preact (island.tsx); Android widgets bound | - | any | - |
 | Lock screen customization (clock, depth effect, widgets) | missing | lock.tsx fixed layout | M | any | - |
 | Find My devices (locate, ring, lock, wipe) | partial | Devices: lock/sleep/screen on/off, ring until stopped + locate (FindMy.kt, 11-27, docs/DEVICES.md), no wipe; ecosystem task parked (streamline) | M | any (ring, location); wipe needs device owner | small scope: ring + last location from the realm, lock via PowosLockAdmin |
-| Password / passkey autofill (Keychain) | missing | no AutofillService / CredentialProvider | M | any | PowAuth-backed vault (memory: PowAuth owns secrets) |
+| Password / passkey autofill (Keychain) | partial | PowPass (its own repo) is the vault + AutofillService + passkey provider; PowOS settings tile "passwords" picks it (docs/research/autofill.md) | M | any | PowPass Android app must reach the HTTPS server first |
 | Wallet / passes | stock | Google Wallet tile | L | - | - |
 | Battery health + charging limit | missing | charge.ts shows time to full only | L | root for the limit | - |
 | Screen Time insights | partial | AppUsage.kt counts launches (Suggested); no time-per-app view | L | any (UsageStats) | across all devices |

@@ -134,6 +134,8 @@ export interface SettingsState {
   version: string;
   /** "Join your PowStation" (PowStation.kt): for the tile's line. Missing on an older host. */
   join?: JoinState;
+  /** Passwords and passkeys through PowPass (system/Passwords.kt): the tile's line. Missing on an older host. */
+  passwords?: { state: "missing" | "not_picked" | "on" | "unknown"; line: string };
 }
 
 /**

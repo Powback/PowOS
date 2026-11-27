@@ -56,6 +56,7 @@ export const settingDestinations: { screen: ScreenName; label: string; target?: 
   { screen: "settings", label: "Settings", keywords: "preferences system updates" },
   { screen: "settings", label: "Voice", target: "voice", keywords: "speech microphone dictation transcription whisper engine" },
   { screen: "settings", label: "Android settings", target: "android settings", keywords: "wifi bluetooth network phone system" },
+  { screen: "settings", label: "Passwords", target: "passwords", keywords: "password passkey autofill keychain vault powpass login credentials" },
   { screen: "settings", label: "System updates", target: "system updates", keywords: "upgrade download check version" },
   // The owner (11-14): "theres no setting like that" - found by what it does, opened on the card's check button.
   { screen: "settings", label: "Check for updates", target: "system updates/check for updates", keywords: "update upgrade new version software install app home screen linux system now" },
