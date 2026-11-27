@@ -85,7 +85,13 @@ class NoRootAppBase(unittest.TestCase):
         self.assertIn('"$HERE/prep-app.sh"', text)
         for t in (text, prep):
             self.assertIn('STAGE=$HERE/app/app/bundled-apps', t)
-        self.assertIn('cp "$ROOT/lib/apps/powos-noroot-services" "$STAGE/"', prep)
+        # The no-root starters (lib/apps) go into the stage beside the apps; one cp may copy several (11-24:
+        # powos-account-sync joined powos-noroot-services), so check each is a source of a cp into "$STAGE/".
+        cps = re.findall(r'^\s*cp ((?:"\$ROOT/lib/apps/[\w-]+" )+)"\$STAGE/"$', prep, re.M)
+        staged = {n for c in cps for n in re.findall(r'lib/apps/([\w-]+)', c)}
+        for starter in ('powos-noroot-services', 'powos-account-sync'):
+            self.assertIn(starter, staged)
+            self.assertTrue((ROOT / 'lib/apps' / starter).is_file(), starter)
         self.assertIn('the APK lacks assets/', text)
 
     def test_bundled_list_lines_resolve(self):
