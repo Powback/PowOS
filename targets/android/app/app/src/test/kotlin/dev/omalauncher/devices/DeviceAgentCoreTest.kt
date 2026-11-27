@@ -14,6 +14,8 @@ class DeviceAgentCoreTest {
         object : DeviceBackend {
             override fun caps() = listOf("status", "screen_on", "ring")
 
+            override fun refusal(action: String) = if (action == "locate") "allow location" else null
+
             override fun status() = JSONObject().put("online", true).put("screen", "off").put("locked", true)
 
             override fun act(
@@ -68,6 +70,12 @@ class DeviceAgentCoreTest {
         assertEquals(listOf("screen_on"), ran)
         assertEquals(404, call("POST", "/v1/action", JSONObject().put("action", "sleep"), token).status)
         assertEquals(400, call("POST", "/v1/action", JSONObject().put("action", "explode"), token).status)
+        // Find my device: ring takes its args; locate without the location permission is refused in the phone's words.
+        assertEquals(200, call("POST", "/v1/action", JSONObject().put("action", "ring").put("args", JSONObject().put("volume", "0.1")), token).status)
+        val locate = call("POST", "/v1/action", JSONObject().put("action", "locate"), token)
+        assertEquals(404, locate.status)
+        assertEquals("allow location", locate.body.getString("error"))
+        assertEquals(listOf("screen_on", "ring"), ran)
         val peers = File(dir, "peers.json").readText()
         assertFalse(peers.contains(token))
         assertTrue(peers.contains(DeviceAgentCore.sha(token)))

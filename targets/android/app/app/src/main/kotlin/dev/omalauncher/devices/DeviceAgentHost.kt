@@ -6,8 +6,6 @@ import android.app.NotificationManager
 import android.content.Context
 import android.content.Intent
 import android.content.IntentFilter
-import android.media.AudioAttributes
-import android.media.RingtoneManager
 import android.os.BatteryManager
 import android.os.PowerManager
 import android.provider.Settings
@@ -38,7 +36,8 @@ import javax.security.auth.x500.X500Principal
  * (the same port), so this starts only when RootedGuest is off.
  *
  * Caps: status (battery, plugged, screen, locked), screen_on (a wake lock that turns the screen on; it stays locked),
- * ring (the alarm sound for 10 s, for a phone lost in the bed), and lock + screen_off (= lock: no screen-off without
+ * ring + ring_stop (the alarm sound at max alarm volume until stopped, FindMy.kt), locate (the phone's location on
+ * request, while PowOS may use location - read live like the lock), and lock + screen_off (= lock: no screen-off without
  * root leaves the phone unlocked) only while the person allows PowOS's lock admin (LockAccess.kt, from the Devices
  * app) - read live, so a grant or a revoke is in the very next info/status answer.
  */
@@ -48,8 +47,9 @@ object DeviceAgentHost {
     private const val CHANNEL = "devices"
     private const val BODY_MAX = 16 * 1024
 
-    /** What every no-root phone can do without asking; WithLock adds lock/screen_off while allowed. */
-    private val BASE_CAPS = listOf("status", "screen_on", "ring")
+    /** What every no-root phone can do without asking; WithLock adds lock/screen_off while allowed, locate follows
+     *  the location permission. */
+    private val BASE_CAPS = listOf("status", "screen_on", "ring", "ring_stop")
     private var started = false
 
     @Synchronized
@@ -193,7 +193,9 @@ object DeviceAgentHost {
     private class AndroidBackend(
         private val ctx: Context,
     ) : DeviceBackend {
-        override fun caps() = BASE_CAPS
+        override fun caps() = if (FindMy.canLocate(ctx)) BASE_CAPS + "locate" else BASE_CAPS
+
+        override fun refusal(action: String) = if (action == "locate") FindMy.LOCATE_REFUSAL else null
 
         override fun status(): JSONObject {
             val b = ctx.registerReceiver(null, IntentFilter(Intent.ACTION_BATTERY_CHANGED))
@@ -215,6 +217,7 @@ object DeviceAgentHost {
                 ).put("screen", if (pm.isInteractive) "on" else "off")
                 .put("locked", km.isKeyguardLocked)
                 .put("busy", org.json.JSONArray())
+                .put("ringing", FindMy.ringing)
         }
 
         override fun act(
@@ -233,13 +236,9 @@ object DeviceAgentHost {
                             .newWakeLock(PowerManager.FULL_WAKE_LOCK or PowerManager.ACQUIRE_CAUSES_WAKEUP, "powos:deviced-screen-on")
                     wl.acquire(3_000)
                 }
-                "ring" -> {
-                    val uri = RingtoneManager.getDefaultUri(RingtoneManager.TYPE_ALARM) ?: RingtoneManager.getDefaultUri(RingtoneManager.TYPE_RINGTONE)
-                    val r = RingtoneManager.getRingtone(ctx, uri) ?: throw DeviceActionError("no sound to ring with", "failed")
-                    r.audioAttributes = AudioAttributes.Builder().setUsage(AudioAttributes.USAGE_ALARM).build()
-                    r.play()
-                    android.os.Handler(android.os.Looper.getMainLooper()).postDelayed({ r.stop() }, 10_000)
-                }
+                "ring" -> return FindMy.ring(ctx, args.optDouble("volume", 1.0).takeIf { !it.isNaN() } ?: 1.0, args.optInt("seconds", FindMy.RING_MAX_S))
+                "ring_stop" -> return FindMy.stop(ctx)
+                "locate" -> return FindMy.locate(ctx)
                 else -> throw DeviceActionError("$action: this device can't", "unsupported")
             }
             return JSONObject().put("done", true)

@@ -7,7 +7,7 @@ describes what is deployed (owner 2026-11-07: keep the current setup, don't exte
 ## Quick start
 
 1. **To control a device, pair it in the Devices app**: Add a device, pick it (mDNS or its address), type the 6-digit
-   code the target shows. Then lock, unlock (desktop, owner-marked peers only), screen on/off, sleep, wake, ring.
+   code the target shows. Then lock, unlock (desktop, owner-marked peers only), screen on/off, sleep, wake, ring (until stopped), locate.
 2. **Join** (the phone: Settings > powstation; Linux: `powos devices enroll`), LAN/VPN: **sign in with your Pow
    account** on the device (owner only), or approve its code from a joined approver. A joined device gets its own AI
    token on the owner's subscription (below).
@@ -16,7 +16,7 @@ describes what is deployed (owner 2026-11-07: keep the current setup, don't exte
 
 | piece | where | what it does |
 |---|---|---|
-| device agent | `lib/devices/powos-deviced` (Linux: desktop, rooted phone's system tier); `DeviceAgentHost.kt` (phone without root, served by the PowOS app) | HTTPS :3416, its own pinned key; `GET /v1/info` (open), `/v1/status`, `/v1/action` (paired token only). Actions by capability: `lock`, `screen_off`, `screen_on`, `sleep` (refused while services/GPU jobs run unless forced), `wake` (Wake-on-LAN for another device), `ring` |
+| device agent | `lib/devices/powos-deviced` (Linux: desktop, rooted phone's system tier); `DeviceAgentHost.kt` (phone without root, served by the PowOS app) | HTTPS :3416, its own pinned key; `GET /v1/info` (open), `/v1/status`, `/v1/action` (paired token only). Actions by capability: `lock`, `screen_off`, `screen_on`, `sleep` (refused while services/GPU jobs run unless forced), `wake` (Wake-on-LAN for another device), `ring` / `ring_stop` / `locate` (phones, below) |
 | pairing | the agent | the controller asks, the **target shows a 6-digit code** (notification / `powos devices codes`), the person types it on the controller; per-peer token, stored hashed; revoke from any paired device. Works offline, no hub needed |
 | enrollment | `powos devices enroll` + PowStation `enroll/powos-enroll.py` (`enroll.pow` only, LAN/VPN; no public route) | the device's identity in the realm, approved by an already-enrolled approver device or by the owner on the server; returns the device's own realm token and the endpoints bundle |
 | AI per device | the realm issues each device its own AI token (hashes only); claude-auth asks the realm whose it is (`/internal/ai/introspect`) and routes it to that tenant (owner devices: `powback`) | revoke the device = its AI stops within 30 s; no tenant secret or Claude login on any device |
@@ -387,3 +387,22 @@ only, owner/approver only, fake loginctl), `test/tier1/test-deviced-approve.py` 
 revoke CLI and `/v1/enroll/*`, approver-only, same-device-only), the gate's `app local.devices` (`dvUnlock`, `dvJoin`,
 `dvJoinDeny`, `dvMember`), `DeviceAgentCoreTest` + `LockActionsTest` (the no-root agent),
 PowStation `enroll/test_powos_enroll.py` (the realm side), `test/tier1/test-places.py` (Dolphin's places).
+
+## Ring and locate (find my device)
+
+A phone's agent (no root: `DeviceAgentHost.kt`; rooted: `powos-deviced`, which reaches the same app code through the
+DUMP-guarded `FindMy$Command` receiver) answers three Find-my actions, all from `devices/FindMy.kt`:
+
+- `ring` - the alarm sound, looping on the alarm stream turned to its maximum (it sounds on silent and vibrate; DND's
+  total silence can still hold it at the person's level), for at most 5 min. It stops from the caller (`ring_stop`,
+  the Devices app's **Stop ringing**) or on the phone: the notification's Stop, a tap or swipe on it, the power
+  button, an unlock. The alarm volume the person had comes back. `args.volume` < 1 plays that quietly and leaves the
+  alarm volume alone (checks); `args.seconds` shortens it. `status.ringing` says whether it's ringing.
+- `locate` - on request only (nothing is tracked or sent otherwise): a fresh fix from the fused provider (10 s at
+  most), else the newest last-known one: `{lat, lon, accuracy_m, at, age_s, provider, fresh}`. Advertised while
+  PowOS may use location; otherwise the refusal says where to allow it. The Devices app shows the coordinates, how
+  close, how old, and **Open in maps**.
+
+Who may ask is pairing (the per-peer token above); device identity stays PowAuth's realm. Phone check:
+`tools/phone/verify/find-my.sh` (rings at 5% for a few seconds, stops it, locates).
+

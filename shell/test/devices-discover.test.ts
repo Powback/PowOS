@@ -2,7 +2,7 @@
 // is what lists the owner's devices over the WireGuard VPN (mDNS is link-local). node --test shell/test/devices-discover.test.ts
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { discover, realmAgentOf, type Device, type Enrolled, type Net, type Status } from "../../apps/devices/ui/lib/devices.ts";
+import { discover, expected, mapsUrl, placeWords, realmAgentOf, type Device, type Enrolled, type Net, type Status } from "../../apps/devices/ui/lib/devices.ts";
 
 const mdnsNet = (rows: { name: string; host: string; port: number; txt: Record<string, string> }[] | Error): Net => ({
   fetch: async () => ({ status: 500, json: () => ({}) as any }),
@@ -56,4 +56,20 @@ test("the registry is read through this device's own enrolled agent, approver or
   };
   assert.equal(realmAgentOf(list, live)?.id, "here");
   assert.equal(realmAgentOf(list, { ...live, here: { ...live.here, realm: { enrolled: false, approver: false, here: true } } }), null);
+});
+
+// Find my device: Locate's answer in words + a maps link, Ring/Stop ringing shown at once (expected).
+
+test("locate: coordinates, accuracy and age; a maps link", () => {
+  const p = { lat: 59.912734, lon: 10.746091, accuracy_m: 12.4, at: 1_700_000_000, age_s: 170 };
+  assert.equal(placeWords(p), "59.91273, 10.74609 · within 12 m · 3 min ago");
+  assert.equal(placeWords({ ...p, accuracy_m: null, age_s: 10 }), "59.91273, 10.74609 · just now");
+  assert.equal(placeWords(p, 7200), "59.91273, 10.74609 · within 12 m · 2 h ago");
+  assert.equal(mapsUrl(p), "https://www.google.com/maps/search/?api=1&query=59.912734,10.746091");
+});
+
+test("ring shows ringing at once, stop shows it stopped", () => {
+  assert.deepEqual(expected(undefined, "ring"), { ringing: true });
+  assert.deepEqual(expected(undefined, "ring_stop"), { ringing: false });
+  assert.deepEqual(expected(undefined, "locate"), {});
 });

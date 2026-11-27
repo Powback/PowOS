@@ -41,7 +41,7 @@ export interface Host {
 }
 
 export const APP = "local.devices";
-export type Cap = "status" | "lock" | "unlock" | "screen_off" | "screen_on" | "sleep" | "wake" | "ring" | "layout";
+export type Cap = "status" | "lock" | "unlock" | "screen_off" | "screen_on" | "sleep" | "wake" | "ring" | "ring_stop" | "locate" | "layout";
 
 export interface Device {
   id: string;
@@ -60,6 +60,8 @@ export interface Status {
   screen: "on" | "off" | null;
   locked: boolean | null;
   busy?: string[];
+  /** Ringing now (a phone's Find my device ring, until stopped there or by Stop ringing here). */
+  ringing?: boolean;
   nics?: Nic[];
   /** This device's enrollment in the realm as its agent says it (no token): an approver, and whether this app runs on it. */
   realm?: Realm;
@@ -233,8 +235,27 @@ export function expected(s: Status | undefined, action: Cap): Partial<Status> {
   if (action === "lock") return { locked: true };
   if (action === "unlock") return { locked: false };
   if (action === "sleep") return { online: false };
+  if (action === "ring") return { ringing: true };
+  if (action === "ring_stop") return { ringing: false };
   return {};
 }
+
+/** Where a device said it is ("locate"): the phone's fused location, fresh or its last known one. */
+export interface Place { lat: number; lon: number; accuracy_m: number | null; at: number; age_s: number; provider?: string; fresh?: boolean }
+
+const ago = (s: number) => (s < 90 ? "just now" : s < 5400 ? `${Math.round(s / 60)} min ago` : s < 129600 ? `${Math.round(s / 3600)} h ago` : `${Math.round(s / 86400)} days ago`);
+
+/**
+ * "59.91273, 10.74609 · within 12 m · 3 min ago": the age the device reported (its own clock, never compared with
+ * ours) plus [sinceS], the seconds since its answer came.
+ */
+export function placeWords(p: Place, sinceS = 0): string {
+  const age = p.age_s + Math.max(0, sinceS);
+  return [`${p.lat.toFixed(5)}, ${p.lon.toFixed(5)}`, p.accuracy_m != null && `within ${Math.round(p.accuracy_m)} m`, ago(age)].filter(Boolean).join(" · ");
+}
+
+/** A maps link for [p] (Google Maps' universal URL: the Maps app on a phone, the web elsewhere). */
+export const mapsUrl = (p: Place) => `https://www.google.com/maps/search/?api=1&query=${p.lat},${p.lon}`;
 
 /** A paired device that can wake [target] (on, has "wake", and the target's NIC is known), or null. */
 export function waker(target: Device, list: Device[], live: Record<string, Status | undefined>): Device | null {

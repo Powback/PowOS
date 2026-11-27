@@ -4,10 +4,12 @@
  * did it, rolled back with the device's own words when it refused.
  */
 import { useEffect, useRef, useState } from "preact/hooks";
-import { act, DeviceError, expected, status as fetchStatus, waker, type Cap, type Device, type Net, type Status } from "./devices";
+import { act, DeviceError, expected, status as fetchStatus, waker, type Cap, type Device, type Net, type Place, type Status } from "./devices";
 
 export type Live = { s?: Status; err?: string; auth?: boolean; at: number };
 export type Pending = { action: Cap; expect: Partial<Status>; error?: string; busy?: string[] };
+/** A device's answer to Locate, and when it came (ms, this device's clock). */
+export type Found = { place: Place; got: number };
 
 const POLL_MS = 5000;
 const OFF: Status = { online: false, screen: null, locked: null };
@@ -74,6 +76,7 @@ const busyOf = (e: DeviceError) => (e.code === "busy" ? e.message.replace(/^busy
 
 export function useActions(net: Net | undefined, list: Device[], { live, settle }: ReturnType<typeof useLive>) {
   const [pending, setPending] = useState<Record<string, Pending>>({});
+  const [found, setFound] = useState<Record<string, Found>>({});
   const dismiss = (id: string) => setPending(({ [id]: _, ...rest }) => rest);
   const send = (d: Device, action: Cap, force: boolean) => {
     if (action !== "wake") return act(net, d, action, { force });
@@ -85,7 +88,8 @@ export function useActions(net: Net | undefined, list: Device[], { live, settle 
     const expect = expected(live[d.id]?.s, action);
     setPending((p) => ({ ...p, [d.id]: { action, expect } }));
     try {
-      await send(d, action, force);
+      const r = await send(d, action, force);
+      if (action === "locate") setFound((f) => ({ ...f, [d.id]: { place: r.result as Place, got: Date.now() } }));
       settle(d.id, expect);
       dismiss(d.id);
     } catch (e) {
@@ -93,5 +97,5 @@ export function useActions(net: Net | undefined, list: Device[], { live, settle 
       setPending((p) => ({ ...p, [d.id]: { action, expect, error: err.message, busy: busyOf(err) } }));
     }
   };
-  return { pending, run, dismiss };
+  return { pending, found, run, dismiss };
 }

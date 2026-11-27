@@ -310,6 +310,18 @@ check(d.REALM == os.environ.get("POWOS_ENROLL_URL", "http://powstation.pow"), "t
 rs.shutdown()
 
 shutil.rmtree(work, ignore_errors=True)
+# ring / locate on a rooted phone: the PowOS app's answer through `am broadcast` (FindMy.Command)
+ok = 'Broadcasting: Intent { cmp=com.powos.app/... }\nBroadcast completed: result=0, data="{"ok":true,"result":{"lat":59.9,"lon":10.7}}"'
+check(d.broadcast_result(0, ok) == {"lat": 59.9, "lon": 10.7}, "locate answer parsed")
+for out, code in (('Broadcast completed: result=0, data="{"ok":false,"error":"location is off","code":"failed"}"', "failed"),
+                  ("Broadcast completed: result=0", "failed")):
+    try:
+        d.broadcast_result(0, out)
+        check(False, f"no error for {out}")
+    except d.ActionError as e:
+        check(e.code == code, f"{out}: {e.code}")
+check(all(a in d.AndroidBackend().caps() for a in ("ring", "ring_stop", "locate")), "a rooted phone advertises ring/locate")
+
 if fails:
     for f in fails:
         print("FAIL", f)

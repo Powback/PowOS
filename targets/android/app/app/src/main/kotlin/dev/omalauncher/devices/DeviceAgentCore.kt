@@ -204,7 +204,7 @@ class DeviceAgentCore(
         const val TTL_MS = 120_000L
         const val TRIES = 5
         const val PENDING_MAX = 3
-        val ACTIONS = setOf("status", "lock", "screen_off", "screen_on", "sleep", "wake", "ring")
+        val ACTIONS = setOf("status", "lock", "screen_off", "screen_on", "sleep", "wake", "ring", "ring_stop", "locate")
         val HTTP = mapOf("bad-request" to 400, "auth" to 401, "unsupported" to 404, "expired" to 410, "busy" to 409, "failed" to 500)
 
         fun sha(s: String): String = hex(MessageDigest.getInstance("SHA-256").digest(s.toByteArray()))

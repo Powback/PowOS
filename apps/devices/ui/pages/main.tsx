@@ -7,8 +7,8 @@
  * On a device enrolled as an approver, lib/join.tsx: new devices asking to join (Approve / Deny) and Revoke per device.
  */
 import { useState } from "preact/hooks";
-import { act, forget, load, realmAgentOf, save, type Cap, type Device, type Host, type Status } from "../lib/devices";
-import { canWake, useActions, useLive, type Live, type Pending } from "../lib/live";
+import { act, forget, load, mapsUrl, placeWords, realmAgentOf, save, type Cap, type Device, type Host, type Status } from "../lib/devices";
+import { canWake, useActions, useLive, type Found, type Live, type Pending } from "../lib/live";
 import { AddDevice } from "../lib/add";
 import { ThisPhone } from "../lib/thisphone";
 import { Join, useApprover, useRealm } from "../lib/join";
@@ -29,6 +29,8 @@ const LABEL: Partial<Record<Cap, string>> = {
   sleep: "Sleep",
   wake: "Wake",
   ring: "Ring",
+  ring_stop: "Stop ringing",
+  locate: "Locate",
 };
 
 export default function Main({ host, close }: Props) {
@@ -40,7 +42,7 @@ export default function Main({ host, close }: Props) {
   };
   const liveState = useLive(net, list, update);
   const live = liveState.live;
-  const { pending, run, dismiss } = useActions(net, list, liveState);
+  const { pending, found, run, dismiss } = useActions(net, list, liveState);
   const liveS = Object.fromEntries(Object.entries(live).map(([k, v]) => [k, v.s]));
   const by = useApprover(net, list, liveS, host.thisDevice);
   const realm = useRealm(by);
@@ -69,6 +71,7 @@ export default function Main({ host, close }: Props) {
           d={d}
           live={live[d.id]}
           pending={pending[d.id]}
+          found={found[d.id]}
           wake={canWake(d, list, live)}
           run={(a, force) => run(d, a, force)}
           dismiss={() => dismiss(d.id)}
@@ -104,13 +107,16 @@ function shownStatus(live?: Live, pending?: Pending): Status | undefined {
 function actionsFor(d: Device, s: Status | undefined, wake: boolean): Cap[] {
   if (!s?.online) return wake ? ["wake"] : [];
   const screen: Cap = s.screen === "off" ? "screen_on" : "screen_off";
-  return (["lock", "unlock", screen, "sleep", "ring"] as Cap[]).filter((a) => d.caps.includes(a));
+  const ring: Cap = s.ringing ? "ring_stop" : "ring";
+  return (["lock", "unlock", screen, "sleep", ring, "locate"] as Cap[]).filter((a) => d.caps.includes(a));
 }
 
-function DeviceCard({ d, live, pending, wake, run, dismiss, remove, enrolled, revoke, importHome }: {
+function DeviceCard({ d, live, pending, found, wake, run, dismiss, remove, enrolled, revoke, importHome }: {
   d: Device;
   live?: Live;
   pending?: Pending;
+  /** Its last answer to Locate (shown until the page closes). */
+  found?: Found;
   wake: boolean;
   run: (a: Cap, force?: boolean) => void;
   dismiss: () => void;
@@ -134,6 +140,7 @@ function DeviceCard({ d, live, pending, wake, run, dismiss, remove, enrolled, re
         <button style={S.ghost} onClick={remove} aria-label={`forget ${d.name}`}>Forget</button>
       </div>
       {actions.length > 0 && <Actions actions={actions} pending={pending} run={run} />}
+      {found && <Where name={d.name} found={found} />}
       {pending?.error && <Refused pending={pending} run={run} dismiss={dismiss} />}
       {enrolled !== null && <Membership name={d.name} enrolled={enrolled} revoke={revoke} />}
       {importHome && <ImportHome name={d.name} go={importHome} />}
@@ -225,6 +232,17 @@ function Actions({ actions, pending, run }: { actions: Cap[]; pending?: Pending;
   );
 }
 
+/** Where Locate found it: coordinates, how close, how old, and a maps link. */
+function Where({ name, found }: { name: string; found: Found }) {
+  const p = found.place;
+  return (
+    <div style={S.row} data-device-place>
+      <div style={{ ...S.grow, ...S.muted }}>{placeWords(p, (Date.now() - found.got) / 1000)}{p.fresh === false && " (last known)"}</div>
+      <a style={S.btn} href={mapsUrl(p)} target="_blank" rel="noopener" aria-label={`open ${name} in maps`}>Open in maps</a>
+    </div>
+  );
+}
+
 /** A refusal in the device's words, with the one next step: try again, or sleep anyway when something was running. */
 function Refused({ pending, run, dismiss }: { pending: Pending; run: (a: Cap, force?: boolean) => void; dismiss: () => void }) {
   const why = pending.busy ? `busy - ${pending.busy.join(", ")} would stop` : pending.error;
@@ -247,6 +265,9 @@ function powerWords(p: Status["power"]): string | null {
   return p.source === "ac" ? "on mains" : null;
 }
 
+/** Screen, lock and ring: "screen on", "locked", "ringing". */
+const stateWords = (s: Status) => [s.screen && `screen ${s.screen}`, s.locked && "locked", s.ringing && "ringing"];
+
 function line(d: Device, s: Status | undefined, live: Live): string {
   const kind = KIND[d.kind] ?? d.kind;
   if (live.auth) return `${kind} - doesn't know this device any more: forget it and pair again`;
@@ -255,8 +276,7 @@ function line(d: Device, s: Status | undefined, live: Live): string {
   return [
     kind,
     powerWords(s.power),
-    s.screen && `screen ${s.screen}`,
-    s.locked && "locked",
+    ...stateWords(s),
     busy.length > 0 && `busy: ${busy.length === 1 ? busy[0] : `${busy.length} things`}`,
   ].filter(Boolean).join(" · ");
 }

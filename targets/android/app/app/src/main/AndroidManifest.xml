@@ -397,6 +397,15 @@
         <receiver
             android:name=".AgentMail$Reply"
             android:exported="false" />
+        <!-- Find my device (devices/FindMy.kt): the ringing notification's Stop, and the rooted phone's powos-deviced
+             reaching ring/locate through `am broadcast` - held to DUMP, which only adb shell and root have. -->
+        <receiver
+            android:name=".devices.FindMy$Stop"
+            android:exported="false" />
+        <receiver
+            android:name=".devices.FindMy$Command"
+            android:exported="true"
+            android:permission="android.permission.DUMP" />
         <!-- Plasma's notifications mirrored here: their buttons, tap and swipe back to the session (PlasmaBridge). -->
         <receiver
             android:name=".PlasmaBridge$Receiver"

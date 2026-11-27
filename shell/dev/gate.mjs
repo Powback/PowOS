@@ -17789,11 +17789,11 @@ async function settleDevices(r) {
   try {
     await r.page.evaluate(() => new Promise((ok) => (window.importShim ? ok() : addEventListener("load", ok))));
     await r.page.evaluate([dvWait, dvType, dvLine, dvFails, dvAgent, dvJoinAgent, dvTxt, dvLock, dvLockAsk, dvLockDecline, dvLockGrant, dvLockStop, dvSleep].map((f) => `window.${f.name} = ${f}`).join(";\n"));
-    for (const step of [dvMount, dvThisPhone, dvPair, dvPaired, dvOptimistic, dvRollback, dvUnlock, dvBusy, dvJoin, dvJoinDeny, dvMember, dvJoinPhone]) {
+    for (const step of [dvMount, dvThisPhone, dvPair, dvPaired, dvOptimistic, dvRollback, dvUnlock, dvBusy, dvFindMy, dvJoin, dvJoinDeny, dvMember, dvJoinPhone]) {
       const out = await r.page.evaluate(step);
       r.problems.push(...out);
       if (step === dvJoinDeny) await r.page.screenshot({ path: "/cache/devices-join.png" }).catch(() => {});
-      if (out.length && ![dvOptimistic, dvBusy, dvRollback, dvUnlock, dvThisPhone, dvJoin, dvJoinDeny, dvMember, dvJoinPhone].includes(step)) break;
+      if (out.length && ![dvOptimistic, dvBusy, dvFindMy, dvRollback, dvUnlock, dvThisPhone, dvJoin, dvJoinDeny, dvMember, dvJoinPhone].includes(step)) break;
     }
     await r.page.screenshot({ path: "/cache/devices-folded.png" }).catch(() => {});
   } catch (e) {
@@ -17948,7 +17948,7 @@ function dvJoinAgent(sleep, reply) {
 function dvAgent() {
   const sleep = (ms) => new Promise((ok) => setTimeout(ok, ms));
   const TPL = "Bearer ${secret:dev-desk1}";
-  const dev = { id: "desk1", name: "Desk", kind: "desktop", v: 1, caps: ["status", "lock", "unlock", "screen_off", "screen_on", "sleep", "wake"] };
+  const dev = { id: "desk1", name: "Desk", kind: "desktop", v: 1, caps: ["status", "lock", "unlock", "screen_off", "screen_on", "sleep", "wake", "ring", "ring_stop", "locate"] };
   const st = { online: true, screen: "on", locked: false, power: { source: "ac", battery: null, charging: false }, busy: ["llama-swap.service"], nics: [] };
   const calls = [];
   const fails = { lock: 1, unlock: 1 };
@@ -17961,6 +17961,9 @@ function dvAgent() {
     lock: (a) => (fails.lock-- > 0 ? reply(500, { ok: false, error: "no desktop session to lock", code: "failed" }) : ((st.locked = true), done(a))),
     unlock: (a) => (fails.unlock-- > 0 ? reply(403, { ok: false, error: "unlock: only this device's owner may", code: "forbidden" }) : ((st.locked = false), done(a))),
     sleep: () => reply(409, { ok: false, error: "busy: llama-swap.service would stop - sleep refused", code: "busy" }),
+    ring: (a) => ((st.ringing = true), reply(200, { ok: true, action: a, result: { ringing: true, seconds: 300, volume: "max" } })),
+    ring_stop: (a) => ((st.ringing = false), reply(200, { ok: true, action: a, result: { ringing: false, was: true } })),
+    locate: (a) => reply(200, { ok: true, action: a, result: { lat: 59.912734, lon: 10.746091, accuracy_m: 12, at: 1, age_s: 170, provider: "fused", fresh: true } }),
   };
   const confirm = (init) => (JSON.parse(init.body).code === "424242" ? reply(200, { token: "", device: dev }) : reply(401, { ok: false, error: "wrong code", code: "auth" }));
   const action = async (init) => {
@@ -18121,7 +18124,7 @@ async function dvPaired() {
     [confirm.secret === "dev-desk1" && confirm.path === "token", `pairing didn't hand the token to host.net (capture ${JSON.stringify(confirm)})`],
     [!bad, `a call carried a token the page made up (${bad?.auth}), not the \${secret:dev-desk1} template`],
     [!bare, "a status/action call went without the device's token"],
-    [shown === "lock,unlock,screen_off,sleep", `a PC that's on shows actions "${shown}", want lock,unlock,screen_off,sleep (its caps)`],
+    [shown === "lock,unlock,screen_off,sleep,ring,locate", `a PC that's on shows actions "${shown}", want lock,unlock,screen_off,sleep,ring,locate (its caps)`],
   ]);
 }
 
@@ -18195,6 +18198,31 @@ async function dvBusy() {
   card.querySelector('[data-action="sleep"]').click();
   const err = await dvWait('[data-device="desk1"] [data-device-error]');
   return dvFails([[/llama-swap/.test(err?.textContent ?? ""), `sleep while busy shows "${err?.textContent ?? "nothing"}", want what would stop`], [card.querySelector("[data-force]"), "sleep while busy offers no Sleep anyway"]]);
+}
+
+/**
+ * Find my device: Ring shows "ringing" the moment it's tapped and turns into Stop ringing; Stop ringing turns it back;
+ * Locate shows the coordinates, how close, how old, and an Open in maps link.
+ */
+async function dvFindMy() {
+  const card = window.__dv.root.querySelector('[data-device="desk1"]');
+  card.querySelector('[data-action="ring"]').click();
+  await new Promise((ok) => setTimeout(ok, 100));
+  const at = /ringing/.test(dvLine());
+  const stop = await dvWait('[data-device="desk1"] [data-action="ring_stop"]:not([disabled])', 1500);
+  stop?.click();
+  const back = await dvWait('[data-device="desk1"] [data-action="ring"]:not([disabled])', 1500);
+  back && card.querySelector('[data-action="locate"]').click();
+  const place = await dvWait('[data-device="desk1"] [data-device-place]', 1500);
+  const words = place?.textContent ?? "";
+  const link = place?.querySelector("a")?.getAttribute("href") ?? "";
+  return dvFails([
+    [at, `100 ms after Ring the line didn't say "ringing" (want it at once)`],
+    [stop, "a ringing device shows no Stop ringing"],
+    [back, "Stop ringing didn't turn back into Ring"],
+    [/59\.91273, 10\.74609 · within 12 m · 3 min ago/.test(words), `Locate shows "${words}", want coordinates, accuracy and age`],
+    [/query=59\.912734,10\.746091/.test(link), `Locate's maps link is "${link}"`],
+  ]);
 }
 
 /** In the page: the text of [sel] under the Devices root ("" when it isn't there). */

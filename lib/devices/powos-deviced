@@ -86,7 +86,7 @@ PAIR_PENDING_MAX = 3
 BODY_MAX = 16 * 1024
 # Actions and what they mean to a person; a device advertises the ones its backend can do.
 DESKTOP_GPU = {"kwin_wayland", "Xwayland", "plasmashell", "gnome-shell", "gamescope", "steamwebhelper"}
-ACTIONS = ("lock", "unlock", "screen_off", "screen_on", "sleep", "wake", "ring", "layout")
+ACTIONS = ("lock", "unlock", "screen_off", "screen_on", "sleep", "wake", "ring", "ring_stop", "locate", "layout")
 # Actions only the device's owner may run (owner_of): ending a lock screen is the owner's, not every paired device's.
 OWNER_ONLY = ("unlock",)
 
@@ -344,17 +344,25 @@ class AndroidBackend(Backend):
     Real fix: the rooted phone runs the app's agent too and this backend goes (docs/REMOTE-POWOS.md section 4)."""
     kind = "phone"
     ADB = ["adb", "-s", "127.0.0.1:5555", "shell"]
-    RING = "/usr/share/sounds/freedesktop/stereo/phone-incoming-call.oga"
+    # Ring and locate are the PowOS app's (devices/FindMy.kt: alarm stream at max until stopped, fused location),
+    # reached through its DUMP-guarded receiver so a rooted and a no-root phone answer the same.
+    FIND_MY = "com.powos.app/dev.omalauncher.devices.FindMy$Command"
 
     # The PowOS app's home + dock as its shell exports them (shell/state.ts exportLayout, shell/homeimport.ts): what
     # "layout" hands a paired device that imports this phone's home (read-only; the app's data needs root here).
     LAYOUT = "/data/data/com.powos.app/files/shell-data/layout-export.json"
 
     def caps(self):
-        c = ["status", "lock", "screen_off", "screen_on", "wake", "layout"]
-        if os.path.exists(self.RING) and shutil.which("paplay"):
-            c.append("ring")
-        return c
+        return ["status", "lock", "screen_off", "screen_on", "wake", "layout", "ring", "ring_stop", "locate"]
+
+    def find_my(self, op, args):
+        cmd = ["am", "broadcast", "-n", f"'{self.FIND_MY}'", "--es", "op", op]
+        for k in ("volume", "seconds"):
+            v = str(args.get(k, ""))
+            if v and all(ch in "0123456789." for ch in v):
+                cmd += ["--es", k, v]
+        rc, out = run(self.ADB + cmd, timeout=15)
+        return broadcast_result(rc, out)
 
     def layout(self):
         rc, out = (1, "")
@@ -409,11 +417,26 @@ class AndroidBackend(Backend):
             return self._ok(self.sh("input", "keyevent", "223"))  # KEYCODE_SLEEP: screen off, keyguard on
         if action == "screen_on":
             return self._ok(self.sh("input", "keyevent", "224"))  # KEYCODE_WAKEUP (stays locked)
-        if action == "ring":
-            return self._ok(run(["paplay", self.RING], timeout=15))
+        if action in ("ring", "ring_stop", "locate"):
+            return self.find_my(action, args)
         if action == "layout":
             return self.layout()
         return Backend.act(self, action, args, force)
+
+
+def broadcast_result(rc, out):
+    """The PowOS app's answer to `am broadcast` (FindMy.Command's result data: {ok, result | error, code})."""
+    data = out.split('data="', 1)[1].rsplit('"', 1)[0] if 'data="' in out else ""
+    try:
+        r = json.loads(data) if data else None
+    except ValueError:
+        r = None
+    if not isinstance(r, dict):
+        raise ActionError("the PowOS app didn't answer (is it installed and up to date?)" if not rc else
+                          (out.splitlines()[0] if out else f"failed (rc {rc})"), "failed")
+    if not r.get("ok"):
+        raise ActionError(str(r.get("error") or "failed"), str(r.get("code") or "failed"))
+    return r.get("result") or {}
 
 
 _backend = None

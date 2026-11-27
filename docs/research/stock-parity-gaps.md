@@ -112,7 +112,7 @@ signature/privileged permission) for the full version; **nr-gap** = works rooted
 | StandBy (charging + landscape: clock/widgets) | done (device check queued) | PowosDozeService as the "when charging" screensaver shows shell/ui/standby.tsx: big clock + two scroll-snap stacks (lock glance: alarm/event/weather/date; now playing/charge), red night look from the light sensor, tap ends the dream; upright = aod. Gate SBY1, tools/phone/verify/standby.sh. Picking PowOS as the screensaver is the user's (Settings > Display > Screen saver; no root can set it) | M | any | next: the Open's inner screen as a home dashboard (Lights, agents, calendar) as more stack cards |
 | Interactive widgets | done | PowOS islands are live Preact (island.tsx); Android widgets bound | - | any | - |
 | Lock screen customization (clock, depth effect, widgets) | missing | lock.tsx fixed layout | M | any | - |
-| Find My devices (locate, ring, lock, wipe) | partial | Devices: lock/sleep/screen on/off, `ring` reserved (device-ecosystem.md), no locate, no wipe; ecosystem task parked (streamline) | M | any (ring, location); wipe needs device owner | small scope: ring + last location from the realm, lock via PowosLockAdmin |
+| Find My devices (locate, ring, lock, wipe) | partial | Devices: lock/sleep/screen on/off, ring until stopped + locate (FindMy.kt, 11-27, docs/DEVICES.md), no wipe; ecosystem task parked (streamline) | M | any (ring, location); wipe needs device owner | small scope: ring + last location from the realm, lock via PowosLockAdmin |
 | Password / passkey autofill (Keychain) | missing | no AutofillService / CredentialProvider | M | any | PowAuth-backed vault (memory: PowAuth owns secrets) |
 | Wallet / passes | stock | Google Wallet tile | L | - | - |
 | Battery health + charging limit | missing | charge.ts shows time to full only | L | root for the limit | - |
@@ -132,7 +132,7 @@ signature/privileged permission) for the full version; **nr-gap** = works rooted
 10. Notification dots on Android app icons - any, M.
 11. Focus modes + notification digest - any, M. First version landed 11-27 (focus.ts; check tools/phone/verify/focus-modes.sh).
 12. Password/passkey autofill via PowAuth - any, M.
-13. Find My: ring + locate (small scope) - any, M.
+13. ~~Find My: ring + locate (small scope)~~ - landed 11-27 (FindMy.kt), phone check find-my.sh queued.
 14. ~~StandBy on charge + landscape~~ - done 11-27 (standby.tsx, PowosDozeService), device check pending.
 15. Notification snooze - any, M.
 16. Screen record on S25/razr (MediaProjection, own recorder) - any, M.
