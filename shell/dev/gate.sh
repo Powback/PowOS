@@ -125,7 +125,8 @@ gate_slots() {
   else echo 2; fi
 }
 if [ "${GATE_PRIORITY:-}" = ship ]; then
-  rm -rf "$slots/ship.$$"; slot_take "$slots/ship.$$"
+  rm -rf "$slots/ship.$$"
+  slot_take "$slots/ship.$$" || { echo "gate: couldn't take the ship slot $slots/ship.$$" >&2; exit 2; }
   cpu=""
 else
   said="" nslots=$(gate_slots)

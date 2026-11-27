@@ -1346,6 +1346,7 @@ if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
                     ;;
                 new|create)
                     shift
+                    # lint-ok: silent-return - ai_session_start prints why it failed
                     ai_new_session "$@"
                     ;;
                 delete|rm)

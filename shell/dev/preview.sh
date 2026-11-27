@@ -52,10 +52,20 @@ command -v docker >/dev/null || { echo "preview: no docker" >&2; exit 2; }
 . "$SHELL_DIR/dev/gate-containers.sh"
 [ "$GATE_PARENT_PID" != $$ ] || gc_reap
 t0=$(date +%s)
+# Every run ends on a "preview: ..." verdict line, even one that dies early (11-27: a pass's `return 2` under set -e
+# ended the sweep with exit 2 and no word, and the gate FAILed without a reason). The ERR trap keeps where it stopped.
+said="" stage=start err_at="" final=""
+trap 'err_at="line $LINENO: $BASH_COMMAND"' ERR
+verdict_exit() { # RC: the verdict line, unless the run already said it - and then never exit 0: bash 3.2 ends a
+  # script with status 0 on an unbound variable inside a ||-tested function (seen 11-27), which the gate took as a pass.
+  [ -z "$said" ] || return 0
+  echo "preview: FAIL - stopped before its verdict at $stage (exit $1${err_at:+, $err_at}) in $(($(date +%s) - t0)) s"
+  [ "$1" != 0 ] || final=2
+}
 mkdir -p "$out" "${XDG_CACHE_HOME:-$HOME/.cache}/powos-preview"
 # Under $HOME: Colima's VM mounts the home folder only.
 work=$(mktemp -d "${XDG_CACHE_HOME:-$HOME/.cache}/powos-preview/run.XXXXXX")
-trap '[ "$GATE_PARENT_PID" != $$ ] || gc_kill; rm -rf "$work"' EXIT
+trap 'rc=$?; verdict_exit $rc; [ "$GATE_PARENT_PID" != $$ ] || gc_kill; rm -rf "$work"; [ -z "$final" ] || exit $final' EXIT
 S=${dir:-$SHELL_DIR}
 mkdir -p "$work/owl" "$work/apps" "$work/data" "$work/themes" "$work/trees"
 cp "$SHELL_DIR"/dev/preview/themes/*.toml "$work/themes/"
@@ -87,6 +97,7 @@ for d in ${apps[@]+"${apps[@]}"}; do add_app "$d"; done
 # checkouts through the build-inputs cache (dev/owl-jar.sh, friction f402). A build that fails keeps the jar there
 # is and says why (owl-jar.sh prints Gradle's error) and what that means for the widgets.
 jar=$REPO/targets/android/app/owl/build/cli/owl.jar
+stage="the owl.jar build"
 rc=0; "$SHELL_DIR/dev/owl-jar.sh" "$REPO" --build >/dev/null || rc=$?
 case $rc in
   0) ;;
@@ -112,7 +123,28 @@ browser() { # PASS
   local envs=(-e PASS="$1" -e HOST_WORK="$work" -e PREVIEW_THEMES="$themes" \
     -e PREVIEW_LIVE="$live" -e PREVIEW_FAST="$fast" ${only:+-e PREVIEW_ONLY="$only"} ${PREVIEW_EMPTY:+-e PREVIEW_EMPTY="$PREVIEW_EMPTY"} \
     ${PREVIEW_JOBS:+-e PREVIEW_JOBS="$PREVIEW_JOBS"} ${PREVIEW_DEBUG:+-e PREVIEW_DEBUG=1} ${PREVIEW_DEBUG_KEY:+-e PREVIEW_DEBUG_KEY="$PREVIEW_DEBUG_KEY"} ${PREVIEW_BASELINE:+-e PREVIEW_BASELINE="$PREVIEW_BASELINE"})
-  if [ -n "$JOB_ON" ]; then browser_job "$1" "${envs[@]}"; return; fi
+  if [ -n "$JOB_ON" ]; then
+    local rc=0 why; browser_job "$1" "${envs[@]}" || rc=$?
+    [ -n "$job_broke" ] || return $rc
+    # The gate job broke under this pass (its container gone, a copy in or out failed): /work and the trees are here,
+    # so the pass reruns in a new container there, once.
+    why=$job_broke job_broke="" rc=0
+    echo "     the gate job on $JOB_CTX broke in the $1 pass ($why) - rerunning it in a new container"
+    job_cleanup
+    if job_up; then
+      browser_job "$1" "${envs[@]}" || rc=$?
+      [ -n "$job_broke" ] || return $rc
+      why="$why, then $job_broke"
+    fi
+    # Still broken. The hub can't stand in under the gate (JOB_NO_FALLBACK: false FAILs at its load), so a FAIL that
+    # says why; elsewhere the local container below, as when the job doesn't start.
+    if [ -n "${JOB_NO_FALLBACK:-}" ]; then
+      echo "FAIL widgets: the gate job on $JOB_CTX broke in the $1 pass ($why) and the hub can't stand in"
+      return 1
+    fi
+    echo "     the gate job on $JOB_CTX broke again ($why) - the $1 pass and the rest run locally"
+    JOB_ON="" job_broke=""; job_cleanup
+  fi
   docker run --rm "${gc_flags[@]}" --platform "$platform" --shm-size 1g ${GATE_CPU_SHARES:+--cpu-shares "$GATE_CPU_SHARES"} "${mounts[@]}" "${envs[@]}" \
     -w /usr/src/app --entrypoint timeout "$IMAGE" "${gc_cap[@]}" node preview.mjs
 }
@@ -123,10 +155,15 @@ browser() { # PASS
 # and comes back after it, with /out. HOST_WORK stays this $work, the path the local JVM container sees.
 # A job that can't start, or PREVIEW_LOCAL=1: the local container above.
 . "$SHELL_DIR/../tools/jobs/job.sh"
-JOB_ON="" job_cid="" jc=$work.job
+JOB_ON="" job_cid="" job_broke="" jc=$work.job
+job_up() { # the gate job's container, kept up for the passes (job_cid)
+  job_cid=$(job_dc run -d --no-deps --entrypoint sleep gate 86400 < /dev/null 2>/dev/null | tail -1) && [ -n "$job_cid" ] &&
+    job_docker exec -u root "$job_cid" sh -c 'mkdir -p /work /out && chown chrome /work /out'
+}
 trap 'exit 130' INT TERM HUP ALRM
-trap '[ "$GATE_PARENT_PID" != $$ ] || gc_kill; job_cleanup; rm -rf "$work" "$jc"' EXIT
+trap 'rc=$?; verdict_exit $rc; [ "$GATE_PARENT_PID" != $$ ] || gc_kill; job_cleanup; rm -rf "$work" "$jc"; [ -z "$final" ] || exit $final' EXIT
 if [ -z "${PREVIEW_LOCAL:-}" ]; then
+  stage="the gate job's start"
   job_init preview
   # Its own image tag: the gate's scene image of this checkout differs, and job_build drops a tag's previous image.
   JOB_TAG=$JOB_TAG-preview
@@ -139,29 +176,34 @@ if [ -z "${PREVIEW_LOCAL:-}" ]; then
   # shell/fonts/nerd_symbols.ttf links to /targets/.../res/font, which the gate image points at /fonts.
   cp -L "$REPO"/targets/android/app/app/src/main/res/font/* "$jc/fonts/" 2>/dev/null || true
   [ -z "$wallpaper" ] || cp "$wallpaper" "$jc/in/wallpaper.jpg"
-  if job_build gate "$jc" && job_cid=$(job_dc run -d --no-deps --entrypoint sleep gate 86400 < /dev/null 2>/dev/null | tail -1) &&
-    [ -n "$job_cid" ] && job_docker exec -u root "$job_cid" sh -c 'mkdir -p /work /out && chown chrome /work /out'; then
+  if job_build gate "$jc" && job_up; then
     JOB_ON=1; echo "     browser passes on $JOB_CTX (gate job)"
   else echo "     the gate job didn't start on $JOB_CTX - browser passes run locally"; job_cleanup; fi
 fi
 browser_job() { # PASS ENVS...
   local rc=0; shift
   # In: this $work (the trees the last pass asked for). Out: /work and /out after the pass.
-  job_docker exec -u root "$job_cid" find /work -mindepth 1 -delete || return 2
-  (cd "$work" && COPYFILE_DISABLE=1 tar -cf - .) | job_docker exec -i -u root "$job_cid" sh -c 'tar -xf - -C /work && chown -R chrome /work' || return 2
+  # A failed copy sets job_broke (what failed): browser() then reruns the pass in a new container. Never a bare `return 2` - under
+  # set -e it ended the whole sweep before its verdict (11-27).
+  job_docker exec -u root "$job_cid" find /work -mindepth 1 -delete || { job_broke="clearing /work"; return 2; }
+  (cd "$work" && COPYFILE_DISABLE=1 tar -cf - .) | job_docker exec -i -u root "$job_cid" sh -c 'tar -xf - -C /work && chown -R chrome /work' ||
+    { job_broke="copying /work in"; return 2; }
   job_docker exec -u chrome -w /usr/src/app "$@" "$job_cid" timeout "${gc_cap[@]}" node preview.mjs < /dev/null || rc=$?
-  { job_docker exec "$job_cid" tar -cf - -C /work . | tar -xf - -C "$work"; } &&
-    { job_docker exec "$job_cid" tar -cf - -C /out . | tar -xf - -C "$out"; } || return 2
+  { job_docker exec "$job_cid" tar -cf - -C /work . | tar -xf - -C "$work"; } || { job_broke="copying /work back (node rc $rc)"; return 2; }
+  { job_docker exec "$job_cid" tar -cf - -C /out . | tar -xf - -C "$out"; } || { job_broke="copying /out back (node rc $rc)"; return 2; }
   return $rc
 }
 step() { echo "     $1: $(($(date +%s) - t0)) s"; }
+stage="the plan pass"
 browser plan; step plan
-owl_trees; step trees
-browser measure; step measure
-owl_trees; step trees
+stage="the trees (plan)"; owl_trees; step trees
+stage="the measure pass"; browser measure; step measure
+stage="the trees (measure)"; owl_trees; step trees
+stage="the render pass"
 set +e
 browser render
 rc=$?
 set -e
+said=1
 echo "preview: $([ $rc = 0 ] && echo "every widget fits" || echo FAIL) in $(($(date +%s) - t0)) s - contact sheets in $out"
 exit $rc

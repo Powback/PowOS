@@ -2,7 +2,7 @@
 # test-check-shell-pitfalls.sh - tools/agents/shell-pitfalls.py: the lint over the phone checks' shell catches the
 # pitfalls that produced false check FAILs (11-10: BSD-awk ternary redirect, SIGPIPE under pipefail, single quotes
 # nested in su -c '...', a tag twice in a logcat filterspec; 11-23: a python3 -c program that doesn't compile; 11-26: a grep whose no-match status ends a set -e + pipefail
-# script silently), stays
+# script silently; 11-27: a function's bare `|| return N` called as a statement under set -e), stays
 # quiet on their fixed forms, and the tree itself is clean. No pipefail here on purpose (see test-base.sh): assertions use `grep -c` on captured output.
 set -u
 ROOT=$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)
@@ -27,10 +27,11 @@ expect bad-nested-quote.sh nested-quote 4
 expect bad-logcat-dup-tag.sh logcat-dup-tag 2
 expect bad-py-c.sh py-c 3
 expect bad-nomatch-grep.sh nomatch-grep 7
+expect bad-silent-return.sh silent-return 4
 
 echo "== fixed forms, lint-ok escapes, no-pipefail files stay quiet =="
 for f in good-awk-ternary.sh good-sigpipe.sh good-sigpipe-nopipefail.sh good-nested-quote.sh good-logcat-dup-tag.sh good-py-c.sh \
-         good-nomatch-grep.sh good-nomatch-grep-noerrexit.sh; do
+         good-nomatch-grep.sh good-nomatch-grep-noerrexit.sh good-silent-return.sh; do
   out=$(python3 "$LINT" "$FX/$f" 2>&1); rc=$?
   [ "$rc" = 0 ] && [ -z "$out" ] && ok "$f clean" || bad "$f: rc=$rc" "$out"
 done

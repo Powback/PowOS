@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""shell-pitfalls.py [file...] - lint shell for six pitfalls that produced false check FAILs or silent script deaths.
+"""shell-pitfalls.py [file...] - lint shell for seven pitfalls that produced false check FAILs or silent script deaths.
 
 WHY (11-10): three checks FAILed on shell pitfalls, not product bugs; each cost a queue run plus an agent.
   awk-ternary   `printf "%d", t>0?t:0` - BSD awk (the Mac's, 20200816) parses `>` as an output redirect: syntax
@@ -28,6 +28,12 @@ WHY (11-10): three checks FAILed on shell pitfalls, not product bugs; each cost 
                 (if/while/!/a non-final && || member). Not flagged: `local x=$(...)`, `$(...)` as an argument, `<(...)`,
                 a $(...)'s non-final commands, a function's last command (its caller tests it), a bare `grep x f`
                 statement (an assertion), heredoc bodies, and lines after `set +e` / `set +o pipefail`.
+  silent-return under `set -e`, a plain statement call (`fn args`, `fn a; step`) of a function that can fail without a
+                word - a bare `cmd || return N` in its body, or an untested call of such a function - ends the script
+                right there with status N and nothing printed. shell/dev/preview.sh 11-27: browser_job's `|| return 2`
+                (a docker exec/tar to the gate job failing) under `browser plan` killed the widget sweep with exit 2
+                before its verdict, so the gate FAILed with no reason. Say what failed (`|| { echo "x: y failed" >&2;
+                return 2; }`) or test the call (`fn || die ...`, if fn; then).
 
 Escape a deliberate case with `# lint-ok: <why>` on the line (or on the line just above it).
 With no arguments it scans tools/phone/**/*.sh and tools/agents/*.sh; tools/lint/changed-lints.sh runs it on every
@@ -912,6 +918,92 @@ def check_nomatch_grep(text, lines):
     return sorted(set(hits))
 
 
+# ---------------------------------------------------------------- (g) silent return under set -e
+FUNC_DEF = re.compile(r"^(\s*)(?:function\s+)?([A-Za-z_][\w-]*)\s*\(\)\s*\{")
+SILENT_RET = re.compile(r"\|\|\s*return\s+[1-9]\d*\s*(?:$|[;#}])")
+
+
+def functions(lines):
+    """{name: (first, last)} 1-based line spans of function bodies: `name() {` up to its closing `}` (the line that is
+    `}` at the definition's indentation, or the same line for a one-liner `name() { ...; }`)."""
+    out, i = {}, 0
+    while i < len(lines):
+        m = FUNC_DEF.match(lines[i])
+        if not m:
+            i += 1
+            continue
+        ind, name = m.group(1), m.group(2)
+        rest = lines[i][m.end():]
+        if re.search(r"\}\s*(?:#.*)?$", rest.rstrip("\n")) and rest.count("{") < rest.count("}"):
+            out[name] = (i + 1, i + 1)
+            i += 1
+            continue
+        j = i + 1
+        while j < len(lines) and not re.match("^" + re.escape(ind) + r"\}", lines[j]):
+            j += 1
+        out[name] = (i + 1, min(j + 1, len(lines)))
+        i = j + 1
+    return out
+
+
+def bare_calls(code, names):
+    """names called as a plain statement in this line of code (not tested by if/while/!/&&/||, not in $(...))."""
+    hits = []
+    if re.search(r"\|\||&&", code) or re.match(r"\s*(if|elif|while|until|!)\b", code):
+        # A tested line: only `...; then fn x; fi`-style tails after then/else/do are plain statements.
+        segs = re.split(r"\b(?:then|else|do)\b", code)[1:] if re.search(r"\b(then|else|do)\b", code) else []
+        segs = [x for seg in segs for x in seg.split(";") if not re.search(r"\|\||&&", x)]
+    else:
+        segs = code.split(";")
+    for seg in segs:
+        w = seg.strip().split()
+        if w and w[0] in names:
+            hits.append(w[0])
+    return hits
+
+
+def check_silent_return(text, lines):
+    if not file_has(text, "errexit"):
+        return []
+    blank = blank_heredocs(text).splitlines(keepends=True)
+    code = []
+    for line in blank:
+        c = line
+        for sp in sorted(quoted_spans(line), reverse=True):
+            c = c[:sp[0]] + '""' + c[sp[1]:]
+        code.append(re.sub(r"(^|[\s;])#.*", r"\1", c).rstrip("\n"))
+    funcs = functions(blank)
+    def guards_external(c):
+        """`cmd || return N` where cmd isn't one of this file's functions (those say why themselves, or are
+        followed through the propagation below)."""
+        m = SILENT_RET.search(c)
+        if not m:
+            return False
+        stmt = re.split(r";|\b(?:then|else|do)\b|\{", c[:m.start()])[-1].strip()
+        stmt = re.sub(r"^(?:local\s+)?[A-Za-z_]\w*=\$\(", "", stmt)  # x=$(fn ...) || return: fn's status
+        w = re.sub(r"^(?:[A-Za-z_]\w*=\S*\s+)*", "", stmt).split()
+        return bool(w) and w[0] not in funcs
+    silent = {n for n, (a, b) in funcs.items() if any(guards_external(code[k - 1]) for k in range(a, b + 1))}
+    grew = True
+    while grew:  # a function that calls a silent one as a plain statement fails as silently
+        grew = False
+        for n, (a, b) in funcs.items():
+            if n not in silent and any(bare_calls(code[k - 1], silent - {n}) for k in range(a + 1, b + 1)):
+                silent.add(n)
+                grew = True
+    if not silent:
+        return []
+    inside = {k for a, b in funcs.values() for k in range(a, b + 1)}
+    modes = shell_modes(lines)
+    hits = []
+    for ln in range(1, len(code) + 1):
+        if ln in inside or not (modes[ln][0] if ln < len(modes) else False):
+            continue
+        for n in bare_calls(code[ln - 1], silent):
+            hits.append((ln, n))
+    return sorted(set(hits))
+
+
 def lint_file(path):
     with open(path, encoding="utf-8", errors="replace") as f:
         text = f.read()
@@ -940,6 +1032,10 @@ def lint_file(path):
         if not lint_ok(lines, ln):
             found.append((ln, "nomatch-grep", f"{g} under set -e + pipefail exits 1 on no match and ends the script"
                                               " silently; add `|| true`, or test it (if/&&/||)"))
+    for ln, fn in check_silent_return(text, lines):
+        if not lint_ok(lines, ln):
+            found.append((ln, "silent-return", f"{fn} can `|| return N` without a message; under set -e this call ends"
+                                               " the script silently - say what failed, or test the call"))
     return sorted(set(found))
 
 

@@ -1100,5 +1100,6 @@ cmd_sync() {
 
 # Allow sourcing or direct execution
 if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
+    # lint-ok: silent-return - its only bare `|| return 1` guards mktemp, which prints why it failed
     cmd_sync "$@"
 fi
