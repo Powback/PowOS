@@ -35,9 +35,9 @@ healthy() { job_bounded 20 docker --context "$JOB_CTX" exec "$NAME" test -f /roo
 # ensure: the pool up and set up, at most one starter at a time (a mkdir lock on this Mac).
 ensure() {
   healthy && return 0
-  local l=${XDG_CACHE_HOME:-$HOME/.cache}/powos-gradle-pool.start i ctx
+  local l=${XDG_CACHE_HOME:-$HOME/.cache}/powos-gradle-pool.start ctx
   mkdir -p "$(dirname "$l")"
-  for i in $(seq 600); do mkdir "$l" 2>/dev/null && break
+  for _ in $(seq 600); do mkdir "$l" 2>/dev/null && break
     kill -0 "$(cat "$l/pid" 2>/dev/null)" 2>/dev/null || { sleep 1; kill -0 "$(cat "$l/pid" 2>/dev/null)" 2>/dev/null || rm -rf "$l"; }
     healthy && return 0; sleep 1; done
   echo $$ > "$l/pid"
@@ -45,6 +45,8 @@ ensure() {
   echo "gradle-pool: starting the pool on $JOB_CTX (once; later runs reuse it)" >&2
   # The image: the apk job's Dockerfile over an empty source (its SDK layers are already cached on the machine).
   ctx=$(mktemp -d "${XDG_CACHE_HOME:-$HOME/.cache}/powos-gradle-pool-ctx.XXXXXX"); touch "$ctx/.pool"
+  # job.sh globals: the image tag and compose project job_build uses (and job_down/cleanup after it).
+  # shellcheck disable=SC2034
   JOB_TAG=gradle-pool JOB_PROJECT=powos-gradle-pool
   if ! job_build apk "$ctx"; then rm -rf "$ctx" "$l"; return 3; fi
   rm -rf "$ctx"

@@ -166,14 +166,6 @@ targets/web/tools/snapshot-prepare.sh SC2046 1
 test/e2e/run-e2e.sh SC1090 1
 test/e2e/test-installer-disk.sh SC2034 4
 test/e2e/test-qemu-boot.sh SC2054 1
-test/tier1/fixtures/shell-pitfalls/bad-logcat-dup-tag.sh SC2034 1
-test/tier1/fixtures/shell-pitfalls/bad-logcat-dup-tag.sh SC2154 2
-test/tier1/fixtures/shell-pitfalls/bad-nested-quote.sh SC2034 2
-test/tier1/fixtures/shell-pitfalls/bad-sigpipe.sh SC2034 1
-test/tier1/fixtures/shell-pitfalls/good-logcat-dup-tag.sh SC2034 1
-test/tier1/fixtures/shell-pitfalls/good-logcat-dup-tag.sh SC2154 2
-test/tier1/fixtures/shell-pitfalls/good-nested-quote.sh SC2034 1
-test/tier1/fixtures/shell-pitfalls/good-sigpipe.sh SC2154 1
 test/tier1/run-all.sh SC2034 1
 test/tier1/test-ai-agent.sh SC1010 1
 test/tier1/test-ai-agent.sh SC1090 2

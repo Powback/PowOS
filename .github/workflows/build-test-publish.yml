@@ -78,14 +78,13 @@ jobs:
       # EVERY tracked shell script (*.sh + extensionless sh/bash-shebang files, ~870), at warning level, as a ratchet:
       # the old step linted bin/, lib/, build/ and sources/ only (142 of 773) at error level, so tools/, targets/ and
       # test/ were never linted. Old warnings are frozen per file and code in tools/lint/shellcheck-baseline.txt; a
-      # new finding, a file that got worse, a stale entry or a raised entry fails. Pinned shellcheck 0.9.0 (Ubuntu
-      # 24.04's; the script falls back to the koalaman image of that version if apt ever ships another).
+      # new finding, a file that got worse, a stale entry or a raised entry fails. Pinned shellcheck 0.9.0, the same
+      # binary as the Mac's pre-push/gate: the koalaman/shellcheck-alpine:v0.9.0 image (ubuntu-latest's apt now ships
+      # 0.11.0, which the script never uses, so the apt install here was a no-op and is gone).
       - name: ShellCheck (ratchet, every shell script)
         env:
           SHELLCHECK_BASELINE_REF: ${{ github.event_name == 'push' && github.event.before || github.event.pull_request.base.sha }}
-        run: |
-          sudo apt-get install -y shellcheck
-          python3 tools/lint/shellcheck-ratchet.py --check
+        run: python3 tools/lint/shellcheck-ratchet.py --check
 
       # A RATCHET, not a ceiling: existing debt is frozen in
       # build/complexity-budget.txt, new functions are capped at 15. Raising a

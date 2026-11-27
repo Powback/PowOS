@@ -34,6 +34,9 @@ from concurrent.futures import ThreadPoolExecutor
 SC_VERSION = "0.9.0"
 BASELINE = "tools/lint/shellcheck-baseline.txt"
 SHEBANG = re.compile(rb"^#!\s*\S*?(?:/env\s+(?:-\S+\s+)*)?\S*?\b(?:ba|da|k|mk)?sh\b")
+# Lint fixtures: shell that is bad ON PURPOSE (tools/agents/shell-pitfalls.py's test cases; changed-lints.sh skips them
+# for the pitfalls lint too). Linting them only counted deliberate findings, and every new fixture tripped CI.
+LINT_FIXTURES = ("test/tier1/fixtures/shell-pitfalls/",)
 FINDING = re.compile(r"^(.+?):(\d+):(\d+): (error|warning): (.*) \[(SC\d+)\]$")
 
 
@@ -46,7 +49,7 @@ def shell_files(root):
     out = []
     for f in git(root, "ls-files", "-z").stdout.split("\0"):
         p = os.path.join(root, f)
-        if not f or not os.path.isfile(p) or os.path.islink(p):
+        if not f or not os.path.isfile(p) or os.path.islink(p) or f.startswith(LINT_FIXTURES):
             continue
         base = os.path.basename(f)
         if f.endswith(".sh"):

@@ -103,7 +103,7 @@ step "out of edit mode: a swipe on the stack shows the other widget, home's page
 p=$(btn ".edit-act.done" "done")
 if [ -n "$p" ]; then sh_ "input tap $p"; else sh_ "input keyevent 4"; fi
 for i in 1 2 3 4 5 6; do [ "$(q '!!document.querySelector(".home.editing")')" = false ] && break; sleep 0.4; [ "$i" = 3 ] && sh_ "input keyevent 4"; done
-chk done
+chk "done"
 [ "$(q '!!document.querySelector(".home.editing")')" = false ] || { fail "'done' (and Back) didn't leave edit mode"; "$T/shot.sh" "$OUT/still-editing.png" 2>&1 | tail -1; exit 1; }
 sleep 0.6
 [ "$(q '!!document.querySelector(".stack-strip[data-swipe]")')" = true ] || fail "the stack can't swipe out of edit mode (edit mode is off)"

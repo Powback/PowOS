@@ -46,7 +46,7 @@ sleep 1
 # the one y that's furthest from both neighbours. x = the bar's middle. Read after the drawer settled (a 2nd read
 # 300 ms later must match, else the bar was still moving).
 BAR='(() => { const b = document.querySelector(".drawer-page .letter-bar"); if (!b) return "0 0 0 0 none"; const s = [...b.querySelectorAll(":scope > span")].map((e) => e.textContent), r = b.getBoundingClientRect(), d = devicePixelRatio, n = s.length, a = s.indexOf("A"), m = s.indexOf("M"); if (a < 0 || m < 0 || !r.height) return "0 0 0 0 none"; const y = (i) => Math.round((r.top + ((i + 0.5) * r.height) / n) * d), x = Math.round((r.left + r.width / 2) * d); return [x, y(a), x, y(m), `bar=${Math.round(r.left)},${Math.round(r.top)},${Math.round(r.width)}x${Math.round(r.height)}@${d}/${n}`].join(" "); })()'
-pos=""; for i in 1 2 3 4 5 6; do
+pos=""; for _ in 1 2 3 4 5 6; do
   p2=$(cdp_val "$BAR"); [ "$p2" = "$pos" ] && break; pos=$p2; sleep 0.3
 done
 read -r AX0 AY0 X Y BARINFO <<<"$pos"
@@ -60,7 +60,7 @@ touch="scrub $AX0,$AY0 -> $X,$Y (8 moves/320 ms, rest 3000 ms) $BARINFO"
 echo "az-scrub: touch $touch"
 drag "$AX0" "$AY0" "$X" "$Y" 0 320 8 3000 >/dev/null & dp=$!
 sleep 0.8
-for i in 1 2 3 4 5 6 7 8; do
+for _ in 1 2 3 4 5 6 7 8; do
   held=$($p/cdp.sh eval home "$probe" | tr -d '\\')
   grep -qE '"view":"letter"|"list":true' <<<"$held" && break; sleep 0.2
 done

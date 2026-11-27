@@ -93,8 +93,10 @@ shot face-playing
 
 # 4. Play/pause from the face, still locked.
 if [ "$(field "$f" card)" = True ]; then
+  # shellcheck disable=SC2046  # playAt is "x y": split on purpose into tap's two args
   tap $(field "$f" playAt); s=$(state_of "$player"); echo "after pause tap: $s"
   [ "$s" = PAUSED ] || fails+=("a tap on pause left the session $s")
+  # shellcheck disable=SC2046  # playAt is "x y": split on purpose into tap's two args
   tap $(field "$f" playAt); s=$(state_of "$player"); echo "after play tap: $s"
   [ "$s" = PLAYING ] || fails+=("a tap on play left the session $s")
   case "$(focus)" in *PowosLock*) ;; *) fails+=("play/pause left the lock face ($(focus))") ;; esac

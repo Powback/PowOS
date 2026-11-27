@@ -122,7 +122,7 @@ restored=0 BF_STEP=start
 # with the step; a real touch on the phone since the start = SKIP (rc 3, "user input", as abort); any other stop from
 # outside (the queue, a kill by hand) = FAIL timeout, named as such.
 stopped_mac() { trap '' TERM INT HUP; local why=outside
-  if [ -f "$OUT/.deadline" ]; then why=deadline; elif [ -n "${i0:-}" ] && touched; then why=touch; fi
+  if [ -f "$OUT/.deadline" ]; then why=deadline; elif [ -n "${i0:-}" ] && touched; then why="touch"; fi
   case $why in
     deadline) echo "FAIL timeout: own deadline ($DL_S s of the ${BUDGET_S} s budget) hit $(date +%T) at step \"$BF_STEP\" - closing the game" ;;
     touch) echo "user input: the phone was touched; stopped $(date +%T) at step \"$BF_STEP\" - closing the game (SKIP)" ;;

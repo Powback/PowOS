@@ -12,6 +12,7 @@ here=$(cd "$(dirname "$0")" && pwd); T=$here/..; A=$T/adb.sh
 OUT=${OUT:-$HOME/.cache/powos-verify/camera-ring-$(date +%m%d-%H%M%S)}; mkdir -p "$OUT"
 sh_() { "$A" shell "$*" 2>/dev/null | tr -d '\r'; }
 DICT=; FORCED=
+# shellcheck disable=SC2034  # read by window-lock.sh's trap (WL_TRAP is eval'd there, DICT/FORCED inside it)
 WL_TRAP='[ -z "$DICT" ] || "$T/cdp.sh" eval home "importShim(\"./bridge.ts\").then(b=>b.powos.speech.cancel()).then(()=>\"ok\")" >/dev/null 2>&1; [ -z "$FORCED" ] || { sh_ "cmd device_state state reset"; echo "device state reset: $(sh_ cmd device_state print-state)"; }'
 . "$here/window-lock.sh"
 window_lock camera-ring.sh 120
@@ -48,6 +49,7 @@ PY
   case $verdict in OK*) checked=$((checked + 1)) ;; SKIP*) ;; *) fails+=("$label: ${verdict#FAIL }") ;; esac
 }
 sh_ "am start -W -a android.intent.action.MAIN -c android.intent.category.HOME >/dev/null"; sleep 1
+# shellcheck disable=SC2034  # read by window-lock.sh's trap (WL_TRAP is eval'd there, DICT/FORCED inside it)
 DICT=1
 "$T/cdp.sh" eval home 'importShim("./bridge.ts").then(b=>b.powos.speech.start(true)).then(()=>"ok",e=>"ERR "+e)' 2>&1 | tail -1
 sleep 2
@@ -56,6 +58,7 @@ one "state-$now"
 # The other screen (fold/unfold): forced, the ring must follow to that screen's hole.
 case $now in 3) to=0 ;; 0) to=3 ;; *) to= ;; esac
 if [ -n "$to" ]; then
+  # shellcheck disable=SC2034  # read by window-lock.sh's trap (WL_TRAP is eval'd there, DICT/FORCED inside it)
   FORCED=1; sh_ "cmd device_state state $to"; sleep 4
   one "state-$to"
 fi

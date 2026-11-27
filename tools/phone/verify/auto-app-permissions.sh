@@ -66,7 +66,7 @@ for _ in 1 2 3; do
   xy=$(tap_allow)
   [ -n "$xy" ] || { echo "no Allow button on screen yet"; continue; }
   echo "tap: $xy"
-  "$A" shell input tap $(echo "$xy" | awk '{print $1, $2}') >/dev/null
+  "$A" shell "input tap $(echo "$xy" | awk '{print $1, $2}')" >/dev/null
 done
 sleep 2
 mic=$(ev 'window.__aapMic')
