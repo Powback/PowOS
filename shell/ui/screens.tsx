@@ -1754,7 +1754,7 @@ function newTrigger(kind: AutomationTrigger["kind"]): AutomationTrigger {
     case "time":
       return { kind, at: "08:00", days: [] };
     case "place":
-      return { kind, when: "arrive", lat: 0, lng: 0, radius: 150, label: "" };
+      return { kind, when: "arrive", lat: 0, lng: 0, radius: 100, label: "" }; // one of the radius choices (PlaceTrigger)
     case "app":
       return { kind, pkg: "" };
     case "charger":
@@ -1926,7 +1926,9 @@ function AutomationEditor({ a: start, byPkg, onBack, onSave, onDelete }: { a: Au
         <Input value={a.name} onInput={(name) => setA({ ...a, name })} placeholder="e.g. Morning" />
       </Section>
       <Section icon="clockOutline" title="when">
-        <Segmented options={TRIGGER_KINDS} picked={TRIGGER_KINDS.indexOf(a.trigger.kind)} onPick={(i) => setA({ ...a, trigger: newTrigger(TRIGGER_KINDS[i]) })} />
+        <div class="scr-auto-kinds">
+          <Segmented options={TRIGGER_KINDS} picked={TRIGGER_KINDS.indexOf(a.trigger.kind)} onPick={(i) => setA({ ...a, trigger: newTrigger(TRIGGER_KINDS[i]) })} />
+        </div>
         <TriggerFields t={a.trigger} setT={setT} byPkg={byPkg} setNote={setNote} />
         {note && <div class="scr-note muted">{note}</div>}
       </Section>

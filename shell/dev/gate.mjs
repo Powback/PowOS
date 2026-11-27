@@ -10594,6 +10594,163 @@ async function lockCustomScene(r, label) {
 }
 
 /**
+ * AU1 (board "automations-triggers-and-actions", b2292e7b): Settings > automations against the mock bridge's
+ * automations.* (bridge.ts mockAutomations). The list: each row "trigger → actions" and "ran N min ago"; its on/off
+ * shown at once (optimistic) and rolled back with the error when the app refuses. The editor: every trigger kind's
+ * fields (time + weekdays, place + "use where I am", app, charger, Bluetooth), actions added (focus, App API) and
+ * removed, saved as a new row; an existing one's "run now" and delete. Nothing past the screen's edges, folded and
+ * unfolded. Each step below runs in the page; window.__au holds the helpers and the fails.
+ */
+function auSetup() {
+  const sleep = (ms) => new Promise((ok) => setTimeout(ok, ms));
+  const $ = (s, root = document) => root.querySelector(s);
+  const $$ = (s, root = document) => [...root.querySelectorAll(s)];
+  const A = (window.__au = { fails: [], seen: {}, sleep, $, $$ });
+  A.frames = (n = 2) => window.__gw.frames(n);
+  A.until = async (f, ms = 3000) => {
+    for (const t0 = performance.now(); performance.now() - t0 < ms; await sleep(16)) if (f()) return f();
+    return null;
+  };
+  A.need = (ok, msg) => ok || (A.fails.push(`AU1: ${msg}`), false);
+  A.byText = (sel, text, root = document) => $$(sel, root).find((b) => b.textContent.trim() === text);
+  A.rows = () => $$(".scr-auto");
+  A.row = (id) => $(`.scr-auto[data-automation="${id}"]`);
+  A.words = (el) => (el ? $$(".scr-auto-body > span", el).map((s) => s.textContent.trim()) : null);
+  A.section = (name) => $(`.scr-section[data-setting="${name}"]`);
+  // A place trigger: its radius one of the choices, "use where I am" taken. An app trigger: the apps to pick from.
+  A.triggerMore = async (k, when) => {
+    if (k === "app") A.need((A.$("select", when)?.options.length ?? 0) > 5, "the app trigger lists no apps");
+    if (k !== "place") return;
+    A.need(A.$(".scr-option[data-setting=radius] button.on", when), "a new place trigger's radius is none of the choices");
+    A.byText(".scr-act", "use where I am", when)?.click();
+    A.need(await A.until(() => /59\.9139, 10\.7522/.test(when.textContent) && /within 18 m/.test(when.textContent)), "place's \"use where I am\" isn't shown");
+  };
+  const past = (el, b) => {
+    const r = el.getBoundingClientRect();
+    return r.width > 0 && (r.right > b.right + 1 || r.left < b.left - 1);
+  };
+  const say = (el) => `${el.tagName.toLowerCase()}.${el.className} "${el.textContent.trim().slice(0, 24)}"`;
+  // Anything in the screen past its edges (its body scrolls down, never sideways), the header's buttons off-screen.
+  A.overflow = (what) => {
+    const body = $(".scr-body");
+    A.need(body && body.scrollWidth <= body.clientWidth + 1, `${what}: the screen scrolls sideways (${body?.scrollWidth} > ${body?.clientWidth})`);
+    const out = [...$$("button, input, select, span", body).filter((el) => past(el, body.getBoundingClientRect())), ...$$("button", $(".scr-top")).filter((el) => past(el, { left: 0, right: innerWidth }))];
+    A.need(!out.length, `${what}: past the screen's edge: ${out.slice(0, 4).map(say).join("; ")}`);
+  };
+  return (async () => {
+    // The user's own focus modes too: the focus action's picker holds them all at the folded width.
+    const F = await window.__gw.mod("./ui/focus.ts");
+    F.focusModes.value = [...F.focusModes.value, ...["Reading", "Driving", "Family"].map((label) => ({ id: label.toLowerCase(), label, icon: "book", allow: [] }))];
+    (await window.__gw.mod("./screens.ts")).screens.value = ["settings", "automations"];
+    return A.until(() => A.rows().length === 2);
+  })();
+}
+/** The mock's two: the named one's words and last run, the unnamed one off and never run. */
+function auList() {
+  const A = window.__au;
+  const m = (A.seen.morning = A.words(A.row("mock-morning")));
+  const c = (A.seen.car = A.words(A.row("mock-car")));
+  A.need(m[0] === "Morning", `the named one's title is "${m[0]}"`);
+  A.need(m[1] === "at 07:30, weekdays → focus off, open Spotify", `the trigger → actions line reads "${m[1]}"`);
+  A.need(/^ran 1[12] min ago: focus off, opened Spotify$/.test(m[2]), `the last run reads "${m[2]}"`);
+  A.need(c.join("|") === "Car audio connected|Car audio connected → Do not disturb on|never ran", `an unnamed, never-run one reads ${JSON.stringify(c)}`);
+  A.need(A.row("mock-car").classList.contains("off"), "the off one isn't shown off");
+  A.overflow("the list");
+}
+/** On: at once, before the app answers (the mock's save waits 300 ms). Refused: shown, then back, with why. */
+async function auSwitch() {
+  const A = window.__au, M = window.__autoMock;
+  const off = (id) => A.row(id).classList.contains("off");
+  A.byText("button", "on", A.row("mock-car")).click();
+  await A.frames(1);
+  A.need(!off("mock-car"), "switching one on isn't shown until the app answers");
+  A.need(await A.until(() => M.saves === 1), "the switch wasn't saved");
+  M.fail = true;
+  A.byText("button", "off", A.row("mock-morning")).click();
+  await A.frames(1);
+  A.need(off("mock-morning"), "switching one off isn't shown at once");
+  await A.until(() => !off("mock-morning"));
+  A.need(!off("mock-morning"), "a refused switch stays off (no rollback)");
+  A.need(await A.until(() => /refused/.test(A.$(".scr-note.danger")?.textContent ?? "")), "a refused switch says nothing");
+  M.fail = false;
+}
+/** "new": each trigger kind's fields, place's "use where I am", the app list; back on time, weekdays picked. */
+async function auTriggers() {
+  const A = window.__au;
+  A.byText(".scr-top button", "new").click();
+  if (!A.need(await A.until(() => A.$(".scr-title")?.textContent === "new automation"), "new didn't open the editor")) return false;
+  const when = () => A.section("when");
+  const want = { place: "when,name,place,radius", app: "app", charger: "when", bluetooth: "when,device", time: "at,on" };
+  const got = (A.seen.kinds = {});
+  for (const k of Object.keys(want)) {
+    A.byText(".scr-seg button", k, when()).click();
+    await A.frames(2);
+    got[k] = A.$$(".scr-option", when()).map((o) => o.dataset.setting).join();
+    A.need(got[k] === want[k], `the ${k} trigger's fields are "${got[k]}", want "${want[k]}"`);
+    A.overflow(`the editor's ${k} trigger`);
+    await A.triggerMore(k, when());
+  }
+  for (const i of [1, 2, 3, 4, 5]) {
+    A.$$(".scr-option[data-setting=on] .scr-seg button", when())[i].click();
+    await A.frames(2);
+  }
+  return true;
+}
+/** Named, a focus and an App API action added, the default notify removed, saved: a third row reads so. */
+async function auActions() {
+  const A = window.__au, M = window.__autoMock;
+  const name = A.$(".scr-section[data-setting=name] input");
+  name.value = "Focus at work";
+  name.dispatchEvent(new Event("input", { bubbles: true }));
+  await A.frames(2);
+  const act = () => A.$$(".scr-auto-act", A.section("do"));
+  A.byText(".scr-focus-app", "focus", A.section("do")).click();
+  await A.frames(2);
+  A.byText(".scr-focus-app", "App API", A.section("do")).click();
+  const sel = await A.until(() => act().map((r) => A.$("select", r)).find((s) => s && [...s.options].some((o) => o.value === "discord/mute_app_notifications")));
+  if (A.need(sel, `the App API action offers no actions ("${act().at(-1)?.textContent}")`)) {
+    sel.value = "discord/mute_app_notifications";
+    sel.dispatchEvent(new Event("change", { bubbles: true }));
+  }
+  await A.frames(2);
+  A.overflow("the editor's actions");
+  A.$(".scr-iconbtn", act()[0]).click();
+  await A.frames(2);
+  A.need(act().length === 2, `after removing one, ${act().length} actions, want 2`);
+  A.byText(".scr-top .scr-act", "save").click();
+  await A.until(() => A.rows().length === 3);
+  const w = (A.seen.added = A.words(A.rows()[2]));
+  A.need(w?.join("|") === "Focus at work|at 08:00, weekdays → focus: Do not disturb, discord: mute app notifications|never ran", `the saved one reads ${JSON.stringify(w)}`);
+  A.need(await A.until(() => M.saves === 2), "the new one wasn't saved");
+}
+/** An existing one: its last run, run now (reaches the app, the line updates), delete. */
+async function auExisting() {
+  const A = window.__au;
+  A.$(".scr-auto-body", A.row("mock-morning")).click();
+  await A.until(() => A.$(".scr-title")?.textContent === "Morning");
+  const mine = () => A.section("this automation");
+  if (!A.need(mine(), "an existing one's editor has no run now / delete")) return;
+  A.overflow("an existing one's editor");
+  A.byText(".scr-act", "run now", mine()).click();
+  A.need(await A.until(() => /ran just now: ran by hand/.test(mine().textContent)), `run now's last run reads "${mine().textContent}"`);
+  A.need(window.__autoMock.ran.includes("mock-morning"), "run now didn't reach the app");
+  A.byText(".scr-act", "delete", mine()).click();
+  A.need(await A.until(() => A.rows().length === 2 && !A.row("mock-morning")), `delete left ${A.rows().length} rows`);
+}
+async function automationsScene(r, label) {
+  if (!(await r.page.evaluate(auSetup))) return [`AU1 ${label}: the list doesn't show the mock's 2 automations`];
+  await r.page.evaluate(auList);
+  await r.page.evaluate(auSwitch);
+  if (await r.page.evaluate(auTriggers)) await r.page.evaluate(auActions);
+  await r.page.evaluate(auExisting);
+  const { fails, seen } = await r.page.evaluate(() => window.__au);
+  console.log(`     automations-${label}: ${JSON.stringify(seen)}`);
+  await r.page.screenshot({ path: `/cache/automations-check-${label}.png` }).catch(() => {});
+  return fails.map((f) => f.replace(/^AU1/, `AU1 ${label}`));
+}
+
+
+/**
  * LG1 (board "Lock screen shows next alarm, weather and next event"): the glance under the date (lockglance.tsx), a
  * mock "lock.glance" pushed as the native side does. All three: three chips on one line, under the date, inside the
  * screen and centred, a long event title cut (never wrapped, never past the edge). Only the weather: one chip. Nothing:
@@ -16787,6 +16944,10 @@ try {
   if (process.env.SHELL_PAGES !== "0")
     for (const [label, viewport] of [["folded", { width: 404, height: 900 }], ["unfolded", { width: 821, height: 883 }]])
       runs.push(open(browser, `${ORIGIN}/index.html?mode=lock`, `lock-custom-check-${label}`, viewport).then((r) => whenReady(r, () => lockCustomScene(r, label))));
+  // AU1: Settings > automations - the list, its optimistic switch, the editor's triggers and actions. Folded and unfolded.
+  if (process.env.SHELL_PAGES !== "0")
+    for (const [label, viewport] of [["folded", { width: 404, height: 900 }], ["unfolded", { width: 821, height: 883 }]])
+      runs.push(open(browser, `${ORIGIN}/index.html`, `automations-check-${label}`, viewport).then((r) => whenReady(r, () => automationsScene(r, label))));
   // SBY1: StandBy (the charging screensaver) on its side - clock, two stacks, night look, tap to exit. Folded and unfolded.
   if (process.env.SHELL_PAGES !== "0")
     for (const [label, viewport] of [["folded", { width: 900, height: 404 }], ["unfolded", { width: 883, height: 821 }]])

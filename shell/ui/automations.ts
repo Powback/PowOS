@@ -73,6 +73,9 @@ export function triggerWords(t: AutomationTrigger, appName: (pkg: string) => str
 /** Settings' tile line: how many are on. */
 export const automationsLine = () => (automations.value.length ? `${automations.value.filter((a) => a.on).length} on` : "when this happens, do that");
 
+/** "" is off (the editor's); "off" too (what the app tells the page, Automations.kt focus). */
+const focusWords = (mode: string) => (mode && mode !== "off" ? `focus: ${modeOf(mode).label}` : "focus off");
+
 export function actionWords(a: AutomationAction, appName: (pkg: string) => string = (p) => p): string {
   switch (a.kind) {
     case "notify":
@@ -82,9 +85,9 @@ export function actionWords(a: AutomationAction, appName: (pkg: string) => strin
     case "toggle":
       return `${{ wifi: "Wi-Fi", bt: "Bluetooth", dnd: "Do not disturb" }[a.what]} ${a.on ? "on" : "off"}`;
     case "focus":
-      return a.mode ? `focus: ${modeOf(a.mode).label}` : "focus off";
+      return focusWords(a.mode);
     case "appapi":
-      return `${a.app}: ${a.action}`;
+      return `${a.app}: ${a.action.replace(/[_-]+/g, " ")}`;
   }
 }
 

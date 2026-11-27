@@ -1155,6 +1155,7 @@ function mock(): Bridge {
       list: async () => ({ now: Date.now(), items: [] }),
       open: async (pkg) => (console.log("[mock] permissions of", pkg), ((window as unknown as { __privacyOpened?: string[] }).__privacyOpened ??= []).push(pkg), true),
     },
+    automations: mockAutomations(events),
     // A few made-up notifications; dismissing, snoozing (window.__mockSnoozeFail: refused) and clearing work on them.
     notifications: (() => {
       const now = Math.floor(Date.now() / 1000);
@@ -2107,5 +2108,38 @@ function mockSearch(events: Events): NonNullable<Bridge["search"]> {
     },
     open: async (kind, id) => (m.opened.push([kind, id]), console.log("[mock] search.open", kind, id), true),
     web: async (text) => (m.opened.push(["web", text]), console.log("[mock] search.web", text), true),
+  };
+}
+
+/**
+ * The mock's automations (Automations.kt's calls, in memory): two made-up ones, a save that answers after a beat (the
+ * list's optimism shows; window.__autoMock.fail refuses it), "run now" stamps the last run and says so as the app does.
+ */
+function mockAutomations(events: Events): NonNullable<Bridge["automations"]> {
+  const now = Date.now();
+  const m = ((window as any).__autoMock ??= { delay: 300, fail: false, saves: 0, ran: [] as string[] });
+  let list: Automation[] = [
+    { id: "mock-morning", name: "Morning", on: true, trigger: { kind: "time", at: "07:30", days: [1, 2, 3, 4, 5] }, actions: [{ kind: "focus", mode: "" }, { kind: "open", target: "spotify" }], lastRan: now - 12 * 60_000, lastResult: "focus off, opened Spotify" },
+    { id: "mock-car", name: "", on: false, trigger: { kind: "bluetooth", when: "connected", device: "Car audio" }, actions: [{ kind: "toggle", what: "dnd", on: true }] },
+  ];
+  const wait = () => new Promise((ok) => setTimeout(ok, m.delay));
+  return {
+    list: async () => list,
+    save: async (next) => {
+      await wait();
+      if (m.fail) throw new Error("(mock) the app refused the list");
+      m.saves++;
+      list = next.map((a) => ({ ...a, lastRan: a.lastRan ?? list.find((x) => x.id === a.id)?.lastRan, lastResult: a.lastResult ?? list.find((x) => x.id === a.id)?.lastResult }));
+      return list;
+    },
+    run: async (id) => {
+      m.ran.push(id);
+      list = list.map((a) => (a.id === id ? { ...a, lastRan: Date.now(), lastResult: "ran by hand" } : a));
+      events.emit("automations.ran", { id, result: "ran by hand" });
+    },
+    here: async () => ({ lat: 59.9139, lng: 10.7522, accuracy: 18 }),
+    takeFocus: async () => null,
+    next: async () => null,
+    actions: async () => [{ app: "discord", appName: "Discord", action: "mute_app_notifications", summary: "Mute Discord's notifications", safety: "safe" }],
   };
 }

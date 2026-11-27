@@ -278,3 +278,5 @@
 .scr-auto-input { min-width: 0; flex: 1; padding: 8px 10px; border-radius: 12px; background: var(--control-fill); color: inherit; border: none; font: inherit; }
 .scr-auto-act { display: flex; align-items: flex-start; gap: 6px; padding: 6px 0; }
 .scr-auto-fields { flex: 1; min-width: 0; display: flex; flex-wrap: wrap; gap: 6px; }
+/* The trigger kinds as wide as their words (not the section's width); a focus picker with the user's own modes wraps. */
+.scr-auto-kinds .scr-seg, .scr-auto-fields .scr-seg { max-width: 100%; flex-wrap: wrap; }
