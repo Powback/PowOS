@@ -239,6 +239,26 @@ state, CVT rate, the game layers' requestedFrameRate, the app's "surface votes")
 Pass: no "render cap" in the layers line and `oti play:` CVT `[0, null]`; then the play fps is the game's own (11-06
 live play with touch: 38 fps, no render cap, CPU/thermal-bound) and the next lever is the main thread, not the display.
 
+## 11-27 59.4/120 "render cap 60 oti-adfr": OTI paused while a game is in front (agent game-120hz)
+
+Same cap as above (bf-pacing: 59.4/120, p50 16.6 ms, `render cap 60 oti-adfr`); the window's surface votes and
+preferredDisplayModeId already ask for 120 (display policy primary/appRequest [120, 120]), so the capping layer is
+ColorOS's touch idle in SurfaceFlinger, not the window and not a Magisk toast (C5): the CVT source is `oti-adfr`, and a
+toast's vote would show as a layer request, not as OTI. Read from oplus-services.jar (dexdump, 11-27):
+OPlusExternalRefreshRateManager.handleTouchIdleState sets `shouldPause` when `checkStatusByList()` (the front package in
+oplus_vrr_config.json's blacklist), `mCurPolicy` not 0/1, or `mTouchIdleShouldPauseForce`; the force flag comes only from
+`notifyDisableOtiMode(bool)`, called by OPlusRefreshRateService.handleDisableAdfrOtiModeChange on a change of
+**Settings.Secure `settings_shutdown_adfr_oti`** (value 1 -> true; also the factory-mode path). The phone has it unset.
+(`oplus_vrr_app_request` is another observed key - not followed.)
+
+Fix (game-boost.sh `oti_pause`, rooted): while a game boost holds (= a game window task in front), the setting is 1;
+the previous value (null = deleted) goes back on every restore - lease stale, game exited, TERM, and a killed holder's
+saved `$S/oti` on the next engage/restore. ColorOS only (`/my_product/etc/oplus_vrr_config.json` present). `game-boost.sh
+status` prints `oti <now> saved <was>`. Test: test-game-boost-holder.sh (paused while held, back to unset, a user's 0
+restored after a kill -9). HACK row in REMOTE-POWOS.md §4. Non-root: the same switch from the app needs
+WRITE_SECURE_SETTINGS (pm grant) - not wired. Pass: bf-pacing `oti base:` CVT `[0, null]`, no "render cap" in the
+layers line, sf >= 110 without INPUT=touch.
+
 ## Real play at 38 fps: the vendor's thermal gear, not a profile (2026-11-06, agent play-cpu-cap)
 
 Live capture of the user's own Broforce play (11-06 ~13:20-13:30, unfolded inner 2440x2268 @120 Hz, direct scanout off):

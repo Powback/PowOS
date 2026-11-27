@@ -29,6 +29,8 @@ pol policy3 "3 4 5 6" 2803200 614400 1920000 614400 1920000 2246400 2803200
 pol policy7 "7" 3187200 864000 1708800 864000 1708800 2476800 3187200
 mkdir -p $T/cpuctl $T/state; touch $T/lease
 export GAME_BOOST_STATE=$T/state GAME_BOOST_CPUCTL=$T/cpuctl GAME_BOOST_CPUFREQ=$P GAME_BOOST_SETTINGS=$T/settings LEASE_S=2
+# ColorOS (its vrr config present): ColorOS touch idle (OTI) paused while a game is held (settings_shutdown_adfr_oti).
+touch $T/vrr.json; export GAME_BOOST_OTI_CONFIG=$T/vrr.json
 # No such game: the holder lifts and holds until the lease (not touched) goes stale, then restores.
 sh "$GB" hold steam_app_999999999 $T/lease &
 h=$!; waitfor 15 is $P/policy7/scaling_min_freq 2476800
@@ -37,6 +39,7 @@ ok "policy3 min = highest step <= 80 %" "$(cat $P/policy3/scaling_min_freq)" 192
 ok "policy7 max lifted" "$(cat $P/policy7/scaling_max_freq)" 3187200
 ok "policy7 min" "$(cat $P/policy7/scaling_min_freq)" 2476800
 ok "little cluster untouched" "$(cat $P/policy0/scaling_max_freq)" 1459200
+ok "OTI paused while held" "$(cat $T/global_settings_shutdown_adfr_oti 2>/dev/null)" 1
 echo 1708800 > $P/policy7/scaling_max_freq   # someone sets it back: re-asserted on the next tick
 waitfor 15 logged 'policy7: max set back to 1708800'; waitfor 5 is $P/policy7/scaling_max_freq 3187200
 ok "policy7 max re-asserted" "$(cat $P/policy7/scaling_max_freq)" 3187200
@@ -46,6 +49,16 @@ ok "policy7 restored" "$(cat $P/policy7/scaling_min_freq) $(cat $P/policy7/scali
 ok "fight logged" "$(grep -c 'policy7: max set back to 1708800 by someone else' $T/state/log)" 1
 ok "stale lease logged" "$(grep -c 'restore - the app.s lease is' $T/state/log)" 1
 ok "no controller: no vendor game class" "$(cat $T/global_powos_game_front 2>/dev/null || echo unset)" unset
+ok "OTI back to unset after" "$(cat $T/global_settings_shutdown_adfr_oti 2>/dev/null || echo unset)" unset
+ok "OTI pause/back logged" "$(grep -c 'touch idle (OTI) \(paused\|back\)' $T/state/log)" 2
+# A value the user had set (0) goes back as it was; a killed holder's saved value is restored by the next restore.
+echo 0 > $T/global_settings_shutdown_adfr_oti; touch $T/lease
+sh "$GB" hold steam_app_999999999 $T/lease & h=$!
+waitfor 15 is $T/global_settings_shutdown_adfr_oti 1; kill -9 $h; wait $h 2>/dev/null
+ok "OTI kept paused by a killed holder" "$(cat $T/global_settings_shutdown_adfr_oti)" 1
+sh "$GB" restore > /dev/null
+ok "OTI restored to the user's 0" "$(cat $T/global_settings_shutdown_adfr_oti 2>/dev/null)" 0
+rm -f $T/global_settings_shutdown_adfr_oti
 # A fake thermal controller (horae): while $T/gear holds a cap, it writes that cap into policy7's (and policy3's
 # gold one, from $T/gear3) scaling_max_freq whenever it differs - horae set a lifted max back within a second (11-06).
 ctl() { while [ -f $T/ctl.on ]; do for g in 7 3; do c=$(cat $T/gear$g 2>/dev/null) || continue

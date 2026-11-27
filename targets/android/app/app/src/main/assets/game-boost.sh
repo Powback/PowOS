@@ -150,6 +150,31 @@ vendor_game_class() {
   fi
 }
 
+# HACK: ColorOS's touch idle (OTI, SurfaceFlinger's OPlus VRR) drops the RENDER rate to 60 Hz 2.5 s after the last
+# touch while the panel stays at 120 (`dumpsys SurfaceFlinger --oplus vrr`: "CVT: CurrentRate [60, oti-adfr]"), so a
+# game played on a gamepad / keyboard - or not touched for 2.5 s - is latched on every 2nd vsync: Broforce 59.4/120,
+# p50 16.6 ms (11-27, layers line "render cap 60 oti-adfr"). The window's frame-rate votes don't lift it (OTI's
+# exemptions are system_server's package blacklist, /my_product/etc/oplus_vrr_config.json, and its "force pause").
+# system_server's own switch Settings.Secure settings_shutdown_adfr_oti = 1 (OPlusRefreshRateService ->
+# OPlusExternalRefreshRateManager.notifyDisableOtiMode(true) -> mTouchIdleShouldPauseForce -> SurfaceFlinger
+# setTouchIdleShouldPause) pauses it; so while a game is boosted (= in front) it is 1, and the value from before goes
+# back on every restore (also a killed holder's: $S/oti). ColorOS only (its vrr config present).
+# Real fix: ColorOS exempting a focused layer that keeps producing frames, or a per-window/process OTI opt-out.
+OTI_KEY=settings_shutdown_adfr_oti
+OTI_CONFIG=${GAME_BOOST_OTI_CONFIG:-/my_product/etc/oplus_vrr_config.json}
+oti_pause() {
+  if [ -n "$1" ]; then
+    [ -f "$OTI_CONFIG" ] || return 0
+    [ -f "$S/oti" ] || $SETTINGS get secure $OTI_KEY > "$S/oti" 2>/dev/null || echo null > "$S/oti"
+    $SETTINGS put secure $OTI_KEY 1 > /dev/null 2>&1 && log "touch idle (OTI) paused: $OTI_KEY 1 (was $(cat "$S/oti"))"
+  elif [ -f "$S/oti" ]; then
+    was=$(cat "$S/oti")
+    if [ -z "$was" ] || [ "$was" = null ]; then $SETTINGS delete secure $OTI_KEY > /dev/null 2>&1
+    else $SETTINGS put secure $OTI_KEY "$was" > /dev/null 2>&1; fi
+    rm -f "$S/oti"; log "touch idle (OTI) back: $OTI_KEY ${was:-null}"
+  fi
+}
+
 freqs_save() {
   [ -s "$S/freqs" ] && return   # a killed holder's: those are the originals, not what it set
   for p in $BOOSTED; do echo "$p $(cat $P/$p/scaling_min_freq) $(cat $P/$p/scaling_max_freq)"; done > "$S/freqs"
@@ -235,6 +260,7 @@ restore_all() {
   [ -f $CG/tasks ] && for t in $(cat $CG/tasks); do echo $t > $CPUCTL/tasks 2>/dev/null; done
   rmdir $CG 2>/dev/null
   vendor_game_class ""
+  oti_pause ""
   rm -f "$S/vendor_game" "$S/freqs" "$S/tids" "$S/ticks" "$S/main" "$S/app" "$S/holder.pid" "$S/thermal"
 }
 
@@ -266,6 +292,7 @@ hold() {
   [ -n "$LITTLE_MASK" ] && taskset -p $LITTLE_MASK $$ > /dev/null 2>&1
   [ -n "$THERMAL" ] && freqs_unstale
   [ -n "$THERMAL" ] && vendor_game_class "$APP"
+  oti_pause on
   mkdir -p $CG && echo $BOOST_UCLAMP > $CG/cpu.uclamp.min 2>/dev/null
   log "$APP: boost (policies $(echo $BOOSTED | tr '\n' ' '), prime cpu$PRIME, rest mask ${REST_MASK:-none}, uclamp.min $(cat $CG/cpu.uclamp.min 2>/dev/null), thermal controller ${THERMAL:-none}$([ -n "$THERMAL" ] && [ "$BOOST_MIN_ALL" != 1 ] && echo ": min held on $TOP only"), holder on mask ${LITTLE_MASK:-?})"
   LIFTED=0 FIGHTS=0 RESETS=0 i=0 seen=0 why= PIDS= KNOWN=
@@ -341,6 +368,7 @@ case "$1" in
     for p in $P/policy*; do echo "policy ${p##*/} min $(cat $p/scaling_min_freq) max $(cat $p/scaling_max_freq) hw $(cat $p/cpuinfo_max_freq) cur $(cat $p/scaling_cur_freq)"; done
     [ -s "$S/thermal" ] && echo "thermal $(cat "$S/thermal")"
     echo "vendor_game $($SETTINGS get global $VENDOR_GAME_KEY 2>/dev/null) since $(cat "$S/vendor_game" 2>/dev/null || echo -)"
+    echo "oti $($SETTINGS get secure $OTI_KEY 2>/dev/null) saved $(cat "$S/oti" 2>/dev/null || echo -)"
     echo "uclamp.min $(cat $CG/cpu.uclamp.min 2>/dev/null || echo none) tasks $({ wc -l < $CG/tasks; } 2>/dev/null || echo 0)"
     [ -s "$S/freqs" ] && echo "saved $(tr '\n' ';' < "$S/freqs")"
     tail -n 5 "$S/log" 2>/dev/null ;;
