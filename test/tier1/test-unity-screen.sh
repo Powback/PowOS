@@ -117,6 +117,19 @@ grep -q "render scale 70 auto: 62 fps at 70%" "$T/err" && ok "auto: a per-game t
 st '{"apps": {"384190": {"fps": [{"fps": 30, "scale": 100}]}}}'
 PATH="$T/bin:$PATH" DISPLAY=:9 SteamAppId=384190 STEAM_COMPAT_DATA_PATH="$CD" sh "$US" "$T/ue/AbzuGame.exe" > /dev/null 2> "$T/err"
 grep -q "render scale 85 auto: 30 fps at 100%, under 120" "$T/err" && ok "auto: 100 under 120 -> one step down (85)" || bad "auto step" "$(cat "$T/err")"
+# render-cap-ladder (11-27): a frame rate at the display's render cap is not GPU-bound - Broforce's 60 fps at 100 % under
+# a 60 Hz cap ("render cap 60 oti-adfr") stepped it to 85, which also lost unity-screen's borderless window.
+US_RUN() { PATH="$T/bin:$PATH" DISPLAY=:9 SteamAppId=384190 STEAM_COMPAT_DATA_PATH="$CD" sh "$US" "$T/ue/AbzuGame.exe" > /dev/null 2> "$T/err"; }
+st '{"apps": {"384190": {"fps": [{"fps": 59.6, "scale": 100, "cap": 60}]}}}'; US_RUN
+grep -q "render scale 100 auto: 60 fps at 100% (render cap 60)" "$T/err" && ok "cap: 60 fps at a 60 Hz cap -> stays 100 (held, not GPU-bound)" || bad "cap held" "$(cat "$T/err")"
+st '{"apps": {"384190": {"fps": [{"fps": 60, "scale": 100, "cap": 120}]}}}'; US_RUN
+grep -q "render scale 85 auto: 60 fps at 100%, under 120 (render cap 120)" "$T/err" && ok "cap: 60 fps under a 120 Hz cap -> GPU-bound, one step down (85)" || bad "cap under" "$(cat "$T/err")"
+st '{"apps": {"384190": {"fps": [{"fps": 60, "scale": 100, "gpu": 40}]}}}'; US_RUN
+grep -q "render scale 100 auto: 60 fps at 100% - not GPU-bound" "$T/err" && ok "no cap known, GPU 40 % busy: not GPU-bound -> stays 100" || bad "gpu idle" "$(cat "$T/err")"
+st '{"apps": {"384190": {"fps": [{"fps": 60, "scale": 100, "gpu": 98}]}}}'; US_RUN
+grep -q "render scale 85 auto: 60 fps at 100%, under 120" "$T/err" && ok "no cap known, GPU 98 % busy: GPU-bound -> 85" || bad "gpu busy" "$(cat "$T/err")"
+st '{"apps": {"384190": {"fps": [{"fps": 60, "scale": 100}, {"fps": 61, "scale": 85, "cap": 120}]}}}'; US_RUN
+grep -q "render scale 100 auto: 100% 60 fps, 85% 61 - not GPU-bound" "$T/err" && ok "85 % no >= 10 % faster than 100 %: back up to 100" || bad "step back up" "$(cat "$T/err")"
 # A check holding the game's settings (bf-lib gus_set's .powos-gus-bak): unity-screen writes nothing, marks it held.
 st '{"apps": {"384190": {"scale": 50}}}'; sed -i.b 's/^ResolutionScale=.*/ResolutionScale=SCALE_75/' "$INI"; : > "$INI.powos-gus-bak"
 PATH="$T/bin:$PATH" DISPLAY=:9 SteamAppId=384190 STEAM_COMPAT_DATA_PATH="$CD" sh "$US" "$T/ue/AbzuGame.exe" > /dev/null 2> "$T/err"

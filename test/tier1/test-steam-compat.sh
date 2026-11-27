@@ -45,7 +45,7 @@ cp "$St/config/config.vdf" "$T/orig.vdf"
 for a in 100:OldGame 200:NewGame "4185400:Steam Linux Runtime 4.0"; do
   printf '"AppState"\n{\n\t"appid"\t\t"%s"\n\t"name"\t\t"%s"\n}\n' "${a%%:*}" "${a#*:}" > "$St/steamapps/appmanifest_${a%%:*}.acf"
 done
-C() { HOME=$T POWOS_STEAM_DIR=$St POWOS_STEAM_COMPAT_STATE=$T/state.json python3 "$PSC" "$@"; }
+C() { POWOS_CAP_CMD="${POWOS_CAP_CMD:-true}" HOME=$T POWOS_STEAM_DIR=$St POWOS_STEAM_COMPAT_STATE=$T/state.json python3 "$PSC" "$@"; }
 
 out=$(C apply --dry-run)
 check "dry run names the new game"                 'grep -q "would set 200 NewGame: native -> arm64" <<<"$out"'
@@ -169,12 +169,40 @@ sleep 600 & GP=$!; exec -a "reaper SteamLaunch AppId=302 -- x" sleep 600 & RP=$!
 ( sleep 0.5; for f in 31.0 33.2 32.0 30.8 34.0; do
     echo "kwin_backend_anland: window task 9 frames: last 5 s 160 commits, 160 drawn ($f fps); commit -> drawn median 1 ms" >> "$LOGF"
     echo "kwin_backend_anland: window task 4 frames: last 5 s 5 commits, 5 drawn (1.0 fps); commit -> drawn median 1 ms" >> "$LOGF"; sleep 0.2; done ) &
-POWOS_SESSION_LOG=$LOGF POWOS_WATCH_FPS=0.1,2.5 C watch-fps 302 >/dev/null 2>&1; wait $! 2>/dev/null
+# The display's render cap (render-cap-ladder, 11-27): SurfaceFlinger's ON display at 120 Hz, ColorOS's touch idle CVT at
+# 60 (what bf-pacing shows as "render cap 60 oti-adfr") - the cap recorded is 60.
+cat > "$T/sf.txt" <<'SF'
+Display 4630946901214512001 (HWC display 1): port=1 pnpId=QCM displayName=""
+   powerMode=Off
+   activeMode={id=0, hwcId=0, resolution=1080x2400, vsyncRate=120.00 Hz}
+Display 4630946901214512002 (HWC display 0): port=0 pnpId=QCM displayName=""
+   powerMode=On
+   activeMode={id=1, hwcId=1, resolution=2268x2440, vsyncRate=119.97 Hz, renderRate=119.97 Hz}
+   primaryRanges={physical=[1.00 Hz, 120.00 Hz], render=[1.00 Hz, 120.00 Hz]}
+@@vrr
+OplusVSyncPredictor:
+  mCvtFps: 60
+
+CVT:
+  Enable: true, Mute: false
+  CurrentRate: [60, oti-adfr]
+@@gpu
+42 %
+SF
+POWOS_CAP_CMD="cat $T/sf.txt" POWOS_SESSION_LOG=$LOGF POWOS_WATCH_FPS=0.1,2.5 C watch-fps 302 >/dev/null 2>&1; wait $! 2>/dev/null
 check "watch-fps: the busiest task's median, recorded"  'python3 -c "import json; f=json.load(open(\"$T/state.json\"))[\"apps\"][\"302\"][\"fps\"][-1]; exit(not (f[\"fps\"]==32.0))"'
+check "watch-fps: the render cap (CVT 60 under 120 Hz) + GPU busy recorded" 'python3 -c "import json; f=json.load(open(\"$T/state.json\"))[\"apps\"][\"302\"][\"fps\"][-1]; exit(not (f[\"cap\"]==60 and f[\"gpu\"]==42))"'
+sed -i.b 's/CurrentRate: \[60, oti-adfr\]/CurrentRate: [0, none]/; s/^42 %$//' "$T/sf.txt"
+check "cap: no CVT cap -> the panel's 119.97, no GPU number" 'python3 -c "import importlib.machinery as m,importlib.util as u,sys; l=m.SourceFileLoader(\"psc\",\"$PSC\"); p=u.module_from_spec(u.spec_from_loader(\"psc\",l)); l.exec_module(p); sys.exit(p.parse_cap(open(\"$T/sf.txt\").read())!=(119.97,None))"'
 kill $RP $GP 2>/dev/null; wait $RP $GP 2>/dev/null
 n=$(python3 -c "import json; print(len(json.load(open('$T/state.json'))['apps']['302']['fps']))")
 POWOS_SESSION_LOG=$LOGF POWOS_WATCH_FPS=0,0.5 C watch-fps 302 >/dev/null 2>&1
 check "watch-fps: game closed -> nothing recorded"   '[ "$(python3 -c "import json; print(len(json.load(open(\"$T/state.json\"))[\"apps\"][\"302\"][\"fps\"]))")" = "$n" ]'
+C fps 302 59.8 --cap 60 >/dev/null
+check "fps --cap recorded"                            'python3 -c "import json; f=json.load(open(\"$T/state.json\"))[\"apps\"][\"302\"][\"fps\"][-1]; exit(not (f[\"cap\"]==60))"'
+C scale 302 85 >/dev/null; C scale 302 reset >/dev/null
+check "scale reset: auto, fps history dropped"       '[ "$(C scale 302)" = auto ] && python3 -c "import json; exit(\"fps\" in json.load(open(\"$T/state.json\"))[\"apps\"][\"302\"])"'
+check "scale reset: the record says 100"              'python3 -c "import json; r=json.load(open(\"$T/render-scale/302.json\")); exit(not (r[\"scale\"]==100 and r[\"why\"].startswith(\"reset\")))"'
 
 echo; echo "== Results: $PASS passed, $FAIL failed =="
 [ $FAIL = 0 ]

@@ -32,9 +32,12 @@ while Steam runs (set, a failed launch) is applied at its next start (`powos gam
     powos-steam-compat opts <appid> <text|->        every user's LaunchOptions for the app (Steam off)
     powos-steam-compat screen <appid> auto|off      the screen-size launch wrapper for a Unity / Unreal game (below)
     powos-steam-compat scale <appid> auto|<25-100>  its render scale in % (unity-screen applies it at each launch)
+    powos-steam-compat scale <appid> reset          auto again, its fps history dropped: the next launch is at 100 %
     powos-steam-compat scales                       JSON {appid: {name, engine, setting, scale, why, fps}} (the widget)
-    powos-steam-compat fps <appid> <fps> [--scale N]   a measured fps at a scale (default: what the last launch applied)
-    powos-steam-compat watch-fps <appid>            after a launch: KWin's window task fps (45 s settle, 30 s) -> fps
+    powos-steam-compat fps <appid> <fps> [--scale N] [--cap HZ] [--gpu PCT]   a measured fps at a scale (default:
+                                                    what the last launch applied), the display's render cap then
+    powos-steam-compat watch-fps <appid>            after a launch: KWin's window task fps (45 s settle, 30 s) and the
+                                                    display's render cap (SurfaceFlinger) -> fps
     powos-steam-compat preboot <appid> [on|off|default]   its Wine session pre-booted at the tap (powos_preboot.py);
                                                     default = the global POWOS_WINE_PREBOOT (steam-env, off)
 
@@ -622,6 +625,23 @@ def last_applied(appid):
 
 
 def cmd_scale(appid, what):
+    if what == "reset":
+        # The ladder's own way back (render-cap-ladder, 11-27): a history measured against a refresh cap (Broforce's
+        # "60 fps at 100%, under 120" at a 60 Hz render cap -> 85) would keep steering it; dropped, auto starts at 100.
+        s = load(); e = app_entry(s, appid)
+        e.pop("scale", None); n = len(e.pop("fps", []) or [])
+        save(s)
+        r = last_applied(appid)
+        if r:
+            r.update(scale=100, why="reset: auto, nothing measured yet", applied=True)
+            try:
+                with open(os.path.join(SCALE_DIR, "%s.json.tmp" % appid), "w") as f:
+                    json.dump(r, f)
+                os.replace(os.path.join(SCALE_DIR, "%s.json.tmp" % appid), os.path.join(SCALE_DIR, "%s.json" % appid))
+            except OSError as err:
+                print("%s: record not rewritten: %s" % (appid, err), file=sys.stderr)
+        print("%s: render scale reset - auto, %d fps record(s) dropped, 100%% from its next launch" % (appid, n))
+        return 0
     try:
         ok = what == "auto" or 25 <= int(what) <= 100
     except ValueError:
@@ -649,15 +669,62 @@ def cmd_scales():
     return 0
 
 
-def cmd_fps(appid, fps, scale=None):
+def cmd_fps(appid, fps, scale=None, cap=None, gpu=None):
     if scale is None:
         r = last_applied(appid)
         scale = r.get("scale", 100) if r.get("applied", True) else 100
     s = load(); e = app_entry(s, appid)
-    e["fps"] = (e.get("fps", []) + [{"fps": round(float(fps), 1), "scale": int(scale), "t": time.strftime("%F %T")}])[-KEEP:]
+    rec = {"fps": round(float(fps), 1), "scale": int(scale), "t": time.strftime("%F %T")}
+    if cap:
+        rec["cap"] = round(float(cap), 1)
+    if gpu is not None:
+        rec["gpu"] = int(gpu)
+    e["fps"] = (e.get("fps", []) + [rec])[-KEEP:]
     save(s)
-    print("%s: %.1f fps at render scale %d%% recorded" % (appid, float(fps), int(scale)))
+    print("%s: %.1f fps at render scale %d%%%s recorded" % (appid, float(fps), int(scale),
+                                                          " (render cap %.0f)" % float(cap) if cap else ""))
     return 0
+
+
+# The display's render cap while the game runs (render-cap-ladder, 11-27): the same SurfaceFlinger numbers bf-pacing
+# prints as "panel <Hz> (render <lo-hi>, render cap <fps> <source>)" (bf-present.sh / bf-layers.py). A game at that cap
+# is not GPU-bound - Broforce's 60 fps at 100 % under a 60 Hz cap ("render cap 60 oti-adfr") moved the ladder to 85 %.
+CAP_CMD = ("dumpsys SurfaceFlinger --displays; echo @@vrr; dumpsys SurfaceFlinger --oplus vrr; echo @@gpu; "
+           "cat /sys/class/kgsl/kgsl-3d0/gpu_busy_percentage 2>/dev/null")
+
+
+def parse_cap(t):
+    """(cap Hz or None, GPU busy % or None) from CAP_CMD's output: the ON display's active vsync rate, its render range's
+    top and ColorOS's CVT render rate ("CurrentRate: [60, oti-adfr]", 0 = none) - the lowest of them is the cap."""
+    disp, _, rest = t.partition("@@vrr")
+    vrr, _, gpu = rest.partition("@@gpu")
+    caps = []
+    for blk in re.split(r"\n(?=(?:Pacesetter )?Display \d+)", disp):
+        if "powerMode=On" not in blk:
+            continue
+        m = re.search(r"activeMode=\{[^}]*vsyncRate=([\d.]+) Hz", blk)
+        r = re.search(r"primaryRanges=\{physical=\[[^]]*\], render=\[([\d.]+) Hz, ([\d.]+) Hz\]", blk)
+        caps += [float(m.group(1))] if m else []
+        caps += [float(r.group(2))] if r else []
+        break
+    m = re.search(r"^CVT:\s*\n(?:.*\n)*?\s*CurrentRate: \[(\d+), ([^\]]*)\]", vrr, re.M)
+    if m and int(m.group(1)) > 0:
+        caps.append(float(m.group(1)))
+    g = re.search(r"^\s*(\d+)\s*%?\s*$", gpu, re.M)
+    return (min(c for c in caps if c > 0) if any(c > 0 for c in caps) else None), (int(g.group(1)) if g else None)
+
+
+def display_cap():
+    """parse_cap of the phone now: Android's shell through `powos android shell` (adb link, root or not);
+    POWOS_CAP_CMD (a shell command printing the same text) for tests. (None, None) when Android can't be asked."""
+    import subprocess
+    cmd = os.environ.get("POWOS_CAP_CMD")
+    argv = ["sh", "-c", cmd] if cmd else ["powos", "android", "shell", CAP_CMD]
+    try:
+        out = subprocess.run(argv, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, timeout=15).stdout
+    except (OSError, subprocess.SubprocessError):
+        return None, None
+    return parse_cap(out.decode("utf-8", "replace").replace("\r", ""))
 
 
 def game_running(appid):
@@ -682,6 +749,9 @@ def cmd_watch_fps(appid, settle=45.0, span=30.0):
     except OSError as e:
         print("watch-fps %s: no session log (%s)" % (appid, e), file=sys.stderr); return 1
     end, tasks = time.monotonic() + span, {}
+    caps, gpus = [], []
+    c, g = display_cap()  # at the start and the end of the span: the lower cap counts (touch idle drops it to 60)
+    caps += [c] if c else []; gpus += [g] if g is not None else []
     while time.monotonic() < end:
         for line in f.readlines():
             m = FRAMES.search(line)
@@ -692,6 +762,8 @@ def cmd_watch_fps(appid, settle=45.0, span=30.0):
         m = FRAMES.search(line)
         if m:
             tasks.setdefault(m.group(1), []).append((int(m.group(3)), float(m.group(4))))
+    c, g = display_cap()
+    caps += [c] if c else []; gpus += [g] if g is not None else []
     if not game_running(appid):
         print("watch-fps %s: the game closed - nothing recorded" % appid, file=sys.stderr); return 1
     if not tasks:
@@ -699,7 +771,8 @@ def cmd_watch_fps(appid, settle=45.0, span=30.0):
     busiest = max(tasks.values(), key=lambda v: sum(d for d, _ in v))
     if len(busiest) < 4:
         print("watch-fps %s: %d frame lines - nothing recorded" % (appid, len(busiest)), file=sys.stderr); return 1
-    return cmd_fps(appid, statistics.median(v for _, v in busiest))
+    return cmd_fps(appid, statistics.median(v for _, v in busiest), cap=min(caps) if caps else None,
+                   gpu=max(gpus) if gpus else None)
 
 
 def main(a):
@@ -736,7 +809,8 @@ def main(a):
             save(s)
         print("%s: preboot %s - from its next launch" % (a[1], e.get("preboot", "default"))); return 0
     if c == "fps" and len(a) >= 3:
-        return cmd_fps(a[1], a[2], a[a.index("--scale") + 1] if "--scale" in a else None)
+        opt = lambda k: a[a.index(k) + 1] if k in a and a.index(k) + 1 < len(a) else None
+        return cmd_fps(a[1], a[2], opt("--scale"), opt("--cap"), opt("--gpu"))
     if c == "watch-fps" and len(a) == 2:  # POWOS_WATCH_FPS="<settle>,<span>" s (tests)
         w = [float(x) for x in os.environ.get("POWOS_WATCH_FPS", "45,30").split(",")]
         return cmd_watch_fps(a[1], *w)

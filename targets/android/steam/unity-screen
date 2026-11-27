@@ -304,10 +304,12 @@ done
 #   Unity: a full-screen player at the scaled size (its render size is fixed at launch); Wine's fullscreen hack
 #     (Proton) or Xwayland's emulated mode (native) stretches it to the screen. A rotate/fold then rescales the frame
 #     instead of re-rendering (100 % keeps the live borderless window).
-# auto: from the game's recorded fps (powos-steam-compat watch-fps after each launch: KWin's window task frames) - the
-# highest scale that held the target fps (one step up again at >= 1.45x it), a step down while none did (100 85 70 50
-# 35), back to the highest when lowering didn't buy >= 10 % (not GPU-bound); nothing recorded: 70 for an Unreal game on
-# > 3 MP, else 100. The target is the panel's refresh, 120 (games-120fps-goal; was a fixed 55, so ABZU sat at 23/120 on
+# auto: from the game's recorded fps (powos-steam-compat watch-fps after each launch: KWin's window task frames, and
+# the display's render cap then) - the highest scale that held the target fps or the render cap (fps at the cap is all
+# the screen shows: 60 under a 60 Hz cap is held, never a step down), one step up again at >= 1.45x it; a step down
+# (100 85 70 50 35) only while GPU-bound (under the cap, or no cap known and the GPU busy); back to the highest when
+# the lowest scale didn't buy >= 10 % over it (not GPU-bound); nothing recorded: 70 for an Unreal game
+# on > 3 MP, else 100. `powos game <x> scale reset` drops the history (100 again). The target is the panel's refresh, 120 (games-120fps-goal; was a fixed 55, so ABZU sat at 23/120 on
 # 70 % and the ladder ended at 50); POWOS_FPS_TARGET or steam-compat.json apps.<id>.target overrides it.
 # Fail loudly, run as is: a scale that can't be applied says why on stderr and the game starts at full size.
 # ~/.local/share/powos/render-scale/<appid>.json: what the last launch applied and why (the widget and watch-fps read it).
@@ -330,31 +332,48 @@ except (TypeError, ValueError):
     TARGET = 120.0
 
 
+def bound(fps, cap, gpu):
+    """Was a launch's frame rate GPU-bound (a lower scale can buy frames)? render-cap-ladder (11-27): Broforce's 60 fps
+    at 100 % under a 60 Hz render cap ("render cap 60 oti-adfr") read as "under 120" and stepped it to 85. At its cap
+    (>= 95 % of it) never; under a known cap yes; no cap known: under the target, unless the GPU was seen mostly idle."""
+    if cap:
+        return fps < cap * 0.95
+    return fps < TARGET and (gpu is None or gpu >= 90)
+
+
 def auto():
     m = {}
     for r in app.get("fps", []):  # oldest first: the latest fps per scale wins
         try:
-            m[int(r["scale"])] = float(r["fps"])
-        except (KeyError, TypeError, ValueError):
+            gpu = r.get("gpu")
+            m[int(r["scale"])] = (float(r["fps"]), float(r.get("cap") or 0) or None, None if gpu is None else float(gpu))
+        except (KeyError, TypeError, ValueError, AttributeError):
             pass
     if not m:
         if engine == "unreal" and w * h > 3000000:
             return 70, "auto: Unreal at %.1f MP, nothing measured yet" % (w * h / 1e6)
         return 100, "auto: nothing measured yet"
+    fps = {s: v[0] for s, v in m.items()}
+    capw = lambda s: " (render cap %.0f)" % m[s][1] if m[s][1] else ""
+    # A launch at a lower scale that didn't buy >= 10 % over the highest measured: back up to that (not GPU-bound).
     hi, lo = max(m), min(m)
-    if len(m) > 1 and m[lo] < m[hi] * 1.1:
-        return hi, "auto: %d%% %.0f fps, %d%% %.0f - not GPU-bound" % (hi, m[hi], lo, m[lo])
-    held = [s for s in m if m[s] >= TARGET]
+    if hi != lo and fps[lo] < fps[hi] * 1.1:
+        return hi, "auto: %d%% %.0f fps, %d%% %.0f - not GPU-bound" % (hi, fps[hi], lo, fps[lo])
+    # Held: the target, or the render cap the display allowed then (fps == cap is all the screen shows).
+    goal = lambda s: min(TARGET, m[s][1] * 0.95) if m[s][1] else TARGET
+    held = [s for s in m if fps[s] >= goal(s)]
     if held:
         s = max(held)
         up = [t for t in STEPS if t > s and t not in m]
-        if m[s] >= TARGET * 1.45 and up:
-            return min(up), "auto: %.0f fps at %d%%, trying %d%%" % (m[s], s, min(up))
-        return s, "auto: %.0f fps at %d%%" % (m[s], s)
+        if fps[s] >= goal(s) * 1.45 and up:
+            return min(up), "auto: %.0f fps at %d%%, trying %d%%" % (fps[s], s, min(up))
+        return s, "auto: %.0f fps at %d%%%s" % (fps[s], s, capw(s))
+    if not bound(*m[lo]):
+        return max(m), "auto: %.0f fps at %d%%%s - not GPU-bound" % (fps[lo], lo, capw(lo))
     down = [t for t in STEPS if t < lo]
     if down:
-        return down[0], "auto: %.0f fps at %d%%, under %.0f" % (m[lo], lo, TARGET)
-    return lo, "auto: %.0f fps at %d%%, the lowest step" % (m[lo], lo)
+        return down[0], "auto: %.0f fps at %d%%, under %.0f%s" % (fps[lo], lo, TARGET, capw(lo))
+    return lo, "auto: %.0f fps at %d%%, the lowest step" % (fps[lo], lo)
 
 
 if want == "auto":

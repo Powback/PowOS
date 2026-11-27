@@ -97,6 +97,14 @@ Built as proposed in "Conclusion" 1, generic for every Unity / Unreal game unity
   prefix's GameUserSettings.ini - the game's own `ResolutionScale=SCALE_<n>` when the file has it (ABZU: 70 -> SCALE_75,
   50 -> SCALE_50), else `[ScalabilityGroups] sg.ResolutionQuality=<n>`. The value before ours is kept in
   `~/.local/share/powos/render-scale/<appid>.json` and put back at 100; a value we never wrote stays.
+- **Render cap vs GPU-bound** (render-cap-ladder, 2026-11-27): Broforce's 60 fps at 100 % was measured while
+  SurfaceFlinger ran at 60 (ColorOS touch idle, bf-pacing "render cap 60 oti-adfr"); auto read it as "under 120"
+  and moved it to 85 (which also drops unity-screen's borderless window). watch-fps now records the display's
+  render cap with each fps (`powos android shell`: `dumpsys SurfaceFlinger --displays` active vsync + render range
+  top, `--oplus vrr` CVT CurrentRate - the lowest; the same numbers bf-present/bf-layers print) and kgsl GPU busy
+  when readable. auto: fps >= 95 % of the cap = held (no step down); a step down only under the cap (or, no cap
+  known, under the target with the GPU busy / unknown); back to the highest scale when a lower one isn't >= 10 %
+  faster. `powos game <x> scale reset` drops the fps history (100 again).
 - **Unity**: below 100, a full-screen player at the scaled size (`-screen-fullscreen 1 -screen-width/-height`),
   stretched by Wine's fullscreen hack (Proton) / Xwayland's emulated mode; at 100 the live borderless window as before.
 - **auto**: `powos-steam-compat watch-fps` (started by powos-open-task after each launch it saw through) records the

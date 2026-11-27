@@ -291,8 +291,9 @@ Verbs (thin wrappers — each dispatches to the subsystem that owns it):
   compat [status]         Which way it runs: native Linux build / ARM64 Proton / x86 Proton, what each launch measured
   compat auto|native|arm64|x86   Pick: auto = the fastest that worked (native, arm64, x86 until measured), or pin one
                           (written while Steam is off: at its next start)   → powos-steam-compat
-  scale [auto|100|85|70|50]   Its render scale in % (Unity/Unreal: fewer pixels drawn, stretched to the screen);
-                          auto = from its measured fps; from its next launch   → powos-steam-compat scale
+  scale [auto|100|85|70|50|reset]   Its render scale in % (Unity/Unreal: fewer pixels drawn, stretched to the
+                          screen); auto = from its measured fps (and the display's render cap); reset = auto with the
+                          fps history dropped (100 again); from its next launch   → powos-steam-compat scale
   preboot [on|off|default]   Its Wine session booted while Steam prepares the launch (ARM64 Proton games;
                           default = POWOS_WINE_PREBOOT in ~/.config/powos/steam-env, off)   → powos-steam-compat preboot
   aot [status|on|off]     Mono AOT images (legacy-Mono Unity games, off by default): on places the images built off the
