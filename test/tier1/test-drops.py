@@ -8,7 +8,8 @@ Pinned here: the drop key is made once and shared (a second device creating it a
 the realm never sees the plaintext (text, file name); a clip reaches the other device and is not offered back; a send
 is saved under a safe name and taken off the realm; expired clips are gone; a third account's device can't open a drop;
 too-big clips are refused and an over-16 MB file without a writable NAS is refused with the reason; a revoked device
-drops its key; the switch (`off`) stops this device offering its clips.
+drops its key; the switch (`off`) stops this device offering its clips; a handoff (a page continued on another
+device) arrives as Continue, not as a file.
 """
 import importlib.machinery
 import importlib.util
@@ -160,6 +161,18 @@ check(len(got) == 1 and open(got[0]["saved"], "rb").read() == b"%PDF-1.4 hello" 
 check(m.inbox(be(desk), out) == [], "a send is taken off the realm once saved")
 m.send(be(fold), "Desk", text="call me")
 check(m.inbox(be(desk), out) == [{"from": "Fold", "type": "text", "text": "call me"}], "a text send")
+# Handoff: Fold's page continues on Desk ("Continue <title> from Fold"); Desk's inbox reports it and saves nothing.
+m.notify = lambda *a: None
+opened = []
+m.continue_here = lambda frm, h: opened.append((frm, h.get("url")))
+check(m.handoff(be(fold), "Desk", "https://notes.pow/n/42", "Notes") == "continue on Desk", "a handoff by device name")
+check(m.inbox(be(desk), out) == [{"from": "Fold", "type": "handoff", "title": "Notes", "url": "https://notes.pow/n/42", "app": None}]
+      and opened == [("Fold", "https://notes.pow/n/42")], "a handoff arrives as Continue, nothing saved")
+try:
+    m.handoff(be(fold), "Desk", "file:///etc/passwd")
+    check(False, "a non-web URL is refused")
+except m.Refused:
+    check(True, "a non-web URL is refused")
 check(m.safe_name({"name": "../../.ssh/authorized_keys", "type": "file"}) == "authorized_keys", "no path in a name")
 try:
     m.send(be(fold), "TV", text="x")

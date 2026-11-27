@@ -21,6 +21,7 @@ import { fitAboveKeyboard, hasKeyboardButton, keyboardTop } from "./kbfit.ts";
 import { applyHomeKeyboard, setWindowTyping } from "./kbhome.ts";
 import { barReveal, edgeDown, edgeEnd, edgeMove, holdReveal, releaseReveal, revealGone, revealKept } from "./barreveal.ts";
 import { usePresence } from "./reveal.tsx";
+import { ContinueItem } from "./handoff.tsx";
 import { confirm as hapticConfirm, tick as hapticTick } from "./haptics.ts";
 import { dropAt, dropInto, freeRegion, insertAt, leaves, splitBox, tabAt, treeRects, zoneKey as dropKey, type Bar, type Tree, type Zone } from "./tiledrop.ts";
 
@@ -3342,6 +3343,8 @@ function TileMenu({ win, leaving }: { win: WebWin; leaving: boolean }) {
           {label}
         </button>
       ))}
+      {/* Handoff: this window's page or app on another of the account's devices (ui/handoff.tsx). */}
+      <ContinueItem t={win} cls="ww-tile-item" done={() => (tileMenu.value = null)} />
     </div>
   );
 }

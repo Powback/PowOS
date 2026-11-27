@@ -871,6 +871,9 @@ class ShellBridge(
             "devices.lockStop" -> dev.omalauncher.devices.LockAccess.stop(context)
             // This phone approving / revoking other devices with its own enrollment (devices/PowStation.kt): [REALM].
             "devices.realm" -> dev.omalauncher.devices.PowStation.realm(context, a.getString(0), a.optJSONObject(1))
+            // "Continue on..." (ui/handoff.tsx, devices/Handoff.kt): the devices a card can go to, and its handoff.
+            "devices.handoffTargets" -> dev.omalauncher.devices.Handoff.targets(context)
+            "devices.handoff" -> dev.omalauncher.devices.Handoff.send(context, a.getString(0), a.getJSONObject(1))
             "privacy.list" -> privacyList()
             "privacy.open" -> openPermissions(a.getString(0))
             "notifications.list" -> notificationList()
@@ -2366,7 +2369,7 @@ class ShellBridge(
         private val lookups = java.util.concurrent.Executors.newSingleThreadExecutor { r -> Thread(r, "shell-lookups").apply { isDaemon = true } }
 
         /** The hub's network calls (devices.realm: up to 10 s on a slow LAN), on their own thread: never the UI's, nor a lookup's. */
-        private val REALM = setOf("devices.realm")
+        private val REALM = setOf("devices.realm", "devices.handoffTargets", "devices.handoff")
         private val realmIo = java.util.concurrent.Executors.newSingleThreadExecutor { r -> Thread(r, "shell-realm").apply { isDaemon = true } }
 
         /** One thread for them all, so a page's set then get stay in that order. */

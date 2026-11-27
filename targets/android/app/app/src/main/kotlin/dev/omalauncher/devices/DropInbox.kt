@@ -67,6 +67,10 @@ object DropInbox {
         w: Drops.Waiting,
     ) {
         val item = Drops.take(c, w) ?: return
+        if (item.type == Handoff.TYPE) {
+            Handoff.parse(item.body)?.let { continueFrom(c, w, it) }
+            return Drops.done(c, w.id)
+        }
         val dir = File(c.cacheDir, "share/drops/${w.id}").apply { mkdirs() }
         val f = File(dir, safeName(item)).apply { writeBytes(item.body) }
         notify(c, w, item, f)
@@ -108,6 +112,29 @@ object DropInbox {
                 .setStyle(if (text) Notification.BigTextStyle().bigText(item.text.take(2000)) else null)
                 .setContentIntent(PendingIntent.getActivity(c, nid, Intent.createChooser(open, "Open with").addFlags(Intent.FLAG_ACTIVITY_NEW_TASK), flags))
                 .addAction(Notification.Action.Builder(null, if (text) "Copy" else "Save", PendingIntent.getBroadcast(c, nid, second, flags)).build())
+                .setAutoCancel(true)
+                .build()
+        nm.notify(nid, n)
+    }
+
+    /** A handoff ([Handoff]): "Continue <title>" from the other device, its tap opens it here. */
+    private fun continueFrom(
+        c: Context,
+        w: Drops.Waiting,
+        p: org.json.JSONObject,
+    ) {
+        val nm = c.getSystemService(NotificationManager::class.java)
+        nm.createNotificationChannel(NotificationChannel(CHANNEL, "Sent from your devices", NotificationManager.IMPORTANCE_HIGH))
+        val nid = w.id.hashCode()
+        val title = p.optString("title").ifBlank { "this" }
+        val open = PendingIntent.getActivity(c, nid, Handoff.openIntent(c, p), PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT)
+        val n =
+            Notification.Builder(c, CHANNEL)
+                .setSmallIcon(R.drawable.ic_notification)
+                .setContentTitle("Continue $title")
+                .setContentText("from ${w.fromName.ifBlank { "your other device" }}" + (p.optString("url").takeIf { it.isNotBlank() }?.let { " - $it" } ?: ""))
+                .setContentIntent(open)
+                .addAction(Notification.Action.Builder(null, "Continue", open).build())
                 .setAutoCancel(true)
                 .build()
         nm.notify(nid, n)

@@ -15,6 +15,7 @@ other opening. Run with python-cryptography (drops.sh: `uv run --with cryptograp
   drops-peer.py clips <from-id> <nonce>   clips from <from-id> containing <nonce>, opened: JSON lines {id, text}
   drops-peer.py clip TEXT                 offer TEXT as its clip; prints the drop id
   drops-peer.py send <to-id> TEXT         send TEXT to one device; prints the drop id
+  drops-peer.py handoff <to-id> URL TITLE a handoff ("Continue TITLE" there, devices/Handoff.kt); prints the drop id
   drops-peer.py state <id>                "waiting" while the drop is still in the realm, "gone" once taken/withdrawn
   drops-peer.py done <id>                 withdraw its own drop (a clip it offered)
 
@@ -90,7 +91,7 @@ def enroll():
 def main(a):
     if a[:1] == ["enroll"]:
         return enroll()
-    if not a or a[0] not in ("id", "sends", "clips", "clip", "send", "state", "done"):
+    if not a or a[0] not in ("id", "sends", "clips", "clip", "send", "handoff", "state", "done"):
         print(__doc__)
         return 2
     d = tool()
@@ -122,6 +123,9 @@ def main(a):
     elif cmd == "send":
         typ, body = d.text_item(a[2])
         print(realm.put("send", typ, body, a[1], mime="text/plain")["id"])
+    elif cmd == "handoff":
+        body = json.dumps({"v": 1, "title": a[3], "url": a[2]}).encode()
+        print(realm.put("send", "handoff", body, a[1], a[3], "application/json")["id"])
     elif cmd == "state":
         st, _ = realm.call("GET", f"/v1/account/drop/{a[1]}")
         print("waiting" if st == 200 else "gone" if st == 404 else f"http {st}")

@@ -38,6 +38,7 @@ import { dropKeyboard } from "./keyboard.ts";
 import { appView, closeApp, forgetOpened, mergeTasks, openApp, taskApp } from "../apps/pages.ts";
 import { dockable, halfRect, type DockSide } from "./carddock.ts";
 import { CanvasPicker, canvasPick } from "./canvaspick.tsx";
+import { ContinueItem } from "./handoff.tsx";
 
 type Phase = "closed" | "drag" | "shown";
 
@@ -873,6 +874,7 @@ function Menu() {
             </button>
           </>
         )}
+        <ContinueItem t={t} done={(note) => act(() => showNote(note))()} />
         <button type="button" onClick={act(() => togglePin(t))}>
           {isPinned ? "Unpin" : "Pin (keep on clear all)"}
         </button>

@@ -41,6 +41,7 @@ import type {
   PrivacyList,
   PhoneNotification,
   RecentTask,
+  HandoffTarget,
   SplitPair,
   CanvasDockResult,
   CanvasState,
@@ -301,6 +302,8 @@ function native(host: NonNullable<Window["PowosHost"]>): Bridge {
       allowLock: () => call<LockAccess>("devices.lockAllow"), // detect
       stopLock: () => call<LockAccess>("devices.lockStop"), // detect
       realm: (op, body) => call<any>("devices.realm", op, body ?? null), // detect
+      handoffTargets: () => call<HandoffTarget[]>("devices.handoffTargets"), // detect
+      handoff: (to, what) => call<{ ok: boolean; why?: string }>("devices.handoff", to, what), // detect
     },
     privacy: {
       list: () => call<PrivacyList>("privacy.list"),

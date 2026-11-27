@@ -402,6 +402,8 @@ class ShellActivity : Activity() {
      * up, [EXTRA_HOME_DRAFT] in the AI page's field. Sent once the page is ready (a cold start's intent too). */
     private fun openPanel(intent: Intent) {
         intent.getStringExtra(EXTRA_SCREEN)?.let { name -> host.whenReady { host.bridge.emit("screens.open", org.json.JSONObject().put("name", name)) } }
+        // "Continue <title>" from another device (devices/Handoff.kt): a PowOS app's route or a Linux app, opened by the page.
+        intent.getStringExtra(dev.omalauncher.devices.Handoff.EXTRA)?.let { p -> host.whenReady { host.bridge.emit("handoff.open", org.json.JSONObject(p)) } }
         // A capture dongle plugged in and PowOS picked for it (HdmiIn.Attach): HDMI in's screen.
         if (intent.getBooleanExtra(HdmiIn.EXTRA_OPEN, false)) host.whenReady { host.bridge.emit("hdmiin.open", null) }
         val kind = intent.getStringExtra(EXTRA_HOME_PANEL) ?: return

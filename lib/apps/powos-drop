@@ -11,6 +11,8 @@ Same envelope as Drops.kt, sealed here with the account's drop key (account secr
   powos-drop send <device> FILE | -t TEXT    one device (id or name); a file over 16 MB goes on the NAS
                                              (/mnt/nas/cdn/powos-drop/<random>/<name>) and its cdn.pow link is sent;
                                              without the NAS here it is refused with the reason
+  powos-drop continue <device> URL [TITLE]   Handoff: the page continues on that device ("Continue <title> from
+                                             <this one>"; a .pow page opens in a PowOS web window there)
   powos-drop inbox [--dir DIR]               what was sent here: saved into DIR (~/Downloads), text printed; a
                                              desktop notification each (notify-send)
   powos-drop clip [-t TEXT]                  offer TEXT (else stdin) as this device's copy for 2 min
@@ -178,11 +180,7 @@ def clip_on():
 
 
 def send(realm, to, path=None, text=None):
-    devs = realm.devices()
-    match = [d for d in devs if to in d]
-    if len(match) != 1:
-        raise Refused(f"no single device named {to!r}: " + ", ".join(n for _, n in devs))
-    did, dname = match[0]
+    did, dname = pick(realm, to)
     if text is not None:
         typ, body = text_item(text)
         realm.put("send", typ, body, did)
@@ -206,6 +204,44 @@ def send(realm, to, path=None, text=None):
     return f"sent to {dname}"
 
 
+def pick(realm, to):
+    devs = realm.devices()
+    match = [d for d in devs if to in d]
+    if len(match) != 1:
+        raise Refused(f"no single device named {to!r}: " + ", ".join(n for _, n in devs))
+    return match[0]
+
+
+def handoff(realm, to, url, title=""):
+    """Handoff (Drops "handoff" item, devices/Handoff.kt): URL continues on device TO."""
+    if not re.fullmatch(r"https?://\S+", url):
+        raise Refused(f"not a page: {url!r} (http/https only)")
+    did, dname = pick(realm, to)
+    body = json.dumps({"v": 1, "title": (title or url)[:200], "url": url}).encode()
+    realm.put("send", "handoff", body, did, title or url, "application/json")
+    return f"continue on {dname}"
+
+
+def continue_here(frm, h):
+    """A handoff that came here: "Continue <title> from <device>"; its Continue opens the page (xdg-open) or the
+    Linux app (gtk-launch). PowOS and Android apps only exist on the phone: the notification says what it was."""
+    url, app = h.get("url") or "", h.get("app") or ""
+    title = h.get("title") or url or app
+    if url.startswith(("http://", "https://")):
+        cmd = ["xdg-open", url]
+    elif app.startswith("l:"):
+        cmd = ["gtk-launch", app[2:]]
+    else:
+        notify(f"{title} from {frm}", "open it on a phone (a phone app)")
+        return
+    if not shutil.which("notify-send") or not shutil.which(cmd[0]):
+        return
+    # notify-send --wait blocks until the action or dismissal: in the background, the inbox goes on.
+    sh = 'test "$(notify-send -a PowOS --wait -A continue=Continue "$1" "$2")" = continue && shift 2 && exec "$@"'
+    subprocess.Popen(["sh", "-c", sh, "sh", f"Continue {title}", f"from {frm}", *cmd],
+                     stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, start_new_session=True)
+
+
 def inbox(realm, out_dir):
     got = []
     for d in realm.waiting("send"):
@@ -214,7 +250,14 @@ def inbox(realm, out_dir):
             continue
         h, body = r
         frm = d.get("from_name") or "your other device"
-        if h.get("type") in ("text", "link"):
+        if h.get("type") == "handoff":
+            try:
+                p = json.loads(body)
+            except ValueError:
+                p = {}
+            got.append({"from": frm, "type": "handoff", **{k: p.get(k) for k in ("title", "url", "app")}})
+            continue_here(frm, p)
+        elif h.get("type") in ("text", "link"):
             text = body.decode(errors="replace")
             got.append({"from": frm, "type": h["type"], "text": text})
             notify(f"From {frm}", text[:200])
@@ -306,6 +349,8 @@ def main(argv):
         elif cmd == "send" and len(argv) >= 4:
             print(send(realm, argv[2], text=argv[4] if argv[3] == "-t" and len(argv) > 4 else None,
                        path=None if argv[3] == "-t" else argv[3]))
+        elif cmd == "continue" and len(argv) >= 4:
+            print(handoff(realm, argv[2], argv[3], argv[4] if len(argv) > 4 else ""))
         elif cmd == "inbox":
             out = argv[argv.index("--dir") + 1] if "--dir" in argv else os.path.expanduser("~/Downloads")
             print(json.dumps(inbox(realm, out), indent=1))

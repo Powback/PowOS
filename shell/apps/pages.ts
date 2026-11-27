@@ -111,6 +111,16 @@ export function openApp(id: string, from: DOMRect | null = null, route?: Record<
   noteOpened(PREFIX + id);
 }
 
+/**
+ * "Continue <title> from <device>" tapped (devices/Handoff.kt, via the home intent): a PowOS app opens at the route
+ * the other device was on, a Linux app launches. Pages and Android apps the host opens itself.
+ */
+powos.on("handoff.open", (h: { app?: string; route?: Record<string, string> }) => {
+  const app = h?.app ?? "";
+  if (app.startsWith(PREFIX)) openApp(app.slice(PREFIX.length), null, h.route ?? undefined);
+  else if (app.startsWith("l:")) void powos.apps.launch(app).catch(() => {});
+});
+
 export function closeApp() {
   const v = appView.value;
   if (v && !v.closing) {

@@ -129,6 +129,25 @@ one chosen device, which shows a notification to open or save). Both work withou
 - Tests: PowStation `enroll/test_powos_enroll.py` (store, expiry, isolation, revocation), `test/tier1/test-drops.py`,
   `DropsTest` (JVM; opens a drop sealed by the Linux tool), the keyboard's `RemoteClipsTest`.
 
+## Handoff: Continue on another device (2026-11-27)
+
+"Continue on..." in a switcher card's menu and in a web window's tile menu lists the account's other devices (test
+devices left out) and hands the card's page or app to the one picked; that device shows "Continue <title> from
+<device>" and its tap opens it there. No realm change: a handoff is a send drop (above) whose sealed item has type
+`handoff` and a JSON body `{v: 1, title, url?, app?, route?}`.
+
+- **What goes.** A web app's window ("w:<host>") goes as the page it shows now (`WebAppActivity.here`, kept from the
+  WebView's history), a PowOS app ("p:<id>") with its route when it is the one open, a Linux app ("l:<id>") and an
+  Android app ("a:<package>", the package only) as themselves. Scroll position isn't carried.
+- **Phone** (`devices/Handoff.kt`; bridge `devices.handoffTargets` / `devices.handoff`; page `ui/handoff.tsx`):
+  `DropInbox` turns a received handoff into the notification. Continue: a `.pow` page opens in a PowOS web window
+  (`WebAppActivity`), another page in the browser, an Android app launches (its store page when it isn't installed),
+  a PowOS or Linux app goes through home's page (`handoff.open`: `openApp(id, null, route)` / `apps.launch`).
+- **Linux** (`powos-drop continue <device> URL [TITLE]`; `powos-drop watch` receives): a notification with a
+  Continue action that runs `xdg-open URL` (or `gtk-launch` for a Linux app); a phone-only app just says so.
+- Tests: `HandoffTest` (JVM), `test/tier1/test-drops.py` (handoff leg), phone check `tools/phone/verify/handoff.sh`
+  (the receiving side, via the drops test peer).
+
 ## The owner config: standalone until enrolled (issue #1)
 
 A fresh device names none of the owner's hosts: its board is its own (`powos agents`, a local file store where no

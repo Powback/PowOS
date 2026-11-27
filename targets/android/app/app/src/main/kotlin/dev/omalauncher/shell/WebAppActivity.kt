@@ -97,6 +97,15 @@ class WebAppActivity : Activity() {
     }
 
     private inner class Client : WebViewClient() {
+        // Where it is now, for Handoff ("Continue on..."): the page it shows, not the one it opened on.
+        override fun doUpdateVisitedHistory(
+            view: WebView,
+            url: String?,
+            isReload: Boolean,
+        ) {
+            if (url != null) here[id] = url to (view.title?.ifBlank { null } ?: label)
+        }
+
         override fun shouldOverrideUrlLoading(
             view: WebView,
             request: WebResourceRequest,
@@ -277,6 +286,7 @@ class WebAppActivity : Activity() {
         dialog?.dismiss()
         files?.onReceiveValue(null)
         if (::web.isInitialized) web.destroy()
+        if (::id.isInitialized) here.remove(id)
         super.onDestroy()
     }
 
@@ -284,6 +294,9 @@ class WebAppActivity : Activity() {
         private const val TAG = "PowosWebApp"
         private const val PERMS_REQUEST = 51
         private const val FILES_REQUEST = 52
+
+        /** Each open site's page now (its id -> URL, title): what a "Continue on..." of its card hands off (devices/Handoff.kt). */
+        val here = java.util.concurrent.ConcurrentHashMap<String, Pair<String, String>>()
 
         /** [url]'s intent: its own document task (one per site). */
         fun intent(

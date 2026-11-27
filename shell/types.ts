@@ -375,6 +375,20 @@ export interface AppWindow {
   bounds?: [number, number, number, number];
 }
 
+/** Another of the account's devices ("Continue on..."). */
+export interface HandoffTarget {
+  id: string;
+  name: string;
+}
+
+/** A page or app handed to another device (devices/Handoff.kt): a launcher key ("p:", "l:", "a:", "w:") and/or a URL. */
+export interface Handoff {
+  title?: string;
+  url?: string;
+  app?: string;
+  route?: Record<string, string>;
+}
+
 export interface RecentTask {
   id: number;
   label: string;
@@ -1137,6 +1151,13 @@ export interface Bridge {
      * the realm's answer; a refusal rejects with the realm's words. Off the main thread (network).
      */
     realm(op: "state" | "pending" | "devices" | "approve" | "revoke" | "rename", body?: object): Promise<any>;
+    /** "Continue on...": the account's other devices (not test ones) a card can go to (devices/Handoff.kt). */
+    handoffTargets?(): Promise<HandoffTarget[]>;
+    /**
+     * Hands [what] off to device [to] as a sealed drop; that device offers "Continue <title> from <this one>". An app
+     * key "w:<host>" goes as its page now. The other side's page gets it back as "handoff.open" (a Handoff).
+     */
+    handoff?(to: string, what: Handoff): Promise<{ ok: boolean; why?: string }>;
   };
   /** The phone's notifications, for the launcher's own panel; "notifications.changed" brings the list again. */
   /**
