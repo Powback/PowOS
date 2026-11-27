@@ -55,6 +55,8 @@ class AppUsage(
         val score = score(key, now) + 1
         scores[key] = score to now
         prefs.edit().putString(key, "$score,$now").apply()
+        // An automation's "app opened" trigger (automations/Automations.kt).
+        dev.omalauncher.automations.Automations.appOpened(key)
     }
 
     fun score(

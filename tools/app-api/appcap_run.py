@@ -34,7 +34,7 @@ matches the device's certificate. A read's JSON answer comes back parsed in
 
 Usage:
   appcap_run.py SPEC ACTION [--arg k=v]... [--state k=v]... \
-      [--consumer ai|cli|sdk|widget|app] [--send] [--confirm TEXT] [--draft] [--json]
+      [--consumer ai|cli|sdk|widget|app|automation] [--send] [--confirm TEXT] [--draft] [--json]
 Default (no --send) = dry-run preview. Exit 0 ok, 3 = refused by safety/allowlist.
 """
 from __future__ import annotations
@@ -147,7 +147,7 @@ def main() -> int:
     ap.add_argument("--arg", action="append", default=[], metavar="k=v")
     ap.add_argument("--state", action="append", default=[], metavar="k=v",
                     help="placeholder values from PowOS app state (e.g. bridge_ip=...)")
-    ap.add_argument("--consumer", default="cli", choices=["ai", "cli", "sdk", "widget", "app"])
+    ap.add_argument("--consumer", default="cli", choices=["ai", "cli", "sdk", "widget", "app", "automation"])
     ap.add_argument("--send", action="store_true", help="actually perform (default: dry-run)")
     ap.add_argument("--confirm", help="the user's typed confirmation for a spend action")
     ap.add_argument("--draft", action="store_true", help="preview a draft under review: dry run only, allowlist skipped")

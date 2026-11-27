@@ -102,7 +102,7 @@ signature/privileged permission) for the full version; **nr-gap** = works rooted
 | Focus modes (per-context home + notification filter, auto by time/place/app) | partial | 11-27: modes (DND, Sleep, Work, Gaming) with app allow-lists, control-center focus tile (tap on/off, hold picks), Settings > focus (shell/ui/focus.ts); DND through the listener, held ones out of shade/lock/banners; allowed apps banner through DND (notifications.focus) but stay silent (no per-app DND bypass without the user marking them priority). Not yet: per-context home, schedules, people allow-lists | M | any (listener filters; DND via NotificationManager policy access) | one Focus syncs to every device (account sync) |
 | Notification summary / digest | partial | "What needs me" app (App API history providers, blocked); 11-27: a focus mode's held notifications on one digest card (by app, Show / Clear), kept after the mode ends; not yet: digest at set times, LLM summary | M | any | the local LLM summarises the shade, delivered at chosen times |
 | Spotlight-grade search | partial | search providers: apps, settings, android-settings, app-api (LAUNCHER-SEARCH.md); no contacts, files, messages, web, calculator/units, actions on results | H | any | files on the NAS/.58 and agents' results from the same bar |
-| Shortcuts / automation | missing | App API/appcap can run actions; no user-built triggers | M | any | triggers from any fleet device (arrive home -> lights, desktop wake) |
+| Shortcuts / automation | partial (device check queued) | 11-27: Settings > automations - user-built "when X, do Y" run by the app (automations/Automations.kt: exact alarms, framework proximity alerts, receivers; re-armed at boot), no root. Triggers: time + weekdays, arriving/leaving a saved place, an app opened from PowOS, charger in/out, a Bluetooth device connecting/going; optional days + time window. Actions: notify, open app/URL, Wi-Fi/BT/DND on/off, a focus mode, any App API action (consumer `automation`; the runtime still refuses writes outside chat). Not yet: desktop runner (powos-shell), app-opened from outside PowOS (recents/notifications), App API action arguments in the editor | M | any | triggers from any fleet device (arrive home -> lights, desktop wake) |
 | Live Text / Visual Look Up | partial | the assistant takes a screenshot (PowosAssistSession, ShotEncoder); no selectable text in images/camera | M | any | OCR on gpu-195 (PaddleOCR-VL, as PowScan) or on device |
 | Text selection loupe, drag & drop between apps | stock / partial | WebView/Android give the loupe; drag & drop only inside PowOS (webwindows, aiboard), not between Android web windows | L | any | - |
 | Haptics everywhere | partial | haptics.ts `tick` used in 21 of 75 shell/ui components | M | any | - |
@@ -140,7 +140,7 @@ signature/privileged permission) for the full version; **nr-gap** = works rooted
 18. Haptics audit across the shell - any, M.
 19. Handoff (continue page/app on another device) - any, M.
 20. Lock face customization - any, M.
-21. Automation (user triggers + App API actions) - any, M.
+21. ~~Automation (user triggers + App API actions)~~ - v1 landed 11-27, device check queued (tools/phone/verify/automations.sh).
 22. Live Text in images and the camera - any, M.
 
 Board tasks were added for 1-22 (project "Shade & lock", "Home & launcher" or "Apps").

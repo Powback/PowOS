@@ -714,6 +714,14 @@ class ShellBridge(
             "lock.sensor" -> FingerprintSensor.read(context).json(context.resources.displayMetrics.density)
             // The glance under the clock (LockGlance): the next alarm, the next event, the weather - as they are now.
             "lock.glance" -> LockGlance.read(context)
+            // Settings > automations (ui/automations.ts; automations/Automations.kt runs them, page or not).
+            "automations.list" -> dev.omalauncher.automations.Automations.list(context)
+            "automations.save" -> dev.omalauncher.automations.Automations.save(context, a.getJSONArray(0)).let { dev.omalauncher.automations.Automations.list(context) }
+            "automations.run" -> dev.omalauncher.automations.Automations.run(context, a.getString(0), "run now")
+            "automations.here" -> dev.omalauncher.automations.Automations.here(context)
+            "automations.takeFocus" -> dev.omalauncher.automations.Automations.takeFocus(context)
+            "automations.next" -> dev.omalauncher.automations.Automations.next(a.getJSONObject(0))
+            "automations.actions" -> dev.omalauncher.automations.Automations.apiActions()
             // StandBy (standby.tsx) tapped: the screensaver ends, the lock screen (or what was up) shows.
             "standby.exit" -> requireNotNull(standbyExit) { "not StandBy" }.invoke()
             "qs.destinations" -> SettingsSearch(context).destinations { broadcast("qs.destinations", "null") }
@@ -2360,7 +2368,7 @@ class ShellBridge(
         }
 
         /** The bridge calls that only touch files or re-serialize (perf.publish: the meter's own ~4 Hz cost): run by [callOffMain], never on the main thread. */
-        private val OFF_MAIN = setOf("store.get", "store.set", "perf.save", "perf.publish")
+        private val OFF_MAIN = setOf("store.get", "store.set", "perf.save", "perf.publish", "automations.actions")
 
         /**
          * Calls that are package manager lookups, answered from [lookups] (not [fileIo]: a store read mustn't wait on

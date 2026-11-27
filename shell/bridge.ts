@@ -5,6 +5,8 @@
  * the phone, so the shell still runs.
  */
 import type {
+  ApiActionRef,
+  Automation,
   AppShortcut,
   FilePlace,
   SearchContact,
@@ -318,6 +320,15 @@ function native(host: NonNullable<Window["PowosHost"]>): Bridge {
       action: (key, index, text) => call("notifications.action", key, index, text ?? null),
       snooze: (key, ms) => call("notifications.snooze", key, ms), // detect: shown only when the list says snooze
       focus: (allow) => call("notifications.focus", allow), // detect: an older host rejects it (no banners through DND)
+    },
+    automations: {
+      list: () => call<Automation[]>("automations.list"),
+      save: (list) => call<Automation[]>("automations.save", list),
+      run: (id) => call("automations.run", id),
+      here: () => call("automations.here"),
+      takeFocus: () => call<string | null>("automations.takeFocus"),
+      next: (t) => call<number | null>("automations.next", t),
+      actions: () => call<ApiActionRef[]>("automations.actions"),
     },
     lock: {
       unlock: () => call("lock.unlock"),

@@ -228,7 +228,7 @@ def enable(_q, b):
     return summary(path)
 
 
-CONSUMERS = ("app", "widget")
+CONSUMERS = ("app", "widget", "automation")  # automation: Settings > automations (the app's Automations.kt)
 
 
 def call(q, b):

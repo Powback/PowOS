@@ -73,6 +73,8 @@ export function desktop(n: Bridge): Bridge {
   const none = async () => {};
   return {
     ...n,
+    // powos-shell has no automations runner yet (Settings > automations says so; the phone's runs in its app).
+    automations: undefined,
     host: "powos",
     apps: {
       ...n.apps,

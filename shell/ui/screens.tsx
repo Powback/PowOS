@@ -42,7 +42,8 @@ import { openApp } from "../apps/pages.ts";
 import { mobileDockPlacement, unfoldedDockPlacement, desktopDockPlacement, dockAlign, searchSpot, validDockPosition, apps, ccV3, pullOverApps, pullPanels, separatePanels, speechEngine, chat, openPanel } from "../state.ts";
 import { iconTint } from "./icontint.ts";
 import { endFocus, focusModes, focusOn, pkgOfKey, startFocus, type FocusMode } from "./focus.ts";
-import type { App } from "../types.ts";
+import type { App, ApiActionRef, Automation, AutomationAction, AutomationTrigger } from "../types.ts";
+import { DAYS, actionWords, automations, automationsHere, automationsLine, blankAutomation, lastRanLine, loadAutomations, saveAutomations, triggerWords } from "./automations.ts";
 import { validDockAlign } from "./dockalign.ts";
 import { UI_FONTS, uiFont } from "./uifont.ts";
 import { ALIGNS, alignChoice, anchorPull, type AlignMode, type AlignSurface } from "./align.ts";
@@ -469,6 +470,17 @@ function useAiTile(): [IconName, string, string, () => void] {
   return ["accountCircleOutline", "AI", auth === "endpoint" ? "this device's Claude endpoint" : "PowOS AI's Claude account", () => (closeScreens(), openPanel("ai"))];
 }
 
+/**
+ * Dictation's engine: a tap cycles it - streamed to the GPU voice agent (the default), stt.pow's requests, the phone's
+ * own (GpuSpeech.kt SpeechEngines).
+ */
+function voiceTile(): [IconName, string, string, () => void] {
+  const line =
+    speechEngine.value === "ondevice" ? "transcription: on the phone" : speechEngine.value === "gpu-http" ? "transcription: GPU (stt.pow requests)" : "transcription: GPU (streaming)";
+  const next = () => (speechEngine.value = speechEngine.value === "ondevice" ? "gpu" : speechEngine.value === "gpu-http" ? "ondevice" : "gpu-http");
+  return ["microphoneOutline", "voice", line, next];
+}
+
 function SettingsScreen() {
   const s = useScreen<SettingsState>("settings");
   const ai = useAiTile();
@@ -492,21 +504,9 @@ function SettingsScreen() {
     ["keyVariant", "passwords", s?.passwords?.line ?? "passwords and passkeys", () => act("settings", "passwords")],
     ["cellphoneCog", "android settings", "the phone's own", () => act("settings", "android")],
     ["arrowLeft", "gestures", "edge gestures, quick tools", () => openScreen("gestures")],
+    ["robotOutline", "automations", automationsLine(), () => openScreen("automations")],
     ["minusCircleOutline", "focus", focusOn.value ? `${focusOn.value.label.toLowerCase()} on` : "modes: which apps get through", () => openScreen("focus")],
-    // Dictation's engine: a tap cycles it - streamed to the GPU voice agent (the default), stt.pow's requests, the
-    // phone's own (GpuSpeech.kt SpeechEngines).
-    [
-      "microphoneOutline",
-      "voice",
-      speechEngine.value === "ondevice"
-        ? "transcription: on the phone"
-        : speechEngine.value === "gpu-http"
-          ? "transcription: GPU (stt.pow requests)"
-          : "transcription: GPU (streaming)",
-      () =>
-        (speechEngine.value =
-          speechEngine.value === "ondevice" ? "gpu" : speechEngine.value === "gpu-http" ? "ondevice" : "gpu-http"),
-    ],
+    voiceTile(),
     ["scaleBalance", "licenses", "open source in PowOS", () => openScreen("licenses")],
   ];
   return (
@@ -1661,6 +1661,325 @@ function FocusModeSection({ m, byPkg, adding, setAdding }: { m: FocusMode; byPkg
   );
 }
 
+// --- automations: "when X, do Y" (ui/automations.ts; the phone's app runs them, Automations.kt)
+
+function AutomationsScreen() {
+  const [editing, setEditing] = useState<Automation | null>(null);
+  const [err, setErr] = useState("");
+  useEffect(() => void loadAutomations(), []);
+  const byPkg = appsByPkg();
+  const appName = (p: string) => byPkg.get(p)?.label ?? p;
+  if (!automationsHere)
+    return (
+      <Frame icon="robotOutline" title="automations">
+        <div class="scr-note muted">Automations run in PowOS's phone app. This device's PowOS can't run them yet.</div>
+      </Frame>
+    );
+  const save = (list: Automation[]) => saveAutomations(list).then(() => setErr(""), (e) => setErr(String(e?.message ?? e)));
+  if (editing)
+    return (
+      <AutomationEditor
+        a={editing}
+        byPkg={byPkg}
+        onBack={() => setEditing(null)}
+        onSave={(a) => {
+          const list = automations.value.some((x) => x.id === a.id) ? automations.value.map((x) => (x.id === a.id ? a : x)) : [...automations.value, a];
+          void save(list);
+          setEditing(null);
+        }}
+        onDelete={() => {
+          void save(automations.value.filter((x) => x.id !== editing.id));
+          setEditing(null);
+        }}
+      />
+    );
+  return (
+    <Frame icon="robotOutline" title="automations" actions={<Action icon="plus" label="new" onClick={() => setEditing(blankAutomation())} />}>
+      <div class="scr-note muted">
+        When something happens - a time, a place, an app, the charger, a Bluetooth device - your actions run, with PowOS closed and after a restart.
+      </div>
+      {err && <div class="scr-note danger">{err}</div>}
+      {automations.value.length === 0 && <div class="scr-note muted">none yet</div>}
+      {automations.value.map((a) => (
+        <div key={a.id} class={`scr-auto ${a.on ? "" : "off"}`} data-automation={a.id}>
+          <button type="button" class="scr-auto-body" onClick={() => setEditing(a)}>
+            <span class="scr-auto-name">{a.name || triggerWords(a.trigger, appName)}</span>
+            <span class="muted">
+              {triggerWords(a.trigger, appName)} → {a.actions.map((x) => actionWords(x, appName)).join(", ") || "nothing"}
+            </span>
+            <span class="muted scr-auto-last" data-last-ran={a.lastRan ?? ""}>{lastRanLine(a)}</span>
+          </button>
+          <Segmented options={["off", "on"]} picked={a.on ? 1 : 0} onPick={(i) => void save(automations.value.map((x) => (x.id === a.id ? { ...x, on: i === 1 } : x)))} />
+        </div>
+      ))}
+    </Frame>
+  );
+}
+
+const TRIGGER_KINDS: AutomationTrigger["kind"][] = ["time", "place", "app", "charger", "bluetooth"];
+const ACTION_KINDS: { kind: AutomationAction["kind"]; label: string; make: () => AutomationAction }[] = [
+  { kind: "notify", label: "notify", make: () => ({ kind: "notify", title: "Automation", text: "" }) },
+  { kind: "open", label: "open", make: () => ({ kind: "open", target: "" }) },
+  { kind: "toggle", label: "switch", make: () => ({ kind: "toggle", what: "dnd", on: true }) },
+  { kind: "focus", label: "focus", make: () => ({ kind: "focus", mode: "dnd" }) },
+  { kind: "appapi", label: "App API", make: () => ({ kind: "appapi", app: "", action: "" }) },
+];
+
+function newTrigger(kind: AutomationTrigger["kind"]): AutomationTrigger {
+  switch (kind) {
+    case "time":
+      return { kind, at: "08:00", days: [] };
+    case "place":
+      return { kind, when: "arrive", lat: 0, lng: 0, radius: 150, label: "" };
+    case "app":
+      return { kind, pkg: "" };
+    case "charger":
+      return { kind, when: "connected" };
+    case "bluetooth":
+      return { kind, when: "connected", device: "" };
+  }
+}
+
+/** A plain text / time input in the settings' field look. */
+function Input({ value, onInput, placeholder, type = "text" }: { value: string; onInput: (v: string) => void; placeholder?: string; type?: string }) {
+  return (
+    <input
+      class="scr-auto-input"
+      type={type}
+      value={value}
+      placeholder={placeholder}
+      autocomplete="off"
+      onInput={(e) => onInput((e.currentTarget as HTMLInputElement).value)}
+      onFocus={() => powos.keyboard.show()}
+    />
+  );
+}
+
+function DayPicker({ days, onPick }: { days: number[]; onPick: (d: number[]) => void }) {
+  return (
+    <span class="scr-seg">
+      {DAYS.map((d, i) => (
+        <button type="button" key={i} class={days.includes(i) ? "on" : ""} onClick={() => onPick(days.includes(i) ? days.filter((x) => x !== i) : [...days, i].sort())}>
+          {d}
+        </button>
+      ))}
+    </span>
+  );
+}
+
+function AppSelect({ value, byPkg, onPick }: { value: string; byPkg: Map<string, App>; onPick: (p: string) => void }) {
+  const sorted = [...byPkg.entries()].sort((a, b) => a[1].label.localeCompare(b[1].label));
+  return (
+    <select class="scr-auto-input" value={value} onChange={(e) => onPick((e.currentTarget as HTMLSelectElement).value)}>
+      <option value="">pick an app</option>
+      {sorted.map(([p, a]) => (
+        <option key={p} value={p}>
+          {a.label}
+        </option>
+      ))}
+    </select>
+  );
+}
+
+type SetTrigger = (x: Partial<AutomationTrigger>) => void;
+
+function TimeTrigger({ t, setT }: { t: Extract<AutomationTrigger, { kind: "time" }>; setT: SetTrigger }) {
+  return (
+    <>
+      <Option label="at">
+        <Input type="time" value={t.at} onInput={(at) => setT({ at })} />
+      </Option>
+      <Option label="on">
+        <DayPicker days={t.days ?? []} onPick={(days) => setT({ days })} />
+      </Option>
+    </>
+  );
+}
+
+function PlaceTrigger({ t, setT, setNote }: { t: Extract<AutomationTrigger, { kind: "place" }>; setT: SetTrigger; setNote: (n: string) => void }) {
+  const here = () =>
+    powos.automations!.here().then(
+      (h) => (h ? (setT({ lat: h.lat, lng: h.lng }), setNote(`within ${Math.round(h.accuracy)} m`)) : setNote("no location yet: turn location on, then try again")),
+      (e) => setNote(String(e?.message ?? e)),
+    );
+  return (
+    <>
+      <Option label="when">
+        <Segmented options={["arriving", "leaving"]} picked={t.when === "leave" ? 1 : 0} onPick={(i) => setT({ when: i ? "leave" : "arrive" })} />
+      </Option>
+      <Option label="name">
+        <Input value={t.label ?? ""} onInput={(label) => setT({ label })} placeholder="Home" />
+      </Option>
+      <Option label="place">
+        <Action icon="mapMarker" label={t.lat || t.lng ? `${t.lat.toFixed(4)}, ${t.lng.toFixed(4)}` : "use where I am"} onClick={here} />
+      </Option>
+      <Option label="radius">
+        <Segmented options={["100 m", "250 m", "500 m"]} picked={[100, 250, 500].indexOf(t.radius)} onPick={(i) => setT({ radius: [100, 250, 500][i] })} />
+      </Option>
+    </>
+  );
+}
+
+function DeviceTrigger({ t, setT }: { t: Extract<AutomationTrigger, { kind: "charger" | "bluetooth" }>; setT: SetTrigger }) {
+  return (
+    <>
+      <Option label="when">
+        <Segmented options={["connected", "disconnected"]} picked={t.when === "disconnected" ? 1 : 0} onPick={(i) => setT({ when: i ? "disconnected" : "connected" })} />
+      </Option>
+      {t.kind === "bluetooth" && (
+        <Option label="device">
+          <Input value={t.device ?? ""} onInput={(device) => setT({ device })} placeholder="any (or its name)" />
+        </Option>
+      )}
+    </>
+  );
+}
+
+function TriggerFields({ t, setT, byPkg, setNote }: { t: AutomationTrigger; setT: SetTrigger; byPkg: Map<string, App>; setNote: (n: string) => void }) {
+  if (t.kind === "time") return <TimeTrigger t={t} setT={setT} />;
+  if (t.kind === "place") return <PlaceTrigger t={t} setT={setT} setNote={setNote} />;
+  if (t.kind === "app")
+    return (
+      <Option label="app">
+        <AppSelect value={t.pkg} byPkg={byPkg} onPick={(pkg) => setT({ pkg })} />
+      </Option>
+    );
+  return <DeviceTrigger t={t} setT={setT} />;
+}
+
+function ConditionsSection({ a, setA }: { a: Automation; setA: (a: Automation) => void }) {
+  const cond = a.conditions ?? {};
+  const set = (x: Partial<NonNullable<Automation["conditions"]>>) => setA({ ...a, conditions: { ...cond, ...x } });
+  return (
+    <Section icon="cogOutline" title="only if (optional)">
+      {a.trigger.kind !== "time" && (
+        <Option label="days">
+          <DayPicker days={cond.days ?? []} onPick={(days) => set({ days })} />
+        </Option>
+      )}
+      <Option label="between">
+        <Input type="time" value={cond.from ?? ""} onInput={(from) => set({ from })} />
+        <Input type="time" value={cond.to ?? ""} onInput={(to) => set({ to })} />
+      </Option>
+    </Section>
+  );
+}
+
+function ActionsSection({ a, setA, byPkg }: { a: Automation; setA: (a: Automation) => void; byPkg: Map<string, App> }) {
+  const [api, setApi] = useState<ApiActionRef[] | null>(null);
+  const setAct = (i: number, x: AutomationAction | null) => setA({ ...a, actions: x ? a.actions.map((y, j) => (j === i ? x : y)) : a.actions.filter((_, j) => j !== i) });
+  useEffect(() => {
+    if (api == null && a.actions.some((x) => x.kind === "appapi")) powos.automations!.actions().then(setApi, () => setApi([]));
+  }, [a.actions]);
+  return (
+    <Section icon="play" title="do">
+      {a.actions.map((x, i) => (
+        <div key={i} class="scr-auto-act">
+          <ActionEditor x={x} byPkg={byPkg} api={api} onChange={(y) => setAct(i, y)} />
+          <IconButton icon="deleteOutline" label="remove" tone="muted" onClick={() => setAct(i, null)} />
+        </div>
+      ))}
+      <div class="scr-focus-apps">
+        {ACTION_KINDS.map((k) => (
+          <button type="button" key={k.kind} class="scr-focus-app" onClick={() => setA({ ...a, actions: [...a.actions, k.make()] })}>
+            <Icon name="plus" size={14} />
+            <span>{k.label}</span>
+          </button>
+        ))}
+      </div>
+    </Section>
+  );
+}
+
+function AutomationEditor({ a: start, byPkg, onBack, onSave, onDelete }: { a: Automation; byPkg: Map<string, App>; onBack: () => void; onSave: (a: Automation) => void; onDelete: () => void }) {
+  const [a, setA] = useState<Automation>(start);
+  const [note, setNote] = useState("");
+  const setT: SetTrigger = (x) => setA({ ...a, trigger: { ...a.trigger, ...x } as AutomationTrigger });
+  const stored = automations.value.find((x) => x.id === a.id);
+  return (
+    <Frame icon="robotOutline" title={a.name || "new automation"} onBack={onBack} actions={<Action icon="check" label="save" tone="primary" onClick={() => onSave({ ...a, name: a.name.trim() })} />}>
+      <Section icon="pencilOutline" title="name">
+        <Input value={a.name} onInput={(name) => setA({ ...a, name })} placeholder="e.g. Morning" />
+      </Section>
+      <Section icon="clockOutline" title="when">
+        <Segmented options={TRIGGER_KINDS} picked={TRIGGER_KINDS.indexOf(a.trigger.kind)} onPick={(i) => setA({ ...a, trigger: newTrigger(TRIGGER_KINDS[i]) })} />
+        <TriggerFields t={a.trigger} setT={setT} byPkg={byPkg} setNote={setNote} />
+        {note && <div class="scr-note muted">{note}</div>}
+      </Section>
+      <ConditionsSection a={a} setA={setA} />
+      <ActionsSection a={a} setA={setA} byPkg={byPkg} />
+      {stored && (
+        <Section icon="robotOutline" title="this automation">
+          <div class="scr-note muted">{lastRanLine(stored)}</div>
+          <span class="scr-heading-actions">
+            <Action icon="play" label="run now" onClick={() => void powos.automations!.run(a.id)} />
+            <Action icon="deleteOutline" label="delete" tone="danger" onClick={onDelete} />
+          </span>
+        </Section>
+      )}
+    </Frame>
+  );
+}
+
+const isLink = (t: string) => t.includes("://");
+const TOGGLES = ["wifi", "bt", "dnd"] as const;
+
+function ApiActionPick({ x, api, onChange }: { x: Extract<AutomationAction, { kind: "appapi" }>; api: ApiActionRef[] | null; onChange: (x: AutomationAction) => void }) {
+  if (api == null) return <span class="muted">App API's actions...</span>;
+  if (api.length === 0) return <span class="muted">App API isn't running here, or none of your apps has an action on.</span>;
+  const pick = (v: string) => {
+    const [app, action] = v.split("/");
+    onChange({ ...x, app, action });
+  };
+  return (
+    <select class="scr-auto-input" value={`${x.app}/${x.action}`} onChange={(e) => pick((e.currentTarget as HTMLSelectElement).value)}>
+      <option value="/">pick an action</option>
+      {api.map((r) => (
+        <option key={`${r.app}/${r.action}`} value={`${r.app}/${r.action}`}>
+          {r.appName}: {r.summary || r.action} ({r.safety})
+        </option>
+      ))}
+    </select>
+  );
+}
+
+function ActionFields({ x, byPkg, api, onChange }: { x: AutomationAction; byPkg: Map<string, App>; api: ApiActionRef[] | null; onChange: (x: AutomationAction) => void }) {
+  if (x.kind === "notify")
+    return (
+      <>
+        <Input value={x.title} onInput={(title) => onChange({ ...x, title })} placeholder="title" />
+        <Input value={x.text} onInput={(text) => onChange({ ...x, text })} placeholder="text" />
+      </>
+    );
+  if (x.kind === "open")
+    return (
+      <>
+        <AppSelect value={isLink(x.target) ? "" : x.target} byPkg={byPkg} onPick={(target) => onChange({ ...x, target })} />
+        <Input value={isLink(x.target) ? x.target : ""} onInput={(target) => onChange({ ...x, target })} placeholder="or a link: https://..." />
+      </>
+    );
+  if (x.kind === "toggle")
+    return (
+      <>
+        <Segmented options={["Wi-Fi", "Bluetooth", "DND"]} picked={TOGGLES.indexOf(x.what)} onPick={(i) => onChange({ ...x, what: TOGGLES[i] })} />
+        <Segmented options={["off", "on"]} picked={x.on ? 1 : 0} onPick={(i) => onChange({ ...x, on: i === 1 })} />
+      </>
+    );
+  if (x.kind === "focus") {
+    const ids = ["", ...focusModes.value.map((m) => m.id)];
+    return <Segmented options={["off", ...focusModes.value.map((m) => m.label)]} picked={Math.max(0, ids.indexOf(x.mode))} onPick={(i) => onChange({ ...x, mode: ids[i] })} />;
+  }
+  return <ApiActionPick x={x} api={api} onChange={onChange} />;
+}
+
+function ActionEditor(p: { x: AutomationAction; byPkg: Map<string, App>; api: ApiActionRef[] | null; onChange: (x: AutomationAction) => void }) {
+  return (
+    <div class="scr-auto-fields">
+      <ActionFields {...p} />
+    </div>
+  );
+}
+
 // --- join: "Use PowOS on its own" or "Join your PowStation" (first run, then Settings' PowStation tile)
 
 /** Settings' PowStation tile line. */
@@ -1854,6 +2173,7 @@ const SCREENS: Record<ScreenName, FunctionComponent> = {
   storage: StorageScreen,
   join: JoinScreen,
   focus: FocusScreen,
+  automations: AutomationsScreen,
 };
 
 /** The top screen, over home; those under it wait (unwatched) until it closes. */

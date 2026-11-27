@@ -4,6 +4,8 @@
     <uses-permission android:name="android.permission.INTERNET" />
     <!-- The device agent's screen_on without root (devices/DeviceAgentHost.kt). -->
     <uses-permission android:name="android.permission.WAKE_LOCK" />
+    <!-- Automations (automations/Automations.kt): their alarms and places re-armed after a reboot. -->
+    <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
     <!-- The lock face asks whether a finger is enrolled (FingerprintSensor.kt) before showing the sensor spot / hint. -->
     <uses-permission android:name="android.permission.USE_BIOMETRIC" />
     <!-- Health Connect (shell/HealthConnectBridge.kt): read-only, what the wearables' apps wrote there. Asked once from PowOS
@@ -410,6 +412,19 @@
         <receiver
             android:name=".PlasmaBridge$Receiver"
             android:exported="false" />
+        <!-- Automations (automations/Automations.kt): time and place triggers (the system's own PendingIntents), and
+             the re-arm after a reboot or an update (protected broadcasts only the system sends). -->
+        <receiver
+            android:name=".automations.Automations$Receiver"
+            android:exported="false" />
+        <receiver
+            android:name=".automations.Automations$BootReceiver"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="android.intent.action.BOOT_COMPLETED" />
+                <action android:name="android.intent.action.MY_PACKAGE_REPLACED" />
+            </intent-filter>
+        </receiver>
 
         <!-- PowOS (rooted mode): a terminal the launcher draws, one task each (PowosTerminalActivity). -->
         <activity

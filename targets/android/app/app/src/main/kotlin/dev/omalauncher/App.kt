@@ -51,6 +51,8 @@ class App : Application() {
         // Send to my device (docs/DEVICES.md "Clipboard and Send to"): what the owner's other devices sent here, as
         // notifications, and the share sheet's "Send to <device>" targets. Rooted and not alike: the app's own realm token.
         dev.omalauncher.devices.DropInbox.start(this)
+        // The user's automations (automations/Automations.kt): alarms, places and receivers armed in the app, not the page.
+        dev.omalauncher.automations.Automations.startApp(this)
         if (RootedGuest.enabled) {
             AgentMail.start(this, File(filesDir, "run"))
             // Desktop mode switched while the session runs: powos-shell's roles, Plasma's panels and Meta follow at once.

@@ -736,6 +736,43 @@ export interface HostWebWindowsSnapshot {
 
 export interface WebWindowRect { left: number; top: number; width: number; height: number }
 
+/** An automation's "when" (Automations.kt reads the same JSON). days: 0 = Sunday; none = every day. */
+export type AutomationTrigger =
+  | { kind: "time"; at: string; days?: number[] }
+  | { kind: "place"; when: "arrive" | "leave"; lat: number; lng: number; radius: number; label?: string }
+  | { kind: "app"; pkg: string }
+  | { kind: "charger"; when: "connected" | "disconnected" }
+  | { kind: "bluetooth"; when: "connected" | "disconnected"; device?: string };
+
+/** An automation's "do": in order. */
+export type AutomationAction =
+  | { kind: "notify"; title: string; text: string }
+  | { kind: "open"; target: string }
+  | { kind: "toggle"; what: "wifi" | "bt" | "dnd"; on: boolean }
+  | { kind: "focus"; mode: string }
+  | { kind: "appapi"; app: string; action: string; args?: Record<string, unknown> };
+
+export interface Automation {
+  id: string;
+  name: string;
+  on: boolean;
+  trigger: AutomationTrigger;
+  /** Only on these weekdays / between from and to (HH:MM, over midnight when to < from). */
+  conditions?: { days?: number[]; from?: string; to?: string };
+  actions: AutomationAction[];
+  /** The app's: when it last ran, what it did. */
+  lastRan?: number;
+  lastResult?: string;
+}
+
+export interface ApiActionRef {
+  app: string;
+  appName: string;
+  action: string;
+  summary: string;
+  safety: string;
+}
+
 export interface Bridge {
   /** Perf traces (?: hosts from before it): saves JSON under the AI shared dir, returns its path in PowOS. */
   /** The one search/chat bar input home's bar and the launcher overlay share (barsync.ts): the host keeps the latest and
@@ -1202,6 +1239,24 @@ export interface Bridge {
     filmstrip(): Promise<string | null>;
     /** Where the page takes touches (live mode: its bar, CSS px); null: everywhere. */
     touchable(rect: { left: number; top: number; width: number; height: number } | null): Promise<void>;
+  };
+  /**
+   * Settings > automations (ui/automations.ts): the list the app runs (Automations.kt: alarms, places, receivers - no
+   * page needed). Phone hosts only: the desktop's and older APKs lack it (the screen says so).
+   */
+  automations?: {
+    list(): Promise<Automation[]>;
+    /** The whole list saved; the app re-arms its triggers and answers the stored list (with its last-run lines). */
+    save(list: Automation[]): Promise<Automation[]>;
+    run(id: string): Promise<void>;
+    /** The phone's last known fix ("use where I am"); null: none. */
+    here(): Promise<{ lat: number; lng: number; accuracy: number } | null>;
+    /** A focus mode an automation set while no page was open ("off": end it); null: none. */
+    takeFocus(): Promise<string | null>;
+    /** A time trigger's next moment (epoch ms); null: never. */
+    next(trigger: AutomationTrigger): Promise<number | null>;
+    /** App API's enabled actions (the device's runtime); [] when it isn't running. */
+    actions(): Promise<ApiActionRef[]>;
   };
   /** The lock screen's face (index.html?mode=lock): unlocking is Android's (its PIN pad, the fingerprint). */
   lock: {
