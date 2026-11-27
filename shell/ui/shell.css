@@ -2234,6 +2234,58 @@ html[data-mode="aod"], html[data-mode="aod"] body { background: #000; }
 .aod-apps img { width: 22px; height: 22px; border-radius: 8px; opacity: 0.7; filter: grayscale(0.4); }
 
 /*
+ * StandBy (standby.tsx, the charging screensaver): black, the clock big on the left, two stacks of cards beside it, each
+ * one card tall and snapped (a swipe up/down per stack). Night (data-night): everything one dim red, nothing blue.
+ */
+html[data-mode="standby"], html[data-mode="standby"] body { background: #000; overflow: hidden; }
+.standby {
+  position: fixed;
+  inset: 0;
+  display: grid;
+  grid-template-columns: minmax(0, 1.6fr) minmax(0, 1fr) minmax(0, 1fr);
+  align-items: center;
+  gap: 16px;
+  padding: max(16px, var(--inset-top)) max(24px, var(--inset-right)) max(16px, var(--inset-bottom)) max(24px, var(--inset-left));
+  box-sizing: border-box;
+  color: var(--color-foreground);
+  transition: transform var(--spring-slow-ms) var(--spring-slow);
+}
+.standby[data-night="1"] { --color-foreground: var(--color-red); --color-accent: var(--color-red); filter: brightness(0.6); }
+.standby-clock { display: flex; flex-direction: column; align-items: center; min-width: 0; container-type: inline-size; }
+.standby-time { font: 200 min(36cqw, 60vh)/1 var(--font-body); letter-spacing: -2px; color: var(--color-accent); font-variant-numeric: tabular-nums; white-space: nowrap; }
+.standby-date { font-size: var(--text-small); opacity: 0.8; }
+.standby-stack { position: relative; height: min(78vh, 340px); min-width: 0; }
+.standby-track { height: 100%; overflow-y: auto; scroll-snap-type: y mandatory; scrollbar-width: none; border-radius: 20px; }
+.standby-track::-webkit-scrollbar { display: none; }
+.standby-card {
+  height: 100%;
+  scroll-snap-align: start;
+  scroll-snap-stop: always;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  padding: 16px;
+  box-sizing: border-box;
+  border-radius: 20px;
+  background: color-mix(in srgb, var(--color-foreground) 9%, transparent);
+  text-align: center;
+  min-width: 0;
+}
+.standby-big { font: 300 clamp(28px, 7vh, 52px)/1.1 var(--font-body); max-width: 100%; }
+.standby-day { font-size: clamp(48px, 16vh, 96px); color: var(--color-accent); }
+.standby-small { font-size: var(--text-small); opacity: 0.75; max-width: 100%; }
+.standby-cut { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.standby-cut2 { font-size: clamp(20px, 5vh, 32px); display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; }
+.standby-wx { font: normal clamp(36px, 10vh, 64px)/1 "Symbols Nerd Font"; color: var(--color-accent); }
+.standby-art { width: clamp(48px, 18vh, 96px); height: clamp(48px, 18vh, 96px); border-radius: 12px; object-fit: cover; }
+.standby[data-night="1"] .standby-art { filter: grayscale(1) sepia(1) hue-rotate(-50deg) saturate(3); }
+.standby-play { width: 48px; height: 48px; border: 0; border-radius: 50%; background: color-mix(in srgb, var(--color-foreground) 18%, transparent); color: inherit; font-size: 24px; display: grid; place-items: center; }
+.page-dots.standby-dots { position: absolute; right: -12px; top: 50%; transform: translateY(-50%); flex-direction: column; height: auto; gap: 5px; }
+.page-dots.standby-dots i { width: 5px; height: 5px; }
+
+/*
  * PowOS AI over another app (assist.tsx) - the design language's one exception (docs/DESIGN-LANGUAGE.md): it shows the
  * real screen 1:1 for circling, so no glass and no tint over the shot; its panel solid. These are yesterday's styles
  * (before be049e7), restored after the glass work changed the overlay (2026-10-21: the screenshot drawn twice/zoomed -
@@ -2699,7 +2751,7 @@ html[data-mode="shade"], html[data-mode="shade"] body { background: transparent;
 .recents .task-shot {
   max-height: none;
   border: none;
-  border-radius: var(--card-radius);
+  border-radius: 20px;
 }
 /* Shadows only while it's up: a closed layer costs the page nothing to keep. */
 .recents.open .task-shot { box-shadow: var(--lift-shadow); }
@@ -2756,7 +2808,7 @@ html[data-mode="shade"], html[data-mode="shade"] body { background: transparent;
    (webwindows.tsx DropPreview, .ww-drop), not a style of its own. */
 .canvas-pick { position: absolute; inset: 0; z-index: 3; pointer-events: auto; }
 .canvas-pick-docked {
-  position: absolute; overflow: hidden; border-radius: var(--card-radius); box-sizing: border-box;
+  position: absolute; overflow: hidden; border-radius: 20px; box-sizing: border-box;
   box-shadow: 0 0 0 var(--frame) var(--color-accent); transform-origin: top left; background: var(--color-surface);
 }
 .canvas-pick-shot { width: 100%; height: 100%; object-fit: cover; display: block; }
@@ -2766,7 +2818,7 @@ html[data-mode="shade"], html[data-mode="shade"] body { background: transparent;
 }
 .canvas-pick-icon { width: 24px; height: 24px; }
 .canvas-pick-panel {
-  position: absolute; box-sizing: border-box; border-radius: var(--card-radius); display: flex; flex-direction: column;
+  position: absolute; box-sizing: border-box; border-radius: 20px; display: flex; flex-direction: column;
   padding: 16px 12px 0; gap: 10px; overflow: hidden; animation: canvas-pick-in var(--spring-ms) var(--spring) both;
 }
 @keyframes canvas-pick-in { from { opacity: 0; transform: scale(0.96); } }

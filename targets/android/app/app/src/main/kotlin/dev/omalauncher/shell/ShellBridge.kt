@@ -245,6 +245,9 @@ class ShellBridge(
     /** Set by the lock screen's face (PowosLockActivity): unlocking, through Android. */
     var lock: LockSlot? = null
 
+    /** Set by the screensaver (PowosDozeService) while it shows StandBy: a tap on it ends the dream (to the lock face). */
+    var standbyExit: (() -> Unit)? = null
+
     /** Only the status/frame host assigns this scoped interface. */
     var chrome: ChromeSlot? = null
 
@@ -704,6 +707,8 @@ class ShellBridge(
             "lock.sensor" -> FingerprintSensor.read(context).json(context.resources.displayMetrics.density)
             // The glance under the clock (LockGlance): the next alarm, the next event, the weather - as they are now.
             "lock.glance" -> LockGlance.read(context)
+            // StandBy (standby.tsx) tapped: the screensaver ends, the lock screen (or what was up) shows.
+            "standby.exit" -> requireNotNull(standbyExit) { "not StandBy" }.invoke()
             "qs.destinations" -> SettingsSearch(context).destinations { broadcast("qs.destinations", "null") }
             // The launcher search's personal sources (SearchSources: contacts, files, the web; shell/searchsources.ts).
             "search.state" -> SearchSources.state(context)

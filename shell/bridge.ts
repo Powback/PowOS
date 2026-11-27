@@ -325,6 +325,9 @@ function native(host: NonNullable<Window["PowosHost"]>): Bridge {
       sensor: () => call<LockSensor>("lock.sensor"), // detect: no spot, no hint until the APK has it
       glance: () => call<LockGlanceState>("lock.glance"), // detect: no glance until the APK has it
     },
+    standby: {
+      exit: () => call("standby.exit"),
+    },
     pad: {
       state: () => call<boolean>("pad.state"),
       overlay: (on) => call<boolean>("pad.overlay", on),
@@ -949,6 +952,7 @@ function mock(): Bridge {
         glance: async (): Promise<LockGlanceState> => ({ alarm: null, event: null, weather: null }),
       };
     })(),
+    standby: { exit: async () => console.log("[mock] standby exit") },
     pad: (() => {
       let on = false;
       return {

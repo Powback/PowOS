@@ -1181,6 +1181,11 @@ export interface Bridge {
     /** The glance under the clock as it is now (an older APK rejects: none shown); "lock.glance" pushes each change. */
     glance(): Promise<LockGlanceState>;
   };
+  /** StandBy (index.html?mode=standby, the "when charging" screensaver PowosDozeService): "standby.dark" (boolean) follows the room's light. */
+  standby: {
+    /** Ends the screensaver: the lock screen (or what was up) shows. */
+    exit(): Promise<void>;
+  };
   /**
    * The control center (and the notification panel's row): every tile the phone's own control center has, switched
    * here, and its sliders. "qs.changed" brings the state again.

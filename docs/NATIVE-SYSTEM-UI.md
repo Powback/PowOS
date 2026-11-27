@@ -302,6 +302,12 @@ that bypass `requestDismissKeyguard`.
   OnePlus's `AodManager`, and that pick-up and tap wake still come through.
 - The screensaver (`config_dreamsDefaultComponent`) needs no root: ship a PowOS `DreamService` and select
   it.
+- **StandBy (2026-11-27):** the same `PowosDozeService`, started as the screensaver (not dozing), loads
+  `index.html?mode=standby` (shell/ui/standby.tsx): in landscape a big clock and two swipeable card stacks (the lock
+  glance's alarm/event/weather via `LockGlance.Watch`, what's playing, the charge), upright the aod screen. It is
+  interactive: swipes are the stacks', a tap calls `standby.exit` (the dream finishes, the lock screen shows). The
+  light sensor (< 5 lux) sends `standby.dark`: a dim red night look. The user picks PowOS once under Settings >
+  Display > Screen saver ("when charging"); adb's `settings put secure screensaver_components` does it for checks.
 
 Effort: about 1 week. Risk: the lowest of all slots, since a broken doze dream only means no AOD.
 

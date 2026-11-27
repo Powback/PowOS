@@ -33,7 +33,7 @@ await loadTheme();
 
 /**
  * Which screen this page is: the host says (index.html?mode=) - home (its switcher is a layer of it, ui/recents.tsx),
- * or a slot's (aod: screen-off; assist: PowOS AI over an app; shade: the notification shade; lock: the lock face;
+ * or a slot's (aod: screen-off; standby: the charging screensaver; assist: PowOS AI over an app; shade: the notification shade; lock: the lock face;
  * recents: the switcher alone, when the desktop is home; panel: the desktop's taskbar, from powos-shell; desktop: the
  * desktop's home, from powos-shell; glasses: the
  * smart glasses' screen, off screen).
@@ -43,6 +43,10 @@ const RENDER_SURFACES = new Set(["shade", "pull", "lock", "recents", "assist"]);
 document.documentElement.dataset.mode = mode ?? "home";
 if (mode === "aod") {
   render(<Aod />, document.body);
+} else if (mode === "standby") {
+  // StandBy (the "when charging" screensaver, PowosDozeService): a clock and two card stacks in landscape, aod upright.
+  const { Standby } = await import("./ui/standby.tsx");
+  render(<Standby />, document.body);
 } else if (mode === "recents") {
   // The switcher on its own (the recents activity's page, when the desktop is home): home's layer, alone.
   render(<Recents />, document.body);

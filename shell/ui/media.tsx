@@ -58,7 +58,7 @@ const FLIP_MS = 2000;
  * Whether [m] plays as shown: the press's own answer at once (optimistic), the session's once it agrees or FLIP_MS
  * passed without it (then the button shows what really happened: the app refused, or never answered).
  */
-function usePlaying(m: MediaState): [boolean, () => void] {
+export function usePlaying(m: MediaState): [boolean, () => void] {
   const [want, setWant] = useState<boolean | null>(null);
   useEffect(() => {
     if (want === null) return;

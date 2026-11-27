@@ -10387,6 +10387,99 @@ function lgLookFails(all, label) {
 }
 
 /**
+ * SBY1 (board "StandBy: clock and widgets when charging in landscape"): index.html?mode=standby (the charging
+ * screensaver, standby.tsx) on its side. A mock "lock.glance" pushed as the dream does: the big clock inside the
+ * screen, two stacks - the left alarm,event,weather,date, the right what's playing then the charge - each one card
+ * tall; a scroll of the left stack moves its dot; "standby.dark" true turns the night look (red, no blue); a tap ends
+ * the dream (powos.standby.exit), a tap on play/pause doesn't. Upright the page is the screen-off display (.aod).
+ */
+/** SBY1's look at StandBy: the clock's box, each stack's cards, the left stack's dot, the night look, the exits. */
+function sbyRead() {
+  const t = document.querySelector(".standby-time")?.getBoundingClientRect();
+  const kinds = (n) => [...document.querySelectorAll(`.standby-stack[data-stack=${n}] .standby-card`)].map((c) => c.dataset.kind).join();
+  const track = document.querySelector(".standby-stack[data-stack=left] .standby-track");
+  const card = track?.querySelector(".standby-card")?.getBoundingClientRect();
+  const box = track?.getBoundingClientRect();
+  const sb = document.querySelector(".standby");
+  return {
+    clock: t ? { left: t.left, right: t.right, top: t.top, bottom: t.bottom, w: t.width } : null,
+    left: kinds("left"), right: kinds("right"), W: innerWidth, H: innerHeight,
+    oneCard: !!card && !!box && Math.abs(card.height - box.height) < 2,
+    dot: [...document.querySelectorAll(".standby-stack[data-stack=left] .standby-dots i")].findIndex((i) => i.style.getPropertyValue("--on") === "1.000"),
+    night: sb?.dataset.night, color: sb ? getComputedStyle(sb).color : "", exits: window.__sbyExits,
+  };
+}
+
+/** SBY1's layout: the clock inside the screen and big, the two stacks' cards, one card per stack's height, day look. */
+function sbyLayoutFails(s, label) {
+  const fails = [];
+  const c = s.clock;
+  if (c.left < -0.5 || c.right > s.W + 0.5 || c.top < -0.5 || c.bottom > s.H + 0.5) fails.push(`SBY1 ${label}: the clock is past the screen (${JSON.stringify(c)})`);
+  if (c.w < s.W * 0.3) fails.push(`SBY1 ${label}: the clock isn't big (${Math.round(c.w)} of ${s.W} px wide)`);
+  if (s.left !== "alarm,event,weather,date") fails.push(`SBY1 ${label}: left stack ${s.left}, want alarm,event,weather,date`);
+  if (s.right !== "media,battery") fails.push(`SBY1 ${label}: right stack ${s.right}, want media,battery`);
+  if (!s.oneCard) fails.push(`SBY1 ${label}: a stack's card isn't one stack tall`);
+  if (s.night !== "0") fails.push(`SBY1 ${label}: night look with the light on`);
+  return fails;
+}
+
+const sbyFrames = (r) => r.page.evaluate(() => new Promise((ok) => requestAnimationFrame(() => requestAnimationFrame(ok))));
+
+/** SBY1's swipe and night: the left stack scrolled to its 3rd card moves its dot; "standby.dark" true turns it red. */
+async function sbyStackNightFails(r, label) {
+  const fails = [];
+  await r.page.evaluate(() => {
+    const t = document.querySelector(".standby-stack[data-stack=left] .standby-track");
+    t.scrollTop = t.clientHeight * 2;
+    t.dispatchEvent(new Event("scroll"));
+  });
+  await sbyFrames(r);
+  const dot = (await r.page.evaluate(sbyRead)).dot;
+  if (dot !== 2) fails.push(`SBY1 ${label}: the left stack scrolled to its 3rd card, dot ${dot}`);
+  await r.page.evaluate(() => window.__mockEvents.emit("standby.dark", true));
+  await sbyFrames(r);
+  const s = await r.page.evaluate(sbyRead);
+  const [red, green, blue] = (s.color.match(/[\d.]+/g) ?? []).map(Number);
+  if (s.night !== "1") fails.push(`SBY1 ${label}: "standby.dark" true, no night look`);
+  else if (!(red > green * 2 && red > blue * 2)) fails.push(`SBY1 ${label}: the night look isn't red (${s.color})`);
+  return fails;
+}
+
+/** SBY1's taps: play/pause keeps StandBy up, a tap on the clock ends it; upright it's the screen-off display. */
+async function sbyTapFails(r, label, s) {
+  const fails = [];
+  await r.page.click(".standby-play");
+  if ((await r.page.evaluate(sbyRead)).exits !== 0) fails.push(`SBY1 ${label}: play/pause ended StandBy`);
+  await r.page.mouse.click((s.clock.left + s.clock.right) / 2, (s.clock.top + s.clock.bottom) / 2);
+  if ((await r.page.evaluate(sbyRead)).exits !== 1) fails.push(`SBY1 ${label}: a tap didn't end StandBy`);
+  await r.page.setViewport({ width: Math.min(s.W, s.H), height: Math.max(s.W, s.H) + 1 });
+  await r.page.waitForSelector(".aod", { timeout: 3000 }).catch(() => fails.push(`SBY1 ${label}: upright, no screen-off display`));
+  return fails;
+}
+
+async function standbyScene(r, label) {
+  await r.page.evaluate(async () => {
+    const { powos } = await importShim("./bridge.ts");
+    window.__sbyExits = 0;
+    powos.standby.exit = async () => void window.__sbyExits++;
+  });
+  // Pushed until the page shows it: the face mounts after its import, its listener a frame after (the host pushes on
+  // every change as well, and the page asks once at mount).
+  await r.page.waitForFunction((now) => {
+    window.__mockEvents.emit("lock.glance", { alarm: now + 7 * 3600e3, event: { title: "Standup", at: now + 90 * 60e3 }, weather: { temp: "7°", icon: "\ue30d", place: "Oslo" } });
+    window.__mockEvents.emit("standby.dark", false);
+    return document.querySelectorAll(".standby-stack[data-stack=left] .standby-card").length === 4;
+  }, { timeout: 5000, polling: 100 }, Date.now()).catch(() => {});
+  const s = await r.page.evaluate(sbyRead);
+  if (!s.clock) return [`SBY1 ${label}: no StandBy clock`];
+  const fails = [...sbyLayoutFails(s, label), ...(await sbyStackNightFails(r, label))];
+  await r.page.screenshot({ path: `/cache/standby-${label}.png` }).catch(() => {});
+  fails.push(...(await sbyTapFails(r, label, s)));
+  console.log(`     standby-${label}: ${JSON.stringify({ left: s.left, right: s.right, clockW: Math.round(s.clock.w), W: s.W })}`);
+  return fails;
+}
+
+/**
  * LG1 (board "Lock screen shows next alarm, weather and next event"): the glance under the date (lockglance.tsx), a
  * mock "lock.glance" pushed as the native side does. All three: three chips on one line, under the date, inside the
  * screen and centred, a long event title cut (never wrapped, never past the edge). Only the weather: one chip.
@@ -16435,6 +16528,10 @@ try {
   if (process.env.SHELL_PAGES !== "0")
     for (const [label, viewport] of [["folded", { width: 404, height: 900 }], ["unfolded", { width: 821, height: 883 }]])
       runs.push(open(browser, `${ORIGIN}/index.html?mode=lock`, `lock-glance-${label}`, viewport).then((r) => whenReady(r, () => lockGlanceScene(r, label))));
+  // SBY1: StandBy (the charging screensaver) on its side - clock, two stacks, night look, tap to exit. Folded and unfolded.
+  if (process.env.SHELL_PAGES !== "0")
+    for (const [label, viewport] of [["folded", { width: 900, height: 404 }], ["unfolded", { width: 883, height: 821 }]])
+      runs.push(open(browser, `${ORIGIN}/index.html?mode=standby`, `standby-${label}`, viewport).then((r) => whenReady(r, () => standbyScene(r, label))));
   // TI1: tiled windows' bars, the w.f touch rects, the divider's pill (the user's layout, 10-31 15:08, unfolded).
   if (process.env.SHELL_PAGES !== "0")
     runs.push(open(browser, `${ORIGIN}/index.html`, "tile-bars-unfolded", { width: 821, height: 883 }).then((r) => whenReady(r, () => tileBarsScene(r))));
