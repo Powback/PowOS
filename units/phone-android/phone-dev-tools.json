@@ -4,14 +4,19 @@
   "kind": "watcher",
   "owner": "system:tools/phone",
   "host": "phone-android",
-  "purpose": "what tools/phone keeps on the phone between runs: the touch monitor tools/phone/idle.sh starts (powos-touchmon.sh: the last touch-panel IRQ change every 2 s -> powos-lasttouch, so the Mac knows if the user is active; it exits 30 min after the last ask) and the verify runner's heartbeat (powos-verify-runner, the AI page's VerifyRun state)",
-  "installedBy": "tools/phone/idle.sh, tools/phone/verify/window-lock.sh",
+  "purpose": "what tools/phone keeps on the phone between runs: the touch monitor tools/phone/idle.sh starts (powos-touchmon.sh: the last touch-panel IRQ change every 2 s -> powos-lasttouch, so the Mac knows if the user is active; it exits 30 min after the last ask) and the verify runner's heartbeat (powos-verify-runner, the AI page's VerifyRun state); the verify toolchain's markers: powos-selfinput (bf-lib/lock-* say the next input is the tool's, not the user's), powos-queuewake (idle.sh), powos-e2e-touch/-lastinj (e2e-lib.sh), powos-gpr (game-present-rate.sh), powos-wr-hidden-* (window-render.sh)",
+  "installedBy": "tools/phone/idle.sh, tools/phone/verify/window-lock.sh, tools/phone/ship-guard.sh, tools/phone/verify/{bf-lib,e2e-lib,lock-*,game-present-rate,window-render}.sh",
   "files": [
     "/data/local/tmp/powos-touchmon.sh",
     "/data/local/tmp/powos-touchmon.pid",
     "/data/local/tmp/powos-touchmon.ask",
     "/data/local/tmp/powos-lasttouch",
-    "/data/local/tmp/powos-verify-runner"
+    "/data/local/tmp/powos-verify-runner",
+    "/data/local/tmp/powos-selfinput",
+    "/data/local/tmp/powos-queuewake",
+    "/data/local/tmp/powos-e2e-*",
+    "/data/local/tmp/powos-gpr",
+    "/data/local/tmp/powos-wr-hidden-*"
   ],
   "processes": [
     {
@@ -25,7 +30,7 @@
       "pkill -f powos-touchmon.sh"
     ],
     "commands": [
-      "rm -f /data/local/tmp/powos-touchmon.* /data/local/tmp/powos-lasttouch /data/local/tmp/powos-verify-runner"
+      "rm -rf /data/local/tmp/powos-touchmon.* /data/local/tmp/powos-lasttouch /data/local/tmp/powos-verify-runner /data/local/tmp/powos-selfinput /data/local/tmp/powos-queuewake /data/local/tmp/powos-e2e-* /data/local/tmp/powos-gpr /data/local/tmp/powos-wr-hidden-*"
     ]
   }
 }

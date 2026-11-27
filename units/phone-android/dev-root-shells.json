@@ -4,7 +4,10 @@
   "kind": "scratch",
   "owner": "agent:*",
   "host": "phone-android",
-  "purpose": "the root shells agents and the Mac's tools open over adb/su (scripts in /data/local/tmp, the rootsh channel): transient, gone with their session",
+  "purpose": "the root shells agents and the Mac's tools open over adb/su (scripts in /data/local/tmp, the rootsh channel): transient, gone with their session - and what they leave in /data/local/tmp, Android's shell scratch directory (agents' ad-hoc scripts, screenshots, logs, staged copies). Nothing is installed there: a real resident file in /data/local/tmp has its own named unit (app-frida's frida-server, idle-sysupdate, phone-dev-tools), which keeps it on this unit's remove; anything running from there is still a process check finds",
+  "files": [
+    "/data/local/tmp/*"
+  ],
   "processes": [
     {
       "match": "^(/system/bin/)?sh$",
@@ -22,5 +25,10 @@
       "match": "com\\.topjohnwu\\.magisk|libbusybox\\.so"
     }
   ],
-  "unbounded": "interactive; a background job started from one and left running shows up in check (it leaves the tree)"
+  "unbounded": "interactive; a background job started from one and left running shows up in check (it leaves the tree)",
+  "remove": {
+    "commands": [
+      "echo 'removing dev-root-shells deletes the unclaimed scratch in /data/local/tmp (other units files are kept)'"
+    ]
+  }
 }
