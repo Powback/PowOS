@@ -1,0 +1,13 @@
+{
+  "_doc": "PS5 Remote Play upstream (docs/PS-REMOTE.md). The version a person last verified; `powos ps5 update` tracks upstream's latest stable past it (gated, previous kept for rollback) - this is a record, not a cap.",
+  "name": "chiaki-ng",
+  "license": "AGPL-3.0-only",
+  "source": "https://github.com/streetpea/chiaki-ng",
+  "verified": "1.10.1",
+  "desktop": { "flatpak": "io.github.streetpea.Chiaki4deck", "remote": "flathub" },
+  "android": {
+    "applicationId": "com.metallic.chiaki",
+    "tag": "v1.10.1",
+    "built_by": "android-app-dev `make build PROJECT=chiaki-ng` (upstream ships no APK; see docs/PS-REMOTE.md)"
+  }
+}

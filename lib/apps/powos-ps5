@@ -1,0 +1,317 @@
+#!/usr/bin/env python3
+"""powos ps5 - PS5 Remote Play on PowOS through chiaki-ng (docs/PS-REMOTE.md).
+
+chiaki-ng (github.com/streetpea/chiaki-ng, AGPL) is the client; PowOS only installs it, keeps it on upstream's latest
+stable (gated, the previous build kept for rollback), finds the PS5 and explains the one-time pairing in plain words.
+The desktop runs the Flathub build (io.github.streetpea.Chiaki4deck); the phones run the chiaki-ng APK from PowApps.
+
+Usage:
+  powos ps5 [open]                  Start chiaki-ng (installs it first if it's missing)
+  powos ps5 status [--json]         Installed or not, which version, upstream's latest, what's next
+  powos ps5 find [--host IP] [--json]
+                                    Look for PlayStations: a broadcast on this network, or ask one address (over
+                                    WireGuard a broadcast never arrives: give the PS5's LAN address with --host)
+  powos ps5 guide                   The one-time pairing, step by step
+  powos ps5 install                 Install chiaki-ng
+  powos ps5 update [--check]        Move to upstream's latest stable: update, check it starts, roll back if not
+  powos ps5 rollback                Back to the build before the last update
+
+Screen only: the PS5's own DualSense stays paired to the PS5 and keeps working while the stream is on; this device is
+just the screen. On a phone, turn the on-screen controls off in the stream's menu.
+Exit status: 0 done, 1 not found / gate failed (rolled back), 2 usage or no way to do it here.
+"""
+import json
+import os
+import re
+import shutil
+import socket
+import subprocess
+import sys
+import time
+import urllib.request
+
+HERE = os.path.dirname(os.path.realpath(__file__))
+PIN = os.path.join(HERE, "upstream", "chiaki-ng.json")
+STATE = os.path.join(os.environ.get("XDG_STATE_HOME") or os.path.expanduser("~/.local/state"), "powos", "ps5.json")
+RELEASES = "https://api.github.com/repos/streetpea/chiaki-ng/releases/latest"
+
+# chiaki lib/include/chiaki/discovery.h: the PS5 answers SRCH on 9302 (PS4: 987) with an HTTP-like reply.
+PS5_PORT, PS5_PROTO = 9302, "00030010"
+PS4_PORT, PS4_PROTO = 987, "00020020"
+
+GUIDE = """Pairing the PS5 (once per device, about two minutes):
+
+On the PS5
+  1. Settings > System > Remote Play: turn on "Enable Remote Play".
+  2. Settings > System > Power Saving > Features Available in Rest Mode: turn on
+     "Stay Connected to the Internet" and "Enable Turning On PS5 from Network"
+     (so the phone can wake it from rest mode).
+
+In chiaki-ng ("PS5" in the launcher)
+  3. It looks for the PS5 on your home network by itself. Away from home on WireGuard it
+     can't see it: add it by hand with the PS5's home address (powos ps5 find --host shows it).
+  4. Pick the PS5 and choose Register. Sign in to PlayStation Network when it asks: that is only
+     to read your account ID, done once; streaming never goes through PSN.
+
+On the PS5 again
+  5. Settings > System > Remote Play > Link Device. The TV shows an 8-digit code.
+
+In chiaki-ng
+  6. Type the 8 digits. Done: the PS5 shows up as registered, tap it to play.
+
+Playing
+  - Your DualSense stays paired to the PS5 and works as always; this device is the screen.
+  - A controller connected to this device works too (it then plays as that controller).
+  - The PS5 in rest mode wakes up when you pick it.
+"""
+
+
+def die(msg, code=2):
+    print(f"powos ps5: {msg}", file=sys.stderr)
+    sys.exit(code)
+
+
+def pin():
+    with open(PIN) as f:
+        return json.load(f)
+
+
+def app_id():
+    return pin()["desktop"]["flatpak"]
+
+
+def load_state():
+    try:
+        with open(STATE) as f:
+            return json.load(f)
+    except (OSError, ValueError):
+        return {}
+
+
+def save_state(s):
+    os.makedirs(os.path.dirname(STATE), exist_ok=True)
+    tmp = STATE + ".tmp"
+    with open(tmp, "w") as f:
+        json.dump(s, f, indent=1)
+    os.replace(tmp, STATE)
+
+
+# --- the desktop's chiaki-ng: the Flathub build ---------------------------------------------------------------------
+
+def flatpak(*args, check=True, capture=True):
+    if not shutil.which("flatpak"):
+        die("no flatpak here: on a phone chiaki-ng is the APK from PowApps (docs/PS-REMOTE.md)")
+    r = subprocess.run(["flatpak", *args], text=True, capture_output=capture)
+    if check and r.returncode:
+        die(f"flatpak {' '.join(args)} failed: {(r.stderr or '').strip()}", 1)
+    return r
+
+
+def scope():
+    """--user when chiaki-ng is installed for the user (or only the user has flathub), else --system."""
+    for s in ("--user", "--system"):
+        if subprocess.run(["flatpak", s, "info", app_id()], capture_output=True).returncode == 0:
+            return s
+    if subprocess.run(["flatpak", "--system", "remotes", "--columns=name"], capture_output=True, text=True).stdout.split().count("flathub"):
+        return "--system"
+    return "--user"
+
+
+def installed():
+    """{version, commit, scope} of the installed chiaki-ng, or None."""
+    if not shutil.which("flatpak"):
+        return None
+    for s in ("--user", "--system"):
+        r = subprocess.run(["flatpak", s, "info", app_id()], capture_output=True, text=True)
+        if r.returncode == 0:
+            info = dict(re.findall(r"^\s*([A-Za-z ]+):\s*(.+)$", r.stdout, re.M))
+            return {"version": info.get("Version", "?").strip(), "commit": info.get("Commit", "").strip(), "scope": s}
+    return None
+
+
+def latest():
+    """Upstream's latest stable tag (GitHub releases/latest skips the weekly canaries), or None offline."""
+    try:
+        with urllib.request.urlopen(urllib.request.Request(RELEASES, headers={"Accept": "application/vnd.github+json"}), timeout=8) as r:
+            return json.load(r).get("tag_name", "").lstrip("v") or None
+    except Exception:
+        return None
+
+
+def gate():
+    """The build starts: chiaki-ng prints its help without a screen (Qt offscreen). True when it did."""
+    env = dict(os.environ, QT_QPA_PLATFORM="offscreen")
+    try:
+        r = subprocess.run(["flatpak", "run", app_id(), "--help"], capture_output=True, text=True, timeout=60, env=env)
+    except subprocess.TimeoutExpired:
+        return False
+    return r.returncode == 0 or "chiaki" in (r.stdout + r.stderr).lower()
+
+
+def cmd_install():
+    have = installed()
+    if have:
+        print(f"chiaki-ng {have['version']} is already installed")
+        return 0
+    s = scope()
+    print(f"Installing chiaki-ng from Flathub ({s.lstrip('-')})...")
+    flatpak(s, "install", "-y", "--noninteractive", "flathub", app_id(), capture=False)
+    have = installed()
+    save_state({**load_state(), "installed": have, "previous": None, "at": int(time.time())})
+    print(f"chiaki-ng {have['version'] if have else '?'} installed. Next: powos ps5 guide")
+    return 0
+
+
+def cmd_update(check_only):
+    have = installed()
+    up = latest()
+    if not have:
+        print(f"chiaki-ng isn't installed (upstream: {up or 'unknown, offline'}): powos ps5 install")
+        return 1
+    print(f"installed {have['version']}, upstream {up or 'unknown (offline)'}")
+    if check_only:
+        return 0
+    before = have
+    flatpak(have["scope"], "update", "-y", "--noninteractive", app_id(), capture=False)
+    after = installed()
+    if after["commit"] == before["commit"]:
+        print("already the latest build")
+        return 0
+    if not gate():
+        print(f"chiaki-ng {after['version']} doesn't start: going back to {before['version']}", file=sys.stderr)
+        flatpak(before["scope"], "update", "-y", "--noninteractive", f"--commit={before['commit']}", app_id(), capture=False)
+        return 1
+    save_state({**load_state(), "installed": after, "previous": before, "at": int(time.time())})
+    print(f"chiaki-ng {before['version']} -> {after['version']} (rollback: powos ps5 rollback)")
+    return 0
+
+
+def cmd_rollback():
+    prev = load_state().get("previous")
+    if not prev or not prev.get("commit"):
+        die("no earlier build recorded (only an update made here keeps one)", 1)
+    have = installed()
+    flatpak(prev["scope"], "update", "-y", "--noninteractive", f"--commit={prev['commit']}", app_id(), capture=False)
+    save_state({**load_state(), "installed": installed(), "previous": have, "at": int(time.time())})
+    print(f"chiaki-ng back to {prev['version']}")
+    return 0
+
+
+def cmd_open(args):
+    if not installed():
+        cmd_install()
+    os.execvp("flatpak", ["flatpak", "run", app_id(), *args])
+
+
+def cmd_status(as_json):
+    have, up, p = installed(), latest(), pin()
+    out = {"installed": have, "upstream": up, "verified": p["verified"], "flatpak": app_id(),
+           "android": p["android"]["applicationId"], "previous": load_state().get("previous")}
+    if as_json:
+        print(json.dumps(out))
+        return 0
+    if have:
+        print(f"chiaki-ng {have['version']} ({have['scope'].lstrip('-')} flatpak)")
+    elif shutil.which("flatpak"):
+        print("chiaki-ng isn't installed: powos ps5 install")
+    else:
+        print(f"no flatpak here: on a phone chiaki-ng is the APK {p['android']['applicationId']} from PowApps")
+    print(f"upstream latest stable: {up or 'unknown (offline)'}; last verified by hand: {p['verified']}")
+    if have and up and have["version"] != up:
+        print("an update is out: powos ps5 update")
+    return 0
+
+
+# --- finding the PS5 ------------------------------------------------------------------------------------------------
+
+def parse_reply(data, addr):
+    """A discovery reply ("HTTP/1.1 200 Ok" awake, "620 Server Standby" rest mode) -> a dict, or None."""
+    text = data.decode("utf-8", "replace")
+    lines = text.replace("\r", "").split("\n")
+    m = re.match(r"HTTP/1\.1 (\d+)", lines[0] if lines else "")
+    if not m:
+        return None
+    hdr = {}
+    for line in lines[1:]:
+        k, sep, v = line.partition(":")
+        if sep:
+            hdr[k.strip().lower()] = v.strip()
+    code = int(m.group(1))
+    return {
+        "address": addr,
+        "name": hdr.get("host-name", "PlayStation"),
+        "type": hdr.get("host-type", "PS5" if hdr.get("device-discovery-protocol-version") == PS5_PROTO else "PS4"),
+        "state": "awake" if code == 200 else "rest mode" if code == 620 else f"status {code}",
+        "id": hdr.get("host-id", ""),
+        "system_version": hdr.get("system-version", ""),
+    }
+
+
+def find(host=None, timeout=2.0):
+    s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    s.setsockopt(socket.SOL_SOCKET, socket.SO_BROADCAST, 1)
+    s.settimeout(0.3)
+    s.bind(("", 0))
+    target = host or "255.255.255.255"
+    for port, proto in ((PS5_PORT, PS5_PROTO), (PS4_PORT, PS4_PROTO)):
+        try:
+            s.sendto(f"SRCH * HTTP/1.1\ndevice-discovery-protocol-version:{proto}\n".encode(), (target, port))
+        except OSError as e:
+            die(f"can't send to {target}: {e}", 1)
+    found, end = {}, time.time() + timeout
+    while time.time() < end:
+        try:
+            data, (addr, _) = s.recvfrom(2048)
+        except socket.timeout:
+            continue
+        r = parse_reply(data, addr)
+        if r:
+            found[(addr, r["type"])] = r
+    return list(found.values())
+
+
+def cmd_find(host, as_json):
+    hosts = find(host)
+    if as_json:
+        print(json.dumps(hosts))
+        return 0 if hosts else 1
+    if not hosts:
+        where = f"at {host}" if host else "on this network"
+        print(f"No PlayStation answered {where}.")
+        print("Is it on (or in rest mode with \"Stay Connected to the Internet\")? Over WireGuard, use --host <its LAN address>.")
+        return 1
+    for h in hosts:
+        print(f"{h['type']} \"{h['name']}\" at {h['address']}, {h['state']}")
+    print("Next, once per device: powos ps5 guide")
+    return 0
+
+
+def main(argv):
+    as_json = "--json" in argv
+    argv = [a for a in argv if a != "--json"]
+    cmd = argv[0] if argv else "open"
+    rest = argv[1:]
+    if cmd in ("-h", "--help", "help"):
+        print(__doc__)
+        return 0
+    if cmd == "open":
+        return cmd_open(rest)
+    if cmd == "status":
+        return cmd_status(as_json)
+    if cmd == "find":
+        host = rest[rest.index("--host") + 1] if "--host" in rest and rest.index("--host") + 1 < len(rest) else None
+        return cmd_find(host, as_json)
+    if cmd == "guide":
+        print(GUIDE)
+        return 0
+    if cmd == "install":
+        return cmd_install()
+    if cmd == "update":
+        return cmd_update("--check" in rest)
+    if cmd == "rollback":
+        return cmd_rollback()
+    die(f"unknown command {cmd!r} (powos ps5 --help)")
+
+
+if __name__ == "__main__":
+    sys.exit(main(sys.argv[1:]) or 0)

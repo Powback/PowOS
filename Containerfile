@@ -84,6 +84,8 @@ COPY desktop/autostart/                   /etc/xdg/autostart/
 # The "Install PowOS" launcher: on the live desktop it opens the guided
 # installer, whose dialogs are kdialog there (text on a console).
 COPY desktop/welcome/powos-install.desktop /usr/share/applications/powos-install.desktop
+# "PS5" in the launcher: Remote Play through chiaki-ng, installed on first open (docs/PS-REMOTE.md).
+COPY desktop/apps/powos-ps5.desktop      /usr/share/applications/powos-ps5.desktop
 COPY config/kde/powermanagementprofilesrc /etc/xdg/powermanagementprofilesrc
 COPY config/kde/kglobalshortcutsrc        /etc/xdg/kglobalshortcutsrc
 COPY config/kde/kwinrc                    /etc/xdg/kwinrc

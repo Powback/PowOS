@@ -225,6 +225,7 @@ Dev & AI:
   shell errors [N]    (phone) The web shell's last errors (each one also went to the manager's inbox)
   glasses [status]    (phone) The smart glasses (Even G2/G1): connected, arms, worn, battery
   glasses show|clear|connect|disconnect|mic   (phone) Text on them, blank them, the link, the mic (powos glasses help)
+  ps5 [open|status|find|guide|update|rollback]   PS5 Remote Play (chiaki-ng): open, find the PS5, pairing guide
   pet say "<text>" [--mood M]   (phone) Speak through the pet on home (powos pet help)
   transcribe FILE|- [--lang xx] [--json]   Speech to text on the GPU server (stt.pow) (powos transcribe --help)
 
@@ -3230,6 +3231,12 @@ case "${1:-}" in
         # The smart glasses the phone's PowOS app drives (lib/apps/powos-glasses, docs/GLASSES.md).
         shift
         exec python3 "$POWOS_LIB/apps/powos-glasses" "$@"
+        ;;
+    ps5)
+        # PS5 Remote Play through chiaki-ng: install, gated update, find the PS5, pairing guide (lib/apps/powos-ps5,
+        # docs/PS-REMOTE.md).
+        shift
+        exec python3 "$POWOS_LIB/apps/powos-ps5" "$@"
         ;;
     transcribe|stt)
         # Speech to text on the GPU server, stt.pow (lib/apps/powos-transcribe; hosts/gpu-195 stt-batch unit).

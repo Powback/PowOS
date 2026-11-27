@@ -1,0 +1,10 @@
+[Desktop Entry]
+Type=Application
+Name=PS5
+GenericName=PS5 Remote Play
+Comment=Play your PS5 on this screen (chiaki-ng)
+Exec=powos ps5 open
+Icon=io.github.streetpea.Chiaki4deck
+Categories=Game;
+Keywords=playstation;ps5;ps4;remote play;chiaki;
+Terminal=false
