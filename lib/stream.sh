@@ -318,6 +318,97 @@ stream_disable() {
     pok "'$1' removed from the capture allowlist."
 }
 
+# ── Remote screen: this computer's screen on a PowOS phone over its USB cable ──
+# (docs/REMOTE-SCREEN.md). The phone (Remote input → Screen) adds a USB NCM network function next to its HID keyboard
+# and mouse; this computer sees it as enx02706f770001 (the fixed MAC hidg.sh gives it). `powos stream cable` gives
+# that link 10.77.0.1/30 (the phone is .2) and runs a SECOND PowStream WebRTC sender - PowStream's own server and
+# protocol, xdg-desktop-portal ScreenCast → PipeWire → hardware H.264 - as plain HTTP on :8092 that only the cable
+# (plus any --allow CIDR) can reach: systemd's IPAddressAllow/Deny on the unit, so the cable is the credential
+# (POWSTREAM_NO_AUTH=1 like the main unit, without the main unit's LAN exposure). Without the phone's NCM function
+# (no root) a USB-tethering interface (rndis_host/cdc_ncm/cdc_ether) is used instead, its subnet allowed.
+CABLE_UNIT="powstream-cable"
+CABLE_PORT="${POWSTREAM_CABLE_PORT:-8092}"
+CABLE_MAC="02:70:6f:77:00:01"
+CABLE_ADDR="10.77.0.1/30"
+
+# "<iface> pow|tether": the phone's link.
+_cable_iface() {
+    local d drv
+    for d in /sys/class/net/*; do
+        [[ "$(cat "$d/address" 2>/dev/null)" == "$CABLE_MAC" ]] && { echo "${d##*/} pow"; return 0; }
+    done
+    for d in /sys/class/net/*; do
+        drv=$(basename "$(readlink -f "$d/device/driver" 2>/dev/null)")
+        case "$drv" in rndis_host|cdc_ncm|cdc_ether) echo "${d##*/} tether"; return 0 ;; esac
+    done
+    return 1
+}
+
+# The cable's address on this end: NetworkManager when it runs (persists, survives replugs), else ip as root.
+_cable_address() {
+    local ifn="$1"
+    ip -4 -o addr show dev "$ifn" 2>/dev/null | grep -q " ${CABLE_ADDR%/*}/" && return 0
+    if command -v nmcli >/dev/null && nmcli -t general status >/dev/null 2>&1; then
+        nmcli -t -f NAME con show | grep -qx powos-cable \
+            || nmcli con add type ethernet ifname "$ifn" con-name powos-cable \
+                ipv4.method manual ipv4.addresses "$CABLE_ADDR" ipv4.never-default yes ipv6.method link-local >/dev/null
+        nmcli con up powos-cable >/dev/null && return 0
+    fi
+    sudo ip link set "$ifn" up && sudo ip addr replace "$CABLE_ADDR" dev "$ifn"
+}
+
+stream_cable() {
+    local allow=() sub="start"
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+            --allow) allow+=("$2"); shift 2 ;;
+            stop|status) sub="$1"; shift ;;
+            *) perr "Unknown: powos stream cable $1"; return 1 ;;
+        esac
+    done
+    if [[ "$sub" == "stop" ]]; then
+        sudo systemctl stop "$CABLE_UNIT" 2>/dev/null; pok "Cable stream stopped."; return 0
+    fi
+    local found ifn kind net
+    if ! found=$(_cable_iface); then
+        [[ "$sub" == "status" ]] && { echo "  phone link: none"; return 0; }
+        perr "No phone on a USB cable: on the phone, Remote input → Screen → 'cable link on' (root), or turn on USB tethering"
+        return 1
+    fi
+    read -r ifn kind <<<"$found"
+    if [[ "$sub" == "status" ]]; then
+        echo "  phone link: $ifn ($kind) $(ip -4 -o addr show dev "$ifn" | awk '{print $4}')"
+        echo "  sender:     $(systemctl is-active "$CABLE_UNIT" 2>/dev/null) ($CABLE_UNIT, :$CABLE_PORT)"
+        return 0
+    fi
+    if [[ "$kind" == "pow" ]]; then
+        _cable_address "$ifn" || { perr "Could not address $ifn"; return 1; }
+        net="10.77.0.0/30"
+    else
+        net=$(ip -4 -o addr show dev "$ifn" | awk '{print $4; exit}')
+        [[ -n "$net" ]] || { perr "$ifn (USB tethering) has no address yet"; return 1; }
+    fi
+    local bin="${POWSTREAM_BIN:-/usr/lib/powstream/bin/powstream-webrtc-server}"
+    [[ -x "$bin" ]] || bin=$(command -v powstream-webrtc-server) \
+        || { perr "PowStream is not installed: powos overlay build powstream && powos overlay enable powstream"; return 1; }
+    local root; root=$(dirname "$(dirname "$bin")")
+    sudo systemctl stop "$CABLE_UNIT" 2>/dev/null; sudo systemctl reset-failed "$CABLE_UNIT" 2>/dev/null
+    # A system unit (IP filtering needs one; a user manager can't attach it) running as this user in this session:
+    # the portal, PipeWire and the display are the session's.
+    sudo systemd-run --quiet --unit="$CABLE_UNIT" --uid="$(id -u)" --gid="$(id -g)" \
+        -p IPAddressDeny=any -p "IPAddressAllow=localhost $net ${allow[*]}" -p Restart=on-failure -p RestartSec=3 \
+        --setenv=HOME="$HOME" --setenv=XDG_RUNTIME_DIR="${XDG_RUNTIME_DIR:-/run/user/$(id -u)}" \
+        --setenv=DBUS_SESSION_BUS_ADDRESS="${DBUS_SESSION_BUS_ADDRESS:-unix:path=/run/user/$(id -u)/bus}" \
+        --setenv=WAYLAND_DISPLAY="${WAYLAND_DISPLAY:-}" --setenv=DISPLAY="${DISPLAY:-}" \
+        --setenv=POWSTREAM_NO_AUTH=1 --setenv=POWSTREAM_FIT_MODESET=0 --setenv=POWSTREAM_TOUCH_ROT=none \
+        --setenv=POWSTREAM_CAPTURE_DUMP_DIR=/tmp/depthcap-cable \
+        "$bin" --no-tls --port "$CABLE_PORT" --web-root "$root/web" --atw-root "$root/atw" \
+        --fps "${POWSTREAM_FPS:-120}" --bitrate "${POWSTREAM_BITRATE:-20000}" \
+        || { perr "Could not start the cable sender"; return 1; }
+    pok "Screen on the cable: on the phone, Remote input → Screen → $( [[ "$kind" == pow ]] && echo "Over the cable" || echo "connect to $(ip -4 -o addr show dev "$ifn" | awk '{print $4}' | cut -d/ -f1):$CABLE_PORT")"
+    plog "Reachable only from $net${allow[*]:+ ${allow[*]}}. Stop: powos stream cable stop"
+}
+
 stream_usage() {
     cat <<EOF
 PowStream — WebRTC streaming status & control
@@ -332,6 +423,9 @@ Services:
   logs [N]  Tail PowStream logs (default: last 100 lines)
   setup     Pre-seed the screencast portal restore token
             (run once on the local console to enable dialog-free capture)
+  cable [--allow CIDR]… | stop | status
+            This screen on a PowOS phone over its USB cable (Remote input → Screen);
+            --allow adds e.g. the WireGuard subnet (docs/REMOTE-SCREEN.md)
 
 Per-game depth/camera capture (ATW) — opt-in, never global:
   launch [--game NAME] -- <cmd>
@@ -361,6 +455,7 @@ cmd_stream() {
         restart)       stream_restart ;;
         logs|log)      stream_logs "${1:-100}" ;;
         setup)         stream_setup ;;
+        cable|usb)     stream_cable "$@" ;;
         launch|run)    stream_launch "$@" ;;
         steam-option|steam) stream_steam_option ;;
         games)         stream_games ;;

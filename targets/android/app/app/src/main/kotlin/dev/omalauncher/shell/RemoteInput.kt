@@ -35,6 +35,12 @@ import kotlin.concurrent.thread
  * - Bluetooth: Android's HID device profile (BluetoothHidDevice) - the phone a keyboard + mouse a computer pairs with,
  *   reconnecting to the last one.
  *
+ * Remote screen (docs/REMOTE-SCREEN.md): the computer's picture on the phone, over the same cable. Root: an NCM network
+ * function on the gadget (hidg.sh net), phone 10.77.0.2 - computer 10.77.0.1 (`powos stream cable` there runs
+ * PowStream's WebRTC sender, reachable from the cable only). The page plays it (WebRTC); this only carries PowStream's
+ * signalling (its /ws: offer/answer/ice as JSON) - a native socket because the page (https://shell.powos) may not open
+ * a ws:// one (mixed content) and the link has no certificate to offer.
+ *
  * One per app (pages come and go: home, a reload): the page's reports go to the target picked. Its state goes to every
  * page as "remote.state".
  */
@@ -69,6 +75,12 @@ object RemoteInput {
     private var host: BluetoothDevice? = null
     private var connecting: String? = null
     private var btError: String? = null
+
+    // Remote screen's link (hidg.sh net): the NCM function up and the phone's interface addressed.
+    private var netOn = false
+    private var netBusy = false
+    private var netIf: String? = null
+    private var netError: String? = null
 
     /** Once per app: what was on last time (pref) comes back on when a page first asks - a reboot drops the gadget. */
     private var restored = false
@@ -113,6 +125,20 @@ object RemoteInput {
     ) {
         private val listener: (JSONObject) -> Unit = { emit("remote.state", it) }
 
+        /** This page's PowStream signalling socket (one screen per page). */
+        @Volatile private var screen: dev.omalauncher.ui.VoiceSocket? = null
+
+        /** The socket's writes, in order, off the main thread (bridge calls come on it; no network there). */
+        private val io = java.util.concurrent.Executors.newSingleThreadExecutor { r -> Thread(r, "remote-screen-io").apply { isDaemon = true } }
+
+        private fun signal(text: String) {
+            val s = screen ?: throw IllegalStateException("no screen open")
+            io.execute { runCatching { s.sendText(text) }.onFailure { Log.w(TAG, "screen signal not sent", it) } }
+        }
+
+        /** To the page from the socket's threads: on the main thread, as the state goes. */
+        private fun screenEvent(e: JSONObject) = main.post { emit("remote.screen", e) }
+
         init {
             init(context)
             listeners += listener
@@ -131,11 +157,58 @@ object RemoteInput {
                 "disconnect" -> disconnect()
                 "keys" -> keys(a.getJSONArray(0))
                 "mouse" -> mouse(a.getInt(0), a.getInt(1), a.getInt(2), a.optInt(3), a.optInt(4))
+                "net" -> net(a.getBoolean(0))
+                "screen" -> screen(a.optString(0).takeIf { !a.isNull(0) && it.isNotEmpty() })
+                "signal" -> signal(a.getString(0))
                 else -> throw IllegalArgumentException("no such call: remote.$method")
             }
 
+        /**
+         * Opens PowStream's signalling at [url] (ws://host:port/ws), closing this page's previous one; null just closes.
+         * Messages come to the page as "remote.screen" {type: "open"} / {type: "message", data} / {type: "closed", why}.
+         */
+        private fun screen(url: String?) {
+            screen?.let { old -> io.execute { old.close() } }
+            screen = null
+            if (url == null) return
+            require(url.startsWith("ws://")) { "not a ws:// url" }
+            val s = socket(url)
+            screen = s
+            io.execute { connect(s, url) }
+        }
+
+        /** A socket whose messages and end go to the page while it is this page's current one. */
+        private fun socket(url: String): dev.omalauncher.ui.VoiceSocket {
+            lateinit var s: dev.omalauncher.ui.VoiceSocket
+            s =
+                dev.omalauncher.ui.VoiceSocket(
+                    url,
+                    onText = { t -> if (screen === s) screenEvent(JSONObject().put("type", "message").put("data", t)) },
+                    onClosed = { why -> if (screen === s) closed(why) },
+                )
+            return s
+        }
+
+        private fun connect(
+            s: dev.omalauncher.ui.VoiceSocket,
+            url: String,
+        ) {
+            val r = runCatching { s.connect() }
+            if (screen !== s) return
+            r.onSuccess { screenEvent(JSONObject().put("type", "open")) }.onFailure {
+                Log.w(TAG, "screen signalling to $url failed", it)
+                screen = null
+                closed(it.message ?: it.javaClass.simpleName)
+            }
+        }
+
+        private fun closed(why: String?) = screenEvent(JSONObject().put("type", "closed").put("why", why ?: JSONObject.NULL))
+
         fun close() {
             listeners -= listener
+            screen?.let { old -> io.execute { old.close() } }
+            screen = null
+            io.shutdown()
         }
     }
 
@@ -144,6 +217,7 @@ object RemoteInput {
             restored = true
             if (prefs.getBoolean("usb", false)) usbUp()
             if (prefs.getBoolean("bt", false)) bluetoothUp()
+            if (prefs.getBoolean("net", false)) net(true)
         }
         if (usbOn && System.currentTimeMillis() - usbChecked > 1500) checkUsb()
         return json()
@@ -348,6 +422,36 @@ object RemoteInput {
         main.postDelayed({ p.destroy() }, 500)
     }
 
+    // ---- Remote screen's link ----
+
+    /** The cable's network function in (on) or out, as root (hidg.sh net); the state says the phone's interface. */
+    fun net(on: Boolean): JSONObject {
+        if (netBusy) return json()
+        netBusy = true
+        netError = null
+        prefs.edit().putBoolean("net", on).apply()
+        changed()
+        thread(name = "remote-net", isDaemon = true) {
+            val (code, out) = runCatching { su("sh '${helper().absolutePath}' net ${if (on) "up" else "down"}") }.getOrElse { -1 to (it.message ?: "") }
+            main.post { netDone(on, code, out) }
+        }
+        return json()
+    }
+
+    /** The helper's answer: "net <iface> <address>" once up. */
+    private fun netDone(
+        on: Boolean,
+        code: Int,
+        out: String,
+    ) {
+        netBusy = false
+        val line = out.lineSequence().firstOrNull { it.startsWith("net ") }
+        netOn = on && code == 0 && line != null
+        netIf = if (netOn) line?.split(' ')?.getOrNull(1) else null
+        if (!netOn && (code != 0 || on)) netError = out.lineSequence().lastOrNull { it.isNotBlank() }?.removePrefix("error: ") ?: "the network helper failed ($code)"
+        changed()
+    }
+
     // ---- Bluetooth ----
 
     private fun adapter(): BluetoothAdapter? = app.getSystemService(BluetoothManager::class.java)?.adapter
@@ -528,7 +632,15 @@ object RemoteInput {
                 .put("connecting", connecting ?: JSONObject.NULL)
                 .put("hosts", hosts)
                 .put("error", btError ?: JSONObject.NULL)
-        return JSONObject().put("target", target ?: JSONObject.NULL).put("usb", usb).put("bluetooth", bt)
+        val net =
+            JSONObject()
+                .put("on", netOn)
+                .put("busy", netBusy)
+                .put("iface", netIf ?: JSONObject.NULL)
+                .put("address", if (netOn) "10.77.0.2" else JSONObject.NULL)
+                .put("peer", if (netOn) "10.77.0.1" else JSONObject.NULL)
+                .put("error", netError ?: JSONObject.NULL)
+        return JSONObject().put("target", target ?: JSONObject.NULL).put("usb", usb).put("bluetooth", bt).put("net", net)
     }
 
     private fun changed() {

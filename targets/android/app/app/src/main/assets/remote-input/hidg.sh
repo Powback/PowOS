@@ -6,6 +6,9 @@
 #   hidg.sh down    taken out again: the gadget as Android set it (rollback)
 #   hidg.sh status  "on" / "off", the UDC's state (configured = a computer enumerated it)
 #   hidg.sh pipe K M   reports from stdin, a line each: "k <bytes>" to K, "m <bytes>" to M, bytes as \0NNN (mksh print's octal)
+#   hidg.sh net up|down|status   Remote screen's link (docs/REMOTE-SCREEN.md): an NCM network function on the same
+#                   gadget, the phone 10.77.0.2/30 on it, the computer 10.77.0.1 (`powos stream cable` sets that end);
+#                   `up` prints "net <iface> 10.77.0.2"
 #
 # Why this survives Android's USB handling (vendor/etc/init/hw/init.qcom.usb.rc, vendor.usb.use_gadget_hal=0 here):
 # each sys.usb.config change rewrites the config's links f1..f9 and rebinds the UDC, never touching links of other
@@ -17,6 +20,14 @@ G=/config/usb_gadget/g1
 KB=$G/functions/hid.powos_kb
 MS=$G/functions/hid.powos_mouse
 CFG=$G/configs/b.1
+# Remote screen's link: USB NCM (CDC Network Control Model; Linux cdc_ncm, macOS and Windows 11 have drivers too).
+# Fixed MACs so the computer's end is always the same interface (Linux names it enx02706f770001: "pow" in it) and
+# `powos stream cable` finds it without asking.
+NET=$G/functions/ncm.powos
+NET_HOST=02:70:6f:77:00:01
+NET_DEV=02:70:6f:77:00:02
+NET_IP=10.77.0.2
+NET_NET=10.77.0.0/30
 
 # The boot-protocol keyboard (HID 1.11 appendix B.1): modifiers, reserved, 6 keys; LEDs out. Works in a BIOS.
 KB_DESC='\0005\0001\0011\0006\0241\0001\0005\0007\0031\0340\0051\0347\0025\0000\0045\0001\0165\0001\0225\0010\0201\0002\0225\0001\0165\0010\0201\0001\0225\0005\0165\0001\0005\0010\0031\0001\0051\0005\0221\0002\0225\0001\0165\0003\0221\0001\0225\0006\0165\0010\0025\0000\0045\0145\0005\0007\0031\0000\0051\0145\0201\0000\0300'
@@ -111,8 +122,57 @@ pipe)
     esac
   done
   ;;
+net)
+  case "$2" in
+  up)
+    [ -d $G ] || { echo "error: no configfs gadget $G" >&2; exit 1; }
+    if [ ! -d $NET ]; then
+      mkdir $NET || { echo "error: can't make $NET (CONFIG_USB_CONFIGFS_NCM?)" >&2; exit 1; }
+      echo $NET_HOST > $NET/host_addr
+      echo $NET_DEV > $NET/dev_addr
+    fi
+    if [ ! -L $CFG/powos_net ]; then
+      unbind
+      ln -s $NET $CFG/powos_net
+      bind || exit 1
+      [ -L $CFG/powos_net ] || { echo "error: the gadget refused the network function" >&2; exit 1; }
+    fi
+    # The interface exists once the gadget is bound ("(unnamed net_device)" before).
+    i=0
+    while :; do
+      ifn=$(cat $NET/ifname 2>/dev/null)
+      [ -n "$ifn" ] && [ -d /sys/class/net/$ifn ] && break
+      i=$((i + 1)); [ $i -gt 30 ] && { echo "error: no network interface for $NET" >&2; exit 1; }
+      sleep 0.1
+    done
+    ip link set $ifn up || exit 1
+    ip addr replace $NET_IP/30 dev $ifn || exit 1
+    # Not a network Android manages (netd's per-network tables don't know it): its route goes in main, and this rule
+    # makes sockets of apps (the WebView's WebRTC, RemoteInput's signalling) look there before netd's catch-alls.
+    # HACK: a static link outside ConnectivityManager; the real fix is registering it as a network (a NetworkAgent
+    # needs a system app), then WebRTC also sees it through Android's own network list.
+    ip route replace $NET_NET dev $ifn table main
+    ip rule show | grep -q "to $NET_NET lookup main" || ip rule add to $NET_NET lookup main pref 9000
+    echo "net $ifn $NET_IP"
+    ;;
+  down)
+    ip rule del to $NET_NET lookup main pref 9000 2>/dev/null
+    if [ -L $CFG/powos_net ]; then
+      unbind
+      rm -f $CFG/powos_net
+      bind
+    fi
+    [ -d $NET ] && rmdir $NET
+    echo off
+    ;;
+  status)
+    if [ -L $CFG/powos_net ]; then echo "on $(cat $NET/ifname 2>/dev/null) $NET_IP"; else echo off; fi
+    ;;
+  *) echo "usage: hidg.sh net up|down|status" >&2; exit 2 ;;
+  esac
+  ;;
 *)
-  echo "usage: hidg.sh up|down|status|pipe KB MOUSE" >&2
+  echo "usage: hidg.sh up|down|status|pipe KB MOUSE|net up|down|status" >&2
   exit 2
   ;;
 esac

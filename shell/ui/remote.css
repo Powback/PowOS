@@ -130,3 +130,60 @@
 }
 /* HDMI in's PC controls (hdmiin.tsx): a side panel, the captured screen staying in view on the left. */
 .remote-screen.beside { left: auto; width: min(420px, 46vw); z-index: 16; border-radius: var(--radius) 0 0 var(--radius); }
+
+/* Remote screen (remote-screen.ts): the computer's picture over the whole sheet, the keys floating on it. */
+.remote-screen-setup { flex-direction: column; align-items: stretch; }
+.remote-screen-host { display: flex; gap: 6px; }
+.remote-host-input {
+  flex: 1;
+  min-width: 0;
+  height: 32px;
+  padding: 0 10px;
+  border-radius: 16px;
+  border: var(--frame) solid var(--line);
+  background: var(--soft-fill);
+  color: var(--color-foreground);
+  font-size: var(--text-small);
+}
+.remote-error { color: var(--color-red); }
+.remote-view {
+  position: fixed;
+  z-index: 16;
+  inset: 0;
+  background: #000;
+  padding-bottom: max(var(--inset-bottom, 0px), var(--inset-keyboard, 0px));
+}
+.remote-video { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: contain; touch-action: none; }
+.remote-view-phase {
+  position: absolute;
+  left: 50%;
+  top: 40%;
+  transform: translate(-50%, -50%);
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  max-width: calc(100% - 2 * var(--edge));
+  padding: 10px 14px;
+  font-size: var(--text-small);
+}
+.remote-view-phase.error { border-color: var(--color-red); }
+.remote-view-bar {
+  position: absolute;
+  top: calc(var(--inset-top, 0px) + 6px);
+  left: var(--edge);
+  display: flex;
+  gap: 6px;
+  opacity: 0.85;
+}
+.remote-view-over {
+  position: absolute;
+  left: var(--edge);
+  right: var(--edge);
+  bottom: calc(max(var(--inset-bottom, 0px), var(--inset-keyboard, 0px)) + 6px);
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  pointer-events: none;
+}
+.remote-view-over > * { pointer-events: auto; opacity: 0.88; }
+.remote-view-over .remote-pad-wrap { height: 32vh; }

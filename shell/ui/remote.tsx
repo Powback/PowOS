@@ -10,6 +10,9 @@
  * - The text field: whatever the phone's keyboard does in it is typed on the computer as it happens - letters as they
  *   compose, autocorrect's swaps as Backspace and the new word, the caret moved by the keyboard's cursor control as
  *   arrows (remote.ts diff), on the computer's layout.
+ * - Screen (remote-screen.ts, docs/REMOTE-SCREEN.md): the computer's picture full screen, from PowStream's sender on
+ *   it, over the cable's network link or the LAN; a touch on the picture is an absolute touch there, the keys and the
+ *   touchpad float over it.
  */
 import { useEffect, useRef, useState } from "preact/hooks";
 import { powos } from "../bridge.ts";
@@ -36,6 +39,21 @@ import {
   tapModifier,
   typeText,
 } from "../remote.ts";
+import {
+  CABLE_PEER,
+  TOUCH_DOWN,
+  TOUCH_MOVE,
+  TOUCH_UP,
+  closeScreen,
+  openScreen,
+  pictureFraction,
+  screenError,
+  screenHost,
+  screenPhase,
+  screenShown,
+  screenStream,
+  touch,
+} from "../remote-screen.ts";
 import type { RemoteState, RemoteTarget } from "../types.ts";
 
 /** Its touches are its own: nothing under it (home's swipes) sees them. */
@@ -60,6 +78,9 @@ export function RemoteScreen() {
 
 function Remote() {
   const [st, setSt] = useState<RemoteState | null>(null);
+  const [screenSetup, setScreenSetup] = useState(false);
+  // The page going away (closed, a reload) takes its stream with it.
+  useEffect(() => closeScreen, []);
   useEffect(() => {
     let live = true;
     const get = () => powos.remote.state().then((s) => live && setSt(s)).catch(() => {});
@@ -82,11 +103,21 @@ function Remote() {
         <span class="ai-title">Remote input</span>
         <Target st={st} side="usb" />
         <Target st={st} side="bluetooth" />
+        <button
+          type="button"
+          class={`remote-target ${screenSetup || screenPhase.value !== "off" ? "picked" : ""}`}
+          onClick={() => setScreenSetup(!screenSetup)}
+        >
+          <Icon name="monitor" size={18} />
+          <span>Screen</span>
+        </button>
       </header>
+      {screenSetup && screenPhase.value === "off" && <ScreenSetup st={st} />}
       {st && <Status st={st} />}
       <Touchpad />
       <ExtraKeys />
       <TypeField />
+      {screenPhase.value !== "off" && <ScreenView onClose={() => { closeScreen(); setScreenSetup(false); }} />}
     </div>
   );
 }
@@ -196,6 +227,183 @@ function Status({ st }: { st: RemoteState }) {
       </span>
     </div>
   );
+}
+
+const HOST_KEY = "remote.screen.host";
+function savedHost(): string {
+  try {
+    return localStorage.getItem(HOST_KEY) ?? "";
+  } catch {
+    return "";
+  }
+}
+
+/** Where the picture comes from: the cable (its network link, root) or a computer on the LAN/VPN. */
+function ScreenSetup({ st }: { st: RemoteState | null }) {
+  const [host, setHost] = useState(savedHost);
+  const net = st?.net;
+  const go = (h: string) => {
+    try {
+      if (h !== CABLE_PEER) localStorage.setItem(HOST_KEY, h);
+    } catch {}
+    openScreen(h);
+  };
+  return (
+    <div class="remote-status tile remote-screen-setup">
+      <span class="remote-status-text">
+        Show the computer's screen here: on it, run <b>powos stream cable</b> (PowStream's sender).
+        {net?.error && <span class="remote-error"> Cable link failed: {net.error}</span>}
+      </span>
+      <span class="remote-hosts">
+        {net &&
+          (net.on ? (
+            <button type="button" class="remote-chip" onClick={() => go(CABLE_PEER)}>
+              <Icon name="usb" size={14} /> Over the cable
+            </button>
+          ) : (
+            <button type="button" class="remote-action" disabled={net.busy} onClick={() => powos.remote.net?.(true).catch(() => {})}>
+              {net.busy ? "starting the cable link…" : "cable link on"}
+            </button>
+          ))}
+        {net?.on && (
+          <button type="button" class="remote-action" onClick={() => powos.remote.net?.(false).catch(() => {})}>
+            cable link off
+          </button>
+        )}
+      </span>
+      <form
+        class="remote-screen-host"
+        onSubmit={(e) => {
+          e.preventDefault();
+          if (host.trim()) go(host.trim());
+        }}
+      >
+        <input
+          class="remote-host-input"
+          placeholder="or the computer's address (LAN, VPN, USB tethering)"
+          value={host}
+          onInput={(e) => setHost((e.target as HTMLInputElement).value)}
+          autocapitalize="off"
+          autocorrect="off"
+          spellcheck={false}
+        />
+        <button type="submit" class="remote-action" disabled={!host.trim()}>
+          connect
+        </button>
+      </form>
+    </div>
+  );
+}
+
+const SCREEN_TEXT: Record<string, string> = {
+  connecting: "Connecting to the computer…",
+  negotiating: "Starting the stream…",
+  waiting: "Waiting for the first picture…",
+};
+
+/** The computer's picture, full screen: touches on it are touches there; the keys and touchpad float over it. */
+function ScreenView({ onClose }: { onClose: () => void }) {
+  const video = useRef<HTMLVideoElement>(null);
+  const [pad, setPad] = useState(false);
+  const [keys, setKeys] = useState(true);
+  const stream = screenStream.value;
+  useEffect(() => {
+    const v = video.current;
+    if (!v) return;
+    v.srcObject = stream;
+    if (stream) v.play().catch(() => {});
+  }, [stream]);
+  usePictureTouch(video);
+  const phase = screenPhase.value;
+  return (
+    <div class="remote-view">
+      <video
+        ref={video}
+        class="remote-video"
+        autoplay
+        playsInline
+        muted
+        onPlaying={screenShown}
+        onLoadedData={screenShown}
+      />
+      {phase !== "live" && <ScreenPhaseLine />}
+      <div class="remote-view-bar">
+        <button type="button" class="remote-key" {...keep} onClick={onClose}>
+          ‹ close
+        </button>
+        <button type="button" class={`remote-key ${pad ? "latched" : ""}`} {...keep} onClick={() => setPad(!pad)}>
+          <Icon name="trackpad" size={16} />
+        </button>
+        <button type="button" class={`remote-key ${keys ? "latched" : ""}`} {...keep} onClick={() => setKeys(!keys)}>
+          keys
+        </button>
+      </div>
+      <div class="remote-view-over">
+        {pad && <Touchpad />}
+        {keys && <ExtraKeys />}
+        {keys && <TypeField />}
+      </div>
+    </div>
+  );
+}
+
+/** Where the stream is (until the first frame), or why it stopped, with retry. */
+function ScreenPhaseLine() {
+  const phase = screenPhase.value;
+  const failed = phase === "failed";
+  return (
+    <div class={`remote-view-phase tile ${failed ? "error" : ""}`}>
+      <span>{failed ? screenError.value : SCREEN_TEXT[phase]}</span>
+      {failed && screenHost.value && (
+        <button type="button" class="remote-action" onClick={() => openScreen(screenHost.value!)}>
+          retry
+        </button>
+      )}
+    </div>
+  );
+}
+
+/** Fingers on the picture: contacts on the computer's touchscreen (slots 0-9, by pointer). */
+function usePictureTouch(video: { current: HTMLVideoElement | null }) {
+  useEffect(() => {
+    const v = video.current!;
+    // Slots 0-9 for the fingers down (PowStream's contact ids), by pointer.
+    const slots = new Map<number, number>();
+    const at = (e: PointerEvent) => pictureFraction(v, e.clientX, e.clientY);
+    const downH = (e: PointerEvent) => {
+      const f = at(e);
+      if (!f) return;
+      let slot = 0;
+      const used = new Set(slots.values());
+      while (used.has(slot) && slot < 9) slot++;
+      slots.set(e.pointerId, slot);
+      v.setPointerCapture(e.pointerId);
+      touch(slot, TOUCH_DOWN, f.x, f.y);
+    };
+    const moveH = (e: PointerEvent) => {
+      const slot = slots.get(e.pointerId);
+      if (slot == null) return;
+      const f = pictureFraction(v, e.clientX, e.clientY) ?? { x: 0, y: 0 };
+      touch(slot, TOUCH_MOVE, f.x, f.y);
+    };
+    const upH = (e: PointerEvent) => {
+      const slot = slots.get(e.pointerId);
+      if (slot == null) return;
+      slots.delete(e.pointerId);
+      const f = pictureFraction(v, e.clientX, e.clientY) ?? { x: 0, y: 0 };
+      touch(slot, TOUCH_UP, f.x, f.y);
+    };
+    v.addEventListener("pointerdown", downH);
+    v.addEventListener("pointermove", moveH);
+    v.addEventListener("pointerup", upH);
+    v.addEventListener("pointercancel", upH);
+    return () => {
+      v.removeEventListener("pointerdown", downH);
+      v.removeEventListener("pointermove", moveH);
+      v.removeEventListener("pointerup", upH);
+      v.removeEventListener("pointercancel", upH);
+    };
+  }, []);
 }
 
 /** Pointer speed: report counts per CSS px, and how much faster a quick swipe goes. */

@@ -1033,6 +1033,15 @@ export interface Bridge {
     keys(reports: number[][]): Promise<void>;
     /** A mouse report: buttons (1 left, 2 right, 4 middle), relative motion, wheel and horizontal wheel. */
     mouse(buttons: number, dx: number, dy: number, wheel?: number, pan?: number): Promise<void>;
+    /** Remote screen's cable link (root): an NCM network function on the gadget, the phone 10.77.0.2, the computer .1. */
+    net?(on: boolean): Promise<RemoteState>;
+    /**
+     * PowStream's signalling (its /ws, docs/REMOTE-SCREEN.md) opened natively at a ws:// url (null: closed), its
+     * messages as "remote.screen" ({type: "open"} | {type: "message", data} | {type: "closed", why}).
+     */
+    screen?(url: string | null): Promise<void>;
+    /** A signalling message (JSON text) to the open screen socket. */
+    signal?(text: string): Promise<void>;
   };
   /**
    * HDMI in (ui/hdmiin.tsx, docs/HDMI-IN.md): the capture itself is the page's (getUserMedia); the host says what is
@@ -1815,7 +1824,19 @@ export interface RemoteState {
     hosts: RemoteHost[];
     error: string | null;
   };
+  /** Remote screen's cable link (absent: a host without it). */
+  net?: {
+    on: boolean;
+    busy: boolean;
+    iface: string | null;
+    address: string | null;
+    /** The computer's end of the cable. */
+    peer: string | null;
+    error: string | null;
+  };
 }
+/** PowStream signalling, natively relayed (RemoteInput.kt). */
+export type RemoteScreenEvent = { type: "open" } | { type: "message"; data: string } | { type: "closed"; why: string | null };
 
 /** An arm of the glasses: its address, advertised name, and link ("off" | "connecting" | "discovering" | "authenticating" | "ready"). */
 export interface GlassesArm {

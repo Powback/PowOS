@@ -264,6 +264,9 @@ function native(host: NonNullable<Window["PowosHost"]>): Bridge {
       disconnect: () => call("remote.disconnect"),
       keys: (reports) => call("remote.keys", reports),
       mouse: (buttons, dx, dy, wheel, pan) => call("remote.mouse", buttons, dx, dy, wheel ?? 0, pan ?? 0),
+      net: (on) => call<RemoteState>("remote.net", on),
+      screen: (url) => call("remote.screen", url),
+      signal: (text) => call("remote.signal", text),
     },
     hdmiin: {
       probe: () => call<HdmiProbe>("hdmiin.probe"),
@@ -2041,6 +2044,7 @@ function mockRemote(events: Events): Bridge["remote"] {
     },
     keys: async (reports) => console.log("[mock] keys", JSON.stringify(reports)),
     mouse: async (buttons, dx, dy, wheel, pan) => console.log("[mock] mouse", buttons, dx, dy, wheel ?? 0, pan ?? 0),
+    // A desktop browser has no cable link and may open the socket itself: the page does (remote-screen.ts).
   };
 }
 
