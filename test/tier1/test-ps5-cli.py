@@ -71,7 +71,7 @@ if srv:
     srv.close()
 
 pin = json.load(open(os.path.join(ROOT, "lib", "apps", "upstream", "chiaki-ng.json")))
-check(pin["desktop"]["flatpak"] == "io.github.streetpea.Chiaki4deck" and pin["android"]["applicationId"] and pin["verified"],
+check(pin["desktop"]["flatpak"] == "io.github.streetpea.Chiaki4deck" and pin["android"]["applicationId"] == "dev.powos.chiaki" and pin["verified"],
       "pin: flatpak id, Android package, verified version")
 g = subprocess.run([sys.executable, CLI, "guide"], capture_output=True, text=True)
 check(g.returncode == 0 and "Link Device" in g.stdout and "8-digit" in g.stdout, "guide: the PS5's Link Device PIN step")

@@ -6,7 +6,8 @@
   "verified": "1.10.1",
   "desktop": { "flatpak": "io.github.streetpea.Chiaki4deck", "remote": "flathub" },
   "android": {
-    "applicationId": "com.metallic.chiaki",
+    "applicationId": "dev.powos.chiaki",
+    "android_recipe": "android-app-dev projects/chiaki-ng",
     "tag": "v1.10.1",
     "built_by": "android-app-dev `make build PROJECT=chiaki-ng` (upstream ships no APK; see docs/PS-REMOTE.md)"
   }

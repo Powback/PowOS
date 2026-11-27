@@ -13,7 +13,7 @@ during registration, to read the account ID.
 | question | decision | why |
 |---|---|---|
 | Desktop package | Flathub `io.github.streetpea.Chiaki4deck` (upstream's own Flatpak, 1.10.1 = the GitHub release) | No build on our side; Bazzite already has Flathub; `flatpak update` gives "latest", `--commit=` gives rollback |
-| Phone package | chiaki-ng's **Android app** (`android/` in the upstream tree, applicationId `com.metallic.chiaki`) | Works on non-root phones (it's a plain APK); MediaCodec hardware decode; Android gamepad API. The Linux AppImage on the phone's Linux side was rejected: software decode, root-only Linux side, Android controllers don't reach it |
+| Phone package | chiaki-ng's **Android app** (`android/` in the upstream tree, built as applicationId `dev.powos.chiaki`, label "PS5", fileprovider `dev.powos.chiaki.fileprovider`) | Works on non-root phones (it's a plain APK); MediaCodec hardware decode; Android gamepad API. The Linux AppImage on the phone's Linux side was rejected: software decode, root-only Linux side, Android controllers don't reach it |
 | Where the APK comes from | Upstream publishes **no APK** (releases have AppImage/Flatpak/Windows/macOS only, checked 11-27; no Android CI workflow). We build the upstream tag with android-app-dev: `make build PROJECT=chiaki-ng`, which publishes it to PowApps | The fleet's one APK pipeline; PowApps installs/updates it on every phone, including the S25 without adb |
 | Launcher entry | Desktop: `desktop/apps/powos-ps5.desktop` "PS5" -> `powos ps5 open` (installs on first open). Phone: the installed APK is listed by the launcher (ShellBridge `apps.list`), labelled "PS5" by the build recipe | No new shell code; the launcher already lists every Android app |
 | Discovery | chiaki-ng discovers on the LAN itself. `powos ps5 find [--host IP]` does the same SRCH (UDP 9302, protocol 00030010) for a quick check and for WireGuard, where broadcasts don't arrive | Same protocol as chiaki `lib/src/discovery.c` |
@@ -42,11 +42,13 @@ during registration, to read the account ID.
 - [x] `powos ps5` CLI: install, gated update + rollback, find, guide, status (tier-1 test).
 - [x] Desktop "PS5" launcher entry, installed by the image.
 - [x] Pin record + latest path.
-- [ ] android-app-dev `projects/chiaki-ng`: fetch the pinned upstream tag with submodules at build time (no source in
-      the repo), NDK 28.2.13676358 + CMake 3.22.1 + protoc/python3-protobuf (nanopb) in the job image, `assembleRelease`
-      unsigned -> hub signs; app label "PS5" via a resource overlay in the recipe; `.ver` = upstream version. Build runs
-      on .58 (coordinator's build).
-- [ ] Phone: install from PowApps; an old Chiaki (F-Droid, same package, other key) must be uninstalled first.
+- [x] android-app-dev `projects/chiaki-ng` recipe (b4057e8/f2bc92e): fetches the pinned upstream tag with submodules
+      at build time (no source in the repo), NDK 28.2.13676358 + CMake 3.22.1 + protoc/python3-protobuf (nanopb) in the
+      job image, `assembleRelease` unsigned -> hub signs; applicationId `dev.powos.chiaki` + fileprovider
+      `dev.powos.chiaki.fileprovider` (installs beside any F-Droid Chiaki, no uninstall), label "PS5"; `.ver` = our
+      rising versionCode, upstream version in versionName (`1.10.1-powos.<date>`).
+- [ ] First build on .58 + publish to PowApps (coordinator's build).
+- [ ] Phone: install from PowApps.
 - [ ] First session (needs the user): registration with the PS5's 8-digit Link Device code on each device.
 - [ ] Check on device: DualSense paired to the PS5 drives the game while the phone shows the stream; on-screen controls
       off; a phone-side controller also works; wake from rest mode.
