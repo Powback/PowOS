@@ -133,6 +133,8 @@ dependencies {
     implementation(libs.compose.ui)
     implementation(libs.commons.compress)
     implementation(libs.androidsvg)
+    // Live Text's on-device reader: ML Kit's bundled Latin model (offline, no Play Services; docs/research/live-text.md).
+    implementation(libs.mlkit.text.recognition)
     implementation(libs.termux.terminal.view)
     implementation(project(":owl"))
     // PowOS: Andromarchy's engine (display, session, rootfs install), GPL-3.0; the app is GPL-3.0 as a whole.

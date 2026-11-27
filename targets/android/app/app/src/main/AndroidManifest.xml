@@ -544,6 +544,38 @@
                 android:resource="@xml/hdmi_in_usb" />
         </activity>
 
+        <!-- Live Text (livetext/LiveTextActivity.kt, docs/research/live-text.md): the share sheet's "Copy text" for any
+             image, and "Scan text" (no image: the camera app takes one). Text in the picture becomes selectable. -->
+        <activity
+            android:name=".livetext.LiveTextActivity"
+            android:label="Copy text"
+            android:theme="@android:style/Theme.DeviceDefault.NoActionBar"
+            android:excludeFromRecents="true"
+            android:taskAffinity=".livetext"
+            android:exported="true"
+            android:configChanges="orientation|screenSize|screenLayout|smallestScreenSize|keyboard|keyboardHidden|navigation|density|uiMode">
+            <intent-filter android:label="Copy text">
+                <action android:name="android.intent.action.SEND" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <data android:mimeType="image/*" />
+            </intent-filter>
+            <intent-filter android:label="Scan text">
+                <action android:name="dev.omalauncher.action.SCAN_TEXT" />
+                <category android:name="android.intent.category.DEFAULT" />
+            </intent-filter>
+        </activity>
+
+        <service
+            android:name=".livetext.ScanTextTile"
+            android:exported="true"
+            android:icon="@drawable/ic_notification"
+            android:label="Scan text"
+            android:permission="android.permission.BIND_QUICK_SETTINGS_TILE">
+            <intent-filter>
+                <action android:name="android.service.quicksettings.action.QS_TILE" />
+            </intent-filter>
+        </service>
+
         <!-- Send to my device (devices/SendToDeviceActivity.kt, docs/DEVICES.md "Clipboard and Send to"): the share
              sheet's target, plus one sharing shortcut per device of the account ("Send to Desk", DropInbox). -->
         <activity
