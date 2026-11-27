@@ -122,7 +122,6 @@ targets/android/app/app/src/main/assets/game-boost.sh SC1007 2
 targets/android/app/app/src/main/assets/game-boost.sh SC1083 2
 targets/android/app/app/src/main/assets/game-boost.sh SC2010 1
 targets/android/app/app/src/main/assets/game-boost.sh SC2046 2
-targets/android/app/app/src/main/assets/game-boost.sh SC2154 1
 targets/android/app/app/src/main/assets/remote-input/hidg.sh SC2046 1
 targets/android/app/scripts/collage-captures.sh SC2034 1
 targets/android/app/scripts/fetch-theme-colors.sh SC2010 1
