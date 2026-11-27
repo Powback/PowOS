@@ -338,6 +338,8 @@ function native(host: NonNullable<Window["PowosHost"]>): Bridge {
       camera: () => call<boolean>("lock.camera"), // detect
       sensor: () => call<LockSensor>("lock.sensor"), // detect: no spot, no hint until the APK has it
       glance: () => call<LockGlanceState>("lock.glance"), // detect: no glance until the APK has it
+      locked: () => call<boolean>("lock.locked"), // detect: an older APK rejects - the face's edit stays in Settings
+      open: (key) => call("lock.open", key), // detect: an older APK rejects - the corner falls back to unlock + launch
     },
     standby: {
       exit: () => call("standby.exit"),
@@ -964,6 +966,9 @@ function mock(): Bridge {
         sensor: async (): Promise<LockSensor> => ({ kind: "side", enrolled: true, spot: null }),
         // A phone at rest: nothing (the lock-glance scenes emit their own "lock.glance").
         glance: async (): Promise<LockGlanceState> => ({ alarm: null, event: null, weather: null }),
+        // A phone unlocked by its face / a trusted device, the keyguard still up: the face's long press edits it.
+        locked: async () => false,
+        open: async (key: string) => console.log("[mock] unlock, then open", key),
       };
     })(),
     standby: { exit: async () => console.log("[mock] standby exit") },

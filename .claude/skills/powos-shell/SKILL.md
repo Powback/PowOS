@@ -803,11 +803,15 @@ strip only - not the cause when a drag in a tile fails.
   sessions; no emits while the screen is off - the face re-asks on lock.shown). On the lock page ShellBridge routes
   media "open"/output through LockSlot.unlockThen; transport acts locked. Play/pause is optimistic (usePlaying, 2 s
   rollback). Face gesture exceptions: `.cc-seek`/`.lock-shortcut` never start the swipe; a sideways move on a
-  `.lock-media-track.several` drops it (the track scrolls, pan-x). Corners: ui/lockshortcuts.tsx LOCK_SHORTCUTS
-  ([left, right], one place for a future setting), hold 400 ms + confirm() haptic, a tap only hints; native
+  `.lock-media-track.several` drops it (the track scrolls, pan-x). Corners: the user's (ui/lockstyle.ts corners:
+  torch/camera/focus/recorder/"app:<key>", an app via lock.open = unlockThen + launch), hold 400 ms + confirm() haptic, a tap only hints; native
   shell/LockShortcuts.kt (torch via CameraManager, camera = INTENT_ACTION_STILL_IMAGE_CAMERA_SECURE from the face's
   activity). Mock: the lock page starts with nothing playing. Gate LM1 lock-media-folded/unfolded; shots
-  lock-media-*, lock-torch-on, lock-camera-hold; device tools/phone/verify/lock-media.sh (plays a silent tone via
+  lock-media-*, lock-torch-on, lock-camera-hold. Customization (11-27): ui/lockstyle.ts is the ONE face style (store
+  "lock.face", local - the account sync is app tables only; clockVars shared by lock/AOD/StandBy, StandBy keeps its
+  colour), ui/lockedit.tsx the editor (face long press when lock.locked is false, or Settings > lock screen); backdrop
+  = html[data-lockwall] over the same wallpaper (no second picture yet). Gate LC1 lock-custom-check-*, shots lock-edit,
+  lock-custom; device tools/phone/verify/lock-custom.sh (read only); device tools/phone/verify/lock-media.sh (plays a silent tone via
   MediaStore in the phone's own player, SKIPs if the user's media plays).
 - Home has NO notification panel of its own: home.tsx sends `shade.homePull(on)`; the host's monitor takes a down-drag
   on home within 250 ms of the finger-down.

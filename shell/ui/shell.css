@@ -2228,7 +2228,8 @@ html[data-mode="aod"], html[data-mode="aod"] body { background: #000; }
   color: color-mix(in srgb, var(--color-foreground) 70%, transparent);
   transition: transform var(--spring-slow-ms) var(--spring-slow);
 }
-.aod-time { font: 300 76px/1 var(--font-body); letter-spacing: 2px; color: color-mix(in srgb, var(--color-accent) 75%, transparent); }
+/* The clock faces share the lock face's clock style (lockstyle.ts clockVars: --clock-font / -weight / -color). */
+.aod-time { font: 300 76px/1 var(--font-body); font-family: var(--clock-font, var(--font-body)); font-weight: var(--clock-weight, 300); letter-spacing: 2px; color: color-mix(in srgb, var(--clock-color, var(--color-accent)) 75%, transparent); }
 .aod-date, .aod-battery { font-size: var(--text-small); }
 .aod-apps { display: flex; gap: var(--gap); margin-top: 14px; }
 .aod-apps img { width: 22px; height: 22px; border-radius: 8px; opacity: 0.7; filter: grayscale(0.4); }
@@ -2266,7 +2267,7 @@ html[data-mode="standby"], html[data-mode="standby"] body { background: #000; ov
 }
 .standby[data-night="1"] { --color-foreground: var(--color-red); --color-accent: var(--color-red); filter: brightness(0.6); }
 .standby-clock { display: flex; flex-direction: column; align-items: center; min-width: 0; container-type: inline-size; }
-.standby-time { font: 200 min(36cqw, 60vh)/1 var(--font-body); letter-spacing: -2px; color: var(--color-accent); font-variant-numeric: tabular-nums; white-space: nowrap; }
+.standby-time { font: 200 min(36cqw, 60vh)/1 var(--font-body); font-family: var(--clock-font, var(--font-body)); font-weight: var(--clock-weight, 200); letter-spacing: -2px; color: var(--color-accent); font-variant-numeric: tabular-nums; white-space: nowrap; }
 .standby-date { font-size: var(--text-small); opacity: 0.8; }
 .standby-stack { position: relative; height: min(78vh, 340px); min-width: 0; }
 .standby-track { height: 100%; overflow-y: auto; scroll-snap-type: y mandatory; scrollbar-width: none; border-radius: 20px; }
@@ -3004,7 +3005,42 @@ html[data-mode="lock"] body { background: none; }
   will-change: transform, opacity;
 }
 html.lock-settling[data-mode="lock"] { transition: --lock-lift var(--spring-ms) var(--spring); }
-.lock-time { font: 300 88px/1 var(--font-body); color: var(--color-foreground); letter-spacing: 2px; }
+.lock-time { font: 300 88px/1 var(--font-body); font-family: var(--clock-font, var(--font-body)); font-weight: var(--clock-weight, 300); color: var(--clock-color, var(--color-foreground)); letter-spacing: 2px; }
+/* The lock's own backdrop (lockstyle.ts LockWall, html[data-lockwall]): home's tint (above), darker, the theme's
+   background alone, or black - over the same wallpaper, so the lock can look apart from home without a second picture. */
+html[data-mode="lock"][data-lockwall="dim"] { background: color-mix(in srgb, color-mix(in srgb, black 80%, var(--backdrop-tint)) calc((1 - var(--lock-lift)) * 100%), transparent); }
+html[data-mode="lock"][data-lockwall="plain"] { background: color-mix(in srgb, var(--color-background) calc((1 - var(--lock-lift)) * 100%), transparent); }
+html[data-mode="lock"][data-lockwall="black"] { background: color-mix(in srgb, black calc((1 - var(--lock-lift)) * 100%), transparent); }
+/* The face's edit (lockedit.tsx): a sheet over the lower face on THE backdrop; the face above it is the live preview. */
+.lock-edit {
+  position: fixed;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  max-height: 62vh;
+  overflow-y: auto;
+  padding: 16px var(--edge) calc(var(--inset-bottom, 0px) + 16px);
+  border-radius: var(--radius) var(--radius) 0 0;
+  background: var(--backdrop-tint);
+  color: var(--color-foreground);
+  touch-action: pan-y;
+  z-index: 3;
+}
+/* Settings > lock screen: the editor in the page, its clock previewed on the lock's backdrop. */
+.lock-preview { display: flex; justify-content: center; padding: 24px 0; margin: 8px 0; border-radius: var(--radius); background: var(--backdrop-tint); }
+.lock-preview[data-lockwall="plain"] { background: var(--color-background); }
+.lock-preview[data-lockwall="black"], .lock-preview[data-lockwall="dim"] { background: black; }
+.lock-preview .lock-time { font-size: 64px; }
+.scr .lock-edit { position: static; max-height: none; background: none; padding: 0; }
+.lock-edit-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 8px; font-size: var(--text-body); }
+.lock-edit-row { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin: 8px 0; }
+.lock-edit-label { width: 100%; font-size: var(--text-small, 13px); color: var(--color-muted); }
+.lock-edit-chip { min-height: 36px; padding: 0 12px; border-radius: var(--radius); border: 0; background: color-mix(in srgb, var(--color-foreground) 10%, transparent); color: inherit; font: inherit; }
+.lock-edit-chip.on { background: var(--color-accent); color: var(--color-background); }
+.lock-edit-swatch { width: 14px; height: 14px; border-radius: 50%; display: inline-block; vertical-align: -2px; margin-right: 6px; background: var(--swatch); }
+.lock-edit-apps { display: flex; flex-wrap: wrap; gap: 6px; max-height: 30vh; overflow-y: auto; }
+.lock.editing .lock-notes, .lock.editing .lock-media, .lock.editing .lock-foot, .lock.editing .lock-fp { visibility: hidden; }
+.lock.editing .lock-time { border-radius: var(--radius); background: color-mix(in srgb, var(--color-foreground) 8%, transparent); padding: 4px 12px; }
 .lock-date { margin-top: 8px; color: var(--color-foreground); font-size: var(--text-body); }
 /* At a glance (lockglance.tsx): the next alarm, the next event, the weather - one line of small chips under the date,
    the date's color a step quieter; a long event title is cut, never wrapped onto a second line. */
@@ -3104,6 +3140,7 @@ html.glass:root .lock .cc-media.tile {
   transition: transform var(--spring-fast-ms) var(--spring-fast);
 }
 .lock-shortcut.left { left: var(--edge); }
+.lock-shortcut-app { width: 28px; height: 28px; border-radius: var(--radius); }
 .lock-shortcut.right { right: var(--edge); }
 /* --lock-hold: the hold's length, set on the button from lockshortcuts.tsx HOLD_MS (one number for both). */
 .lock-shortcut.holding { transform: scale(1.2); transition: transform var(--lock-hold) linear; }

@@ -31,6 +31,11 @@
  *
  * Under the date, at a glance (lockglance.tsx, LockGlance.kt): the next alarm, the next event of the next 12 hours and
  * the weather now, small chips on one line; a part that isn't there isn't shown.
+ *
+ * The face is the user's (lockstyle.ts, edited in lockedit.tsx): the clock's font / weight / colour, the backdrop, the
+ * glance items and now playing shown or not, the corners. A long press on the face (not on a card or a corner, held
+ * still EDIT_MS) edits it in place once the phone is unlocked with the face still up (a biometric, a trusted device:
+ * lock.locked false); still locked, the hint says to unlock first or use Settings > lock screen.
  */
 import { useEffect, useLayoutEffect, useRef, useState } from "preact/hooks";
 import { powos } from "../bridge.ts";
@@ -47,6 +52,8 @@ import { LockShortcuts, askShortcuts } from "./lockshortcuts.tsx";
 import { Icon } from "./icons.tsx";
 import type { LockSensor } from "../types.ts";
 import { LockGlance } from "./lockglance.tsx";
+import { clockVars, loadLockFace, lockFace } from "./lockstyle.ts";
+import { LockEditor } from "./lockedit.tsx";
 
 /** Lifted this far (of the height) when let go, it unlocks. */
 const UNLOCK = 0.33;
@@ -58,6 +65,10 @@ const STILL = 80;
 const SHOWN = 5;
 /** px the finger moves before it's the face's swipe; less, and let go, it was a tap (a card's, a group's). */
 const SLOP = 10;
+/** ms the finger rests on the face (not a card, not a corner) before it's the edit's long press. */
+const EDIT_MS = 550;
+/** Where a long press is someone else's: a card (snooze), the player, a corner, the edit itself. */
+const NOT_EDIT = ".lock-note, .lock-media, .lock-edit";
 
 const two = (n: number) => String(n).padStart(2, "0");
 
@@ -104,9 +115,11 @@ function lift(p: number, settling: boolean) {
  */
 function LockMedia() {
   useEffect(askMedia, []);
+  const keep = lockFace.value.glance.media;
   // Each minute: a paused card's 10 minutes are counted with no tick from the host.
   const now = useMinuteClock();
-  const shown = lockSessions(media.value, mediaSeen.at, Math.max(now.getTime(), Date.now()));
+  // Now playing taken off the face (the edit): no cards (and the players' own notifications listed again).
+  const shown = keep ? lockSessions(media.value, mediaSeen.at, Math.max(now.getTime(), Date.now())) : [];
   const pkgs = shown.map((m) => m.package ?? "").join();
   const [track, dots] = useCardDots(shown.length);
   useEffect(() => {
@@ -234,6 +247,21 @@ export function Lock() {
     const t = window.setTimeout(() => setHint(null), 1600);
     return () => clearTimeout(t);
   }, [hint]);
+  /** The face being edited (lockedit.tsx), and the long press that may open it. */
+  const [editing, setEditing] = useState(false);
+  const press = useRef(0);
+  const unpress = () => (clearTimeout(press.current), (press.current = 0));
+  const wall = lockFace.value.wall;
+  useEffect(() => void (document.documentElement.dataset.lockwall = wall), [wall]);
+  const tryEdit = () => {
+    press.current = 0;
+    // The finger stays: no swipe from it now.
+    drag.current = null;
+    powos.lock.locked().then(
+      (locked) => (locked ? setHint("unlock first to customize, or settings › lock screen") : setEditing(true)),
+      () => setHint("customize it in settings › lock screen"),
+    );
+  };
   /** The cards leaving, by key: each one's cancel (it came back before it was gone). */
   const leaving = useRef(new Map<string, () => void>());
   useLayoutEffect(() => {
@@ -268,6 +296,9 @@ export function Lock() {
       // Shown again (the screen back on, the PIN pad backed out of): the face whole, wherever it was left.
       going.current = false;
       drag.current = null;
+      // Shown again: not editing; the face as it is set now (another page may have changed it).
+      setEditing(false);
+      loadLockFace();
       lift(0, false);
       // Folded again, as a shut shade starts (notifications.tsx).
       foldAll();
@@ -292,6 +323,7 @@ export function Lock() {
   const charge = chargeLine(battery);
 
   const end = (e: PointerEvent, cancelled = false) => {
+    unpress();
     const d = drag.current;
     if (!d || d.id !== e.pointerId) return;
     drag.current = null;
@@ -308,11 +340,12 @@ export function Lock() {
 
   return (
     <div
-      class="lock"
+      class={`lock${editing ? " editing" : ""}`}
       onPointerDown={(e) => {
-        if (drag.current || going.current) return;
+        if (drag.current || going.current || editing) return;
         const at = e.target as Element;
         if (at.closest?.(OWN)) return;
+        if (!at.closest?.(NOT_EDIT)) press.current = window.setTimeout(tryEdit, EDIT_MS);
         // Not captured yet: a tap on a card or a group's head is theirs (captured here, no tap ever reached them).
         drag.current = {
           id: e.pointerId,
@@ -331,6 +364,7 @@ export function Lock() {
         // The media track's sideways swipe: the face lets the finger go (the track scrolls).
         if (!d.moved && sideways(d, e)) return void (drag.current = null);
         if (!d.moved && !claim(d, e)) return;
+        unpress();
         const t = performance.now();
         const [ly, lt] = d.last;
         if (t > lt) d.v = (ly - e.clientY) / (t - lt);
@@ -340,7 +374,7 @@ export function Lock() {
       onPointerUp={end}
       onPointerCancel={(e) => end(e, true)}
     >
-      <div class="lock-time">
+      <div class="lock-time" style={clockVars(lockFace.value)}>
         {two(now.getHours())}:{two(now.getMinutes())}
       </div>
       <div class="lock-date">
@@ -374,7 +408,8 @@ export function Lock() {
         <div class="lock-hint muted">{hint ?? sensorHint(sensor)}</div>
       </div>
       <LockFingerprint s={sensor} />
-      <LockShortcuts hint={setHint} />
+      {!editing && <LockShortcuts hint={setHint} />}
+      {editing && <LockEditor onDone={() => setEditing(false)} />}
     </div>
   );
 }

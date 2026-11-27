@@ -6,6 +6,8 @@
  *
  * Icon first: every screen, section and action is an icon (ui/icons.tsx) with a word, the settings hub a grid of them.
  */
+import { LockEditor } from "./lockedit.tsx";
+import { clockVars, loadLockFace, lockFace } from "./lockstyle.ts";
 import type { ComponentChildren, FunctionComponent } from "preact";
 import { useEffect, useLayoutEffect, useRef, useState } from "preact/hooks";
 import { powos } from "../bridge.ts";
@@ -505,6 +507,7 @@ function SettingsScreen() {
     ["cellphoneCog", "android settings", "the phone's own", () => act("settings", "android")],
     ["arrowLeft", "gestures", "edge gestures, quick tools", () => openScreen("gestures")],
     ["robotOutline", "automations", automationsLine(), () => openScreen("automations")],
+    ["lockOutline", "lock screen", "clock, background, glance, shortcuts", () => openScreen("lockscreen")],
     ["minusCircleOutline", "focus", focusOn.value ? `${focusOn.value.label.toLowerCase()} on` : "modes: which apps get through", () => openScreen("focus")],
     voiceTile(),
     ["scaleBalance", "licenses", "open source in PowOS", () => openScreen("licenses")],
@@ -1589,6 +1592,27 @@ function GesturesScreen() {
   );
 }
 
+// --- lock screen: the face's edit (lockedit.tsx), with its clock as a preview
+
+function LockScreenSettings() {
+  useEffect(loadLockFace, []);
+  const now = new Date();
+  return (
+    <Frame icon="lockOutline" title="lock screen">
+      <div class="scr-note muted">
+        Also from the lock screen itself: once your fingerprint or face has unlocked the phone, touch and hold the lock
+        screen. The clock style is the always-on display's and StandBy's too.
+      </div>
+      <div class="lock-preview" data-lockwall={lockFace.value.wall}>
+        <div class="lock-time" style={clockVars(lockFace.value)}>
+          {String(now.getHours()).padStart(2, "0")}:{String(now.getMinutes()).padStart(2, "0")}
+        </div>
+      </div>
+      <LockEditor />
+    </Frame>
+  );
+}
+
 // --- focus: the modes (ui/focus.ts) and the apps each lets through
 
 /** Android's apps by package (a work profile's twin once). */
@@ -2174,6 +2198,7 @@ const SCREENS: Record<ScreenName, FunctionComponent> = {
   join: JoinScreen,
   focus: FocusScreen,
   automations: AutomationsScreen,
+  lockscreen: LockScreenSettings,
 };
 
 /** The top screen, over home; those under it wait (unwatched) until it closes. */

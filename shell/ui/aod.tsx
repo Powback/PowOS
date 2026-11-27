@@ -14,6 +14,7 @@ import { powos } from "../bridge.ts";
 import type { LockSensor, MediaState, NotificationList } from "../types.ts";
 import { askMedia, media, refreshMedia, sessionsOf, usePlaying } from "./media.tsx";
 import { Icon } from "./icons.tsx";
+import { clockVars, loadLockFace, lockFace } from "./lockstyle.ts";
 
 /** How far it wanders from the middle, px. */
 const DRIFT = 18;
@@ -69,6 +70,8 @@ export function Aod({ controls = false }: { controls?: boolean }) {
   const [sensor, setSensor] = useState<LockSensor | null>(null);
   useEffect(() => {
     askMedia();
+    // The lock face's clock style (lockstyle.ts), read as it shows: one style for every clock face.
+    loadLockFace();
     // Asked again each time it's shown: a finger enrolled meanwhile, the inner / outer screen (its own sensor place).
     const askSensor = () => void powos.lock.sensor().then(setSensor, () => setSensor(null));
     askSensor();
@@ -97,7 +100,7 @@ export function Aod({ controls = false }: { controls?: boolean }) {
   return (
     <>
       <div class="aod" style={{ transform: `translate(${drift.x}px, ${drift.y}px)` }}>
-        <div class="aod-time">
+        <div class="aod-time" style={clockVars(lockFace.value)}>
           {two(now.getHours())}:{two(now.getMinutes())}
         </div>
         <div class="aod-date">{now.toLocaleDateString(undefined, { weekday: "long", day: "numeric", month: "long" }).toLowerCase()}</div>

@@ -722,6 +722,10 @@ class ShellBridge(
             "automations.takeFocus" -> dev.omalauncher.automations.Automations.takeFocus(context)
             "automations.next" -> dev.omalauncher.automations.Automations.next(a.getJSONObject(0))
             "automations.actions" -> dev.omalauncher.automations.Automations.apiActions()
+            // The face's edit (lockedit.tsx) only once the phone is unlocked (a biometric, a trusted device) with the face up.
+            "lock.locked" -> context.getSystemService(android.app.KeyguardManager::class.java).isDeviceLocked
+            // A corner shortcut set to an app: the unlock first (PIN pad / fingerprint), the app once it's done.
+            "lock.open" -> a.getString(0).let { key -> requireNotNull(lock) { "not the lock face" }.unlockThen { launch(key, false) } }
             // StandBy (standby.tsx) tapped: the screensaver ends, the lock screen (or what was up) shows.
             "standby.exit" -> requireNotNull(standbyExit) { "not StandBy" }.invoke()
             "qs.destinations" -> SettingsSearch(context).destinations { broadcast("qs.destinations", "null") }

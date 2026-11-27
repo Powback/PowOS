@@ -1273,6 +1273,11 @@ export interface Bridge {
     sensor(): Promise<LockSensor>;
     /** The glance under the clock as it is now (an older APK rejects: none shown); "lock.glance" pushes each change. */
     glance(): Promise<LockGlanceState>;
+    /** Whether the phone needs its PIN / fingerprint now (KeyguardManager.isDeviceLocked): false once a biometric or a
+     * trusted device unlocked it with the face still up - only then does a long press on the face edit it. */
+    locked(): Promise<boolean>;
+    /** Asks for the unlock, then opens the app [key] (a corner shortcut set to an app). */
+    open(key: string): Promise<void>;
   };
   /** StandBy (index.html?mode=standby, the "when charging" screensaver PowosDozeService): "standby.dark" (boolean) follows the room's light. */
   standby: {

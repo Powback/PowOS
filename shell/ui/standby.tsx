@@ -14,6 +14,7 @@ import { Aod } from "./aod.tsx";
 import { glanceTime } from "./lockglance.tsx";
 import { askMedia, media, sessionsOf, usePlaying } from "./media.tsx";
 import { Icon } from "./icons.tsx";
+import { clockVars, loadLockFace, lockFace } from "./lockstyle.ts";
 import { PageDots, paintDots } from "./pagedots.tsx";
 
 const two = (n: number) => String(n).padStart(2, "0");
@@ -147,6 +148,8 @@ function StandbyFace() {
   const [drift, setDrift] = useState({ x: 0, y: 0 });
   useEffect(() => {
     askMedia();
+    // The lock face's clock font and weight (lockstyle.ts); the colour stays StandBy's (its night red wins).
+    loadLockFace();
     powos.lock.glance().then(setG, () => {});
     const offs = [powos.on("lock.glance", setG), powos.on("standby.dark", (d: boolean) => setDark(!!d))];
     const tick = () => {
@@ -169,7 +172,7 @@ function StandbyFace() {
   return (
     <div class="standby" data-night={night ? "1" : "0"} style={{ transform: `translate(${drift.x}px, ${drift.y}px)` }} onClick={() => void powos.standby.exit().catch(() => {})}>
       <div class="standby-clock">
-        <div class="standby-time">
+        <div class="standby-time" style={clockVars(lockFace.value, false)}>
           {two(now.getHours())}:{two(now.getMinutes())}
         </div>
         <div class="standby-date">

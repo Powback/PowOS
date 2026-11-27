@@ -10508,6 +10508,92 @@ async function aodScene(r, label) {
 }
 
 /**
+ * LC1 (board "Customize the lock screen"): a long press on the face of a phone unlocked by a biometric (lock.locked
+ * false) opens the edit; a pick shows on the face at once (optimistic) and is kept in the store "lock.face"; locked, the
+ * long press only hints. A customized face (serif bold accent clock, black backdrop, weather only, focus + recorder
+ * corners) reads back from the store as the face shows.
+ */
+const lcWait = (ms) => new Promise((ok) => setTimeout(ok, ms));
+function lcRead() {
+  const t = document.querySelector(".lock-time");
+  const cs = getComputedStyle(t);
+  const kinds = (sel, key) => [...document.querySelectorAll(sel)].map((c) => c.dataset[key]).join();
+  return {
+    editing: !!document.querySelector(".lock-edit"),
+    family: cs.fontFamily,
+    weight: cs.fontWeight,
+    color: t.style.getPropertyValue("--clock-color"),
+    wall: document.documentElement.dataset.lockwall ?? "",
+    chips: kinds(".lock-glance-chip", "kind"),
+    corners: kinds(".lock-shortcut", "shortcut"),
+    hint: document.querySelector(".lock-hint")?.textContent ?? "",
+  };
+}
+/** A finger held on the clock past the edit's long press, then let go. */
+async function lcHold(r) {
+  await r.page.evaluate(() => {
+    const t = document.querySelector(".lock-time");
+    const b = t.getBoundingClientRect();
+    t.dispatchEvent(new PointerEvent("pointerdown", { bubbles: true, clientX: b.left + b.width / 2, clientY: b.top + b.height / 2, pointerId: 11, pointerType: "touch", isPrimary: true }));
+  });
+  await lcWait(800);
+  await r.page.evaluate(() => document.querySelector(".lock").dispatchEvent(new PointerEvent("pointerup", { bubbles: true, pointerId: 11, pointerType: "touch" })));
+  await lcWait(50);
+  return r.page.evaluate(lcRead);
+}
+function lcSetup() {
+  return (async () => {
+    const { powos } = await window.__gw.mod("./bridge.ts");
+    window.__lcBridge = powos;
+    window.__lcLocked = true;
+    powos.lock.locked = async () => window.__lcLocked;
+    powos.lock.shortcuts = async () => ({ torch: false, camera: true });
+    powos.apps.list = async () => [{ key: "a:com.google.android.apps.recorder/.Main", label: "Recorder", icon: "", kind: "android" }];
+    await powos.store.set("lock.face", null);
+    window.__mockEvents.emit("lock.shown", null);
+  })();
+}
+/** Locked: the long press only hints. Unlocked: it edits, and a colour pick is on the clock at once and kept. */
+async function lcEditFails(r, label) {
+  const fails = [];
+  let s = await lcHold(r);
+  if (s.editing) fails.push(`LC1 ${label}: a long press on a locked phone opened the edit`);
+  if (!/unlock first/.test(s.hint)) fails.push(`LC1 ${label}: locked, the long press says nothing (hint "${s.hint}")`);
+  await r.page.evaluate(() => (window.__lcLocked = false));
+  s = await lcHold(r);
+  if (!s.editing) fails.push(`LC1 ${label}: a long press on an unlocked face didn't open the edit`);
+  await r.page.evaluate(() => document.querySelector('.lock-edit [data-pick="color:accent"]')?.click());
+  await lcWait(50);
+  s = await r.page.evaluate(lcRead);
+  if (s.color !== "var(--color-accent)") fails.push(`LC1 ${label}: the colour pick isn't on the clock at once (${s.color || "none"})`);
+  const kept = await r.page.evaluate(() => window.__lcBridge.store.get("lock.face"));
+  if (kept?.clock?.color !== "accent") fails.push(`LC1 ${label}: the colour pick isn't kept in the store`);
+  return fails;
+}
+/** A customized face in the store, the face shown again: all of it read back. */
+async function lcFaceFails(r, label) {
+  await r.page.evaluate(async () => {
+    await window.__lcBridge.store.set("lock.face", { clock: { font: "serif", weight: "bold", color: "accent" }, wall: "black", glance: { alarm: false, event: false, weather: true, media: false }, corners: ["focus", "recorder"] });
+    window.__mockEvents.emit("lock.shown", null);
+  });
+  await lcWait(300);
+  await r.page.evaluate((now) => window.__mockEvents.emit("lock.glance", { alarm: now + 7 * 3600e3, event: { title: "Standup", at: now + 90 * 60e3 }, weather: { temp: "7°", icon: "\ue30d", place: "Oslo" } }), Date.now());
+  await lcWait(50);
+  const s = await r.page.evaluate(lcRead);
+  const want = { editing: false, serifBold: true, wall: "black", chips: "weather", corners: "focus,recorder" };
+  const got = { editing: s.editing, serifBold: /serif/i.test(s.family) && !/sans-serif$/.test(s.family) && s.weight === "700", wall: s.wall, chips: s.chips, corners: s.corners };
+  console.log(`     lock-custom-${label}: ${JSON.stringify(s)}`);
+  return Object.keys(want).filter((k) => want[k] !== got[k]).map((k) => `LC1 ${label}: ${k} ${JSON.stringify(got[k])}, want ${JSON.stringify(want[k])}`);
+}
+async function lockCustomScene(r, label) {
+  await r.page.evaluate(lcSetup);
+  await lcWait(300);
+  const fails = [...(await lcEditFails(r, label)), ...(await lcFaceFails(r, label))];
+  await r.page.screenshot({ path: `/cache/lock-custom-check-${label}.png` }).catch(() => {});
+  return fails;
+}
+
+/**
  * LG1 (board "Lock screen shows next alarm, weather and next event"): the glance under the date (lockglance.tsx), a
  * mock "lock.glance" pushed as the native side does. All three: three chips on one line, under the date, inside the
  * screen and centred, a long event title cut (never wrapped, never past the edge). Only the weather: one chip. Nothing:
@@ -16697,6 +16783,10 @@ try {
   if (process.env.SHELL_PAGES !== "0")
     for (const [label, viewport] of [["folded", { width: 404, height: 900 }], ["unfolded", { width: 821, height: 883 }]])
       runs.push(open(browser, `${ORIGIN}/index.html?mode=lock`, `lock-glance-${label}`, viewport).then((r) => whenReady(r, () => lockGlanceScene(r, label))));
+  // LC1: the face's edit (long press, unlocked only) and a customized face read back. Folded and unfolded.
+  if (process.env.SHELL_PAGES !== "0")
+    for (const [label, viewport] of [["folded", { width: 404, height: 900 }], ["unfolded", { width: 821, height: 883 }]])
+      runs.push(open(browser, `${ORIGIN}/index.html?mode=lock`, `lock-custom-check-${label}`, viewport).then((r) => whenReady(r, () => lockCustomScene(r, label))));
   // SBY1: StandBy (the charging screensaver) on its side - clock, two stacks, night look, tap to exit. Folded and unfolded.
   if (process.env.SHELL_PAGES !== "0")
     for (const [label, viewport] of [["folded", { width: 900, height: 404 }], ["unfolded", { width: 883, height: 821 }]])

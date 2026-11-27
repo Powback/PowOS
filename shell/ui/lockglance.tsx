@@ -7,6 +7,7 @@
 import { useEffect, useState } from "preact/hooks";
 import { powos } from "../bridge.ts";
 import type { LockGlanceState } from "../types.ts";
+import { lockFace } from "./lockstyle.ts";
 
 const two = (n: number) => String(n).padStart(2, "0");
 const DAY = 24 * 60 * 60 * 1000;
@@ -57,7 +58,9 @@ export function LockGlance({ now }: { now: Date }) {
     powos.lock.glance().then(setG, () => {});
     return powos.on("lock.glance", setG);
   }, []);
-  const chips = glanceChips(g, now.getTime());
+  // Only the items the user keeps on the face (lockstyle.ts glance, the face's edit).
+  const show = lockFace.value.glance;
+  const chips = glanceChips(g, now.getTime()).filter((c) => show[c.kind]);
   if (!chips.length) return null;
   return (
     <div class="lock-glance">
