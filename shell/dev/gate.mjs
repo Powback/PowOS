@@ -304,6 +304,72 @@ async function statusIconsCheck(folded) {
 }
 
 /**
+ * Live activities round the camera (ui/chrome.tsx LiveIsland, StatusChrome.kt LiveActivities; board
+ * live-activities-around-the-camera-ring): a running timer / progress / playing media draw a black pill hugging the
+ * hole (4 px round it, top and bottom) and inside the screen, its time ticking; a tap shows it pressed at once and asks
+ * for "live:<key>" (its region sent first); a long-press widens it with the title; nothing live: no pill.
+ */
+async function liveIslandCheck(hole) {
+  const frame = () => new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)));
+  const wait = (ms) => new Promise((r) => setTimeout(r, ms));
+  const show = async (extra) => { window.__mockEvents.emit("chrome.changed", { kind: "status", battery: 74, network: "wifi", left: 8, camera: hole, ...extra }); await frame(); };
+  const pill = () => document.querySelector(".live-island");
+  const text = () => pill()?.textContent ?? "";
+  // Settled: the spring in finished (not the endless opening pulse).
+  const width = () => { for (const a of pill()?.getAnimations() ?? []) if (a.effect?.getComputedTiming().endTime !== Infinity) a.finish(); return pill()?.getBoundingClientRect().width ?? 0; };
+  const timer = { key: "0|com.example.clock|7|null|10", kind: "timer", app: "Clock", title: "Timer", text: null, clock: { base: Date.now() + 65_500, down: true } };
+  const must = (ok, why) => (ok ? [] : [why]);
+  const placed = (label) => {
+    if (!pill()) return [`${label}: no pill`];
+    const r = (width(), pill().getBoundingClientRect());
+    return [
+      ...must(Math.abs(r.top - (hole.y - 4)) <= 1 && Math.abs(r.height - (hole.height + 8)) <= 1, `${label}: pill ${r.top}+${r.height} isn't 4px round the hole ${hole.y}+${hole.height}`),
+      ...must(r.left <= hole.x - 3 && r.right >= hole.x + hole.width + 3, `${label}: pill ${r.left}..${r.right} doesn't go round the hole ${hole.x}..${hole.x + hole.width}`),
+      ...must(r.left >= 0 && r.right <= innerWidth, `${label}: pill ${r.left}..${r.right} off the ${innerWidth}px screen`),
+    ];
+  };
+  const ticking = async () => {
+    const t1 = text();
+    await wait(1100);
+    return [
+      ...must(/1:0[3-5]/.test(t1), `timer: shows "${t1}", want ~1:05 counting down`),
+      ...must(t1.includes("+1"), `timer: doesn't count the other one ("${t1}")`),
+      ...must(text() !== t1, "timer: the time didn't tick"),
+      ...must((window.__chromeRegions ?? []).some((r) => r.action === "live"), `the pill's region never reached the host (${JSON.stringify(window.__chromeRegions)})`),
+    ];
+  };
+  const longPress = async () => {
+    const narrow = width();
+    pill().dispatchEvent(new PointerEvent("pointerdown", { bubbles: true }));
+    await wait(520);
+    pill().dispatchEvent(new PointerEvent("pointerup", { bubbles: true }));
+    pill().click(); // the click a long press ends with: not an open
+    await frame();
+    const wide = width();
+    return [...must(wide > narrow + 20 && text().includes("Timer"), `long-press: ${narrow} -> ${wide}px, "${text()}" - want wider with the title`), ...placed("wide")];
+  };
+  const tap = async () => {
+    const n = (window.__chromeActions ??= []).length;
+    pill().click();
+    await frame();
+    const got = window.__chromeActions.slice(n);
+    return [...must(got.length === 1 && got[0] === `live:${timer.key}`, `tap: actions ${JSON.stringify(got)}, want ["live:${timer.key}"]`),
+      ...must(pill().classList.contains("opening"), "tap: the pill doesn't show it's opening")];
+  };
+  await show({ live: [] });
+  const fail = must(!pill(), "a pill with nothing live");
+  await show({ live: [timer, { key: "dl", kind: "progress", app: "Files", title: "photo.zip", text: null, progress: 0.42 }] });
+  fail.push(...placed("timer"));
+  if (!pill()) return fail;
+  fail.push(...await ticking(), ...await longPress(), ...await tap());
+  await show({ live: [{ key: "m", kind: "media", app: "Music", title: "Song", text: "Band" }], recording: "mic" });
+  fail.push(...placed("media"), ...must(!!pill()?.querySelector(".live-eq"), "media: no playing meter"),
+    ...must(!document.querySelector(".status-rec-ring"), "media + mic: a ring over the pill (the pill's edge is the light)"));
+  await show({ live: [], recording: null });
+  return [...fail, ...must(!pill(), "the pill stayed after it ended")];
+}
+
+/**
  * The recording light (ui/chrome.tsx RecordingRing, StatusChrome.kt's AppOps watch): with the camera / mic / screen in
  * use, a ring sits centred on the camera's cutout on this screen - [hole] the cover's centred punch-hole folded, the
  * inner screen's top-right one unfolded - in that op's colour; gone when nothing records; a dot without a cutout.
@@ -16147,6 +16213,9 @@ try {
   // cover (OEM hole [523,29:594,100] px, DPR 2.7625) and inner ([2144,46:2220,122]), and S25 / razr-shaped mocks.
   for (const [label, width, hole] of RING_HOLES)
     runs.push(open(browser, `${ORIGIN}/index.html?mode=statusbar`, `rec-light-${label}`, { width, height: 46 }).then((r) => whenReady(r, () => r.page.evaluate(recordingRingCheck, hole))));
+  // The live pill round the same holes (folded centred, unfolded top right: its trail goes left).
+  for (const [label, width, hole] of RING_HOLES)
+    runs.push(open(browser, `${ORIGIN}/index.html?mode=statusbar`, `live-island-${label}`, { width, height: 46 }).then((r) => whenReady(r, () => r.page.evaluate(liveIslandCheck, hole))));
   for (const [label, width] of [["folded", 404], ["unfolded", 821]])
     runs.push(open(browser, `${ORIGIN}/index.html?mode=statusbar`, `status-icons-${label}`, { width, height: 46 }).then((r) => whenReady(r, () => r.page.evaluate(statusIconsCheck, label === "folded"))));
   // The pill (bar.tsx, grow.tsx): every empty pill on home is one --pill-height tall - the foot's, PowOS AI's compose,

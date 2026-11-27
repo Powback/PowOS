@@ -97,3 +97,39 @@ html:root .chrome-surface { --frost-fill: color-mix(in srgb, var(--frost-base) m
 .status-nicon { width: 15px; height: 15px; background: currentColor; -webkit-mask: var(--icon) center / contain no-repeat; mask: var(--icon) center / contain no-repeat; }
 .status-battery[data-tone="saver"] { color: var(--status-needs); }
 .status-battery[data-tone="low"] { color: var(--color-red); }
+/* The live pill round the camera (chrome.tsx LiveIsland): black like the hole it hugs, [lead | hole | trail] columns
+   sized by the page. A transparent 2px edge always (ISLAND_EDGE), filled with the recording colour while something records. */
+.status-chrome .live-island { --live-ink: var(--live-on-black); pointer-events: auto; appearance: none; margin: 0; padding: 0; min-height: 0; min-width: 0; cursor: pointer;
+  position: fixed; display: grid; align-items: center; border-radius: 999px; box-sizing: border-box; border: 2px solid transparent;
+  background: var(--live-black) padding-box, var(--live-black) border-box; color: var(--live-ink); box-shadow: none;
+  font: 600 12px/1 var(--font-body); font-variant-numeric: tabular-nums; overflow: hidden;
+  transition: left var(--spring-fast-ms) var(--spring-fast), width var(--spring-fast-ms) var(--spring-fast), scale var(--spring-fast-ms) var(--spring-fast), filter var(--spring-fast-ms) var(--spring-fast);
+  animation: status-rec-in var(--spring-fast-ms) var(--spring-fast); }
+.live-island { --live-black: #000; --live-on-black: #fff; }
+.status-chrome .live-island:focus, .status-chrome .live-island:focus-visible { background: var(--live-black) padding-box, var(--live-black) border-box; box-shadow: none; }
+.status-chrome .live-island[data-rec], .status-chrome .live-island[data-rec]:focus { background: var(--live-black) padding-box, linear-gradient(var(--rec), var(--rec)) border-box; }
+.live-island[data-rec="camera"] { --rec: var(--privacy-camera); }
+.live-island[data-rec="mic"] { --rec: var(--privacy-mic); }
+.live-island[data-rec="screen"] { --rec: var(--privacy-screen); }
+.status-chrome .live-island:active, .status-chrome .live-island.opening { scale: .94; }
+.status-chrome .live-island.opening { animation: live-opening 600ms var(--ambient) infinite alternate; }
+@keyframes live-opening { to { filter: brightness(1.8); } }
+.live-lead, .live-trail { display: flex; align-items: center; gap: 4px; min-width: 0; overflow: hidden; white-space: nowrap; }
+.live-lead { justify-content: flex-end; padding-left: 6px; }
+.live-trail { justify-content: flex-start; padding-right: 6px; }
+.live-lead svg { width: 14px; height: 14px; flex: none; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+.live-island[data-kind="call"] .live-lead svg, .live-island[data-kind="call"] .live-time { color: var(--privacy-camera); }
+.live-island[data-kind="timer"] .live-lead svg, .live-island[data-kind="timer"] .live-time { color: var(--privacy-mic); }
+.live-more { font-weight: 600; font-size: 10px; opacity: .7; }
+.live-title { overflow: hidden; text-overflow: ellipsis; min-width: 0; flex: 1 1 auto; font-weight: 500; opacity: .85; }
+.live-time { display: flex; align-items: center; gap: 3px; flex: none; }
+.live-ring { width: 13px; height: 13px; rotate: -90deg; fill: none; stroke-width: 3; flex: none; }
+.live-ring circle { stroke: color-mix(in srgb, currentColor 25%, transparent); }
+.live-ring .live-ring-done { stroke: var(--color-accent); }
+.live-ring.live-spin .live-ring-done { stroke-dasharray: 30 100; animation: live-spin 1000ms var(--ambient) infinite; transform-origin: center; }
+@keyframes live-spin { to { rotate: 1turn; } }
+.live-eq { display: flex; align-items: flex-end; gap: 2px; height: 12px; flex: none; }
+.live-eq i { width: 3px; height: 100%; border-radius: 0; background: var(--privacy-camera); transform-origin: bottom; animation: live-eq 900ms var(--ambient) infinite alternate; }
+.live-eq i:nth-child(2) { animation-delay: -.3s; } .live-eq i:nth-child(3) { animation-delay: -.6s; }
+@keyframes live-eq { from { scale: 1 .3; } to { scale: 1 1; } }
+@media (prefers-reduced-motion: reduce) { .live-eq i, .live-spin .live-ring-done, .live-island.opening { animation: none; } }

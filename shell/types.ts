@@ -580,6 +580,21 @@ export type Battery = {
   fullInMs?: number | null;
 };
 
+/**
+ * A live activity (host: system/LiveActivities.kt), from an ongoing notification: media that plays, a call, a timer or
+ * stopwatch ([clock]: epoch ms, counting up from [base] or [down] to it), progress (0..1, null indeterminate) - a
+ * download, a ship, a PowOS AI task - or Android 16's promoted "live update". [key] the notification's.
+ */
+export type LiveActivity = {
+  key: string;
+  kind: "call" | "timer" | "progress" | "live" | "media";
+  app: string;
+  title: string | null;
+  text: string | null;
+  clock?: { base: number; down: boolean };
+  progress?: number | null;
+};
+
 /** Visible system chrome is shared web UI; hosts supply state and perform scoped actions. */
 export interface ChromeState {
   kind: "window" | "grip" | "status";
@@ -602,6 +617,8 @@ export interface ChromeState {
   holeLeft?: number;
   /** The camera's hole on this screen (CSS px, the strip's own coordinates; the hole itself, not the padded cutout box - StatusChrome.kt CameraHole): folded the cover's, unfolded the inner's. */
   camera?: { x: number; y: number; width: number; height: number };
+  /** What's going on now, round the camera ring (StatusChrome.kt LiveActivities; ui/chrome.tsx LiveIsland): the first is drawn. */
+  live?: LiveActivity[];
   /** The recording light (StatusChrome.kt RecordingWatcher, AppOps active ops): what's in use - camera, screen capture, mic. */
   recording?: "camera" | "screen" | "mic" | null;
   /** The apps using it (package names). */

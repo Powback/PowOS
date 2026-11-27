@@ -70,6 +70,8 @@ class StatusChrome(private val context: Context, private val changed: () -> Unit
         scope.launch { MediaListener.changes.collect {
             val count = runCatching { MediaListener.connected?.activeNotifications?.size }.getOrNull()
             data.put("notifications", count ?: JSONObject.NULL)
+            // The live activities round the camera ring (chrome.tsx LiveIsland): media, calls, timers, progress.
+            data.put("live", LiveActivities.json(context, LiveActivities.read(context)))
             publish()
         } }
     }
@@ -102,7 +104,7 @@ class StatusChrome(private val context: Context, private val changed: () -> Unit
                 }
             }.filter { !it.second.isEmpty }
         val list = all.map { it.second }
-        val light = all.filter { it.first == "privacy" }.map { it.second }
+        val light = all.filter { it.first == "privacy" || it.first == "live" }.map { it.second }
         web.post {
             if (list == controls && light == lights) return@post
             controls = list
@@ -133,7 +135,14 @@ class StatusChrome(private val context: Context, private val changed: () -> Unit
         publish()
     }
 
-    override fun action(name: String) { when (name) { "notifications" -> open(false); "controls", "privacy" -> open(true) } } // privacy: the recording ring's tap - the control center, its privacy row
+    // privacy: the recording ring's tap - the control center, its privacy row; live:<key> the live pill's - that app.
+    override fun action(name: String) {
+        when {
+            name == "notifications" -> open(false)
+            name == "controls" || name == "privacy" -> open(true)
+            name.startsWith("live:") -> LiveActivities.open(context, name.removePrefix("live:"))
+        }
+    }
     private fun connection() {
         val caps = connectivity.getNetworkCapabilities(connectivity.activeNetwork)
         val kind = when {

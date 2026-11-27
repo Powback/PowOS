@@ -30,6 +30,8 @@ powos.on("chrome.changed", (state: ChromeState) => {
   lastRecording = state.recording;
   requestAnimationFrame(() => { void regions().catch(console.error); });
 });
+// The live pill (ui/chrome.tsx LiveIsland) says when it came, went or changed size.
+addEventListener("chrome-regions", () => { void regions().catch(console.error); });
 draw(await powos.chrome.state());
 function regions() {
   return powos.chrome.regions([...document.querySelectorAll<HTMLElement>("[data-action]")].map((e) => {
