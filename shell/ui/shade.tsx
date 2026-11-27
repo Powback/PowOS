@@ -17,6 +17,7 @@ import type { PhoneNotification } from "../types.ts";
 import { anchorPull, pullAt } from "./align.ts";
 import { homeGestures, notifDrag, notifOpen, notifShown } from "./gesture.ts";
 import { Actions, NotificationPanel, wideShade } from "./notifications.tsx";
+import { isHeld } from "./focus.ts";
 
 // Which panel the pull brings: the status bar's right half the control center, the rest the notifications - when
 // they're apart (settings); together, it's the one panel wherever the pull starts. Unfolded both show side by side;
@@ -117,7 +118,9 @@ effect(() => {
 
 /** The heads-up banner showing, or null. */
 const peek = signal<PhoneNotification | null>(null);
-powos.on("shade.peek", (n: PhoneNotification | null) => (peek.value = n));
+// A focus mode's held one (ui/focus.ts) gets no banner: it waits on the digest card (one showing stays; none: the
+// window the host raised for it goes).
+powos.on("shade.peek", (n: PhoneNotification | null) => (n && isHeld(n) ? peek.value || unpeek() : (peek.value = n)));
 
 /** How long a banner stays (ms): an alarm's or a call's longer. */
 const PEEK_MS = 6000;

@@ -311,6 +311,7 @@ function native(host: NonNullable<Window["PowosHost"]>): Bridge {
       access: () => call("notifications.access"),
       action: (key, index, text) => call("notifications.action", key, index, text ?? null),
       snooze: (key, ms) => call("notifications.snooze", key, ms), // detect: shown only when the list says snooze
+      focus: (allow) => call("notifications.focus", allow), // detect: an older host rejects it (no banners through DND)
     },
     lock: {
       unlock: () => call("lock.unlock"),

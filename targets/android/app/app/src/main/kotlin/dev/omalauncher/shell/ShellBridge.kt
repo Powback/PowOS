@@ -875,6 +875,7 @@ class ShellBridge(
             "notifications.snooze" -> runtime.widgets.notifications.snooze(a.getString(0), a.getLong(1))
             "notifications.action" -> runtime.widgets.notifications.action(a.getString(0), a.getInt(1), a.optString(2).takeIf { !a.isNull(2) && it.isNotEmpty() })
             "notifications.access" -> runtime.widgets.notifications.askAccess()
+            "notifications.focus" -> a.getJSONArray(0).let { l -> runtime.widgets.notifications.focusAllow = (0 until l.length()).map(l::getString).toSet() }
             // Android widgets are home items too, kept by AppWidgets ("aw:" keys).
             "home.get" -> panels.merge(appWidgets.merge(home.snapshot()))
             "home.place" -> if (panels.owns(a.getString(0))) panels.place(a.getString(0), a.getJSONObject(1), a.getInt(2)).also { emit("home.changed", null) } else if (appWidgets.owns(a.getString(0))) appWidgets.place(a.getString(0), a.getJSONObject(1), a.getInt(2)) else home.place(a.getString(0), a.getJSONObject(1), a.getInt(2))

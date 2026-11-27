@@ -18,6 +18,7 @@ import { tick } from "./haptics.ts";
 import { animateLayout, closeGap, foldAway } from "./notifmotion.ts";
 import { followNotif, notifOpen, notifShown } from "./gesture.ts";
 import { ago } from "./time.ts";
+import { clearHeld, digestLine, digestTitle, focusOn, releaseDigest, splitHeld } from "./focus.ts";
 import type { NotificationList, PhoneNotification } from "../types.ts";
 
 const list = signal<NotificationList>({ available: true, items: [] });
@@ -643,6 +644,44 @@ function stickyRoom(card: HTMLElement): { room: number; up: number; moved: HTMLE
   return { room, up, moved };
 }
 
+/**
+ * A focus mode's digest (ui/focus.ts): what it held, as one card at the top of the list - while it's on, and after it
+ * ended until "show" lets them in or "clear" dismisses them.
+ */
+function Digest({ held, i }: { held: PhoneNotification[]; i: number }) {
+  const on = focusOn.value;
+  const icons = [...new Map(held.map((n) => [n.pkg ?? n.app, n])).values()].slice(0, 4);
+  return (
+    <div class="cascade" data-q ref={followNotif} style={{ "--i": i }}>
+      <div class="notif tile notif-digest">
+        <div class="notif-head">
+          {icons.map((n) => {
+            const src = notifIconSrc(n);
+            return src ? <img key={n.key} class="notif-icon" src={src} alt="" /> : null;
+          })}
+          <span class="notif-app">{digestTitle(held.length)}</span>
+        </div>
+        <div class="notif-text">{digestLine(held)}</div>
+        <div class="notif-buttons" onPointerDown={(e) => e.stopPropagation()}>
+          {/* While on, "show" is the focus's end; after, the held ones into the list. */}
+          <button type="button" onClick={() => animateLayout(on ? releaseAll : releaseDigest)}>
+            {on ? "Show all" : "Show"}
+          </button>
+          <button type="button" onClick={() => animateLayout(() => clearHeld(held))}>
+            Clear
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+/** "Show all" while a focus runs: shown now, the focus keeps holding new ones (its start moves to now). */
+function releaseAll() {
+  const on = focusOn.value;
+  if (on) focusOn.value = { ...on, since: Date.now() };
+  releaseDigest();
+}
+
 export function NotificationPanel() {
   const shown = notifOpen.value;
   // The notifications and the control center: one panel (the default), or apart (settings -> style); unfolded, side
@@ -654,7 +693,9 @@ export function NotificationPanel() {
     if (!shown) replying.value = null;
   }, [shown]);
   const { available } = list.value;
-  const items = unsnoozed(list.value.items);
+  // A focus mode's held ones (ui/focus.ts): out of the list, counted on its digest card instead.
+  const { shown: items, held } = splitHeld(unsnoozed(list.value.items));
+  const digest = available && held.length > 0;
   const clearable = items.some((n) => n.clearable);
   // The pull's ride (shell.css .notif-items): the room left under the cards and the panel's height, measured when they
   // change size - never per frame (the finger moves --q only).
@@ -751,8 +792,11 @@ export function NotificationPanel() {
         <button type="button" class="notif tile notif-access" onClick={() => powos.notifications.access()}>
           allow the launcher to show your notifications here →
         </button>
-      ) : items.length ? (
-        rows(items, from)
+      ) : items.length || digest ? (
+        <>
+          {digest && <Digest held={held} i={from} />}
+          {rows(items, from + (digest ? 1 : 0))}
+        </>
       ) : (
         <div class="notif-empty muted cascade" data-q ref={followNotif} style={{ "--i": from }}>
           {together ? "no notifications" : "nothing new"}

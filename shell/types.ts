@@ -1133,6 +1133,8 @@ export interface Bridge {
     action(key: string, index: number, text?: string): Promise<void>;
     /** Snoozes [key] for [ms] (Android posts it again then); rejects when it couldn't. */
     snooze(key: string, ms: number): Promise<void>;
+    /** The running focus's allowed packages (ui/focus.ts): their banners come through Do not disturb. Older hosts: none. */
+    focus?(allow: string[]): Promise<void>;
   };
   /**
    * The assistant's screen (index.html?mode=assist, over another app): what that app's screen showed - its text, an

@@ -99,8 +99,8 @@ signature/privileged permission) for the full version; **nr-gap** = works rooted
 | Unlock with another device | partial | 82f5711c: phone unlocks the desktop (owner only); no watch/phone-unlocks-phone | M | any | glasses/watch presence (GlassesPresenceService) as a trust signal |
 | Call/SMS relay to desktop | missing | KDE Connect on .58 unpaired (device-ecosystem.md L14) | M | any | notifications + reply to the desktop shell through the realm, reusing the shade's RemoteInput |
 | Sidecar / second screen | partial | remote windows research (native-window-remoting.md); no phone-as-display | L | root for virtual display input | - |
-| Focus modes (per-context home + notification filter, auto by time/place/app) | missing | DND toggle only | M | any (listener filters; DND via NotificationManager policy access) | one Focus syncs to every device (account sync) |
-| Notification summary / digest | partial | "What needs me" app (App API history providers, blocked) | M | any | the local LLM summarises the shade, delivered at chosen times |
+| Focus modes (per-context home + notification filter, auto by time/place/app) | partial | 11-27: modes (DND, Sleep, Work, Gaming) with app allow-lists, control-center focus tile (tap on/off, hold picks), Settings > focus (shell/ui/focus.ts); DND through the listener, held ones out of shade/lock/banners; allowed apps banner through DND (notifications.focus) but stay silent (no per-app DND bypass without the user marking them priority). Not yet: per-context home, schedules, people allow-lists | M | any (listener filters; DND via NotificationManager policy access) | one Focus syncs to every device (account sync) |
+| Notification summary / digest | partial | "What needs me" app (App API history providers, blocked); 11-27: a focus mode's held notifications on one digest card (by app, Show / Clear), kept after the mode ends; not yet: digest at set times, LLM summary | M | any | the local LLM summarises the shade, delivered at chosen times |
 | Spotlight-grade search | partial | search providers: apps, settings, android-settings, app-api (LAUNCHER-SEARCH.md); no contacts, files, messages, web, calculator/units, actions on results | H | any | files on the NAS/.58 and agents' results from the same bar |
 | Shortcuts / automation | missing | App API/appcap can run actions; no user-built triggers | M | any | triggers from any fleet device (arrive home -> lights, desktop wake) |
 | Live Text / Visual Look Up | partial | the assistant takes a screenshot (PowosAssistSession, ShotEncoder); no selectable text in images/camera | M | any | OCR on gpu-195 (PaddleOCR-VL, as PowScan) or on device |
@@ -130,7 +130,7 @@ signature/privileged permission) for the full version; **nr-gap** = works rooted
 8. Spotlight-grade search (contacts, files, web, calculator, actions) - any, H.
 9. Lock face glance: next alarm, weather, next calendar event - any, M.
 10. Notification dots on Android app icons - any, M.
-11. Focus modes + notification digest - any, M.
+11. Focus modes + notification digest - any, M. First version landed 11-27 (focus.ts; check tools/phone/verify/focus-modes.sh).
 12. Password/passkey autofill via PowAuth - any, M.
 13. Find My: ring + locate (small scope) - any, M.
 14. StandBy on charge + landscape - any, M.

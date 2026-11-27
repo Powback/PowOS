@@ -39,6 +39,7 @@ import type { Battery, NotificationList } from "../types.ts";
 import { chargeLine } from "./charge.ts";
 import { foldAll, grouped, snoozing, Stack, unsnoozed, type Group, type GroupedNotification } from "./notifications.tsx";
 import { arrive, leave } from "./notifmotion.ts";
+import { focusDigest, focusOn, splitHeld } from "./focus.ts";
 import { signal } from "@preact/signals";
 import { MediaCard, askAppIcons, askMedia, lockSessions, media, mediaSeen, refreshMedia, useCardDots } from "./media.tsx";
 import { PageDots } from "./pagedots.tsx";
@@ -222,7 +223,10 @@ export function Lock() {
   const playing = mediaShown.value;
   // Snoozed from a card's long press (notifications.tsx snooze): gone at once, back if Android refused it.
   const hidden = snoozing.value;
-  useEffect(() => setRows((prev) => lockRows(prev, lockGroups(unsnoozed(list.items as GroupedNotification[], hidden), playing))), [list, playing, hidden]);
+  // A focus mode's held ones (ui/focus.ts) wait on the shade's digest card, not on the face.
+  const focus = focusOn.value;
+  const digest = focusDigest.value;
+  useEffect(() => setRows((prev) => lockRows(prev, lockGroups(splitHeld(unsnoozed(list.items as GroupedNotification[], hidden)).shown, playing))), [list, playing, hidden, focus, digest]);
   /** The face's hint line, for a moment something else (a corner shortcut tapped instead of held). */
   const [hint, setHint] = useState<string | null>(null);
   useEffect(() => {

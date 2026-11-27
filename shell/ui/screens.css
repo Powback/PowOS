@@ -263,3 +263,9 @@
   user-select: text;
   -webkit-user-select: text;
 }
+/* Settings > focus (FocusScreen): each mode's allowed apps as chips (a tap lets one wait again), the picker under them. */
+.scr-focus-apps, .scr-focus-pick { display: flex; flex-wrap: wrap; gap: 6px; padding: 4px 0; }
+.scr-focus-pick { max-height: 40vh; overflow-y: auto; padding-top: 8px; border-top: var(--frame) solid var(--line); }
+.scr-focus-app { display: inline-flex; align-items: center; gap: 6px; padding: 6px 10px; border-radius: 999px; background: var(--control-fill); color: inherit; font-size: var(--text-small); }
+.scr-focus-app img { width: 20px; height: 20px; border-radius: 6px; }
+.scr-focus-app.add.on { background: color-mix(in srgb, var(--color-accent) 30%, transparent); }

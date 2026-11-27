@@ -4926,3 +4926,6 @@ html:root .stack-sheet.tile { --glass-blur-native: var(--backdrop-blur-native); 
 .stack-list button:disabled { opacity: 0.35; }
 .stack-sheet-acts { display: flex; gap: 6px; justify-content: flex-end; flex-wrap: wrap; }
 .stack-sheet .danger { color: var(--color-red); }
+/* The focus tile's modes (control.tsx FocusPick): four chips, two to a row when narrow. */
+.cc-focus-pick .cc-pick-row { flex-wrap: wrap; }
+.cc-focus-pick .cc-chip { flex: 1 1 40%; }

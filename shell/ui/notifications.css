@@ -189,3 +189,6 @@
 .notif-snooze { align-items: center; }
 .notif-snooze > .icon:first-child { margin: 0 2px 0 8px; color: var(--color-muted); }
 .notif-snooze .notif-snooze-cancel { margin-left: auto; color: var(--color-muted); }
+/* A focus mode's digest card (notifications.tsx Digest): the held apps' icons a little overlapped, the accent's edge. */
+.notif-digest { border-inline-start: 3px solid var(--color-accent); }
+.notif-digest .notif-icon + .notif-icon { margin-inline-start: -8px; }

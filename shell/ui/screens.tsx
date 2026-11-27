@@ -41,6 +41,8 @@ import { PACK_INFO, PackBar, packAction, packCancellable, packFrees, packSize, p
 import { openApp } from "../apps/pages.ts";
 import { mobileDockPlacement, unfoldedDockPlacement, desktopDockPlacement, dockAlign, searchSpot, validDockPosition, apps, ccV3, pullOverApps, pullPanels, separatePanels, speechEngine, chat, openPanel } from "../state.ts";
 import { iconTint } from "./icontint.ts";
+import { endFocus, focusModes, focusOn, pkgOfKey, startFocus, type FocusMode } from "./focus.ts";
+import type { App } from "../types.ts";
 import { validDockAlign } from "./dockalign.ts";
 import { UI_FONTS, uiFont } from "./uifont.ts";
 import { ALIGNS, alignChoice, anchorPull, type AlignMode, type AlignSurface } from "./align.ts";
@@ -488,6 +490,7 @@ function SettingsScreen() {
     ["harddisk", "storage", "PowOS parts: gaming, apps, languages", () => openScreen("storage")],
     ["cellphoneCog", "android settings", "the phone's own", () => act("settings", "android")],
     ["arrowLeft", "gestures", "edge gestures, quick tools", () => openScreen("gestures")],
+    ["minusCircleOutline", "focus", focusOn.value ? `${focusOn.value.label.toLowerCase()} on` : "modes: which apps get through", () => openScreen("focus")],
     // Dictation's engine: a tap cycles it - streamed to the GPU voice agent (the default), stt.pow's requests, the
     // phone's own (GpuSpeech.kt SpeechEngines).
     [
@@ -1584,6 +1587,78 @@ function GesturesScreen() {
   );
 }
 
+// --- focus: the modes (ui/focus.ts) and the apps each lets through
+
+/** Android's apps by package (a work profile's twin once). */
+function appsByPkg(): Map<string, App> {
+  const byPkg = new Map<string, App>();
+  for (const a of apps.value) {
+    const p = a.kind === "android" ? pkgOfKey(a.key) : null;
+    if (p && !byPkg.has(p)) byPkg.set(p, a);
+  }
+  return byPkg;
+}
+
+function FocusScreen() {
+  const [adding, setAdding] = useState<string | null>(null);
+  const byPkg = appsByPkg();
+  return (
+    <Frame icon="minusCircleOutline" title="focus">
+      <div class="scr-note muted">
+        A focus mode turns on Do not disturb and lets only its apps through (alarms and calls always). The others are held: no
+        sound, no banner, one digest card at the top of your notifications - shown when you want, and still there when the
+        mode ends. Turn one on from the control center's focus tile (a long press picks the mode).
+      </div>
+      {focusModes.value.map((m) => (
+        <FocusModeSection key={m.id} m={m} byPkg={byPkg} adding={adding === m.id} setAdding={(a) => setAdding(a ? m.id : null)} />
+      ))}
+    </Frame>
+  );
+}
+
+/** One mode: on/off, its allowed apps (a tap lets one wait again), "allow an app" opening the installed ones. */
+function FocusModeSection({ m, byPkg, adding, setAdding }: { m: FocusMode; byPkg: Map<string, App>; adding: boolean; setAdding: (a: boolean) => void }) {
+  const isOn = focusOn.value?.id === m.id;
+  const known = byPkg.size > 0;
+  const allowed = m.allow.filter((p) => !known || byPkg.has(p));
+  const setAllow = (allow: string[]) => (focusModes.value = focusModes.value.map((x) => (x.id === m.id ? { ...x, allow } : x)));
+  const sorted = [...byPkg.entries()].filter(([p]) => !m.allow.includes(p)).sort((a, b) => a[1].label.localeCompare(b[1].label));
+  const toggle = <Action icon={isOn ? "close" : "check"} label={isOn ? "turn off" : "turn on"} tone={isOn ? "primary" : undefined} onClick={() => (isOn ? endFocus() : startFocus(m.id))} />;
+  return (
+    <Section icon={m.icon} title={m.label.toLowerCase()} actions={toggle}>
+      <div class="scr-focus-apps">
+        {allowed.length === 0 && <span class="muted scr-note">nothing gets through</span>}
+        {allowed.map((p) => {
+          const a = byPkg.get(p);
+          return (
+            <button type="button" key={p} class="scr-focus-app" aria-label={`let ${a?.label ?? p} wait too`} onClick={() => setAllow(m.allow.filter((x) => x !== p))}>
+              {a && <img src={a.icon} alt="" />}
+              <span>{a?.label ?? p}</span>
+              <Icon name="close" size={14} />
+            </button>
+          );
+        })}
+        {known && (
+          <button type="button" class={`scr-focus-app add ${adding ? "on" : ""}`} onClick={() => setAdding(!adding)}>
+            <Icon name="plus" size={16} />
+            <span>allow an app</span>
+          </button>
+        )}
+      </div>
+      {adding && (
+        <div class="scr-focus-pick">
+          {sorted.map(([p, a]) => (
+            <button type="button" key={p} class="scr-focus-app" onClick={() => setAllow([...m.allow, p])}>
+              <img src={a.icon} alt="" />
+              <span>{a.label}</span>
+            </button>
+          ))}
+        </div>
+      )}
+    </Section>
+  );
+}
+
 // --- join: "Use PowOS on its own" or "Join your PowStation" (first run, then Settings' PowStation tile)
 
 /** Settings' PowStation tile line. */
@@ -1776,6 +1851,7 @@ const SCREENS: Record<ScreenName, FunctionComponent> = {
   gestures: GesturesScreen,
   storage: StorageScreen,
   join: JoinScreen,
+  focus: FocusScreen,
 };
 
 /** The top screen, over home; those under it wait (unwatched) until it closes. */

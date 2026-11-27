@@ -186,6 +186,12 @@ class Notifications(
         return NotificationPicture.smallPng(sbn, context)
     }
 
+    /**
+     * The running focus mode's allowed packages (the shell's ui/focus.ts, "notifications.focus"): their banners come
+     * through the Do not disturb the focus turned on. Empty: no focus, Android's filter alone decides.
+     */
+    @Volatile var focusAllow: Set<String> = emptySet()
+
     /** Keys of what had a banner (the time it was posted), for once-only alerts' updates. */
     private val alerted = HashMap<String, Long>()
 
@@ -205,7 +211,7 @@ class Notifications(
             alerted.keys.retainAll(live)
         }
         if (ranking.importance < NotificationManager.IMPORTANCE_HIGH) return false
-        if (!ranking.matchesInterruptionFilter()) return false
+        if (!ranking.matchesInterruptionFilter() && sbn.packageName !in focusAllow) return false
         if (ranking.suppressedVisualEffects and NotificationManager.Policy.SUPPRESSED_EFFECT_PEEK != 0) return false
         if (n.flags and Notification.FLAG_FOREGROUND_SERVICE != 0) return false
         if (n.flags and Notification.FLAG_ONGOING_EVENT != 0 && n.category != Notification.CATEGORY_CALL) return false

@@ -25,6 +25,7 @@ import { Launchers } from "./launchers.tsx";
 import { MediaCard, askMedia, media, sessionsOf } from "./media.tsx";
 import { PAD_ID, askPad, editPad, padTile, togglePad } from "./padtile.ts";
 import { FPS_ID, askFps, fpsTile, toggleFps } from "./fpstile.ts";
+import { FOCUS_ID, editFocus, endFocus, focusLast, focusModes, focusOn, focusTile, modeOf, startFocus, toggleFocus } from "./focus.ts";
 import { TESTS_ID, askTests, testsTile, toggleTests } from "./tests.ts";
 import type { GlassesState, MediaState, QuickState, QuickTile, RemoteState, RemoteTarget } from "../types.ts";
 
@@ -104,6 +105,7 @@ const APP_ICONS: Record<string, IconName> = {
 };
 
 function tileIcon(t: QuickTile): IconName {
+  if (t.id === FOCUS_ID) return modeOf(focusOn.value?.id ?? focusLast.value).icon;
   const i = TILE_ICONS[t.id];
   if (Array.isArray(i)) return t.on === false ? i[0] : i[1];
   return i ?? (t.app && APP_ICONS[t.app]) ?? "apps";
@@ -135,6 +137,8 @@ function usePress(t: QuickTile, hold = true) {
     tick();
     // The Controller tile's hold is the overlay's layout editor, not a page in Settings.
     if (t.id === PAD_ID) return editPad();
+    // The focus tile's hold: its modes to pick from, in place (FocusPick).
+    if (t.id === FOCUS_ID) return void (focusPicking.value = !focusPicking.value);
     shut();
     // Wi-Fi, Bluetooth, hotspot, NFC: their page as a quick page springing out of the tile (ui/quickpage.tsx).
     const page = TILE_PAGES[t.id];
@@ -275,6 +279,36 @@ function RemoteTile({ t }: { t: QuickTile }) {
       </span>
       <span class="cc-label">{t.label}</span>
     </button>
+  );
+}
+
+/** The focus tile's long press: its modes (ui/focus.ts) as chips - one tapped turns it on, "off" ends it. */
+const focusPicking = signal(false);
+function FocusPick() {
+  if (!focusPicking.value) return null;
+  const on = focusOn.value;
+  const pick = (f: () => void) => () => (tick(), (focusPicking.value = false), f());
+  return (
+    <div class="cc-pick cc-focus-pick">
+      <span class="cc-pick-head muted">{on ? `focus: ${on.label.toLowerCase()} - others held for the digest` : "focus: let only some apps through"}</span>
+      <span class="cc-pick-row">
+        {focusModes.value.map((m) => (
+          <button type="button" key={m.id} class={`cc-chip ${on?.id === m.id ? "on" : ""}`} onClick={pick(() => startFocus(m.id))}>
+            <Icon name={m.icon} />
+            <span>{m.label.toLowerCase()}</span>
+          </button>
+        ))}
+      </span>
+      <span class="cc-pick-row">
+        <button type="button" class={`cc-chip ${on ? "" : "on"}`} onClick={pick(endFocus)}>
+          <span>off</span>
+        </button>
+        <button type="button" class="cc-chip" onClick={pick(() => (shut(), editFocus()))}>
+          <Icon name="pencilOutline" />
+          <span>allowed apps</span>
+        </button>
+      </span>
+    </div>
   );
 }
 
@@ -862,7 +896,7 @@ const SECTIONS: { id: string; label: string; members: string[] }[] = [
     members: ["wifi", "cell", "airplane", "hotspot", "bt", "nfc", "app:com.google.android.gms|app:com.oneplus.oshare", "app:com.oplus.linker", GLASSES_ID, "location"],
   },
   // Focus with the screen's own (no sound-mode tiles to make a section of: the volume slider's icon is the ringer).
-  { id: "display", label: "display & focus", members: ["rotation", "darkmode", "app:com.oplus.eyeprotect", "dnd", "battery"] },
+  { id: "display", label: "display & focus", members: ["rotation", "darkmode", "app:com.oplus.eyeprotect", FOCUS_ID, "dnd", "battery"] },
   { id: "tools", label: "tools", members: ["flashlight", "screenshot", "screenrecord", "calculator", "qr_code_scanner", "wallet", "controls", PAD_ID, TESTS_ID, FPS_ID] },
 ];
 /** Each control's one word. */
@@ -877,7 +911,8 @@ const WORD: Record<string, string> = {
   rotation: "rotate",
   darkmode: "dark",
   battery: "saver",
-  dnd: "focus",
+  dnd: "dnd",
+  [FOCUS_ID]: "focus",
   flashlight: "torch",
   screenshot: "screenshot",
   screenrecord: "record",
@@ -891,7 +926,7 @@ const WORD: Record<string, string> = {
 };
 const WORD_APP: Record<string, string> = { "com.oplus.eyeprotect": "eye", "com.google.android.gms": "share", "com.oneplus.oshare": "share", "com.oplus.linker": "cast" };
 // The phone checks' word is their state (tests.ts).
-const word = (t: QuickTile) => (t.id === TESTS_ID || t.id === PAD_ID ? t.label : null) ?? WORD[t.id] ?? (t.app && WORD_APP[t.app]) ?? t.label.toLowerCase().split(/\s+/)[0];
+const word = (t: QuickTile) => (t.id === TESTS_ID || t.id === PAD_ID || t.id === FOCUS_ID ? t.label : null) ?? WORD[t.id] ?? (t.app && WORD_APP[t.app]) ?? t.label.toLowerCase().split(/\s+/)[0];
 
 /** Controls with a screen of their own: a tap shuts the panel and opens it. */
 const SCREENS: Record<string, () => void> = { [GLASSES_ID]: openGlasses, [REMOTE_ID]: openRemote };
@@ -903,6 +938,7 @@ function tapOf(t: QuickTile, own: () => void): () => void {
   if (t.id === TESTS_ID) return flip(toggleTests);
   if (t.id === PAD_ID) return flip(togglePad);
   if (t.id === FPS_ID) return flip(toggleFps);
+  if (t.id === FOCUS_ID) return flip(() => ((focusPicking.value = false), toggleFocus()));
   const open = SCREENS[t.id];
   return open ? () => (shut(), open()) : own;
 }
@@ -996,6 +1032,7 @@ function Controls() {
       powos.qs.listening(false);
       clearInterval(timer);
       picking.value = false;
+      focusPicking.value = false;
       ccExpanded.value = expandedByDefault();
       ccEditing.value = false;
       chosen.value = null;
@@ -1004,7 +1041,7 @@ function Controls() {
   const q = quick.value;
   const tests = testsTile();
   const pad = padTile();
-  const every = [...(q.tiles ?? []), ...(glasses.value ? [glassesTile()] : []), ...(pad ? [pad] : []), ...(tests ? [tests] : []), fpsTile()].filter((t) => !leftOut(t));
+  const every = [...(q.tiles ?? []), focusTile(), ...(glasses.value ? [glassesTile()] : []), ...(pad ? [pad] : []), ...(tests ? [tests] : []), fpsTile()].filter((t) => !leftOut(t));
   // The fps meter's tile is back in Tools (the user, 11-01 22:14: "fps indicator etc is gone from control centre" -
   // 5921e6dc had taken it out on 10-28); the status bar's meter and settings' switch stay too.
   logUnshown(every);
@@ -1079,6 +1116,7 @@ function Controls() {
       <div class={`cc3-list cascade ${whole ? "whole" : ""}`} data-q ref={followNotif} style={{ "--i": 3 }}>
         <ToggleGrid ts={list} save={saveOrder} />
       </div>
+      <FocusPick />
       <Launchers hooks={editHooks} shut={shut} />
       <MediaCards i={5} />
     </div>
