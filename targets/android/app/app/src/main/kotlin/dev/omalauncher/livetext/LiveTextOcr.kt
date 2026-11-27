@@ -83,7 +83,7 @@ object LiveTextOcr {
             val xs = (0 until quad.length()).map { quad.getJSONArray(it).getDouble(0).toFloat() }
             val ys = (0 until quad.length()).map { quad.getJSONArray(it).getDouble(1).toFloat() }
             if (xs.isEmpty()) continue
-            lines += Read.splitLine(s.optString("text"), xs.min(), ys.min(), xs.max(), ys.max())
+            lines += Read.splitLine(s.optString("text"), Word("", xs.min(), ys.min(), xs.max(), ys.max(), 0))
         }
         return Read.ofLines(lines, "powstation").takeIf { it.words.isNotEmpty() }
     }

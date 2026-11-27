@@ -42,7 +42,7 @@ sh_ "logcat -c" >/dev/null 2>&1
 sh_ "am start -n $ACT -a android.intent.action.SEND -t image/png --eu android.intent.extra.STREAM content://media/external/images/media/$id --grant-read-uri-permission --ez dev.omalauncher.livetext.REPORT true" >/dev/null ||
     fail "am start refused"
 
-dev= hq=
+dev='' hq=''
 for _ in $(seq 1 90); do
     log=$(sh_ "logcat -d -s LiveText:I" 2>/dev/null)
     dev=$(sed -n 's/.*LiveText: result \({"engine":"device".*\)/\1/p' <<<"$log" | tail -1)

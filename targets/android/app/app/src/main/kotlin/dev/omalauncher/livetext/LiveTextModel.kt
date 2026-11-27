@@ -94,14 +94,12 @@ data class Read(val words: List<Word>, val engine: String) {
         }
 
         /** A line's text with its box, split into words with boxes in proportion to their characters (PowStation's
-         *  spotting gives line boxes only). */
+         *  spotting gives line boxes only). [box]: the line's box (its text unused). */
         fun splitLine(
             text: String,
-            l: Float,
-            t: Float,
-            r: Float,
-            b: Float,
+            box: Word,
         ): List<Word> {
+            val (_, l, t, r, b) = box
             val total = text.length.coerceAtLeast(1)
             val out = mutableListOf<Word>()
             Regex("\\S+").findAll(text).forEach { m ->
@@ -139,30 +137,36 @@ object Entities {
                 """(?:,?[ \t]+\d{4,5}[ \t]+[A-ZÆØÅÄÖ][a-zæøåäöüß]+)?""",
         )
 
-    fun find(text: String): List<Entity> {
-        val out = mutableListOf<Entity>()
-        val taken = mutableListOf<IntRange>()
+    private class Rule(val re: Regex, val kind: Entity.Kind, val uri: (String) -> String?)
 
-        fun add(
-            m: MatchResult,
-            kind: Entity.Kind,
-            uri: (String) -> String?,
-        ) {
-            if (taken.any { it.first <= m.range.last && m.range.first <= it.last }) return
-            val v = m.value.trimEnd('.', ',', ';', ':', ')')
-            val u = uri(v) ?: return
-            taken += m.range
-            out += Entity(kind, v, u)
-        }
-        email.findAll(text).forEach { add(it, Entity.Kind.EMAIL) { v -> "mailto:$v" } }
-        url.findAll(text).forEach { add(it, Entity.Kind.URL) { v -> if (v.startsWith("http", true)) v else "https://$v" } }
-        address.findAll(text).forEach { add(it, Entity.Kind.ADDRESS) { v -> "geo:0,0?q=" + java.net.URLEncoder.encode(v, "UTF-8") } }
-        phone.findAll(text).forEach {
-            add(it, Entity.Kind.PHONE) { v ->
-                val digits = v.filter { c -> c.isDigit() || c == '+' }
-                if (date.matches(v) || digits.count { c -> c.isDigit() } !in 8..15) null else "tel:$digits"
-            }
-        }
-        return out.sortedBy { e -> text.indexOf(e.text) }
+    private val rules =
+        listOf(
+            Rule(email, Entity.Kind.EMAIL) { "mailto:$it" },
+            Rule(url, Entity.Kind.URL) { if (it.startsWith("http", true)) it else "https://$it" },
+            Rule(address, Entity.Kind.ADDRESS) { "geo:0,0?q=" + java.net.URLEncoder.encode(it, "UTF-8") },
+            Rule(phone, Entity.Kind.PHONE, ::telOf),
+        )
+
+    /** tel: for 8-15 digits that aren't a date; null otherwise. */
+    private fun telOf(v: String): String? {
+        val digits = v.filter { it.isDigit() || it == '+' }
+        return if (date.matches(v) || digits.count { it.isDigit() } !in 8..15) null else "tel:$digits"
+    }
+
+    private fun take(
+        out: MutableList<Pair<IntRange, Entity>>,
+        rule: Rule,
+        m: MatchResult,
+    ) {
+        if (out.any { (r, _) -> r.first <= m.range.last && m.range.first <= r.last }) return
+        val v = m.value.trimEnd('.', ',', ';', ':', ')')
+        rule.uri(v)?.let { out += m.range to Entity(rule.kind, v, it) }
+    }
+
+    /** Emails, links, addresses, then phone numbers - a later kind never takes text an earlier one has. */
+    fun find(text: String): List<Entity> {
+        val out = mutableListOf<Pair<IntRange, Entity>>()
+        for (rule in rules) rule.re.findAll(text).forEach { m -> take(out, rule, m) }
+        return out.sortedBy { it.first.first }.map { it.second }
     }
 }

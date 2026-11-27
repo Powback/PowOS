@@ -120,39 +120,39 @@ class LiveTextActivity : Activity() {
 
     private fun load(uri: Uri) {
         status.text = "Reading text..."
-        val report = intent.getBooleanExtra(EXTRA_REPORT, false)
-        val remote = intent.getBooleanExtra(EXTRA_POWSTATION, true)
-        Thread {
-            val bmp = runCatching { decode(uri) }.getOrNull()
-            if (bmp == null) {
-                runOnUiThread { toast("Can't open that image"); finish() }
-                return@Thread
-            }
-            runOnUiThread { page.setImage(bmp) }
-            val t0 = System.nanoTime()
-            val local = runCatching { LiveTextOcr.device(bmp) }.onFailure { Log.w(TAG, "device OCR", it) }.getOrNull()
-            val localMs = (System.nanoTime() - t0) / 1_000_000
-            if (local != null) runOnUiThread { show(local) }
-            if (report) log("device", local, localMs)
-            if (!remote) {
-                if (report) runOnUiThread { finish() }
-                return@Thread
-            }
-            val t1 = System.nanoTime()
-            val hq = LiveTextOcr.powstation(bmp)
-            val hqMs = (System.nanoTime() - t1) / 1_000_000
-            if (report) {
-                log("powstation", hq, hqMs)
-                runOnUiThread { finish() } // the check is done: leave the phone as it was
-                return@Thread
-            }
-            // The pool's read wins when it saw more text than the device (handwriting, other scripts, small print).
-            if (hq != null && hq.text.count { !it.isWhitespace() } > (local?.text?.count { !it.isWhitespace() } ?: 0)) {
-                runOnUiThread { show(hq) }
-            } else if (local == null || local.words.isEmpty()) {
-                runOnUiThread { status.text = if (local == null) "Couldn't read this image" else "No text found" }
-            }
-        }.start()
+        Thread { read(uri) }.start()
+    }
+
+    /** Off the main thread: decode, read on the device (shown at once), then ask PowStation - its read wins when it
+     *  saw more text than the device (handwriting, other scripts, small print). */
+    private fun read(uri: Uri) {
+        val bmp =
+            runCatching { decode(uri) }.getOrNull()
+                ?: return runOnUiThread {
+                    toast("Can't open that image")
+                    finish()
+                }
+        runOnUiThread { page.setImage(bmp) }
+        val local = timed("device") { runCatching { LiveTextOcr.device(bmp) }.onFailure { Log.w(TAG, "device OCR", it) }.getOrNull() }
+        runOnUiThread { if (local != null) show(local) else status.text = "Couldn't read this image" }
+        val hq = if (intent.getBooleanExtra(EXTRA_POWSTATION, true)) timed("powstation") { LiveTextOcr.powstation(bmp) } else null
+        if (reporting) return runOnUiThread { finish() } // the check is done: leave the phone as it was
+        if (hq != null && chars(hq) > (local?.let(::chars) ?: 0)) runOnUiThread { show(hq) }
+    }
+
+    private val reporting get() = intent.getBooleanExtra(EXTRA_REPORT, false)
+
+    private fun chars(r: Read) = r.text.count { !it.isWhitespace() }
+
+    /** Runs a reader, logging its read for the verify check when asked to (EXTRA_REPORT). */
+    private fun timed(
+        engine: String,
+        f: () -> Read?,
+    ): Read? {
+        val t0 = System.nanoTime()
+        val r = f()
+        if (reporting) log(engine, r, (System.nanoTime() - t0) / 1_000_000)
+        return r
     }
 
     private fun decode(uri: Uri): Bitmap {
@@ -184,10 +184,17 @@ class LiveTextActivity : Activity() {
             else "Drag across text to select it" + if (read.engine == "powstation") " (read by PowStation)" else ""
         chips.removeAllViews()
         for (e in Entities.find(read.text)) {
-            val icon = when (e.kind) { Entity.Kind.PHONE -> "Call"; Entity.Kind.URL -> "Open"; Entity.Kind.EMAIL -> "Mail"; Entity.Kind.ADDRESS -> "Map" }
-            chips.addView(button("$icon ${e.text}") { open(Intent(if (e.kind == Entity.Kind.PHONE) Intent.ACTION_DIAL else Intent.ACTION_VIEW, Uri.parse(e.uri))) })
+            chips.addView(button("${verb(e.kind)} ${e.text}") { open(Intent(if (e.kind == Entity.Kind.PHONE) Intent.ACTION_DIAL else Intent.ACTION_VIEW, Uri.parse(e.uri))) })
         }
     }
+
+    private fun verb(k: Entity.Kind) =
+        when (k) {
+            Entity.Kind.PHONE -> "Call"
+            Entity.Kind.URL -> "Open"
+            Entity.Kind.EMAIL -> "Mail"
+            Entity.Kind.ADDRESS -> "Map"
+        }
 
     private fun onSelection() {
         val s = page.selected()
@@ -287,11 +294,7 @@ private class ImageTextView(
 
     fun selectAll() {
         val r = read ?: return
-        if (r.words.isEmpty()) return
-        from = 0
-        to = r.words.size - 1
-        invalidate()
-        changed()
+        if (r.words.isNotEmpty()) select(0, r.words.size - 1)
     }
 
     override fun onDraw(c: Canvas) {
@@ -318,38 +321,44 @@ private class ImageTextView(
     override fun onTouchEvent(e: MotionEvent): Boolean {
         val r = read ?: return false
         if (dst.width() <= 0f) return false
-        val x = (e.x - dst.left) / dst.width()
-        val y = (e.y - dst.top) / dst.height()
-        val i = r.wordAt(x, y)
+        val i = r.wordAt((e.x - dst.left) / dst.width(), (e.y - dst.top) / dst.height())
         when (e.actionMasked) {
-            MotionEvent.ACTION_DOWN -> {
-                downAt = i
-                moved = false
-                parent?.requestDisallowInterceptTouchEvent(true)
-            }
-            MotionEvent.ACTION_MOVE -> if (downAt >= 0 && i >= 0 && (i != downAt || moved)) {
-                moved = true
-                from = downAt
-                to = i
-                invalidate()
-                changed()
-            }
-            MotionEvent.ACTION_UP -> {
-                if (!moved) {
-                    if (downAt >= 0) {
-                        val line = r.lineRange(downAt)
-                        from = line.first
-                        to = line.last
-                    } else {
-                        from = -1
-                        to = -1
-                    }
-                    invalidate()
-                    changed()
-                }
-                downAt = -1
-            }
+            MotionEvent.ACTION_DOWN -> down(i)
+            MotionEvent.ACTION_MOVE -> drag(i)
+            MotionEvent.ACTION_UP -> up(r)
         }
         return true
+    }
+
+    private fun down(i: Int) {
+        downAt = i
+        moved = false
+        parent?.requestDisallowInterceptTouchEvent(true)
+    }
+
+    /** Dragging from a word selects the run from it to the word under the finger. */
+    private fun drag(i: Int) {
+        if (downAt < 0 || i < 0 || (i == downAt && !moved)) return
+        moved = true
+        select(downAt, i)
+    }
+
+    /** A tap on a word selects its line; a tap beside the text clears the selection. */
+    private fun up(r: Read) {
+        if (!moved) {
+            val line = if (downAt >= 0) r.lineRange(downAt) else -1..-1
+            select(line.first, line.last)
+        }
+        downAt = -1
+    }
+
+    private fun select(
+        a: Int,
+        z: Int,
+    ) {
+        from = a
+        to = z
+        invalidate()
+        changed()
     }
 }
