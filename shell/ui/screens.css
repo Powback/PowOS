@@ -267,7 +267,7 @@
 .scr-focus-apps, .scr-focus-pick { display: flex; flex-wrap: wrap; gap: 6px; padding: 4px 0; }
 .scr-focus-pick { max-height: 40vh; overflow-y: auto; padding-top: 8px; border-top: var(--frame) solid var(--line); }
 .scr-focus-app { display: inline-flex; align-items: center; gap: 6px; padding: 6px 10px; border-radius: 999px; background: var(--control-fill); color: inherit; font-size: var(--text-small); }
-.scr-focus-app img { width: 20px; height: 20px; border-radius: 6px; }
+.scr-focus-app img { width: 20px; height: 20px; border-radius: var(--icon-radius); }
 .scr-focus-app.add.on { background: color-mix(in srgb, var(--color-accent) 30%, transparent); }
 /* Settings > automations (AutomationsScreen): one row each (what -> do, last ran, on/off), the editor's inputs. */
 .scr-auto { display: flex; align-items: center; gap: 8px; padding: 8px 0; border-bottom: var(--frame) solid var(--line); }

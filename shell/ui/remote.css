@@ -139,7 +139,7 @@
   min-width: 0;
   height: 32px;
   padding: 0 10px;
-  border-radius: 16px;
+  border-radius: 999px;
   border: var(--frame) solid var(--line);
   background: var(--soft-fill);
   color: var(--color-foreground);

@@ -18,4 +18,5 @@ ui/shell.css background: rgb(0 0 0 / 0.25);  # AUDIT: the assistant's dim over t
 ui/shell.css transparent calc(var(--fr) - 0.5px), #000 var(--fr));  # a CSS mask's keep-area (mask semantics, not a colour): the seam fillet's quarter-circle cut
 dev/preview/sheet.tsx .pv-cell.bad .home-tile { outline: 2px solid var(--color-red);  # the widget-fit sheet's marker on a tile with problems: dev tooling, never on the phone
 ui/hdmiin.css background: #000;  # HDMI in's video stage and letterbox: black is the picture's own bars, not a theme surface
+ui/remote.css background: #000;  # Remote screen's video stage and letterbox: black is the picture's own bars, not a theme surface (as hdmiin.css)
 ui/chrome.css .live-island { --live-black: #000; --live-on-black: #fff; }  # the live pill round the camera: black is the camera hole it extends (as the AOD's off pixels), white the ink on it - in every theme

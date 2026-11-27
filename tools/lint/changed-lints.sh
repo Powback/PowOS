@@ -9,6 +9,10 @@
 #   tools/lint/changed-lints.sh [--no-shell] FILE...   repo-relative paths (missing/deleted files are skipped)
 #     shell/*.ts|tsx|mjs|js  shell/dev/lint-complexity.sh on them, then tsc --noEmit over shell/   (--no-shell: neither;
 #                            the gate runs both over its composed tree already)
+#     shell/*.css|ts|tsx     shell/dev/lint-style.sh on them + shell/dev/lint-design.sh (--no-shell: neither; the gate
+#                            runs both over its composed tree) - 11-27: the remote screen and focus modes landings
+#                            pushed a raw colour and off-scale radii that only the full gate caught: the push lints
+#                            checked no CSS at all
 #     apps/*/ui/*            shell/dev/lint-complexity.sh --apps
 #     targets/android/app/**/*.kt (not tests)   targets/android/lint-complexity.sh --only (detekt, ~4 s)
 #     every file             tools/lint/shellcheck-ratchet.py --check (keeps the shell scripts among them)
@@ -20,7 +24,7 @@
 set -uo pipefail
 root=$(git rev-parse --show-toplevel)
 noshell=""; [ "${1:-}" = --no-shell ] && { noshell=1; shift; }
-files=() apps="" kt="" sh=() pit=() xml=()
+files=() styled=() apps="" kt="" sh=() pit=() xml=()
 for f in "$@"; do
   [ -e "$root/$f" ] || continue
   sh+=("$f")
@@ -32,6 +36,7 @@ for f in "$@"; do
     *) first=$(head -n1 "$root/$f" 2>/dev/null || true)
        case "$first" in '#!'*sh*) pit+=("$f") ;; esac ;;
   esac
+  case "$f" in shell/*.css|shell/*.ts|shell/*.tsx) [ -n "$noshell" ] || styled+=("${f#shell/}") ;; esac
   case "$f" in
     shell/*.ts|shell/*.tsx|shell/*.mjs|shell/*.js) [ -n "$noshell" ] || files+=("${f#shell/}") ;;
     apps/*/ui/*) apps=--apps ;;
@@ -49,6 +54,12 @@ if [ ${#files[@]} -gt 0 ] && [ "${GATE_LINT:-1}" != 0 ]; then
   if [ ! -x "$tsc" ]; then echo "lints: tsc skipped (no shell/node_modules)" >&2
   elif ! out=$(cd "$root/shell" && "$tsc" --noEmit -p . 2>&1); then echo "$out" | grep -v '^ ' | head -30 | sed 's/^/FAIL tsc: /'; s=1
   fi
+fi
+# The design language's lints (docs/DESIGN-LANGUAGE.md): the style lint on the changed files, the design lint over the
+# shell (it has no per-file mode; its blocking rules sit at zero, so a failure is this change's).
+if [ ${#styled[@]} -gt 0 ]; then
+  out=$("$root/shell/dev/lint-style.sh" "$root/shell" "${styled[@]}" 2>&1) || { echo "$out" | grep -v '^ok '; s=1; }
+  out=$("$root/shell/dev/lint-design.sh" "$root/shell" 2>&1) || { echo "$out" | head -40; s=1; }
 fi
 if [ -n "$kt" ]; then
   # need_docker (f35: brew upgrade unlinks docker) fixes PATH for this shell, which lint-complexity.sh inherits.
@@ -76,5 +87,5 @@ fi
 if ! out=$(bash "$root/test/tier1/test-hack-registry.sh" 2>&1); then
   echo "$out" | grep -E "FAIL" | sed 's/^ */FAIL hack registry: /'; s=1
 fi
-[ $s = 0 ] && echo "ok   changed-file lints (complexity, shellcheck ratchet, shell pitfalls, xml, hack registry)"
+[ $s = 0 ] && echo "ok   changed-file lints (style, design, complexity, shellcheck ratchet, shell pitfalls, xml, hack registry)"
 exit $s
