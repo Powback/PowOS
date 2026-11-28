@@ -24,8 +24,18 @@ TAG=powos-focus-check
 LISTED="$PB"'("notifications.list",[]).then(l=>JSON.stringify((l.items||[]).map(n=>[n.key,n.pkg,n.title,n.time,n.clearable].join("|"))),()=>"err")'
 . "$here/window-lock.sh"; window_lock focus-modes 150 "${MAX_WAIT:-10800}"
 ON0=""; DIG0=""; DND0=""
+# The test notification is the SHELL's (uid 2000, package com.android.shell), so it is posted and cancelled through
+# plain `adb shell`, never sh_: as root (su -c, uid 0) `cmd notification post` lists nothing under com.android.shell,
+# and its output went to /dev/null - the 11-28 08:57 run's list had no $TAG at all (System UI's DND notice was what the
+# digest counted).
+post_shell() { "$A" shell "cmd notification post -t 'focus check' $TAG 'held while the focus is on'" 2>&1 | tr -d '\r'; }
+# No `cmd notification cancel` on this Android ("Unknown command: cancel", probe 11-28 10:48 - the old trap's cancel
+# never removed anything): dismissed as the shade does it, through the host (notifications.dismiss), only keys
+# "0|com.android.shell|<id>|$TAG|..." - never anything else.
+CANCEL="$PB"'("notifications.list",[]).then(l=>Promise.all((l.items||[]).map(n=>n.key).filter(k=>{const p=String(k).split("|");return p[1]==="com.android.shell"&&p[3]==="'"$TAG"'"}).map(k=>'"$PB"'("notifications.dismiss",[k]))).then(r=>"dismissed "+r.length)),e=>"err "+e)'
+cancel_shell() { q "$CANCEL"; }
 restore() {
-  sh_ "cmd notification cancel $TAG >/dev/null 2>&1"
+  log "cleanup: $(cancel_shell)"
   if [ -n "$ON0" ]; then
     # The page's own storage back as it was (the storage event follows in the other pages).
     q "(()=>{const s=(k,v)=>v==='null'?localStorage.removeItem('powos.'+k):localStorage.setItem('powos.'+k,v);s('focus.on','$ON0');s('focus.digest','$DIG0');return 'ok'})()" >/dev/null
@@ -68,7 +78,11 @@ on=$(store focus.on); log "after the tap: focus.on=$on dnd=$(dnd)"
 case "$on" in *since:*) ;; *) fail "the tile didn't turn a focus on (focus.on=$on)" ;; esac
 [ "$(dnd)" = true ] || fail "focus on, Do not disturb is not (qs.state dnd=$(dnd))"
 
-sh_ "cmd notification post -t 'focus check' $TAG 'held while the focus is on' >/dev/null"; sleep 2
+po=$(post_shell); log "post (shell uid): $po"
+# Listed within ~5 s, or the rest of the check means nothing (the digest would count some other notification).
+lw=""; for _ in 1 2 3 4 5; do lw=$(q "$LISTED"); case "$lw" in *"|$TAG|"*) break ;; esac; sleep 1; done
+case "$lw" in *"|$TAG|"*) ;; *) fail "the test notification (tag $TAG) wasn't listed within 5 s of its post ('$po'); listed=$lw"; exit 1 ;; esac
+sleep 1
 cards=$(q '[...document.querySelectorAll(".notif-items .notif:not(.notif-digest)")].filter(e=>e.textContent.includes("held while the focus")).length')
 digest=$(q 'document.querySelector(".notif-digest")?.textContent ?? ""')
 log "while on: matching cards=$cards digest='$digest'"
