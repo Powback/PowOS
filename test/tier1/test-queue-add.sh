@@ -48,6 +48,10 @@ if len(sys.argv) > 2 and sys.argv[1] == 'task' and sys.argv[2] == 'list':
     if state == "down":
         sys.exit(1)
     tasks = [{"id": "t1"}, {"id": "t2"}, {"id": "t3"}]
+    # --id: done tasks too (the real list shows a done task only when named)
+    if "--id" in sys.argv:
+        want = sys.argv[sys.argv.index("--id") + 1]
+        tasks = [t for t in tasks + [{"id": "old-done", "status": "done"}] if t["id"] == want]
     print(json.dumps(tasks))
 else:
     sys.exit(127)
@@ -62,6 +66,11 @@ echo "up" > "$BOARD_STATE"
 out=$(run_queue add no-such-task dummy.sh echo test 2>&1); rc=$?
 [ $rc -ne 0 ] && grep -q "no board task 'no-such-task'" <<<"$out" && ok "f164: refuses unknown task when board is up" \
   || bad "f164: refuses unknown task when board is up" "rc=$rc: $out"
+
+# Test 1b (11-28): a DONE task - refused with how to reopen it (an agent bypassed with QUEUE_NEW_TASK=1)
+out=$(run_queue add old-done dummy.sh echo test 2>&1); rc=$?
+[ $rc -ne 0 ] && grep -q "board task 'old-done' is done" <<<"$out" && grep -q "task set old-done --status working" <<<"$out" \
+  && ok "11-28: a done task's refusal says how to reopen it" || bad "11-28: a done task's refusal says how to reopen it" "rc=$rc: $out"
 
 # Test 2: board is up, task exists - should accept
 out=$(run_queue add t1 dummy.sh echo test 2>&1); rc=$?

@@ -491,7 +491,12 @@ except Exception: pass' 2>/dev/null) || ids=
       ids=
       board_answered=0
     fi
-    if [ -n "$ids" ] && ! grep -qxF "$task" <<<"$ids"; then
+    if [ -n "$ids" ] && ! grep -qxF "$task" <<<"$ids" && [ -n "$("$CLI" task list --json --id "$task" 2>/dev/null | python3 -c 'import json,sys
+try: print("".join(t["id"] for t in json.load(sys.stdin) if t.get("status") == "done"))
+except Exception: pass' 2>/dev/null)" ]; then
+      # A done task (11-28: an agent got "no board task" for one and bypassed with QUEUE_NEW_TASK=1): say how to reopen.
+      echo "queue.sh: board task '$task' is done. If it isn't, reopen it first - powos agents task set $task --status working --step \"reopened: <why>\" - then queue again (its old checks stop deciding; this check's result does)." >&2; exit 2
+    elif [ -n "$ids" ] && ! grep -qxF "$task" <<<"$ids"; then
       like=$(grep -i "${task:0:8}" <<<"$ids" | head -3 | tr '\n' ' ')
       echo "queue.sh: no board task '$task'${like:+ - did you mean: $like}. Add it first (powos agents task add ...), or QUEUE_NEW_TASK=1 to queue against it anyway." >&2; exit 2
     elif [ -z "$ids" ] && [ $board_answered = 0 ]; then
@@ -619,8 +624,8 @@ except Exception: pass' 2>/dev/null) || ids=
   elif [ -z "${QUEUE_NO_RUN:-}" ]; then
     # The board marker: the AI page offers "test now" on a task whose step says so (the result's step replaces it).
     # And the check itself (the board's work_check: its truthful "awaiting-check", and the done rule's facts).
-    ( user_sh "$(printf 'powos agents task set %q --step %q >/dev/null 2>&1 || true\npowos agents check set %q %q queued --name %q --need %q >/dev/null 2>&1 || true' \
-        "$task" "$QUEUED_STEP" "$task" "$(basename "$j" .job)" "$name" "$need")" & ) >/dev/null 2>&1
+    ( user_sh "$(printf 'powos agents task set %q --step %q >/dev/null 2>&1 || true\npowos agents check set %q %q queued --name %q --need %q --close %s >/dev/null 2>&1 || powos agents check set %q %q queued --name %q --need %q >/dev/null 2>&1 || true' \
+        "$task" "$QUEUED_STEP" "$task" "$(basename "$j" .job)" "$name" "$need" "$close" "$task" "$(basename "$j" .job)" "$name" "$need")" & ) >/dev/null 2>&1
     # The launchd agent's runner, started now; without the agent, a runner of our own.
     runner_up || agent_kick || { nohup "$0" run >> "$Q/runner.log" 2>&1 & echo $! > "$Q/runner.pid"; }
   fi ;;
@@ -728,8 +733,13 @@ run)
     # user was on the phone), not a bug in the check - filing it as flaky-check friction every time someone uses
     # their own phone was noise, not signal (f50, f56, 2026-10-24).
     local s st=${r%% *} sh=1; shipped "$need" "$qt" || sh=0
-    s=$(printf 'powos agents check set %q %q %q --name %q --line %q --need %q --shipped %s >/dev/null 2>&1 || true\n' \
-        "$1" "$n" "$st" "${name:-}" "$(printf %s "$line" | cut -c1-280)" "$need" "$sh"
+    # --close: only a --close job's PASS may close the task (the board's truth, janitor and sweep read it; 11-28: a
+    # probe queued without --close PASSed and the task read done).
+    # HACK: the "||" retry without --close is for a phone whose CLI predates --close (it refuses the option, and the
+    # row would be lost); real fix: drop the retry once every phone runs the 11-28 CLI.
+    local ln; ln=$(printf %s "$line" | cut -c1-280)
+    s=$(printf 'powos agents check set %q %q %q --name %q --line %q --need %q --shipped %s --close %s >/dev/null 2>&1 || powos agents check set %q %q %q --name %q --line %q --need %q --shipped %s >/dev/null 2>&1 || true\n' \
+        "$1" "$n" "$st" "${name:-}" "$ln" "$need" "$sh" "${close:-0}" "$1" "$n" "$st" "${name:-}" "$ln" "$need" "$sh"
       if { [ "$st" = SKIP ] || [ "$st" = INVALID ]; } && [ "$r" != "SKIP phone in use" ]; then
         printf 'powos friction add --area verify --kind flaky-check %q --repro %q --evidence %q --by verify-queue >/dev/null 2>&1 || true\n' \
           "check ${name:-$1} was $st: $(printf %s "$line" | cut -c1-100)" "tools/phone/verify/queue.sh add $1 $(printf %s "${cmd[*]}" | cut -c1-200)" "~/.cache/powos-verify-queue/done/$n.log"; fi

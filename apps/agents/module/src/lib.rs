@@ -1020,9 +1020,16 @@ pub struct WorkCheck {
     need: String,
     /// That commit was on the phone (shipped) when it ran - or, queued, is now.
     shipped: bool,
+    /// Queued with `queue.sh add --close`: only such a job's PASS speaks for closing the task (2026-11-28: a probe
+    /// queued without --close PASSed and the board called the task done). Last, with a default, so the table migrates
+    /// in place.
+    #[default(false)]
+    close: bool,
 }
 
-const CHECK_STATES: [&str; 7] = ["queued", "running", "PASS", "FAIL", "SKIP", "INVALID", "none"];
+/// "reopened": the mark `task set <done task> --status ...` writes (job `reopen:<task>`) - the checks before it no
+/// longer decide; the task needs a new result (2026-11-28: an explicit reopen kept showing done off the old PASS).
+const CHECK_STATES: [&str; 8] = ["queued", "running", "PASS", "FAIL", "SKIP", "INVALID", "none", "reopened"];
 const CHECKS_MAX: usize = 1500;
 const CHECK_KEEP_MS: u64 = 14 * 24 * 3600 * 1000;
 
@@ -1041,6 +1048,8 @@ struct CheckIn {
     need: String,
     #[serde(default = "yes")]
     shipped: bool,
+    #[serde(default)]
+    close: bool,
 }
 
 fn yes() -> bool {
@@ -1091,10 +1100,14 @@ fn may_close(ctx: &ReducerContext, id: &str) -> Result<(), String> {
         .work_check()
         .task()
         .filter(id)
-        .filter(|c| matches!(c.state.as_str(), "PASS" | "FAIL" | "none"))
+        .filter(|c| matches!(c.state.as_str(), "PASS" | "FAIL" | "none" | "reopened"))
         .max_by_key(|c| c.at);
     match last {
         Some(c) if c.state == "none" || (c.state == "PASS" && c.shipped) => Ok(()),
+        Some(c) if c.state == "reopened" => Err(format!(
+            "'{id}' can't be done: it was reopened ({}) after its last check - queue a check again (queue.sh add --close {id} <check>), or --no-check \"<why>\"",
+            cut(c.line, 120)
+        )),
         Some(c) if c.state == "PASS" => Err(format!(
             "'{id}' can't be done: its check {} passed against a build that wasn't on the phone yet - queue it again after the ship",
             c.name
@@ -1126,6 +1139,7 @@ fn check_row(c: CheckIn, now: u64) -> Result<WorkCheck, String> {
         at: if c.at > 0 { c.at } else { now },
         need: cut(c.need, 40),
         shipped: c.shipped,
+        close: c.close,
     })
 }
 
@@ -1193,7 +1207,7 @@ fn prune_checks(ctx: &ReducerContext, now: u64) {
         .db
         .work_check()
         .iter()
-        .filter(|c| !keep.contains(&c.job) && !matches!(c.state.as_str(), "queued" | "running" | "none"))
+        .filter(|c| !keep.contains(&c.job) && !matches!(c.state.as_str(), "queued" | "running" | "none" | "reopened"))
         .map(|c| (c.at, c.job))
         .collect();
     old.sort();

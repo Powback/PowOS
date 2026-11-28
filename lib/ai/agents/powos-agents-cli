@@ -274,7 +274,7 @@ STORE_FILE = os.environ.get("POWOS_AGENTS_STORE_FILE") or os.path.join(
 FILE_STORE = os.environ.get("POWOS_AGENTS_STORE") == "file"
 TABLES = ("work", "work_check", "friction", "user_ask", "unit")
 WORK_DONE_KEEP_MS, WORK_MAX = 7 * 24 * 3600 * 1000, 200
-CHECK_STATES = ("queued", "running", "PASS", "FAIL", "SKIP", "INVALID", "none")
+CHECK_STATES = ("queued", "running", "PASS", "FAIL", "SKIP", "INVALID", "none", "reopened")
 FRICTION_KINDS = ("refused", "broken-tool", "flaky-check", "unclear-rule", "slow", "other")
 
 
@@ -340,10 +340,13 @@ def _fs_may_close(db, wid):
     if nxt:
         raise Refused(f"'{wid}' can't be done: {len(nxt)} planned step(s) still open: {_cut('; '.join(nxt), 200)} - do "
                       f"them, or drop them from the plan (task set {wid} --plan \"\")")
-    cs = [c for c in db["work_check"].values() if c["task"] == wid and c["state"] in ("PASS", "FAIL", "none")]
+    cs = [c for c in db["work_check"].values() if c["task"] == wid and c["state"] in DECIDING]
     c = max(cs, key=lambda c: c["at"]) if cs else None
     if c and (c["state"] == "none" or (c["state"] == "PASS" and c["shipped"])):
         return
+    if c and c["state"] == "reopened":
+        raise Refused(f"'{wid}' can't be done: it was reopened ({_cut(c['line'], 120)}) after its last check - queue a "
+                      f"check again (queue.sh add --close {wid} <check>), or --no-check \"<why>\"")
     if c and c["state"] == "PASS":
         raise Refused(f"'{wid}' can't be done: its check {c['name']} passed against a build that wasn't on the phone "
                       "yet - queue it again after the ship")
@@ -388,7 +391,7 @@ def _fs_check_row(c, now):
         raise Refused("check: a job and a task")
     return {"job": _cut(c["job"].strip(), 120), "task": _cut(c["task"].strip(), 64), "name": _cut(c.get("name", ""), 64),
             "state": c["state"], "line": _one(c.get("line", ""), 300), "at": int(c.get("at") or 0) or now,
-            "need": _cut(c.get("need", ""), 40), "shipped": bool(c.get("shipped", True))}
+            "need": _cut(c.get("need", ""), 40), "shipped": bool(c.get("shipped", True)), "close": bool(c.get("close"))}
 
 
 def _fs_reduce(db, reducer, a):
@@ -1155,6 +1158,13 @@ def task(argv):
         if st == "done":
             refuse_open(w)
             no_check(w["id"], o)
+        elif st and w["status"] == "done":
+            # An explicit reopen (a user/coordinator: shipped tasks never auto-requeue, but this is the owner's word):
+            # its mark makes the checks before it stop deciding - else the old PASS kept the board's truth "done"
+            # (2026-11-28). The next result (or --no-check) decides again.
+            why = _line(o.get("step") or o.get("note") or "") or f"set {st} by hand"
+            call("check_set", json.dumps({"job": f"reopen:{w['id']}", "task": w["id"], "name": "reopened",
+                                          "state": "reopened", "line": why[:280]}))
         call("work_set", w["id"], o.get("title", ""), o.get("owner", ""), st, o.get("note", ""), project)
         if tl is not None:
             call("work_try", w["id"], tl)
@@ -1325,6 +1335,9 @@ def task(argv):
 TRUTH = ("working", "awaiting-check", "no-check", "stalled", "queued", "blocked", "backlog", "stale", "done")
 LIVE_MS = 30 * 60_000          # agentsd's own staleness: an agent heard from in the last 30 min is live
 CHECK_RESULTS = ("PASS", "FAIL", "SKIP", "INVALID", "none")
+# The results that decide a close - and "reopened" (`task set <done task> --status S`'s mark): the checks before an
+# explicit reopen no longer speak (2026-11-28: a reopened task kept showing done off its old PASS).
+DECIDING = ("PASS", "FAIL", "none", "reopened")
 QUEUED_STEP = "phone check queued"   # tools/phone/verify/queue.sh's marker (the board's fallback before a sync)
 
 
@@ -1427,8 +1440,10 @@ def truth(w, held, idle_roles, checks, now_ms=None, ws=()):
         return "awaiting-check", f"check {_check_name(c)} {c['state']}{ship}"
     if not checks and w.get("step") == QUEUED_STEP:
         return "awaiting-check", "check queued (the queue not synced yet)"
-    results = sorted((c for c in checks if c.get("state") in CHECK_RESULTS), key=lambda c: int(c.get("at") or 0))
+    results = sorted((c for c in checks if c.get("state") in CHECK_RESULTS + ("reopened",)), key=lambda c: int(c.get("at") or 0))
     last = results[-1] if results else None
+    if last and last["state"] == "reopened":
+        return "no-check", f"reopened {ago(int(last.get('at') or now_ms))} ago ({last.get('line', '')[:100]}) - needs a new check"
     if last and last["state"] in ("FAIL", "INVALID", "SKIP"):
         word = {"FAIL": "FAILED", "INVALID": "was INVALID", "SKIP": "was SKIPPED"}[last["state"]]
         return "no-check", f"last check {_check_name(last)} {word}: {last.get('line', '')[:120]} - nobody on it"
@@ -1442,8 +1457,13 @@ def truth(w, held, idle_roles, checks, now_ms=None, ws=()):
         # A newer PASS of a shipped build supersedes every older FAIL (results[-1] is the latest by time); with the fix
         # landed (commits recorded) that is the done rule's evidence - the board no longer waits for someone to close
         # it.
-        if last.get("shipped", True) and work_shipped(w):
+        # ... and only a `queue.sh add --close` job's PASS (2026-11-28: a probe queued without --close PASSed and the
+        # task read done): a probe's PASS is evidence, not the task's last proof.
+        if last.get("shipped", True) and last.get("close") and work_shipped(w):
             return "done", f"fix landed, check {_check_name(last)} PASSED {ago(int(last.get('at') or now_ms))} ago"
+        if not last.get("close"):
+            return "no-check", (f"check {_check_name(last)} PASSED {ago(int(last.get('at') or now_ms))} ago (not a --close "
+                                "check) - queue its closing check (queue.sh add --close) or close it")
         return "no-check", f"check {_check_name(last)} PASSED {ago(int(last.get('at') or now_ms))} ago - close it or queue the next check"
     if last and last["state"] == "none":
         return "no-check", f"no device check possible ({last.get('line', '')[:80]}) - close it"
@@ -1620,12 +1640,13 @@ def check_cmd(argv):
     verb = argv[0] if argv else "list"
     argv = argv[1:]
     if verb == "set":
-        o, rest = opts(argv, ["name", "line", "need", "shipped", "at"])
+        o, rest = opts(argv, ["name", "line", "need", "shipped", "at", "close"])
         if len(rest) != 3:
-            die("usage: powos agents check set <task> <job> <queued|running|PASS|FAIL|SKIP|INVALID|none> [--name N] [--line L] [--need SHA] [--shipped 0|1]")
+            die("usage: powos agents check set <task> <job> <queued|running|PASS|FAIL|SKIP|INVALID|none> [--name N] [--line L] [--need SHA] [--shipped 0|1] [--close 0|1]")
         task_, job, state = rest
         c = {"job": job, "task": task_, "state": state, "name": o.get("name", ""), "line": o.get("line", ""),
-             "need": o.get("need", ""), "shipped": o.get("shipped", "1") != "0", "at": int(o.get("at") or 0)}
+             "need": o.get("need", ""), "shipped": o.get("shipped", "1") != "0", "at": int(o.get("at") or 0),
+             "close": o.get("close", "0") not in ("0", "")}
         call("check_set", json.dumps(c))
     elif verb == "sync":
         if len(argv) != 2 or argv[0] != "--json-text":
@@ -1658,7 +1679,7 @@ def close_passed(cs):
     copy - or failed)."""
     latest = {}
     for c in cs:
-        if c.get("state") in ("PASS", "FAIL", "none") and int(c.get("at") or 0) >= int(latest.get(c["task"], {}).get("at") or 0):
+        if c.get("state") in DECIDING and int(c.get("at") or 0) >= int(latest.get(c["task"], {}).get("at") or 0):
             latest[c["task"]] = c
     # Only while nothing happened to the task since that result (the runner's step write follows it within seconds): a
     # task its owner reopened or moved after the pass is theirs.
@@ -2129,7 +2150,7 @@ def sweep_decide(ws, frictions, checks, asks, now_ms):
     for w in open_:
         # Only on a task whose latest deciding check PASSED (the seen case: its own work passed, the plan holds steps
         # pasted from another task, so nothing ever closes it); the other task keeps them.
-        res = sorted((c for c in by.get(w["id"], []) if c.get("state") in ("PASS", "FAIL", "none")), key=lambda c: int(c.get("at") or 0))
+        res = sorted((c for c in by.get(w["id"], []) if c.get("state") in DECIDING), key=lambda c: int(c.get("at") or 0))
         if w.get("truth") == "working" or not res or res[-1]["state"] != "PASS":
             continue
         nxt = [_line(x.get("text", "")) for x in _jl(w.get("steps", "")) if isinstance(x, dict) and x.get("state") == "next"]
@@ -2149,13 +2170,15 @@ def sweep_decide(ws, frictions, checks, asks, now_ms):
         kids, steps = open_items(w, ws)
         if kids or steps:
             continue
-        res = sorted((c for c in by.get(w["id"], []) if c.get("state") in ("PASS", "FAIL", "none")), key=lambda c: int(c.get("at") or 0))
+        res = sorted((c for c in by.get(w["id"], []) if c.get("state") in DECIDING), key=lambda c: int(c.get("at") or 0))
         last = res[-1] if res else None
         # The user's own latest verdict "still broken" (check `you` FAIL) is never closed over, whatever passed since.
         mine_ = [c for c in res if c.get("name") == "you" and c.get("state") in ("PASS", "FAIL")]
         if mine_ and mine_[-1]["state"] == "FAIL":
             continue
-        if last and ((last["state"] == "PASS" and last.get("shipped", True)) or (last["state"] == "none" and (last.get("line") or "").strip())):
+        # Only a --close job's PASS closes (2026-11-28: a probe's PASS closed focus-modes-and-a-notification-digest).
+        if last and ((last["state"] == "PASS" and last.get("shipped", True) and last.get("close"))
+                     or (last["state"] == "none" and (last.get("line") or "").strip())):
             ev_ = (f"check {_check_name(last)} PASSED" if last["state"] == "PASS" else f"no device check: {last['line']}")[:200]
             out.append({"kind": "close", "id": w["id"], "why": ev_,
                         "calls": [("work_set", w["id"], "", "", "done", f"board sweep: closed on {ev_}"[:280], "")]})

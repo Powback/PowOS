@@ -138,10 +138,12 @@ class FakeStdb(http.server.BaseHTTPRequestHandler):
         steps = json.loads(self.db["work"].get(wid, {}).get("steps") or "[]")
         if any(x["state"] == "next" for x in steps):
             raise ValueError(f"'{wid}' can't be done: planned step(s) still open")
-        res = [c for c in self.db["work_check"].values() if c["task"] == wid and c["state"] in ("PASS", "FAIL", "none")]
+        res = [c for c in self.db["work_check"].values() if c["task"] == wid and c["state"] in ("PASS", "FAIL", "none", "reopened")]
         last = max(res, key=lambda c: c["at"]) if res else None
         if last and (last["state"] == "none" or (last["state"] == "PASS" and last["shipped"])):
             return
+        if last and last["state"] == "reopened":
+            raise ValueError(f"'{wid}' can't be done: it was reopened ({last['line']}) after its last check")
         raise ValueError(f"'{wid}' can't be done: " + ("its last phone check FAILED" if last and last["state"] == "FAIL"
                                                          else "a build that wasn't on the phone" if last else
                                                          "no phone check passed for it"))
@@ -149,7 +151,7 @@ class FakeStdb(http.server.BaseHTTPRequestHandler):
     def _check(self, c):
         return {"job": c["job"], "task": c["task"], "name": c.get("name", ""), "state": c["state"],
                 "line": c.get("line", ""), "at": c.get("at") or self.clock[0], "need": c.get("need", ""),
-                "shipped": c.get("shipped", True)}
+                "shipped": c.get("shipped", True), "close": bool(c.get("close"))}
 
     def r_check_set(self, check):
         c = self._check(json.loads(check))
@@ -275,7 +277,7 @@ class TruthTest(unittest.TestCase):
 
     def test_newer_pass_supersedes_older_fail_and_closes_a_landed_fix(self):
         fail = {"state": "FAIL", "at": NOW - 5000, "job": "j1", "line": "x"}
-        ok = {"state": "PASS", "at": NOW - 1000, "job": "j2", "shipped": True}
+        ok = {"state": "PASS", "at": NOW - 1000, "job": "j2", "shipped": True, "close": True}
         landed = row("a", commits='["abc1234"]')
         self.assertEqual(self.t(landed, checks=[ok, fail])[0], "done")   # order of the list does not matter, time does
         self.assertEqual(self.t(landed, checks=[dict(fail, at=NOW - 100), ok])[0], "no-check")   # newer FAIL wins
@@ -345,7 +347,8 @@ class JanitorTest(unittest.TestCase):
     had moved in 6 h; "a lot has been done just not marked as such"): claims expire, the facts close, fake clock."""
 
     H = 3600_000
-    PASS = {"task": "a", "job": "j2", "name": "board-state", "state": "PASS", "at": NOW - 60_000, "shipped": True}
+    PASS = {"task": "a", "job": "j2", "name": "board-state", "state": "PASS", "at": NOW - 60_000, "shipped": True,
+            "close": True}
     LANDED = json.dumps([{"sha": "abc1234", "subject": "fix"}])
 
     def setUp(self):
@@ -556,7 +559,7 @@ class PassClosesOnlyItsOwnTaskTest(unittest.TestCase):
 
     def test_truth_a_pass_never_closes_a_parent_with_open_children(self):
         ok = lambda task, at=NOW - 1000: {"job": f"j-{task}-{at}", "task": task, "state": "PASS", "at": at, "shipped": True,
-                                          "name": f"{task}-check"}
+                                          "name": f"{task}-check", "close": True}
         landed = '[{"sha": "abc1234", "subject": "x"}]'
         p = row("p", commits=landed)
         a, b = row("a", parent="p", commits=landed), row("b", parent="p", commits=landed)
@@ -974,7 +977,7 @@ class HygieneCliTest(BoardTest):
         self.run_cli("task", "add", "Owner of the steps", "--id", "own", "--plan", "w1 build it; w2 test it", "--status", "blocked",
                      "--note", "waits on the kernel")
         self.run_cli("task", "add", "Leaky", "--id", "leaky", "--plan", "w1 build it")
-        self.run_cli("check", "set", "leaky", "j1", "PASS", "--name", "leaky-check")
+        self.run_cli("check", "set", "leaky", "j1", "PASS", "--name", "leaky-check", "--close", "1")
         self.run_cli("task", "add", "No check reason", "--id", "nc")
         self.run_cli("check", "set", "nc", "nocheck:nc", "none", "--line", "docs only")
         self.run_cli("task", "add", "Owned by ghost", "--id", "ghost", "--owner", "powos-ghost")
@@ -1016,7 +1019,7 @@ class HygieneCliTest(BoardTest):
         self.run_cli("task", "add", "Theme flash", "--id", "flash", "--commit", "abc1234")
         self.run_cli("check", "set", "flash", "j3", "FAIL", "--name", "you", "--line", "still broken")
         FakeStdb.clock[0] += 1000
-        self.run_cli("check", "set", "flash", "j4", "PASS", "--name", "agent-check")
+        self.run_cli("check", "set", "flash", "j4", "PASS", "--name", "agent-check", "--close", "1")
         # the manager's own: listed, untouched
         self.run_cli("task", "add", "Manager builds this", "--id", "mgr", "--owner", "manager")
         for w in ("epic", "taps", "flash", "mgr"):
@@ -1142,6 +1145,41 @@ class PassClosesOnlyItsOwnTaskCliTest(unittest.TestCase):
         self.run_cli("task", "done", "b")
         self.run_cli("task", "done", "p")
         self.assertEqual([work[t]["status"] for t in "pab"], ["done", "done", "done"])
+
+    def test_a_probe_pass_never_closes_and_a_reopen_sticks(self):
+        """2026-11-28: a probe queued WITHOUT --close (20261128-104819-85399) PASSed on
+        focus-modes-and-a-notification-digest and the board (truth -> janitor) marked it done; `task set --status working`
+        then didn't stick (the next list's janitor closed it again off the same PASS)."""
+        landed = '[{"sha": "abc1234", "subject": "x"}]'
+        self.run_cli("task", "add", "Focus modes", "--id", "fm")
+        FakeStdb.db["work"]["fm"]["commits"] = landed
+        self.run_cli("check", "set", "fm", "probe", "PASS", "--name", "notif post probe", "--close", "0")
+        js = {w["id"]: w for w in json.loads(self.run_cli("task", "list", "--json").stdout)}
+        self.assertEqual(FakeStdb.db["work"]["fm"]["status"], "working", "a probe's PASS never closes (janitor)")
+        self.assertEqual(js["fm"]["truth"], "no-check")
+        self.assertIn("not a --close check", js["fm"]["why"])
+        f = os.path.join(self.tmp, "c.json")
+        json.dump([{"job": "probe", "task": "fm", "state": "PASS", "close": False, "shipped": True,
+                    "at": FakeStdb.clock[0]}], open(f, "w"))
+        self.assertIn("0 task(s) closed", self.run_cli("check", "sync", f).stdout)
+        self.run_cli("sweep")
+        self.assertNotEqual(FakeStdb.db["work"]["fm"]["status"], "done", "nor the sweep")
+        self.run_cli("task", "set", "fm", "--status", "working")
+        # The closing check's PASS closes it (the janitor, on the next list).
+        self.run_cli("check", "set", "fm", "real", "PASS", "--name", "focus-modes", "--close", "1")
+        self.run_cli("task", "list", "--json")
+        self.assertEqual(FakeStdb.db["work"]["fm"]["status"], "done")
+        # An explicit reopen sticks: the old PASS no longer decides, a list doesn't close it again, nor does task done.
+        self.run_cli("task", "set", "fm", "--status", "working", "--step", "reopened: probe closed it by mistake")
+        js = {w["id"]: w for w in json.loads(self.run_cli("task", "list", "--json").stdout)}
+        self.assertEqual(FakeStdb.db["work"]["fm"]["status"], "working")
+        self.assertEqual(js["fm"]["truth"], "no-check")
+        self.assertIn("reopened", js["fm"]["why"])
+        self.assertIn("reopened", self.run_cli("task", "done", "fm", ok=False).stderr)
+        # The next closing PASS decides again.
+        self.run_cli("check", "set", "fm", "rerun", "PASS", "--name", "focus-modes", "--close", "1")
+        self.run_cli("task", "list", "--json")
+        self.assertEqual(FakeStdb.db["work"]["fm"]["status"], "done")
 
     def test_parent_children_done_but_no_own_pass(self):
         self.run_cli("task", "add", "Parent", "--id", "p")
