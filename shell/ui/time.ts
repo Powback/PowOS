@@ -9,6 +9,16 @@ export function ago(time: number) {
   return `${Math.floor(s / 86400)}d`;
 }
 
+/**
+ * Whether [time] (Unix seconds, as notifications carry it) falls in [since, until] (Date.now() ms, as a focus window
+ * stores them; until null: still running). Compared in whole seconds: a notification's postTime is cut to the second, so
+ * one posted in the focus's first second counts. (focus.ts compared the seconds with the ms directly - nothing was ever
+ * held, verify FAIL 11-28.)
+ */
+export function inWindow(time: number, since: number, until?: number | null) {
+  return time >= Math.floor(since / 1000) && (until == null || time <= Math.ceil(until / 1000));
+}
+
 const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
 const hm = (d: Date) => `${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`;
 const dayOf = (d: Date) => new Date(d.getFullYear(), d.getMonth(), d.getDate()).getTime();

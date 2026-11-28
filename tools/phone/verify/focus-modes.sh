@@ -60,7 +60,8 @@ tap_tile() {
 }
 tap_tile on || exit 1
 on=$(store focus.on); log "after the tap: focus.on=$on dnd=$(dnd)"
-case "$on" in *'"since"'*) ;; *) fail "the tile didn't turn a focus on (focus.on=$on)" ;; esac
+# q strips the answer's quotes (tr -d '"'): {id:dnd,...,since:...} - match the bare key (11-28 FAIL on a focus that was on).
+case "$on" in *since:*) ;; *) fail "the tile didn't turn a focus on (focus.on=$on)" ;; esac
 [ "$(dnd)" = true ] || fail "focus on, Do not disturb is not (qs.state dnd=$(dnd))"
 
 sh_ "cmd notification post -t 'focus check' $TAG 'held while the focus is on' >/dev/null"; sleep 2

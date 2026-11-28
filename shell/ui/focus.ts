@@ -15,6 +15,7 @@ import { computed, effect, signal } from "@preact/signals";
 import { powos } from "../bridge.ts";
 import { openScreen } from "../screens.ts";
 import type { IconName } from "./icons.tsx";
+import { inWindow } from "./time.ts";
 import type { PhoneNotification, QuickTile } from "../types.ts";
 
 export interface FocusMode {
@@ -97,7 +98,7 @@ const exempt = (n: PhoneNotification) => n.category === "alarm" || n.category ==
 /** Whether [n] is held by window [w]. */
 export function heldBy(n: PhoneNotification, w: FocusWindow): boolean {
   if (exempt(n)) return false;
-  if (n.time < w.since || (w.until != null && n.time > w.until)) return false;
+  if (!inWindow(n.time, w.since, w.until)) return false;
   return !w.allow.includes(n.pkg ?? n.app);
 }
 
