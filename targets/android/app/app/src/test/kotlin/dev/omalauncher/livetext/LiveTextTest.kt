@@ -49,6 +49,28 @@ class LiveTextTest {
         assertTrue(found[Entity.Kind.ADDRESS]!!.contains("Storgata"))
     }
 
+    /** ML Kit's actual read of the fixture on the phone (verify queue 11-28 04:49): it splits the email at the "@". */
+    @Test fun deviceReadOfTheFixtureFindsTheSplitEmail() {
+        val device = "PowOS Live Text\nCall +47 22 33 44 55\nVisit www.powback.com\nMail hello @powback.com\nStorgata 12, 0155 Oslo"
+        val found = Entities.find(device)
+        assertEquals(listOf(Entity(Entity.Kind.EMAIL, "hello@powback.com", "mailto:hello@powback.com")), found.filter { it.kind == Entity.Kind.EMAIL })
+        // The email's domain is no separate link any more; www.powback.com still is.
+        assertEquals(listOf("www.powback.com"), found.filter { it.kind == Entity.Kind.URL }.map { it.text })
+        assertEquals(setOf(Entity.Kind.PHONE, Entity.Kind.URL, Entity.Kind.EMAIL, Entity.Kind.ADDRESS), found.map { it.kind }.toSet())
+    }
+
+    @Test fun emailsSurviveCommonOcrSplitsAndMisreads() {
+        val email = { s: String -> Entities.find(s).filter { it.kind == Entity.Kind.EMAIL }.map { it.uri } }
+        for (s in listOf("hello@ powback.com", "hello @ powback.com", "mail hello@powback.corn", "hello@powback.c0m.")) {
+            assertEquals(s, listOf("mailto:hello@powback.com"), email(s))
+        }
+        assertEquals(listOf("mailto:a.b@mail.example.no"), email("to a.b@mail.example.no,"))
+        // Not emails: a lone "@" between words, no dot in the domain, a numeric tail.
+        assertTrue(email("meet @ noon").isEmpty())
+        assertTrue(email("user@localhost").isEmpty())
+        assertTrue(email("build 1.2@3.45").isEmpty())
+    }
+
     @Test fun moreEntityShapes() {
         val kinds = { s: String -> Entities.find(s).map { it.kind to it.text } }
         assertEquals(listOf(Entity.Kind.PHONE to "(555) 123-4567"), kinds("ring (555) 123-4567 now"))

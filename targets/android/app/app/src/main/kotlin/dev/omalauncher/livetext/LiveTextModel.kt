@@ -118,7 +118,22 @@ data class Entity(val kind: Kind, val text: String, val uri: String) {
 }
 
 object Entities {
-    private val email = Regex("""[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}""")
+    /**
+     * OCR splits an address around its "@" the way it splits words: ML Kit read the fixture's "hello@powback.com" as
+     * "hello @powback.com" (11-28), and "a @ b.com" / "a@ b.com" are the same thing. Live Text still makes it one email,
+     * so one space either side of the "@" belongs to it; [emailOf] puts it back together.
+     */
+    private val email = Regex("""[A-Za-z0-9._%+-]+[ \t]?@[ \t]?[A-Za-z0-9-]+(?:\.[A-Za-z0-9-]+)*\.[A-Za-z0-9]{2,}""")
+
+    /** OCR's usual misreads of a ".com" ending ("rn" for "m", "0" for "o"): no such TLDs exist, so they mean .com. */
+    private val comMisread = Regex("""(?i)\.(?:corn|c0m|c0rn)$""")
+
+    /** An [email] match without the spaces OCR put around the "@", with a misread .com fixed; null if the TLD
+     *  isn't letters (a version string or IP-like tail). */
+    private fun emailOf(v: String): String? {
+        val e = comMisread.replace(v.replace(" ", "").replace("\t", ""), ".com")
+        return if (e.substringAfterLast('.').all { it.isLetter() }) e else null
+    }
     private val url = Regex("""(?i)\b(?:https?://|www\.)[^\s<>"]+|\b[a-z0-9-]+(?:\.[a-z0-9-]+)*\.(?:com|no|org|net|io|dev|app|se|dk|de|uk|eu)(?:/[^\s<>"]*)?""")
 
     /** +47 22 33 44 55, (555) 123-4567, 22334455: 8+ digits, separators allowed, optional +. */
@@ -137,14 +152,15 @@ object Entities {
                 """(?:,?[ \t]+\d{4,5}[ \t]+[A-ZÆØÅÄÖ][a-zæøåäöüß]+)?""",
         )
 
-    private class Rule(val re: Regex, val kind: Entity.Kind, val uri: (String) -> String?)
+    /** [norm]: the entity's text from the matched text (null: not one after all), [uri] from that. */
+    private class Rule(val re: Regex, val kind: Entity.Kind, val norm: (String) -> String? = { it }, val uri: (String) -> String?)
 
     private val rules =
         listOf(
-            Rule(email, Entity.Kind.EMAIL) { "mailto:$it" },
+            Rule(email, Entity.Kind.EMAIL, ::emailOf) { "mailto:$it" },
             Rule(url, Entity.Kind.URL) { if (it.startsWith("http", true)) it else "https://$it" },
             Rule(address, Entity.Kind.ADDRESS) { "geo:0,0?q=" + java.net.URLEncoder.encode(it, "UTF-8") },
-            Rule(phone, Entity.Kind.PHONE, ::telOf),
+            Rule(phone, Entity.Kind.PHONE, uri = ::telOf),
         )
 
     /** tel: for 8-15 digits that aren't a date; null otherwise. */
@@ -159,7 +175,7 @@ object Entities {
         m: MatchResult,
     ) {
         if (out.any { (r, _) -> r.first <= m.range.last && m.range.first <= r.last }) return
-        val v = m.value.trimEnd('.', ',', ';', ':', ')')
+        val v = rule.norm(m.value.trimEnd('.', ',', ';', ':', ')')) ?: return
         rule.uri(v)?.let { out += m.range to Entity(rule.kind, v, it) }
     }
 

@@ -63,11 +63,16 @@ d = json.loads(sys.argv[1])
 bad = []
 if not d.get("ok"): bad.append("device OCR failed")
 t = d.get("text", "")
-for want in ["Live Text", "22 33 44 55", "powback.com", "hello@powback.com", "Storgata 12"]:
+# The raw read keeps OCR's spacing (ML Kit reads the email line as "hello @powback.com", 11-28), so the email is judged
+# as the exact address the detector makes of it, the way Live Text's chip shows it.
+for want in ["Live Text", "22 33 44 55", "powback.com", "hello", "Storgata 12"]:
     if want not in t: bad.append(f"text lacks {want!r}")
-kinds = {e["kind"] for e in d.get("entities", [])}
+ents = d.get("entities", [])
+kinds = {e["kind"] for e in ents}
 for k in ["PHONE", "URL", "EMAIL", "ADDRESS"]:
     if k not in kinds: bad.append(f"no {k} found")
+emails = [e["uri"] for e in ents if e["kind"] == "EMAIL"]
+if emails and "mailto:hello@powback.com" not in emails: bad.append(f"email read as {emails}, not hello@powback.com")
 print(f"device read: {d.get('words')} words in {d.get('ms')} ms, entities {sorted(kinds)}")
 if sys.argv[2]:
     h = json.loads(sys.argv[2])
