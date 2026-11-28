@@ -15,6 +15,7 @@
 set -u
 here=$(cd "$(dirname "$0")" && pwd); T=$here/..; A="$T/adb.sh"
 . "$here/base.sh"
+. "$here/dream.sh"
 cd "$here/../../.." || exit 1
 ash() { "$A" shell "$@" 2>/dev/null | tr -d '\r'; }
 COMP=com.powos.app/dev.omalauncher.shell.PowosDozeService
@@ -22,7 +23,7 @@ COMP=com.powos.app/dev.omalauncher.shell.PowosDozeService
 dump=$(ash dumpsys battery)
 echo "$dump" | grep -qE '(AC|USB|Wireless|Dock) powered: true' || skip "not plugged in - the screensaver shows only on a charger"
 
-step "pick PowOS as the screensaver, portrait, start it" 30
+step "pick PowOS as the screensaver, portrait, start it" 60
 old_comp=$(ash settings get secure screensaver_components)
 old_on=$(ash settings get secure screensaver_enabled)
 old_acc=$(ash settings get system accelerometer_rotation)
@@ -33,18 +34,13 @@ restore() {
   put_back secure screensaver_enabled "$old_on"
   put_back system user_rotation "$old_rot"
   put_back system accelerometer_rotation "$old_acc"
-  ash cmd dreams stop-dream >/dev/null 2>&1 || true
+  dream_stop
+  dream_restore
 }
 trap restore EXIT
-ash settings put secure screensaver_components "$COMP" >/dev/null
-ash settings put secure screensaver_enabled 1 >/dev/null
 ash settings put system accelerometer_rotation 0 >/dev/null
 ash settings put system user_rotation 0 >/dev/null
-sleep 1
-ash cmd dreams start-dream >/dev/null 2>&1 || ash am start -n com.android.systemui/.Somnambulator >/dev/null
-dreaming() { ash dumpsys dreams | grep -qiE 'mCurrentDream.*PowosDozeService|isDreaming=true|mDreaming=true|dreaming: true'; }
-for _ in 1 2 3 4 5 6 7 8 9 10; do dreaming && break; sleep 1; done
-dreaming || fail "the dream didn't start"
+if dream_start "$COMP"; then pass "the dream is up: $(dream_line)"; else fail "the dream didn't start ($DREAM_WHY)"; fi
 
 step "the aod page and its now-playing line" 40
 playing=0
@@ -68,7 +64,7 @@ fi
 
 step "the fingerprint spot" 15
 # The host's own answer (home's page asks it; the same FingerprintSensor.read the aod's page got). Quotes stripped.
-sensor=$(hcall_once lock.sensor null 'v=>JSON.stringify(v)')
+sensor=$(hcall_once lock.sensor '[]' 'v=>JSON.stringify(v)')
 echo "sensor: $sensor"
 if echo "$sensor" | grep -q 'kind:udfps' && echo "$sensor" | grep -q 'enrolled:true'; then
   echo "$st" | grep -q '"fp":true' && pass "spot drawn for the in-display sensor" || fail "an in-display sensor, no spot ($st)"

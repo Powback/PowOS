@@ -5,13 +5,15 @@
 # settings/dream rights). Runs only on a charging phone: not plugged in = SKIP (the queue already runs it only in an
 # idle window). Steps, every setting put back as it was at the end:
 #   1. PowOS picked as the screensaver (secure screensaver_components/_enabled), the screen turned landscape
-#      (system accelerometer_rotation 0 + user_rotation 1), the dream started (cmd dreams, else SystemUI's Somnambulator);
+#      (system accelerometer_rotation 0 + user_rotation 1), the dream started (dream.sh: root `cmd dreams`, else
+#      SystemUI's Somnambulator, else the screen timing out while charging);
 #   2. the standby page is up (CDP "standby"): its clock, both stacks, the left stack's cards and the night flag;
 #   3. a tap in the clock ends the dream (dumpsys dreams: not dreaming within 5 s).
 # PASS = all three. Screenshot: $OUT/standby.png when OUT is set.
 set -u
 here=$(cd "$(dirname "$0")" && pwd); T=$here/..; A="$T/adb.sh"
 . "$here/base.sh"
+. "$here/dream.sh"
 cd "$here/../../.." || exit 1
 ash() { "$A" shell "$@" 2>/dev/null | tr -d '\r'; }
 COMP=com.powos.app/dev.omalauncher.shell.PowosDozeService
@@ -19,7 +21,7 @@ COMP=com.powos.app/dev.omalauncher.shell.PowosDozeService
 dump=$(ash dumpsys battery)
 echo "$dump" | grep -qE '(AC|USB|Wireless|Dock) powered: true' || skip "not plugged in - StandBy shows only on a charger"
 
-step "pick PowOS as the screensaver, landscape, start it" 30
+step "pick PowOS as the screensaver, landscape, start it" 60
 old_comp=$(ash settings get secure screensaver_components)
 old_on=$(ash settings get secure screensaver_enabled)
 old_acc=$(ash settings get system accelerometer_rotation)
@@ -31,18 +33,13 @@ restore() {
   put_back secure screensaver_enabled "$old_on"
   put_back system user_rotation "$old_rot"
   put_back system accelerometer_rotation "$old_acc"
-  ash cmd dreams stop-dream >/dev/null 2>&1 || true
+  dream_stop
+  dream_restore
 }
 trap restore EXIT
-ash settings put secure screensaver_components "$COMP" >/dev/null
-ash settings put secure screensaver_enabled 1 >/dev/null
 ash settings put system accelerometer_rotation 0 >/dev/null
 ash settings put system user_rotation 1 >/dev/null
-sleep 1
-ash cmd dreams start-dream >/dev/null 2>&1 || ash am start -n com.android.systemui/.Somnambulator >/dev/null
-dreaming() { ash dumpsys dreams | grep -qiE 'mCurrentDream.*PowosDozeService|isDreaming=true|mDreaming=true|dreaming: true'; }
-for _ in 1 2 3 4 5 6 7 8 9 10; do dreaming && break; sleep 1; done
-dreaming || fail "the dream didn't start (dumpsys dreams: $(ash dumpsys dreams | grep -iE 'dream' | head -3 | tr '\n' ' '))"
+if dream_start "$COMP"; then pass "the dream is up: $(dream_line)"; else fail "the dream didn't start ($DREAM_WHY)"; fi
 
 step "the standby page" 40
 st=""
@@ -66,7 +63,7 @@ read -r pw ph <<<"$size"
 long=$(( pw > ph ? pw : ph )); short=$(( pw > ph ? ph : pw ))
 "$A" shell input tap $(( long / 4 )) $(( short / 2 )) >/dev/null 2>&1
 gone=0
-for _ in 1 2 3 4 5; do dreaming || { gone=1; break; }; sleep 1; done
+for _ in 1 2 3 4 5; do dream_on || { gone=1; break; }; sleep 1; done
 [ "$gone" = 1 ] && pass "a tap ended StandBy" || fail "StandBy still up 5 s after a tap"
 
 result "StandBy shows on the charger and a tap ends it"
