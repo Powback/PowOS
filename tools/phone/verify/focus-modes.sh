@@ -77,6 +77,9 @@ log "after the second tap: focus.on=$(store focus.on) dnd=$(dnd)"
 [ "$(dnd)" = false ] || fail "focus off, Do not disturb still on"
 digest=$(q 'document.querySelector(".notif-digest")?.textContent ?? ""')
 log "after: digest='$digest'"
+# What the digest decides from (11-28 FAIL: held while on, gone after): the stored windows and the test notification as listed.
+log "after: focus.digest=$(store focus.digest)"
+log "after: listed=$(q "$PB('notifications.list',[]).then(l=>JSON.stringify((l.items||[]).filter(n=>n.title==='focus check').map(n=>({key:n.key,time:n.time,pkg:n.pkg,clearable:n.clearable}))), () => 'err')")"
 case "$digest" in *"was on"*) ;; *) fail "the digest card isn't there after the focus ended ('$digest')" ;; esac
 
 SHOW='(()=>{const b=[...document.querySelectorAll(".notif-digest button")].find(e=>e.textContent.trim()==="Show");if(!b)return "";b.scrollIntoView({block:"center"});const r=b.getBoundingClientRect(),d=devicePixelRatio;return [Math.round((r.left+r.width/2)*d),Math.round((r.top+r.height/2)*d)].join(" ")})()'

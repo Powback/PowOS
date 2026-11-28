@@ -18,10 +18,12 @@ import { tick } from "./haptics.ts";
 import { animateLayout, closeGap, foldAway } from "./notifmotion.ts";
 import { followNotif, notifOpen, notifShown } from "./gesture.ts";
 import { ago } from "./time.ts";
-import { clearHeld, digestLine, digestTitle, focusOn, releaseDigest, splitHeld } from "./focus.ts";
+import { clearHeld, digestLine, digestTitle, focusOn, releaseDigest, splitHeld, trackListed } from "./focus.ts";
 import type { NotificationList, PhoneNotification } from "../types.ts";
 
 const list = signal<NotificationList>({ available: true, items: [] });
+// A focus ending keeps what it held by key (focus.ts ended).
+trackListed(() => list.value.items);
 /** The list, read by the meter recording's snapshot (perfrec.ts). */
 export { list as notifList };
 

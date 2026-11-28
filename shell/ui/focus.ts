@@ -15,7 +15,7 @@ import { computed, effect, signal } from "@preact/signals";
 import { powos } from "../bridge.ts";
 import { openScreen } from "../screens.ts";
 import type { IconName } from "./icons.tsx";
-import { inWindow } from "./time.ts";
+import { ended as endedWith, heldBy, type FocusWindow } from "./focuswindow.ts";
 import type { PhoneNotification, QuickTile } from "../types.ts";
 
 export interface FocusMode {
@@ -26,15 +26,7 @@ export interface FocusMode {
   allow: string[];
 }
 
-/** A finished (or running) focus's window: what came in between [since] and [until] from outside [allow] is held. */
-export interface FocusWindow {
-  id: string;
-  label: string;
-  since: number;
-  /** Still on: none. */
-  until?: number;
-  allow: string[];
-}
+export { heldBy, type FocusWindow };
 
 export const FOCUS_ID = "powos.focus";
 
@@ -92,16 +84,6 @@ export function pkgOfKey(key: string): string | null {
   return key.slice(2).split("/")[0] || null;
 }
 
-/** Never held: alarms, calls, ongoing ones (music, a download). */
-const exempt = (n: PhoneNotification) => n.category === "alarm" || n.category === "call" || !n.clearable;
-
-/** Whether [n] is held by window [w]. */
-export function heldBy(n: PhoneNotification, w: FocusWindow): boolean {
-  if (exempt(n)) return false;
-  if (!inWindow(n.time, w.since, w.until)) return false;
-  return !w.allow.includes(n.pkg ?? n.app);
-}
-
 /** The windows holding notifications now: the running focus (with its live allow list) and the digest's. */
 const windows = computed<FocusWindow[]>(() => {
   const on = focusOn.value;
@@ -142,8 +124,12 @@ export function startFocus(id: string) {
   void dnd(true);
 }
 
+/** The page's notifications as listed (notifications.tsx registers its list): what an ending focus held, by key. */
+let listed: () => PhoneNotification[] = () => [];
+export const trackListed = (f: () => PhoneNotification[]) => void (listed = f);
+
 function endWindow(w: FocusWindow) {
-  focusDigest.value = [{ ...w, allow: modeOf(w.id).allow, until: Date.now() }, ...focusDigest.value].slice(0, 8);
+  focusDigest.value = [endedWith(w, modeOf(w.id).allow, listed()), ...focusDigest.value].slice(0, 8);
 }
 
 /** The focus off: Do not disturb off, what it held left on the digest card. */
