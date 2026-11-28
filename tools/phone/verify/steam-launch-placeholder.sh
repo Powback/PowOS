@@ -68,15 +68,15 @@ grep -q "^ANNOUNCE" "$OUT/run.txt" || { echo "RESULT FAIL announce"; exit 1; }
 since() { python3 -c "import time;print(int((time.time()-$t0)*1000))"; }
 if [ "${FOLDED:-0}" = 1 ]; then
   seen=""; fails=""
-  while [ "$(since)" -lt $((PLACEHOLDER_MS + 15000)) ]; do logs | grep -q "($APP): its launch window" && { seen=$(since); break; }; sleep 0.5; done
+  while [ "$(since)" -lt $((PLACEHOLDER_MS + 15000)) ]; do grep -q "($APP): its launch window" <<<"$(logs)" && { seen=$(since); break; }; sleep 0.5; done
   echo "launch task: ${seen:-never} ms after the call" | tee -a "$OUT/run.txt"
   [ -n "$seen" ] || fails="$fails no-launch-task"
   [ -n "$seen" ] && [ "$seen" -gt "$PLACEHOLDER_MS" ] && fails="$fails slow-launch-task"
   end=$(( $(date +%s) + WINDOW_S ))
-  while [ "$(date +%s)" -lt "$end" ]; do logs | grep -q "launch window: now window\|launch of .* failed" && break; sleep 2; done
+  while [ "$(date +%s)" -lt "$end" ]; do grep -q "launch window: now window\|launch of .* failed" <<<"$(logs)" && break; sleep 2; done
   logs | grep "its launch window\|launch window: now window\|launch of .* failed\|full screen (the app's own)" | tail -6 | tee -a "$OUT/run.txt"
-  logs | grep -q "launch window: now window" || fails="$fails window-never-took-the-task"
-  logs | grep -q "full screen (the app's own)" && fails="$fails second-task"
+  grep -q "launch window: now window" <<<"$(logs)" || fails="$fails window-never-took-the-task"
+  grep -q "full screen (the app's own)" <<<"$(logs)" && fails="$fails second-task"
   q=$(steam_ask)
   session "timeout 35 powos game $APP stop 2>&1 | tail -1" | tee -a "$OUT/run.txt"
   [ -z "$fails" ] && { echo "RESULT PASS folded launch task ${seen} ms"; exit 0; }

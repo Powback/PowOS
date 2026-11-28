@@ -192,7 +192,7 @@ for y in 40 28 52; do
       ax=${at%,*}; ay=${at#*,}
       [ $(( (ax - ex) * (ax - ex) )) -le 36 ] && [ $(( (ay - ey) * (ay - ey) )) -le 36 ] ||
         bad "popup $N at $ax,$ay, want ~$ex,$ey (its X place against Steam's window x $scale, +-6 px)"
-      echo "$lines" | grep -q "^popup $N insane" && bad "popup $N: $(echo "$lines" | grep "^popup $N insane" | tail -1)"
+      grep -q "^popup $N insane" <<<"$lines" && bad "popup $N: $(grep "^popup $N insane" <<<"$lines" | tail -1)"
       popup_proof "$N" "$LAYERS" "$lines" "$(rs "tail -n +$((klog0 + 1)) /run/powos-app/hyprland.log | grep -a 'window task $N live'")"
       rs "tail -n +$((klog0 + 1)) /run/powos-app/hyprland.log | grep -a 'exports popup $N '" | tail -1 | grep -q . &&
         say "kwin: $(rs "tail -n +$((klog0 + 1)) /run/powos-app/hyprland.log | grep -a 'exports popup $N '" | tail -1 | cut -c1-200)" ||

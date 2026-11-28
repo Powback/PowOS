@@ -28,7 +28,7 @@ SH
   "$A" shell "su -c 'mkdir -p /data/powos/root/data/local/tmp && mv /data/local/tmp/$b /data/powos/root/data/local/tmp/$b'" >/dev/null
   out=$("$R" "$s" 2>&1); rm -f "$s"
   echo "$out" | tail -2
-  echo "$out" | grep -q ": installed" || { echo "FAIL install: $f"; rc=1; continue; }
+  grep -q ": installed" <<<"$out" || { echo "FAIL install: $f"; rc=1; continue; }
   case $f in apps/powos-sleep-gui) gui=1 ;; esac
 done
 if [ -n "$gui" ]; then

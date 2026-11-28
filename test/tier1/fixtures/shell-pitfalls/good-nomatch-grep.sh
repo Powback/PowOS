@@ -9,8 +9,8 @@ git status --porcelain | { grep -v node_modules || true; } | sort
 if git status --porcelain | grep -q '^ M'; then echo dirty; fi
 git status --porcelain | grep -q '^ M' && echo dirty
 if [ -d .git ] && git status --porcelain | grep -q '^ M'; then echo dirty; fi
-! ps ax | grep -q '[s]leep 99'
-while ps ax | grep -q '[s]leep 99'; do sleep 1; done
+! pgrep -fl sleep | grep -q '[s]leep 99'
+while pgrep -fl sleep | grep -q '[s]leep 99'; do sleep 1; done
 has_change() { git status --porcelain | grep -q "$1"; }
 f() {
   local x=$(grep -o 'a=[0-9]*' f)
@@ -21,7 +21,7 @@ for w in $(grep -l widget ./*.tsx | sort); do echo "$w"; done
 while read -r l; do echo "$l"; done < <(grep -v '^#' list.txt)
 x=$(grep -c y f | sort; echo finished)
 grep TODO notes.txt
-out=$(git log | grep fix | head -3) || out=
+out=$(grep fix notes.txt | head -3) || out=
 grep x f | sort # lint-ok: fixture escape on the line itself
 cat <<EOT
 grep x f | sort

@@ -213,17 +213,17 @@ git reset -q --hard origin/main
 
 # 5. The guards: agents can't ship by hand; --direct from the tip works and is logged; --direct behind is refused.
 out=$(cd shell && ./push.sh --vpn --note x ui/a.tsx 2>&1); rc=$?
-[ $rc = 3 ] && echo "$out" | grep -q "agents don't ship" && ok "push.sh refused outside the service" || { bad "push.sh guard rc $rc"; echo "$out"; }
+[ $rc = 3 ] && grep -q "agents don't ship" <<<"$out" && ok "push.sh refused outside the service" || { bad "push.sh guard rc $rc"; echo "$out"; }
 out=$(cd shell && ./push.sh --vpn --direct --note x ui/a.tsx 2>&1); rc=$?
 [ $rc = 0 ] && grep -q 'push.sh --direct' "$Q/direct.log" && ok "push.sh --direct pushes, logged" || { bad "--direct rc $rc"; echo "$out"; }
 out=$(cd shell && ./push.sh --errors 2>&1); rc=$?
 [ $rc = 0 ] && ok "--errors needs no service" || { bad "--errors rc $rc"; echo "$out"; }
 git checkout -q HEAD~1
 out=$(cd shell && ./push.sh --vpn --direct --note x ui/a.tsx 2>&1); rc=$?
-[ $rc = 3 ] && echo "$out" | grep -q "isn't origin" && ok "--direct behind the tip refused" || { bad "--direct behind rc $rc"; echo "$out"; }
+[ $rc = 3 ] && grep -q "isn't origin" <<<"$out" && ok "--direct behind the tip refused" || { bad "--direct behind rc $rc"; echo "$out"; }
 git checkout -q main
 out=$(SHIP_APK_CURRENT=1 bash tools/phone/ship-apk.real.sh --note x 2>&1); rc=$?
-[ $rc = 3 ] && echo "$out" | grep -q "agents don't ship" && ok "ship-apk refused outside the service" || { bad "ship-apk guard rc $rc"; echo "$out"; }
+[ $rc = 3 ] && grep -q "agents don't ship" <<<"$out" && ok "ship-apk refused outside the service" || { bad "ship-apk guard rc $rc"; echo "$out"; }
 git checkout -q HEAD~1   # behind: logged, then refused before any build
 out=$(SHIP_APK_CURRENT=1 bash tools/phone/ship-apk.real.sh --direct --note x 2>&1); rc=$?
 [ $rc = 3 ] && grep -q 'ship-apk --direct' "$Q/direct.log" && ok "ship-apk --direct logged (then its tip check)" || { bad "ship-apk --direct rc $rc"; echo "$out"; }
@@ -244,7 +244,7 @@ drained && grep -q 'a = 6' "$PHONE/files/shell/ui/a.tsx" && ok "the fix ships, b
 land targets/android/app/Main.kt 'class Main7' "kt7"; req --note "seven"; t7=$(tip)
 for _ in $(seq 200); do grep -q '^APKSTART' "$LOG" && break; sleep 0.2; done
 out=$(bash tools/phone/ship.sh pause --why "test")
-echo "$out" | grep -q "was stopped" && ok "pause stops the building ship" || { bad "pause: $out"; tail -5 "$Q/runner.log"; }
+grep -q "was stopped" <<<"$out" && ok "pause stops the building ship" || { bad "pause: $out"; tail -5 "$Q/runner.log"; }
 for _ in $(seq 75); do [ -d "$HOME/.cache/powos-ship.lock" ] || [ -n "$(cat "$Q/runner.lock/pid" 2>/dev/null)" ] || break; sleep 0.2; done
 [ ! -d "$HOME/.cache/powos-ship.lock" ] && ls "$Q"/*.req >/dev/null 2>&1 && ! grep -q "^APK $t7" "$LOG" && [ ! -s "$Q/failed-apk" ] &&
   ok "lock freed, request kept, nothing installed, not marked failed" || { bad "after pause"; cat "$LOG"; ls "$Q"; tail -5 "$Q/runner.log"; }
@@ -255,7 +255,7 @@ export APK_INSTALL_S=3
 bash tools/phone/ship.sh resume >/dev/null
 for _ in $(seq 200); do [ -s "$Q/installing" ] && break; sleep 0.2; done
 out=$(bash tools/phone/ship.sh pause --why "test")
-echo "$out" | grep -q "install is in flight" && ok "pause during an install lets it run" || bad "pause mid-install: $out"
+grep -q "install is in flight" <<<"$out" && ok "pause during an install lets it run" || bad "pause mid-install: $out"
 drained 30 && grep -q "^APK $t7 svc=1" "$LOG" && ok "the install finished, its requests done" || { bad "install in flight"; cat "$LOG"; ls "$Q"; }
 bash tools/phone/ship.sh resume >/dev/null; export APK_INSTALL_S=0
 
@@ -424,8 +424,8 @@ st=$(bash tools/phone/ship.sh status)
 grep -q "the phone is offline (no WireGuard link)" "$Q/runner.log" && [ "$(grep -c "^APKPUBLISH $t16b .*--publish-only" "$LOG")" = 1 ] &&
   ! grep -q "^APK $t16b" "$LOG" && ! grep -q '^MAIL' "$LOG" && [ "$(cat "$Q/apk-published" 2>/dev/null)" = "$t16b" ] &&
   grep -q "^published=$t16b" "$Q"/*.req && grep -q "${t16b:0:9} apk PUBLISHED to PowApps (version code 4242), 1 req" "$Q/shipped.log" &&
-  echo "$st" | grep -q "^APK on PowApps: ${t16b:0:9} (version code 4242.*the OnePlus install waits for the phone (offline)" &&
-  echo "$st" | grep -q "sixteen b  \[APK published to PowApps (${t16b:0:9}); OnePlus install pending\]" &&
+  grep -q "^APK on PowApps: ${t16b:0:9} (version code 4242.*the OnePlus install waits for the phone (offline)" <<<"$st" &&
+  grep -q "sixteen b  \[APK published to PowApps (${t16b:0:9}); OnePlus install pending\]" <<<"$st" &&
   ok "VPN offline: the APK is published to PowApps once, its request kept pending for the OnePlus install (status shows both)" || { bad "VPN offline publish"; echo "$st"; cat "$LOG"; tail -8 "$Q/runner.log"; }
 rm -f "$HOME/phone-offline"
 drained 60 && grep -q "^APK $t16b" "$LOG" && grep -q "the phone is back online" "$Q/runner.log" && [ "$(grep -c '^APKPUBLISH' "$LOG")" = 1 ] &&
@@ -447,7 +447,7 @@ nv_ok() {   # STEP TIP: deferred and nothing else
   local st; st=$(bash tools/phone/ship.sh status)
   grep -q "${2:0:9}: $1 DEFERRED - no gate verdict" "$Q/runner.log" && ! grep -q '^MAIL' "$LOG" && ls "$Q"/*.req >/dev/null 2>&1 &&
     ! grep -q "${2:0:9}.*\(FAILED\|REFUSED\)" "$Q/runner.log" && [ "$(cat "$Q/failed" "$Q/failed-apk" 2>/dev/null | grep -c "$2")" = 0 ] &&
-    [ "$(echo "$st" | grep -c '^GATE DEFERRED')" = 1 ] && echo "$st" | grep -q "^GATE DEFERRED (no verdict.*$1 ${2:0:9} since" || { echo "$st"; return 1; }; }
+    [ "$(grep -c '^GATE DEFERRED' <<<"$st")" = 1 ] && grep -q "^GATE DEFERRED (no verdict.*$1 ${2:0:9} since" <<<"$st" || { echo "$st"; return 1; }; }
 : > "$LOG"; touch "$HOME/gate-down"
 land shell/ui/a.tsx 'export const a = 17' "a17"; req --note "seventeen"; t17=$(tip)
 for _ in $(seq 100); do grep -q "${t17:0:9}: shell DEFERRED" "$Q/runner.log" && break; sleep 0.2; done; sleep 2
@@ -480,7 +480,7 @@ for _ in $(seq 100); do [ -n "$(cat "$Q/runner.lock/pid" 2>/dev/null)" ] || brea
 for _ in $(seq 150); do grep -q "${t17c:0:9}: postgate DEFERRED" "$Q/runner.log" && break; sleep 0.2; done
 st=$(bash tools/phone/ship.sh status)
 grep -q 'b = 17' "$PHONE/files/shell/ui/b.tsx" && grep -q "${t17c:0:9}: postgate DEFERRED - no gate verdict" "$Q/runner.log" && ! grep -q '^MAIL' "$LOG" &&
-  [ ! -e "$Q/postgate-failed" ] && echo "$st" | grep -q "^GATE DEFERRED.*postgate ${t17c:0:9}" &&
+  [ ! -e "$Q/postgate-failed" ] && grep -q "^GATE DEFERRED.*postgate ${t17c:0:9}" <<<"$st" &&
   ok "no gate verdict after a deploy-first push: post-gate deferred, not FAILED/mailed" || { bad "post-gate no-verdict"; echo "$st"; cat "$LOG"; tail -8 "$Q/runner.log"; }
 rm -f "$HOME/gate-down"
 for _ in $(seq 150); do [ -s "$Q/gate-deferred/postgate" ] || [ -s "$Q/postgate.pid" ] || break; sleep 0.2; done

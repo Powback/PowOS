@@ -108,7 +108,7 @@ sync_device() { local name=$1 prefix=$2 D=$NR/$1 s inst base d add gone n rc pc 
   if [ -n "$want" ] && [ -s "$APK" ] && [ "$want" != "$inst" ] && { ! known "$inst" || g merge-base --is-ancestor "$inst" "$want" 2>/dev/null; }; then
     scr=${NONROOT_SCREEN:-$(ad shell dumpsys power 2>/dev/null | tr -d '\r' | sed -n 's/.*mWakefulness=//p' | head -1)}
     if [ "$scr" != Awake ] || [ -e "$HOME/.config/powos/ship-no-idle-wait" ]; then
-      if out=$(ad install -r "$APK" 2>&1) && echo "$out" | grep -q Success; then
+      if out=$(ad install -r "$APK" 2>&1) && grep -q Success <<<"$out"; then
         note "$name: APK ${want:0:9} installed (was ${inst:0:9})"; inst=$(stamp)
       else note "$name: APK ${want:0:9} install FAILED: $(echo "$out" | tail -1 | cut -c1-200)"; fi
     else log "$name: APK ${want:0:9} waits for the screen off (the user is on it)"; fi

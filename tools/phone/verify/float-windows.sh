@@ -88,7 +88,7 @@ FD=$(sh_ "wm density" | grep -oE '[0-9]+' | tail -1)
 # each root task's "configuration={... wNNNdp ... NNNdpi ...}" above its "taskId=N: <pkg>/..." line; a freeform task is
 # a root task of its own. Not the activity's CurrentConfiguration in dumpsys activity activities (came back empty on
 # APK ccab7f0). dense re-applies the density every 500 ms until it shows (up to 4 s): poll up to 5 s for it to settle.
-tcfg() { sh_ "am stack list" | awk -v p="$PKG" '/^ *configuration=/{c=$0} $0 ~ "taskId=[0-9]+: "p"/"{print c; exit}'; }
+tcfg() { sh_ "am stack list" | awk -v p="$PKG" '/^ *configuration=/{c=$0} $0 ~ "taskId=[0-9]+: "p"/"&&!f{print c; f=1}'; }  # reads to the end: an awk exit SIGPIPEs adb under pipefail
 TD=; TW=; WANT=$((FD * 95 / 100))
 for _ in 1 2 3 4 5 6 7 8 9 10; do
   cfg=$(tcfg); printf '%s\n' "$cfg" > "$OUT/task-config.txt"
@@ -125,7 +125,7 @@ bars=$(sh_ "dumpsys window windows | grep -c \"PowOS window bar\""); echo "frame
 # ONE title bar: SystemUI's own caption (WM Shell CaptionWindowDecoration: back/min/max/close inside the task) is
 # shrunk to 1 px through the overlay system/OemCaption.kt registers (0 px made its input window the whole task: a drag
 # anywhere moved the window), and that 1 px row - its input window too - lies under PowOS's bar, which takes the touch.
-sh_ "cmd overlay list com.android.systemui" | grep -q '^\[x\] com.android.shell:PowosNoCaption' &&
+sh_ "cmd overlay list com.android.systemui | grep -m1 PowosNoCaption" | grep -q '^\[x\] com.android.shell:PowosNoCaption' &&
   pass "the system's caption overlay is on" || fail "the system's caption overlay (com.android.shell:PowosNoCaption) isn't enabled"
 caps=$(sh_ "dumpsys window" | grep -oE 'type=captionBar frame=\[[0-9-]+,[0-9-]+\]\[[0-9-]+,[0-9-]+\]' | sort -u)
 echo "caption insets: ${caps:-none}" | tee -a "$OUT/mode.txt"

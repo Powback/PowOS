@@ -48,7 +48,7 @@ fi
 rc=$(echo "$out" | grep -o 'gradle-exit=[0-9]*' | tail -1 | cut -d= -f2)
 echo "$out" | grep -E "^e: |error:" | head -40
 # Not a compile error (a gradle lock held by a concurrent build, a dependency fetch): say what gradle said.
-echo "$out" | grep -q "^e: " || echo "$out" | grep -A10 "What went wrong" | head -14
+grep -q "^e: " <<<"$out" || grep -A10 "What went wrong" <<<"$out" | head -14
 if [ "${rc:-1}" != 0 ]; then echo "compile-check: FAILED (gradle exit ${rc:-?})" >&2; exit 1; fi
 # The complexity lint land.sh's pre-push hook runs (tools/git-hooks/pre-push: lint-complexity.sh --only <changed .kt>,
 # limit cognitive 10): it only ran at push, so a change that compiled here was refused there 4+ times on 2026-10-24

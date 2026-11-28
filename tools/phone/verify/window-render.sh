@@ -311,7 +311,7 @@ EOF
   r=$(sh_ "sh $dir.sh; rm -f $dir.sh")
   echo "$r" | sed 's/^/  helper: /' | tee -a "$OUT/log.txt"
   D=$(echo "$r" | sed -n "s/^display $tag \([0-9]*\).*/\1/p")
-  [ -n "$D" ] || hfail "the host made no display: $(echo "$r" | grep -m1 "^error $tag" || echo "${r:-no answer from WebWindowsHost}")"
+  [ -n "$D" ] || hfail "the host made no display: $(grep -m1 "^error $tag" <<<"$r" || echo "${r:-no answer from WebWindowsHost}")"
   S=$(sh_ "dumpsys SurfaceFlinger --display-id" | sed -n "s/^Display \([0-9]*\) (Virtual display): displayName=\"powos-ww-$tag\".*/\1/p")
   [ -n "$S" ] || hfail "display $D isn't in SurfaceFlinger's list (no powos-ww-$tag)"
   log "display $D (SurfaceFlinger $S), never mirrored"
@@ -532,6 +532,6 @@ for v in "$d0" "$dom" "$edg" "$d1" "$noise"; do case $v in ""|*[!0-9.]*) log "FA
 [ "$live" = true ] || bad="$bad; never live (no first frame from the app in 15 s)"
 awk "BEGIN{exit !($d0 >= 0.35)}" || bad="$bad; the body looks like the page under it ($d0 differs, want >= 0.35): an empty hole"
 awk "BEGIN{exit !($dom < 0.97 && $edg >= 0.003)}" || bad="$bad; the body is a flat fill (dominant $dom, edges $edg)"
-[ -n "$tj" ] || awk "BEGIN{exit !($d1 >= 0.001 && $d1 > 3 * $noise)}" || bad="$bad; the tap changed nothing in the app ($d1 vs noise $noise)$(echo "$tl" | grep -q ': ok' && echo ' though the helper injected it ok')"
+[ -n "$tj" ] || awk "BEGIN{exit !($d1 >= 0.001 && $d1 > 3 * $noise)}" || bad="$bad; the tap changed nothing in the app ($d1 vs noise $noise)$(grep -q ': ok' <<<"$tl" && echo ' though the helper injected it ok')"
 if [ -z "$bad" ]; then verdict PASS; exit 0; fi
 log "FAIL:${bad#;}"; verdict FAIL; exit 1

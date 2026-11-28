@@ -79,7 +79,7 @@ r=$(hcall notifications.dismiss "['$key']" "()=>'ok'"); [ "$r" = ok ] || fail "n
 sleep 3; chk dismiss
 left=$(hcall notifications.list "[]" "l=>(l.items||[]).some(i=>i.title==='$TITLE')?'still':'gone'")
 [ "$left" = gone ] || fail "still in the shade after the dismiss"
-ux "cat /tmp/pn-$N.out" | grep -q '^closed$' || fail "Plasma didn't close it (notify-send -w still waiting)"
+[[ $'\n'$(ux "cat /tmp/pn-$N.out")$'\n' == *$'\nclosed\n'* ]] || fail "Plasma didn't close it (notify-send -w still waiting)"
 pass "dismissed: gone from the shade, and Plasma closed $pid_n"
 
 # 4. The clipboard, both ways (the user's clip kept and put back).

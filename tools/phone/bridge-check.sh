@@ -46,7 +46,7 @@ refused=$("$here/adb.sh" shell "logcat -d -v time -s PowosShell:W | grep -c 'ref
 echo "logcat: $refused refused message(s) so far"
 # Pass: the top frame has the objects. A probe frame may hold an object only where the WebView injects by origin
 # (a same-origin srcdoc/about:blank frame) - then its call must have been refused (seen in logcat above).
-echo "$res" | grep -q '"host": "object"' || { echo "bridge-check: FAIL - the top frame has no PowosHost" >&2; exit 1; }
+grep -q '"host": "object"' <<<"$res" || { echo "bridge-check: FAIL - the top frame has no PowosHost" >&2; exit 1; }
 echo "$res" | python3 -c '
 import json, sys
 d = json.load(sys.stdin)

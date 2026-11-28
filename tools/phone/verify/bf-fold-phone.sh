@@ -33,7 +33,7 @@ candidates() {
   { xwininfo -root -tree 2>/dev/null | awk -v n="\"$WIN_NAME\"" 'n != "\"\"" && index($0, n) && !/has no name/ {print $1}'
     xdotool search --class "^steam_app_$APP\$" 2>/dev/null | awk '{printf "0x%x\n", $1}'; } | sort -u | while read -r w; do
     xwininfo -id "$w" 2>/dev/null | awk -v w="$w" '/Width:/{x=$2} /Height:/{y=$2} /Map State:/{m=$3} END{if (x) printf "%d %s %dx%d %s\n", x*y, w, x, y, m}'; done | sort -rn; }
-gamewin() { local c; c=$(candidates); { echo "$c" | awk '$4 == "IsViewable" {print $2; exit}'; echo "$c" | awk 'NF {print $2; exit}'; } | head -1; }
+gamewin() { local c; c=$(candidates); { awk '$4 == "IsViewable" {print $2; exit}' <<<"$c"; awk 'NF {print $2; exit}' <<<"$c"; } | head -1; }
 case ${1:-state} in
 state)
   w=$(gamewin); g=-

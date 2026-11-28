@@ -238,7 +238,7 @@ order_jobs() { local j k i m b out=() keys=() tasks=() placed=()
 # "<script> <runs> <p50> <budget>" lines); empty when it has no history.
 hist_of() { [ -n "${HIST:-}" ] || return 0; local k
   k=$(printf '%s ' "$@" | tr "\"'" '  ' | awk '{for (i = 1; i <= NF; i++) if ($i ~ /\.(sh|py)$/) { n = split($i, p, "/"); print p[n]; exit }}')
-  [ -n "$k" ] && printf '%s\n' "$HIST" | awk -v k="$k" '$1 == k { print $2, $3, $4; exit }'; :; }
+  [ -n "$k" ] && awk -v k="$k" '$1 == k { print $2, $3, $4; exit }' <<<"$HIST"; :; }
 # job_budget <budget> <cmd...>: the budget the job runs with. Only the 300 s default (an explicit --budget other than
 # 300 is the caller's, kept) follows the check's history (queue-util.py budget_of): a check that always finished in
 # under a minute gets 2 x its longest + 60 s (a hang costs less), one that passes past 240 s by design gets 1.25 x its
@@ -553,7 +553,7 @@ except Exception: pass' 2>/dev/null) || ids=
   for a in "$@"; do
     [ -n "$a" ] || [ "${QUEUE_ALLOW_EMPTY:-0}" = 1 ] || { echo "queue.sh: an empty argument in: $* (zsh doesn't split \$var - write the words out; QUEUE_ALLOW_EMPTY=1 if meant)"; exit 2; }
     case "$a" in *.sh) [ -f "$a" ] || continue
-      e=$(bash -n "$a" 2>&1) || { printf '%s\n' "$e" | head -3; echo "queue.sh: $a doesn't parse - not queued"; exit 2; }
+      e=$(bash -n "$a" 2>&1) || { head -3 <<<"$e"; echo "queue.sh: $a doesn't parse - not queued"; exit 2; }
       if docker image inspect koalaman/shellcheck:stable >/dev/null 2>&1; then
         # The script goes in on stdin: a bind mount of a Mac path fails under Colima unless that path is shared (f63).
         sc=$(docker run --rm -i koalaman/shellcheck:stable -S error -s bash - < "$a" 2>&1 | head -12)

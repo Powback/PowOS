@@ -612,7 +612,7 @@ run)
       elif [ "${live:-0}" -gt 0 ] && [ "${wf:-0}" = 0 ]; then
         foc=$("$here/adb.sh" shell 'dumpsys window | grep -m1 mCurrentFocus' 2>/dev/null | tr -d '\r')
         home=$("$here/adb.sh" shell "cat /proc/${pid:-0}/cmdline" 2>/dev/null | tr -d '\r\0')
-        if [ -n "$home" ] && echo "$foc" | grep -q "$home"; then bad="no w.f geometry applied in ${RENDER_WATCH_S:-20} s with live windows and home on screen ($foc)"
+        if [ -n "$home" ] && grep -q "$home" <<<"$foc"; then bad="no w.f geometry applied in ${RENDER_WATCH_S:-20} s with live windows and home on screen ($foc)"
         else echo "not judged: no geometry, but home is not on screen ($foc)" >> "$rl"; fi
       fi
       if [ -z "$bad" ]; then echo "$(date +%T) render-watch: PASS" >> "$rl"; echo "$(date '+%F %T') ${t:0:9} $what render-watch PASS (live $live, w.f $wf, hidden hold $hid)" >> "$Q/shipped.log"; exit 0; fi

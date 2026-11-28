@@ -1,5 +1,5 @@
 #!/bin/bash
-# lint fixture: each command below is one sigpipe hit (9)
+# lint fixture: each command below is one sigpipe hit (12)
 set -euo pipefail
 A=adb
 focus() { "$A" shell dumpsys window | awk '/mCurrentFocus/{print; exit}'; }
@@ -17,3 +17,15 @@ wg_age() {
     -v ip="$ip" 'NR > 1 && index("," $4 ",", "," ip "/32,") { print now - $5; exit }'
 }
 up=$(docker ps -q --filter name=x | grep -q . && echo yes)
+# any producer that can outrun a pipe buffer, not only dumpsys/logcat/docker (11-27/28): a big variable through
+# printf (bash 3.2 writes it in chunks; bridge-detect-check.sh), `pm dump` through a wrapper split over two lines
+# (live-text.sh), and a function of this file whose output is a logcat
+while read -r m; do
+  printf '%s\n' "$have" | grep -qx "$m" && continue
+done < /dev/null
+pkgdump_ok() {
+  sh_ "pm dump $PKG" 2>/dev/null |
+    grep -q 'livetext.LiveTextActivity' || skip "this app build has no LiveTextActivity yet"
+}
+logs() { sh_ "logcat -d -s Steam:I" | tr -d '\r'; }
+logs | grep -q "launch window" && echo seen

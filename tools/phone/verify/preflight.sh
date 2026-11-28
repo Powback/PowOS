@@ -67,6 +67,6 @@ phone_needs() { local needs mods=("$@") out rc=0 t
   [ -n "$out" ] || env_fail "phone unreachable over adb (rc $rc) - the VPN or adb server is down"
   case " $needs " in *" kwin "*) echo "$out" | grep -q '^kwin=1' || env_fail "no kwin_wayland running - the PowOS session is down or stale" ;; esac
   for t in ${mods[@]+"${mods[@]}"}; do
-    echo "$out" | grep -q "^py:$t=1" || env_fail "python module '$t' missing in the PowOS root"; done
+    grep -q "^py:$t=1" <<<"$out" || env_fail "python module '$t' missing in the PowOS root"; done
   return 0; }
 main "$@"

@@ -2,7 +2,8 @@
 # test-check-shell-pitfalls.sh - tools/agents/shell-pitfalls.py: the lint over the phone checks' shell catches the
 # pitfalls that produced false check FAILs (11-10: BSD-awk ternary redirect, SIGPIPE under pipefail, single quotes
 # nested in su -c '...', a tag twice in a logcat filterspec; 11-23: a python3 -c program that doesn't compile; 11-26: a grep whose no-match status ends a set -e + pipefail
-# script silently; 11-27: a function's bare `|| return N` called as a statement under set -e), stays
+# script silently; 11-27: a function's bare `|| return N` called as a statement under set -e; 11-28: sigpipe from any big producer - a printf of a
+# big variable, `sh_ "pm dump"` split over two lines, a function wrapping logcat), stays
 # quiet on their fixed forms, and the tree itself is clean. No pipefail here on purpose (see test-base.sh): assertions use `grep -c` on captured output.
 set -u
 ROOT=$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)
@@ -22,7 +23,7 @@ expect() {  # expect <fixture> <kind> <count>
 
 echo "== bad fixtures are caught =="
 expect bad-awk-ternary.sh awk-ternary 3
-expect bad-sigpipe.sh sigpipe 9
+expect bad-sigpipe.sh sigpipe 12
 expect bad-nested-quote.sh nested-quote 4
 expect bad-logcat-dup-tag.sh logcat-dup-tag 2
 expect bad-py-c.sh py-c 3

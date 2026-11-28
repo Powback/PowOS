@@ -88,7 +88,7 @@ for k, c in wide.items():
 print(f"migration: {n} tiles checked, {len(host['items'])} items")
 PY
 )
-  echo "$r" | tee -a "$OUT/log.txt"; echo "$r" | grep -q "^FAIL" && FAILS=$((FAILS + 1))
+  echo "$r" | tee -a "$OUT/log.txt"; grep -q "^FAIL" <<<"$r" && FAILS=$((FAILS + 1))
 }
 
 # Edit mode by a long press on an empty spot of the page: the search bar a tile on the grid, the dock in view.

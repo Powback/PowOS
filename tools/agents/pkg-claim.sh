@@ -52,7 +52,7 @@ pkgrel_max() {  # pkgrel_max <pkgdir> <repo>: the higher of this worktree's PKGB
   local_rel=$(pkgrel_of "$pkgdir/PKGBUILD"); local_rel=${local_rel:-0}
   if [ -n "$repo" ]; then
     git -C "$repo" fetch -q origin "$BASE" 2>/dev/null || true
-    origin_rel=$(git -C "$repo" show "origin/$BASE:${pkgdir#"$repo"/}/PKGBUILD" 2>/dev/null | sed -n 's/^pkgrel=//p' | head -1)
+    origin_rel=$(git -C "$repo" show "origin/$BASE:${pkgdir#"$repo"/}/PKGBUILD" 2>/dev/null | awk '!f && sub(/^pkgrel=/, "") {print; f=1}')  # to the end: no head SIGPIPE under pipefail
     origin_rel=${origin_rel:-0}
   fi
   printf '%s\n%s\n' "$local_rel" "$origin_rel" | sort -V | tail -1

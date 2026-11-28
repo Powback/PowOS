@@ -36,6 +36,6 @@ echo "$name \${old:-none} -> \$(pacman -Q $name | cut -d' ' -f2) (rollback: /var
 SH
   out=$("$R" "$s" 2>&1); rm -f "$s"
   echo "$out" | tail -3
-  echo "$out" | grep -q " -> " || { echo "FAIL install: $b"; rc=1; }
+  grep -q " -> " <<<"$out" || { echo "FAIL install: $b"; rc=1; }
 done
 exit $rc

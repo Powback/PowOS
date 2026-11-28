@@ -321,7 +321,7 @@ pushok=1
 # and go BEFORE the push stamps the layer as the tip (else they'd be served as the tip's). None to push: all of them.
 if [ -n "$stamped_apk" ]; then
   extra=$(tar -tf "$snap/overrides.tar" 2>/dev/null | sed -n 's|^shell/||p' | grep -v '/$' | grep -vx '\.pushing' |
-    while read -r f; do echo "$full" | grep -qxF "$f" || echo "$f"; done)
+    while read -r f; do grep -qxF -- "$f" <<<"$full" || echo "$f"; done)
   if [ -z "$full" ]; then rs=$(shell/push.sh --vpn --reset 2>&1) || echo "ship-apk: WARNING - resetting the overrides after the install failed: $(echo "$rs" | tail -1)" >&2
   elif [ -n "$extra" ]; then rs=$(shell/push.sh --vpn --reset $extra 2>&1) || echo "ship-apk: WARNING - removing the stale overrides failed: $(echo "$rs" | tail -1)" >&2; fi
 fi
@@ -344,11 +344,11 @@ if [ -n "$full" ]; then
   # the live record and the boot check below.
   out=$(rp) || true; echo "$out"
   # No gate verdict (SHIP_GATE_FIRST's gated push, the gate's machine gone): no retry - it would wait as long again.
-  if ! echo "$out" | grep -q "^pushed " && echo "$out" | grep -q "no gate verdict"; then
+  if ! grep -q "^pushed " <<<"$out" && grep -q "no gate verdict" <<<"$out"; then
     pushok=""; echo "ship-apk: WARNING - no gate verdict for origin's newer shell files (the gate's machine didn't answer): the phone runs the APK's own shell until the service pushes them: $(echo $full)" >&2
-  elif ! echo "$out" | grep -q "^pushed "; then
+  elif ! grep -q "^pushed " <<<"$out"; then
     echo "ship-apk: the push was refused - retrying once" >&2; out=$(READY_MS=90000 stamp= rp) || true; echo "$out"
-    echo "$out" | grep -q "^pushed " || { pushok=""; echo "ship-apk: WARNING - the phone runs the APK's own shell, without origin's newer files: $(echo $full)" >&2; }
+    grep -q "^pushed " <<<"$out" || { pushok=""; echo "ship-apk: WARNING - the phone runs the APK's own shell, without origin's newer files: $(echo $full)" >&2; }
   fi
   rm -f "$stamp"
 fi

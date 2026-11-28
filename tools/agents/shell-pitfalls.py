@@ -10,6 +10,17 @@ WHY (11-10): three checks FAILed on shell pitfalls, not product bugs; each cost 
                 the end (`awk '/x/&&!f{print;f=1}'`, `awk '/x/{f=1} END{exit !f}'` for a test) or filter on the
                 phone side (`sh_ "dumpsys window | grep -m1 x"`). (plasma-modes focus()) Any `docker ...` producer
                 too: adb.sh's `docker exec wireguard wg show | awk '...exit'` killed rooted deploys rc 141 (11-25).
+                11-27/28 it missed two more because it knew only those producer words: `printf '%s\n' "$have" |
+                grep -qx "$m"` (bridge-detect-check.sh; bash 3.2's printf writes a big variable in chunks) and
+                `sh_ "pm dump $PKG" |`+newline+`grep -q` (live-text.sh; any wrapper command, and the `|` at the end
+                of a line ended the pipeline for the lint). Now any producer counts unless provably tiny: echo/printf
+                of a "$var", any adb/sh_/us-style call not bounded on the phone (getprop, settings get, pgrep, a
+                script ending in `echo ok`, `... | grep -m1 x`), docker/dumpsys/logcat/journalctl/cat/find/lsof/
+                ps/git log|show|diff..., and this file's functions whose last pipeline is one of those; the walk
+                goes back through streaming filters (grep/sed/tr/cut/tee/sort) and stops at head/wc/tail -N/awk.
+                Fix: capture then match (`grep -q x <<<"$v"`), count into a variable (`n=$(... | grep -c x)`;
+                not `grep -c x >/dev/null` - GNU grep stops at the first match when its output is /dev/null), or
+                read to the end.
   nested-quote  a single quote inside an argument that ends up inside `su -c '...'` (sh_ "...", a literal
                 "su -c '...'") closes the su string early, so the command runs mangled. Use \\" or '\\''.
                 (ww-popup-x11)
@@ -191,26 +202,105 @@ def quoted_spans(s):
     return spans
 
 
-def is_producer(seg, wrappers):
-    """A segment that streams a big phone-side dump into this pipe: adb/sh_-style wrappers running dumpsys/logcat
-    (unless filtered on the phone side by a | inside the same quoted command), or dumpsys/logcat run directly."""
+# A pipeline's early-exit consumer only kills the segment right before it; a streaming filter there (grep, sed, tr...)
+# dies too and passes the 141 on, so the walk goes back through filters to the source. A read-all stage (tail -1,
+# wc, sort -u | ... no: sort writes all it read) or a bounded one (head, grep -m1/-c, awk ...exit) ends the walk: what
+# it writes is tiny or already written before the consumer reads.
+FILTER = re.compile(r"(?:e?grep|sed|cut|tr|tee|uniq|sort|column|rev|fold|cat|xargs)\b")
+# reads to the end and prints a selection: `awk '/x/&&!f{print;f=1}'` (the recommended fix)
+SELECT = re.compile(r"[gmn]?awk\b")
+BOUNDED = re.compile(r"(?:head|wc|tail\s+-(?:n\s*)?\d|tail\s+-n\s+\d|e?grep\b[^|]*\s-[A-Za-z]*[mc]|"
+                     r"[gmn]?awk\b.*\bexit\b|tail\s*$)")
+BIG_LOCAL = re.compile(r"(?:dumpsys|logcat|journalctl|docker|find|"
+                       r"git(?:\s+-C\s+\S+)?\s+(?:log|show|archive|ls-files|ls-tree|diff|grep|rev-list|cat-file|blame)|lsof|strings|tar|unzip|seq|yes|"
+                       r"tail\s+(?:-n\s*)?\+|tail\s+-f|ps\b(?![^|]*\s-p\b))\b|cat\b(?![^|]*/(?:proc|sys)/)")
+# phone-side commands with a one-line answer, and wrappers that run their argument on the phone
+TINY_REMOTE = {"getprop", "settings", "echo", "printf", "id", "pidof", "pgrep", "true", "test", "stat", "wm", "whoami",
+               "date", "uname", "readlink", "wc", "basename", "dirname", "pwd", "sleep", "[", "md5sum", "sha256sum",
+               "command", "input", "am", "cmd", "pm"}
+BIG_REMOTE_ARGS = re.compile(r"^(?:am\s+stack|am\s+broadcast|cmd\s+(?:package\s+(?:list|dump|query)|overlay\s+list|"
+                             r"activity|window|statusbar|notification)|pm\s+(?:dump|list))")
+REMOTE_WRAPPERS = {"sh_", "ash", "_kw_sh", "asroot", "ww_us", "us_", "us", "ux", "rs", "uxs", "su_"}
+
+
+def remote_cmd(s):
+    """The phone-side command string of an adb/sh_-style call: its quoted arguments (or the bare words after
+    `adb [-s x] shell` / the wrapper name)."""
+    w = s.split(None, 1)[1] if len(s.split()) > 1 else ""
+    w = re.sub(r"^(?:(?:-s\s+\S+|-\w+|shell)\s+)*", "", w)
+    return w.replace('"', "").replace("'", "")
+
+
+def remote_big(cmd):
+    """A phone-side command string writes more than a line or two: not bounded on the phone (`| grep -m1 x`,
+    `| head`, `| wc -l`), not a getprop/settings get/pgrep, not a script whose last word is an `echo ok`."""
+    stmts = [x.strip() for x in re.split(r";|&&|\|\||\n", cmd) if x.strip()]
+    if stmts and re.match(r"(?:echo|printf)\s+['\"]?\w*['\"]?\s*$", stmts[-1]):
+        return False  # `...; pgrep x >/dev/null && echo up`: the answer is the echo
+    stages = cmd.split("|")
+    if len(stages) > 1:
+        return False  # filtered on the phone (`sh_ "dumpsys window | grep -m1 x"`, `"am stack list | grep Y"`)
+    w = re.sub(r"^(?:su\s+(?:-c\s+|0\s+|root\s+)?|exec\s+)+", "", stages[0].strip().strip("'\"")).split()
+    if not w:
+        return False
+    if (BOUNDED.match(" ".join(w)) or FILTER.match(" ".join(w))) and w[0] != "cat":
+        return False  # `grep -c x f`, `grep -A6 x f`: a few lines of a file
+    if BIG_REMOTE_ARGS.match(" ".join(w)):
+        return True
+    if w[0] in TINY_REMOTE and not (w[0] == "getprop" and len(w) == 1) and not (w[0] == "settings" and "list" in w):
+        return False
+    return True
+
+
+def big_source(seg, wrappers, funcs, depth=0):
+    """seg (a pipeline's first segment, or a filter-less one) writes an unbounded amount into the pipe."""
     s = strip_lead(seg)
-    first = s.split(None, 1)[0] if s.split() else ""
-    remote = ADB_RE.match(s + " ") is not None or first in wrappers
-    if not remote:
-        # docker's CLI (Go) dies of SIGPIPE on its stdout too: `docker exec wireguard wg show wg0 dump | awk '...exit'`
-        # in adb.sh's wg_age failed ~1 in 200 calls with rc 141, silently ending every rooted deploy that hit it (11-25).
-        return (re.match(r"(dumpsys|logcat|journalctl|docker)\b", s) is not None
-                or re.match(r"cat\b[^|]*\.log\b", s) is not None)
-    spans = quoted_spans(s)
-    for m in PRODUCER_WORD.finditer(s):
-        inside = [sp for sp in spans if sp[0] <= m.start() < sp[1]]
-        if not inside:
-            return True
-        a, b = inside[0]
-        if "|" not in s[m.end():b]:
-            return True
+    s = re.sub(r"^(?:[A-Za-z_]\w*=\S*\s+)+", "", s)  # VAR=x cmd
+    s = re.sub(r"^(?:cap|mt|timeout|bounded)\s+(?:\$\{[^}]*\}|\S+\s+)?(?=\S)", "", s).strip()  # timeout wrappers
+    words = s.split()
+    if not words or words[0] in ("}", ")", "done", "fi", "esac"):
+        return False  # a group's output: its own `|| true` decides (`{ docker ... || true; } | awk`)
+    first = words[0].strip('"')
+    if ADB_RE.match(s + " ") is not None or first in wrappers or first in REMOTE_WRAPPERS:
+        return remote_big(remote_cmd(s))
+    if first in ("echo", "printf"):
+        # a literal is tiny; "$var"/$(...) can be any size (bridge-detect's method list ~3000 lines, bash 3.2's printf
+        # writes it in chunks)
+        return "$" in s
+    if first in funcs and depth < 3:
+        return funcs[first](depth + 1)
+    return BIG_LOCAL.match(s) is not None
+
+
+def big_upstream(segs, wrappers, funcs, depth=0):
+    """Walk back from the segment before the consumer through streaming filters to the first segment that decides."""
+    for seg in reversed(segs):
+        t = strip_lead(seg)
+        t = re.sub(r"^(?:[A-Za-z_]\w*=\S*\s+)+", "", t)
+        if BOUNDED.match(t) or SELECT.match(t):
+            return False
+        if FILTER.match(t) and seg is not segs[0] and not re.match(r"cat\b\s*\S", t):
+            continue  # its output is as big as its input
+        if FILTER.match(t) and not re.match(r"cat\b", t):
+            return False  # a filter over a file or herestring at the head: not a stream we can size
+        return big_source(seg, wrappers, funcs, depth)
     return False
+
+
+def func_sizes(text, wrappers):
+    """{name: f(depth) -> bool}: a function defined in this file writes an unbounded amount (its last pipeline does).
+    `kg() { sh_ "dumpsys window policy | grep -m1 ..."; }` is tiny, `logs() { sh_ "logcat -d ..." | sed ...; }` big."""
+    lines = blank_heredocs(text).splitlines(keepends=True)
+    spans = functions(lines)
+    table = {}
+    for name, (a, b) in spans.items():
+        body = "".join(lines[a - 1:b])
+        body = re.sub(r"^\s*(?:function\s+)?[A-Za-z_]\w*\s*\(\)\s*\{", "", body, count=1)
+        body = re.sub(r"\}\s*(?:#[^\n]*)?\s*$", "", body.rstrip())
+        pls = [segs for segs, _, after, subst in split_pipelines(body) if not subst and any(x.strip() for x in segs)]
+        last = pls[-1] if pls else []
+        table[name] = (lambda segs: (lambda d: bool(segs) and big_upstream(segs, wrappers, table, d)))(last)
+    return table
 
 
 def consumer_kind(seg):
@@ -235,8 +325,9 @@ def consumer_kind(seg):
     return None
 
 
-def logical_lines(lines):
-    """Join backslash continuations and keep single-quoted strings spanning lines together.
+def logical_lines(lines, join_ops=False):
+    """Join backslash continuations and keep single-quoted strings spanning lines together; with join_ops also a
+    line ending in `|`, `&&` or `||` (live-text.sh's `sh_ "pm dump" |` + `grep -q` on the next line, 11-28).
     Yields (first_line_no, text)."""
     buf, start = "", None
     quote = None
@@ -264,7 +355,12 @@ def logical_lines(lines):
                 elif c == "#" and (i == 0 or line[i - 1] in " \t;"):
                     break
             i += 1
-        if quote is None and not line.rstrip("\n").endswith("\\"):
+        code = line[:i] if i < len(line) else line
+        op = join_ops and quote is None and re.search(r"(\||&&)\s*$", code.rstrip()) is not None
+        if op:  # one pipeline/list over two lines: no newline between them (split_pipelines ends a pipeline there)
+            buf = buf.rstrip("\n") + " "
+            continue
+        if quote is None and not code.rstrip().endswith("\\"):
             yield start, buf
             buf, start = "", None
         else:
@@ -385,10 +481,11 @@ def check_sigpipe(text, lines):
     if not file_has(text, "pipefail"):
         return []
     errexit = file_has(text, "errexit")
-    wrappers = su_wrappers(text) | {"sh_", "ash", "_kw_sh", "asroot", "ww_us", "us_"}
+    wrappers = su_wrappers(text) | REMOTE_WRAPPERS
+    funcs = func_sizes(text, wrappers)
     hits = []
     # heredoc bodies are another shell's script (a phone-side `sh <<EOF`), without this file's pipefail
-    llist = list(logical_lines(blank_heredocs(text).splitlines(keepends=True)))
+    llist = list(logical_lines(blank_heredocs(text).splitlines(keepends=True), join_ops=True))
     for idx, (ln, s) in enumerate(llist):
         for segs, before, after, subst in split_pipelines(s):
             if len(segs) < 2:
@@ -396,7 +493,7 @@ def check_sigpipe(text, lines):
             kind = consumer_kind(segs[-1])
             if not kind:
                 continue
-            if not any(is_producer(x, wrappers) for x in segs[:-1]):
+            if not big_upstream(segs[:-1], wrappers, funcs):
                 continue
             head = re.sub(r"^(?:function\s+)?[A-Za-z_][A-Za-z0-9_]*\s*\(\)\s*\{\s*", "", segs[0].strip())
             used = (before in ("&&", "||") or after in ("&&", "||") or head.startswith("!")
@@ -1015,8 +1112,11 @@ def lint_file(path):
             found.append((ln, "awk-ternary", "unparenthesized ?: with < or > in print/printf (BSD awk reads a redirect)"))
     for ln, kind in check_sigpipe(text, lines):
         if not lint_ok(lines, ln):
-            found.append((ln, "sigpipe", f"pipefail + adb/dumpsys/logcat/docker producer + early-exit consumer ({kind})"
-                                         " whose status is used; read to the end (awk '/x/{f=1} END{exit !f}')"))
+            found.append((ln, "sigpipe", f"pipefail + a producer that can outrun a pipe buffer + early-exit consumer ({kind})"
+                                         " whose status is used: capture then match (`v=$(cmd)`, `grep -q x <<<\"$v\"`),"
+                                         " read to the end (awk '/x/{f=1} END{exit !f}', `n=$(... | grep -c x)`; not grep -c to /dev/null,"
+                                         " GNU grep stops at the first match then too), or"
+                                         " bound it on the phone (sh_ \"... | grep -m1 x\")"))
     for ln in check_nested_quotes(text, lines):
         if not lint_ok(lines, ln):
             found.append((ln, "nested-quote", "single quote inside a su -c '...' string closes it early"))

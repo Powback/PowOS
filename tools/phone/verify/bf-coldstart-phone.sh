@@ -119,7 +119,7 @@ ON_CLOSE="fexcache_off; restore; bash /var/tmp/powos-bf-stop.sh --steam | head -
 game_exe() { local x c; for x in $(tree "$1"); do c=$(tr '\0' ' ' < "/proc/$x/cmdline" 2>/dev/null) || continue
     case $c in *"common/$IDIR/"* | *"common\\$IDIR\\"*) ;; *) continue ;; esac
     case $(readlink "/proc/$x/exe") in *FEX* | *wine*) ;; *) continue ;; esac  # emulated (FEX) or in Wine (ARM64 Proton)
-    printf '%s' "$c" | grep -q 'proton\|reaper\|python\|pressure-vessel\|steam-launch-wrapper\|unity-screen\|entry-point\|steam-runtime\|steam\.exe\|SteamLaunch' && continue
+    grep -q 'proton\|reaper\|python\|pressure-vessel\|steam-launch-wrapper\|unity-screen\|entry-point\|steam-runtime\|steam\.exe\|SteamLaunch' <<<"$c" && continue
     return 0; done; return 1; }
 HYPR=/run/powos-app/hyprland.log
 # exported <variant> <hyprland.log line at the tap> <X window>: the game's window is an Android task (KWin's word: its

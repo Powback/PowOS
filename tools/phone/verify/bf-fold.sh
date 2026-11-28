@@ -86,7 +86,7 @@ stop() {  # what it started: closed; a Broforce the user had left (frozen in the
     log "closed the Broforce it started: $("$A" shell "su -c 'sh /data/powos/powos-run.sh \"APP=$APP bash /var/tmp/powos-bf-stop.sh\"'" 2>&1 | tr -d '\r' | tail -1)"
   elif [[ ${r:-} == *mine=0* ]]; then pill "freezing the user's $WIN_NAME again"; log "the user's $WIN_NAME: $(ph refreeze | tail -1)"; fi; }
 [[ $r == *"user input"* ]] && { log "user input during the start"; exit 3; }  # bf-lib closed what it started
-[[ $r == *FAIL* || $r != *mine=* ]] && { log "FAIL: $WIN_NAME didn't come up: $(echo "$r" | grep -m1 FAIL)"; stop; exit 1; }
+[[ $r == *FAIL* || $r != *mine=* ]] && { log "FAIL: $WIN_NAME didn't come up: $(grep -m1 FAIL <<<"$r")"; stop; exit 1; }
 
 # SurfaceFlinger presents over 2 s, summed over the window tasks' SurfaceViews (the game's task is the busy one).
 sf() { "$A" shell 'L=$(dumpsys SurfaceFlinger --list | sed -E "s/^RequestedLayerState\{//; s/ parentId=.*//" | grep -E "SurfaceView\[com.powos.app/andro.marchy.PowosWindowActivity\]" | grep -vE "Background|Bounds|ActivityRecord" | head -4)

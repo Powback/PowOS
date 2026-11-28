@@ -149,10 +149,10 @@ C=$(landB 'export const ai = "C"' C)
 (cd "$T/B/shell" && ./push.sh --vpn --silent ui/ai.tsx) >/dev/null 2>&1   # B pushes C's ai.tsx
 D=$(landB 'export const ai = "fixed"' "revert C")   # origin's ai.tsx is A's again: the origin check alone passes A
 out=$(cd "$T/A/shell" && ./push.sh --vpn --silent ui/ai.tsx 2>&1); rc=$?
-[ $rc -ne 0 ] && echo "$out" | grep -q "ui/ai.tsx on the phone is from ${C:0:9} (newer than your base): rebase first" && ok "older base refused" || { bad "older base not refused (rc $rc)"; echo "$out"; }
+[ $rc -ne 0 ] && grep -q "ui/ai.tsx on the phone is from ${C:0:9} (newer than your base): rebase first" <<<"$out" && ok "older base refused" || { bad "older base not refused (rc $rc)"; echo "$out"; }
 grep -q '"C"' "$PHONE/files/shell/ui/ai.tsx" && ok "phone kept the newer copy" || bad "phone's copy overwritten"
 out=$(cd "$T/A/shell" && ./push.sh --vpn --silent --force ui/ai.tsx 2>&1); rc=$?
-[ $rc -eq 0 ] && echo "$out" | grep -q "pushing anyway (--force)" && ok "--force pushes anyway" || { bad "--force (rc $rc)"; echo "$out"; }
+[ $rc -eq 0 ] && grep -q "pushing anyway (--force)" <<<"$out" && ok "--force pushes anyway" || { bad "--force (rc $rc)"; echo "$out"; }
 (cd "$T/B/shell" && ./push.sh --vpn --silent ui/ai.tsx) >/dev/null 2>&1   # record: D (B's HEAD has it)
 (cd "$T/A" && git pull -q --ff-only 2>/dev/null)
 out=$(cd "$T/A/shell" && ./push.sh --vpn --silent ui/ai.tsx 2>&1); rc=$?
@@ -161,7 +161,7 @@ out=$(cd "$T/A/shell" && ./push.sh --vpn --silent ui/ai.tsx 2>&1); rc=$?
 # 4. A stamp is only for exactly its file set and tree.
 st=$(cd "$T/A/shell" && ./push.sh --pre-gate ui/ai.tsx 2>&1 | sed -n 's/^pre-gated //p')
 out=$(cd "$T/A/shell" && ./push.sh --vpn --pre-gated="$st" --silent ui/ai.tsx ui/other.tsx 2>&1); rc=$?
-[ $rc -ne 0 ] && echo "$out" | grep -q "isn't a gate result for exactly these files" && ok "stamp for another file set refused" || { bad "stamp mismatch (rc $rc)"; echo "$out"; }
+[ $rc -ne 0 ] && grep -q "isn't a gate result for exactly these files" <<<"$out" && ok "stamp for another file set refused" || { bad "stamp mismatch (rc $rc)"; echo "$out"; }
 : > "$LOG"
 out=$(cd "$T/A/shell" && ./push.sh --vpn --pre-gated="$st" --silent ui/ai.tsx 2>&1); rc=$?
 [ $rc -eq 0 ] && ! grep -q '^GATE' "$LOG" && ok "matching stamp pushes ungated" || { bad "matching stamp (rc $rc)"; echo "$out"; }

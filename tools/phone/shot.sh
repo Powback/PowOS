@@ -74,7 +74,7 @@ EOF
 ) || { echo "shot: adb failed: $res" >&2; exit 2; }
 res=$(echo "$res" | tr -d '\r')
 case "$res" in OFF*) echo "shot: refused - the screen is ${res#OFF } (never woken; AWAKE_ONLY=1 tools/phone/idle.sh --wait 120 MAX)" >&2; exit 3 ;; esac
-echo "$res" | grep -q '^SHOT' || { echo "shot: failed: $res" >&2; exit 2; }
+grep -q '^SHOT' <<<"$res" || { echo "shot: failed: $res" >&2; exit 2; }
 rc=0
 while read -r _ name id dw dh n sec f; do
   dest=$base.png; [ -n "$all" ] && dest=$base-$name.png
