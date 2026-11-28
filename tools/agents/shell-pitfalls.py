@@ -41,6 +41,12 @@ WHY (11-10): three checks FAILed on shell pitfalls, not product bugs; each cost 
                 (if/while/!/a non-final && || member). Not flagged: `local x=$(...)`, `$(...)` as an argument, `<(...)`,
                 a $(...)'s non-final commands, a function's last command (its caller tests it), a bare `grep x f`
                 statement (an assertion), heredoc bodies, and lines after `set +e` / `set +o pipefail`.
+  brace-subst   a {a,b} inside a double-quoted string nested in a $(...) or `...` that is itself inside a double-quoted
+                word (`log "x=$(q "...({k:n.k,t:n.t})...")"`): the Mac's bash 3.2 brace-expands it anyway, so the
+                command runs once per alternative with a mangled argument (focus-modes 11-28: four "listed=SyntaxError:
+                Unexpected token ':'" - the JS object literal {key:..,time:..} split in four). Put the inner text in a
+                single-quoted variable first (`L='...'`, `log "x=$(q "$L")"`), or capture into a variable (an
+                assignment isn't brace-expanded): `v=$(q "...")`.
   silent-return under `set -e`, a plain statement call (`fn args`, `fn a; step`) of a function that can fail without a
                 word - a bare `cmd || return N` in its body, or an untested call of such a function - ends the script
                 right there with status N and nothing printed. shell/dev/preview.sh 11-27: browser_job's `|| return 2`
@@ -1129,6 +1135,100 @@ def check_silent_return(text, lines):
     return sorted(set(hits))
 
 
+BRACE_ALT = re.compile(r"(?<!\$)\{[^{}]*,[^{}]*\}")
+
+
+def dq_word(s, i):
+    """s[i] == '"'. Scan the double-quoted string to its end, its $(...)/`...` taken whole (their own quotes and
+    parentheses included). Return (index after it, the double-quoted strings found inside its substitutions)."""
+    inner = []
+
+    def subst(j, close):
+        # inside $( ... ) (close ")") or ` ... ` (close "`"), from j; return the index after the closing char
+        depth = 0
+        while j < len(s):
+            c = s[j]
+            if c == "\\":
+                j += 2
+                continue
+            if c == "'":
+                k = s.find("'", j + 1)
+                j = len(s) if k < 0 else k + 1
+                continue
+            if c == '"':
+                k, sub = dq(j)
+                inner.append(s[j + 1:k - 1])
+                inner.extend(sub)
+                j = k
+                continue
+            if close == ")" and s.startswith("$(", j):
+                j = subst(j + 2, ")")
+                continue
+            if close == ")" and c == "(":
+                depth += 1
+            elif c == close:
+                if depth == 0:
+                    return j + 1
+                depth -= 1
+            j += 1
+        return j
+
+    def dq(j):
+        mark = len(inner)
+        j += 1
+        while j < len(s):
+            c = s[j]
+            if c == "\\":
+                j += 2
+                continue
+            if s.startswith("$(", j):
+                j = subst(j + 2, ")")
+                continue
+            if c == "`":
+                j = subst(j + 1, "`")
+                continue
+            if c == '"':
+                found = inner[mark:]
+                del inner[mark:]
+                return j + 1, found
+            j += 1
+        found = inner[mark:]
+        del inner[mark:]
+        return j, found
+
+    return dq(i)
+
+
+def check_brace_subst(lines):
+    """Lines with a "..$(.. "{a,b}" ..).." word that isn't an assignment: bash 3.2 brace-expands the inner text."""
+    hits = []
+    for ln, s in logical_lines(lines):
+        i = 0
+        while i < len(s):
+            c = s[i]
+            if c == "\\":
+                i += 2
+                continue
+            if c == "'":
+                k = s.find("'", i + 1)
+                i = len(s) if k < 0 else k + 1
+                continue
+            if c == "#" and (i == 0 or s[i - 1] in " \t;\n"):
+                k = s.find("\n", i)
+                i = len(s) if k < 0 else k + 1
+                continue
+            if c == '"':
+                j, inner = dq_word(s, i)
+                word = re.search(r"[^\s;&|(]*$", s[:i]).group(0)
+                # an assignment's or a redirection's word (`<<<"$(...)"`) isn't brace-expanded
+                assign = re.match(r"^\w+(\[[^]]*\])?\+?=", word) is not None or re.search(r"[<>]\s*$", s[:i]) is not None
+                if not assign and any(BRACE_ALT.search(t) for t in inner):
+                    hits.append(ln)
+                i = j
+                continue
+            i += 1
+    return sorted(set(hits))
+
 def lint_file(path):
     with open(path, encoding="utf-8", errors="replace") as f:
         text = f.read()
@@ -1168,6 +1268,11 @@ def lint_file(path):
         if not lint_ok(lines, ln):
             found.append((ln, "silent-return", f"{fn} can `|| return N` without a message; under set -e this call ends"
                                                " the script silently - say what failed, or test the call"))
+    for ln in check_brace_subst(lines):
+        if not lint_ok(lines, ln):
+            found.append((ln, "brace-subst", "a {a,b} in a \"...\" nested in a $(...) inside a \"...\" word: bash 3.2"
+                                             " brace-expands it (one run per alternative); move the inner text to a"
+                                             " single-quoted variable"))
     return sorted(set(found))
 
 

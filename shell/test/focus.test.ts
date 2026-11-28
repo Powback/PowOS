@@ -42,3 +42,13 @@ test("ended: an allowed app's one is not kept", () => {
 test("an older stored window (no keys): the time window decides", () => {
   assert.equal(heldBy(note("a", s + 2), { ...on, until: since + 8000 }), true);
 });
+
+// 11-28 07:00 verify run, the stored ended window exactly as the phone had it (focus.digest): the digest renders from
+// the host's list through the key - the same string, user|pkg|id|tag|uid, tag "null" for none (StatusBarNotification.key).
+const stored: FocusWindow = { id: "dnd", label: "Do not disturb", since: 1795845624641, allow: [], until: 1795845631317, held: ["0|com.android.systemui|10001|null|10262"] };
+test("the 11-28 stored window: its key still listed - held (the card renders)", () => {
+  assert.equal(heldBy(note("0|com.android.systemui|10001|null|10262", 1795845626, "com.android.systemui"), stored), true);
+});
+test("the 11-28 stored window: the test's own shell post (never in it) is not held", () => {
+  assert.equal(heldBy(note("0|com.android.shell|1138|powos-focus-check|2000", 1795845627), stored), false);
+});

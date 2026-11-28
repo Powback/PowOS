@@ -144,6 +144,8 @@ want=$(printf '%s\t%s' "$TOKEN" "$TEXT")
 if [ "$got" = "$want" ]; then pass "the test sender received \"$TEXT\" through its RemoteInput"
 else fail "the test sender received \"${got:-nothing}\", want \"$want\""; fi
 st=$(ev "(()=>{const r=$ROW;return r?(r.dataset.reply||'gone'):'gone'})()")
-[ "$st" = error ] && fail "the row rolled back to an error after the reply went: $(ev "(()=>{const r=$ROW;return r?r.textContent.slice(0,80):''})()")"
+# The row's text captured first: inside "...$(ev "{..,..}")" bash 3.2 brace-expands the JS (shell-pitfalls brace-subst).
+row=$(ev "(()=>{const r=$ROW;return r?r.textContent.slice(0,80):''})()")
+[ "$st" = error ] && fail "the row rolled back to an error after the reply went: $row"
 [ "$FAILS" -eq 0 ] && { echo "PASS needs-me-reply: inline reply from What needs me reached the app"; exit 0; }
 exit 1

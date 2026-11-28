@@ -18,6 +18,10 @@ PB='((m,a)=>new Promise((ok,no)=>{const h=window.__powosHost,P=window.PowosHost;
 dnd() { q "$PB('qs.state',[]).then(s=>String(s.dnd), () => 'err')"; }
 store() { q "String(localStorage.getItem('powos.$1'))"; }
 TAG=powos-focus-check
+# The host's list as key|pkg|title|time|clearable. In a variable: written inline as "...$(q "...{k:..,t:..}...")" the Mac's
+# bash 3.2 brace-expanded the JS object literal - four evals of "(key:n.key)", each "SyntaxError: Unexpected token ':'"
+# (11-28; tools/agents/shell-pitfalls.py brace-subst).
+LISTED="$PB"'("notifications.list",[]).then(l=>JSON.stringify((l.items||[]).map(n=>[n.key,n.pkg,n.title,n.time,n.clearable].join("|"))),()=>"err")'
 . "$here/window-lock.sh"; window_lock focus-modes 150 "${MAX_WAIT:-10800}"
 ON0=""; DIG0=""; DND0=""
 restore() {
@@ -68,6 +72,10 @@ sh_ "cmd notification post -t 'focus check' $TAG 'held while the focus is on' >/
 cards=$(q '[...document.querySelectorAll(".notif-items .notif:not(.notif-digest)")].filter(e=>e.textContent.includes("held while the focus")).length')
 digest=$(q 'document.querySelector(".notif-digest")?.textContent ?? ""')
 log "while on: matching cards=$cards digest='$digest'"
+# Every listed notification, not just the test one (11-28: the only one held was System UI's 0|com.android.systemui|10001|null|...,
+# gone once Do not disturb went off - was the test post listed at all?): key, package, title, time, clearable.
+lw=$(q "$LISTED"); log "while on: listed=$lw"
+case "$lw" in *"|$TAG|"*) ;; *) fail "the test notification (tag $TAG) isn't in the host's list - the digest counted something else" ;; esac
 [ "$cards" = 0 ] || fail "the held notification shows as a card ($cards)"
 case "$digest" in *held*) ;; *) fail "no digest card counting it ('$digest')" ;; esac
 
@@ -79,7 +87,7 @@ digest=$(q 'document.querySelector(".notif-digest")?.textContent ?? ""')
 log "after: digest='$digest'"
 # What the digest decides from (11-28 FAIL: held while on, gone after): the stored windows and the test notification as listed.
 log "after: focus.digest=$(store focus.digest)"
-log "after: listed=$(q "$PB('notifications.list',[]).then(l=>JSON.stringify((l.items||[]).filter(n=>n.title==='focus check').map(n=>({key:n.key,time:n.time,pkg:n.pkg,clearable:n.clearable}))), () => 'err')")"
+log "after: listed=$(q "$LISTED")"
 case "$digest" in *"was on"*) ;; *) fail "the digest card isn't there after the focus ended ('$digest')" ;; esac
 
 SHOW='(()=>{const b=[...document.querySelectorAll(".notif-digest button")].find(e=>e.textContent.trim()==="Show");if(!b)return "";b.scrollIntoView({block:"center"});const r=b.getBoundingClientRect(),d=devicePixelRatio;return [Math.round((r.left+r.width/2)*d),Math.round((r.top+r.height/2)*d)].join(" ")})()'

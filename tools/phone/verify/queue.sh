@@ -833,7 +833,9 @@ EOS
     for j in "$Q"/*.job; do [ -f "$j" ] && ( need=; qt=0; . "$j"; shipped "$need" "$qt" ) && r=$((r + 1)); done
     [ $r -gt 0 ] || return 0
     sleep "${WAIT_PILL_S:-10}"
-    while :; do phone_sh "umask 022; $(put "{\"done\":true,\"wait\":true,\"n\":$r,\"ttl\":200}")" >/dev/null; sleep 150 & wait $!; done; }
+    # The put's command first: inside "...$(put "{..,..}")" bash 3.2 brace-expanded the JSON (tools/agents/shell-pitfalls.py brace-subst).
+    local w; w=$(put "{\"done\":true,\"wait\":true,\"n\":$r,\"ttl\":200}")
+    while :; do phone_sh "umask 022; $w" >/dev/null; sleep 150 & wait $!; done; }
   # select_jobs GO: this window's jobs in queue order -> sel[]; held = how many wait for their ship. A job waiting for
   # its ship never blocks the ones behind it (11-02: the head job's "waits for its ship" held the queue while the ship
   # service waited on a dozing phone): it's skipped here, every runnable job behind it runs, and it's looked at again
