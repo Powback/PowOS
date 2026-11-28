@@ -14,22 +14,28 @@ L=$HOME/.cache/powos-verify.lock
 . "$here/window-lock.sh"; window_lock automations 60 "${MAX_WAIT:-10800}"
 ID=verify$(date +%s); TAG="automation check $ID"
 B0=""
-restore() { [ -n "$B0" ] && hcall automations.save "JSON.parse(atob('$B0'))" 'v=>String(v.length)' >/dev/null; }
+# hcall's second argument is the call's ARGUMENT LIST (the bridge's positional args, bridge.ts call(method, ...args)):
+# save takes one list, next one trigger - each wrapped in [...] (11-28 FAIL: passed bare, the host read the first
+# automation / the trigger's first field as that list: "Value {...} cannot be converted to JSONArray").
+restore() { [ -n "$B0" ] && hcall automations.save "[JSON.parse(atob('$B0'))]" 'v=>String(v.length)' >/dev/null; }
 trap 'restore; [ "${LOCK_HELD:-0}" = 1 ] || rm -rf "$L"' EXIT
 
 B0=$(hcall automations.list '[]' 'v=>btoa(JSON.stringify(v))')
 case "$B0" in ERR* | "") echo "ENV: no automations bridge on home ($B0) - an APK before automations?"; B0=""; exit 5 ;; esac
 # The phone's clock: the next whole minute at least 20 s away.
-read -r s now < <(sh_ "date +'%s %S'" | awk '{print $1, $2}')
-add=60; [ "${now#0}" -ge 40 ] && add=120
+# One plain word: sh_ wraps its command in su -c '...', so a quoted format (date +'%s %S') split there and came back
+# empty (11-28: "trigger at 01:01").
+s=$(sh_ "date +%s"); vb_int "$s" || { echo "ENV: no phone clock ('$s')"; exit 5; }
+now=$((s % 60)); add=60; [ "$now" -ge 40 ] && add=120
 AT=$(sh_ "date -d @$((s + add)) +%H:%M" 2>/dev/null)
 [ -n "$AT" ] || AT=$(date -r $((s + add)) +%H:%M)
 FIRE=$(( (s + add) / 60 * 60 ))
 echo "phone time $(sh_ "date +%H:%M:%S"), trigger at $AT (in $((FIRE - s)) s)" | tee -a "$OUT/log.txt"
 NEW="{id:'$ID',name:'verify',on:true,trigger:{kind:'time',at:'$AT',days:[]},actions:[{kind:'notify',title:'PowOS',text:'$TAG'}]}"
-n=$(hcall automations.save "[...JSON.parse(atob('$B0')),$NEW]" 'v=>String(v.length)')
+n=$(hcall automations.save "[[...JSON.parse(atob('$B0')),$NEW]]" 'v=>String(v.length)')
 echo "saved: $n automations" | tee -a "$OUT/log.txt"
-next=$(hcall automations.next "{kind:'time',at:'$AT',days:[]}" 'v=>String(Math.round(v/1000))')
+vb_int "$n" || fail "automations.save says $n"
+next=$(hcall automations.next "[{kind:'time',at:'$AT',days:[]}]" 'v=>String(Math.round(v/1000))')
 [ "$next" = "$FIRE" ] || fail "automations.next says $next, expected $FIRE"
 
 ran=""; end=$((FIRE + 75))
