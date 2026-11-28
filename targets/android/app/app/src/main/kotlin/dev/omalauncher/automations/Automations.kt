@@ -190,7 +190,7 @@ object Automations {
     /** One action; what it did, in a few words. */
     private fun act(c: Context, x: JSONObject): String =
         when (x.optString("kind")) {
-            "notify" -> notify(c, x.optString("title", "Automation"), x.optString("text")).let { "notified" }
+            "notify" -> notify(c, x.optString("title", "Automation"), x.optString("text"))
             "open" -> open(c, x.optString("target"))
             "toggle" -> toggle(c, x.optString("what"), x.optBoolean("on", true))
             "focus" -> focus(c, x.optString("mode"))
@@ -237,13 +237,17 @@ object Automations {
     /** A focus mode an automation set while no page was there to take it ("off": end it); null: none waiting. */
     fun takeFocus(c: Context): String? = prefs(c).getString("focus", null)?.also { prefs(c).edit().remove("focus").apply() }
 
-    fun notify(c: Context, title: String, text: String) {
+    /** Posts it; "notified", or the reason the user won't see it (app notifications off / the channel turned off). */
+    fun notify(c: Context, title: String, text: String): String {
         val nm = c.getSystemService(NotificationManager::class.java)
         nm.createNotificationChannel(NotificationChannel(CHANNEL, "Automations", NotificationManager.IMPORTANCE_DEFAULT).apply { description = "What your automations post" })
+        if (!nm.areNotificationsEnabled()) return "notifications are off for PowOS"
+        if (nm.getNotificationChannel(CHANNEL)?.importance == NotificationManager.IMPORTANCE_NONE) return "the Automations notification channel is off"
         nm.notify(
             ("automation:$title:$text").hashCode(),
             Notification.Builder(c, CHANNEL).setSmallIcon(R.drawable.ic_notification).setContentTitle(title).setContentText(text).setAutoCancel(true).build(),
         )
+        return "notified"
     }
 
     /** An App API action through the device's runtime; its own refusal words when it says no. */

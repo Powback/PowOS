@@ -53,10 +53,14 @@ case "$ran" in
     [ "$late" -ge -2 ] && [ "$late" -le 70 ] || fail "ran at the wrong time ($late s from $AT)" ;;
   *) fail "the automation didn't run by $AT + 75 s ($ran)" ;;
 esac
-c=$(sh_ "dumpsys notification --noredact | grep -c '$TAG'")
-echo "notification lines: $c" | tee -a "$OUT/log.txt"
-[ "${c:-0}" -ge 1 ] 2>/dev/null || fail "no notification with '$TAG' posted"
+# Grep the one-word $ID, unquoted: sh_ wraps its command in su -c '...', so a quoted '$TAG' closed that quote and the
+# phone ran "grep -c automation check verify..." (files "check", "verify..."): empty output, a false FAIL (11-28 05:02,
+# while logcat said "notified").
 sh_ "logcat -d -s automations | tail -5" >"$OUT/logcat.txt"
+c=$(sh_ "dumpsys notification --noredact | grep -c $ID")
+echo "notification lines: $c" | tee -a "$OUT/log.txt"
+vb_int "$c" || fail "dumpsys notification grep gave '$c'"
+[ "${c:-0}" -ge 1 ] 2>/dev/null || { cat "$OUT/logcat.txt"; fail "no notification with '$TAG' posted"; }
 
 restore; B0=""; trap - EXIT; [ "${LOCK_HELD:-0}" = 1 ] || rm -rf "$L"
 echo "artefacts: $OUT"
