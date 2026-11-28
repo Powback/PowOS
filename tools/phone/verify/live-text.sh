@@ -22,8 +22,11 @@ skip() { echo "SKIP: live-text: $1"; exit 2; }
 fail() { echo "FAIL: live-text: $1"; exit 1; }
 
 sh_ true >/dev/null 2>&1 || skip "device not reachable"
-sh_ "cmd package resolve-activity --brief -a android.intent.action.SEND -t image/png -c android.intent.category.DEFAULT $PKG" 2>/dev/null |
-    grep -q livetext || sh_ "pm dump $PKG" 2>/dev/null | grep -q 'livetext.LiveTextActivity' || skip "this app build has no LiveTextActivity yet"
+# Read the whole dump into a variable, then match: `sh_ ... | grep -q` under pipefail SIGPIPEs adb when grep leaves at
+# the first hit of the long `pm dump`, the pipe returns 141 and the check SKIPped a build that has the activity (11-28).
+# resolve-activity alone can't tell: with several SEND image/* targets in the package it answers the ResolverActivity.
+pkgdump=$(sh_ "pm dump $PKG" 2>/dev/null || true)
+[[ $pkgdump == *livetext.LiveTextActivity* ]] || skip "this app build has no LiveTextActivity yet"
 
 "$T/adb.sh" push "$FIX" "/sdcard/Pictures/$NAME" >/dev/null || fail "push failed"
 sh_ "am broadcast -a android.intent.action.MEDIA_SCANNER_SCAN_FILE -d file:///sdcard/Pictures/$NAME" >/dev/null 2>&1
