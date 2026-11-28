@@ -72,7 +72,10 @@ mt() { perl -e 'my $t = shift; my $p = fork(); defined $p or exit 127;
 fifo_put_cmd() { echo "p=\$(cat $1/helper 2>/dev/null); if [ -p $1/in ] && [ -n \"\$p\" ] && kill -0 \$p 2>/dev/null; then echo $2 1<>$1/in && echo sent; else echo gone; fi"; }
 # <<< fifo-bounds
 # sh_ CMD: one root shell command on the phone, bounded to SH_T (60) s (hclean: 15 s per call).
-sh_() { mt "${SH_T:-60}" "$A" shell "su -c '$*'" </dev/null 2>/dev/null | tr -d '\r'; }
+# su_q: a ' inside the command is safe. ship.sh runs a copy (no su-quote.sh beside it, WR_TOOLS=the real tools); tests
+# run the real file with a fake WR_TOOLS.
+if [ -f "$here/../su-quote.sh" ]; then . "$here/../su-quote.sh"; else . "$T/su-quote.sh"; fi
+sh_() { mt "${SH_T:-60}" "$A" shell "$(su_q "$*")" </dev/null 2>/dev/null | tr -d '\r'; }
 # asleep: true when the phone's power state isn't Awake (Dozing/Asleep/Dreaming); WAKE is that state. Read-only
 # (dumpsys power) - it never wakes the screen. Unreadable (no answer) counts as awake: the step is judged as before.
 asleep() { WAKE=$(mt "${SH_T:-60}" "$A" shell "dumpsys power | grep -m1 mWakefulness=" </dev/null 2>/dev/null | tr -d '\r ' | cut -d= -f2); [ -n "$WAKE" ] && [ "$WAKE" != Awake ] && return 0
@@ -88,7 +91,7 @@ except Exception:
 print(v if isinstance(v,str) else json.dumps(v))'
 ev() { CDP_TIMEOUT_S=${CDP_TIMEOUT_S:-20} "$T/cdp.sh" eval home "$1" 2>/dev/null | tr -d '\r' | tail -1 | python3 -c "$UNQ"; }
 WW='Promise.all([importShim("./state.ts"),importShim("./ui/webwindows.tsx")])'
-irq() { sh_ "awk '\''/touch-0/{for(i=2;i<=NF;i++) if(\$i ~ /^[0-9]+\$/) s+=\$i; else break} END{print s}'\'' /proc/interrupts"; }
+irq() { sh_ "awk '/touch-0/{for(i=2;i<=NF;i++) if(\$i ~ /^[0-9]+\$/) s+=\$i; else break} END{print s}' /proc/interrupts"; }
 ID= LOCKED= P0=
 cleanup() {
   if [ -n "$ID" ]; then

@@ -21,7 +21,8 @@ NF=0 MINE_W="" MINE_P="" UNFOLDED=0 T0=0
 export CDP_TIMEOUT_S=${CDP_TIMEOUT_S:-20}
 WW_DEADLINE=${WWC_DEADLINE_S:-230}
 say() { echo "$* [${SECONDS}s]" | tee -a "$OUT/log.txt"; }
-sh_() { "$A" shell "su -c '$*'" </dev/null 2>/dev/null | tr -d '\r'; }
+. "$(dirname "${BASH_SOURCE[0]}")/../su-quote.sh"  # su_q: a ' inside the command is safe
+sh_() { "$A" shell "$(su_q "$*")" </dev/null 2>/dev/null | tr -d '\r'; }
 bad() { say "FAIL $*"; NF=$((NF + 1)); }
 wwc_skip() { say "SKIP $*"; wwc_clean; exit 3; }
 # touched: a real finger since wwc_start (idle.sh's touch idle is shorter than the run).

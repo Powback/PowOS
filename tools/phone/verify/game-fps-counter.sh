@@ -42,8 +42,9 @@ cap() { perl -e 'alarm shift; exec @ARGV' "$@"; }   # cap <s> cmd...: killed (SI
 step() { STEP=$*; }
 log() { echo "$(date +%T) $*" | tee -a "$R"; }
 note() { echo "$(date +%T) $*" >> "$R"; }   # the log file only (callers inside $(...) print their value on stdout)
-sh_() { cap 45 "$A" shell "su -c '$*'" 2>/dev/null | tr -d '\r'; }
-irq() { sh_ "awk '\''/touch-0/{s+=\$2+\$3+\$4+\$5+\$6+\$7+\$8+\$9} END{print s}'\'' /proc/interrupts"; }
+. "$(dirname "${BASH_SOURCE[0]}")/../su-quote.sh"  # su_q: a ' inside the command is safe
+sh_() { cap 45 "$A" shell "$(su_q "$*")" 2>/dev/null | tr -d '\r'; }
+irq() { sh_ "awk '/touch-0/{s+=\$2+\$3+\$4+\$5+\$6+\$7+\$8+\$9} END{print s}' /proc/interrupts"; }
 top() { sh_ "dumpsys activity activities | grep -m1 topResumedActivity"; }
 ev() { CDP_TIMEOUT_S=20 cap 40 "$T/cdp.sh" eval "$1" "$2" 2>&1 | tr -d '\r' | tail -1; }   # ev <page> <js>
 vis() { CDP_TIMEOUT_S=8 cap 15 "$T/cdp.sh" eval "$1" 'document.visibilityState' 2>&1 | tr -d '\r"' | tail -1; }

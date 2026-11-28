@@ -15,7 +15,9 @@
 #   kwin_state              "kwin=<pid|-> kwin_new=<0|1>" (1: its libkwin is the installed file, not a deleted one).
 # shellcheck shell=bash
 KWIN_ROOT=$(cd "$T/../.." && pwd)
-_kw_sh() ( set -o pipefail; "$T/adb.sh" shell "su -c '$*'" 2>/dev/null | tr -d '\r'; )
+[ -f "$T/su-quote.sh" ] && . "$T/su-quote.sh"  # su_q: a ' inside the command is safe
+declare -F su_q >/dev/null || . "$(dirname "${BASH_SOURCE[0]}")/../su-quote.sh"  # a test's fake $T
+_kw_sh() ( set -o pipefail; "$T/adb.sh" shell "$(su_q "$*")" 2>/dev/null | tr -d '\r'; )
 _kw_rs() ( set -o pipefail; printf '%s\n' "$1" > "$OUT/kw-r.sh"; "$T/root.sh" "$OUT/kw-r.sh" 2>/dev/null | sed '/file pushed/d' | tr -d '\r'; )
 _kw_us() { printf '%s\n' "$1" > "$OUT/kw-u.sh"; "$T/user.sh" "$OUT/kw-u.sh" 2>/dev/null | grep -v "file pushed" | tr -d '\r'; }
 _kw_log() { if declare -F log >/dev/null; then log "$*"; else echo "$*"; fi; }

@@ -19,7 +19,7 @@ POLICY="$T/verify/camera-ownership.py"
 # Local transport AND remote dumps are bounded. Preserve stderr + status, not just
 # grep's empty output (a failed probe is never evidence of absence).
 probe() { local file=$1; shift
-  perl -e 'alarm 12; exec @ARGV' "$A" shell "su -c '$*'" </dev/null >"$file" 2>"$file.err"
+  perl -e 'alarm 12; exec @ARGV' "$A" shell "$(su_q "$*")" </dev/null >"$file" 2>"$file.err"
   local rc=$?; echo "$rc" >"$file.rc"; return "$rc"; }
 camera_snapshot() { local dir=$1 key cmd failed=0
   mkdir -p "$dir"

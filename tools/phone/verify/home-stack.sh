@@ -17,7 +17,7 @@ OUT=${1:-$HOME/.cache/powos-verify/home-stack-$(date +%m%d-%H%M)}; mkdir -p "$OU
 L=$HOME/.cache/powos-verify.lock
 SD=/data/data/com.powos.app/files/shell-data
 . "$here/base.sh"  # sh_ and the shared check helpers (tools/phone/verify/base.sh)
-irq() { sh_ "awk '\''/touch-0/{s+=\$2+\$3+\$4+\$5+\$6+\$7+\$8+\$9} END{print s}'\'' /proc/interrupts"; }
+irq() { sh_ "awk '/touch-0/{s+=\$2+\$3+\$4+\$5+\$6+\$7+\$8+\$9} END{print s}' /proc/interrupts"; }
 q() { "$T/cdp.sh" eval home "$1" 2>/dev/null | tail -1 | tr -d '"\\\r'; }
 # A host call from the page (its own resolve chained, only our id taken), answered as base64 JSON (q strips quotes).
 HC='const hc=(m,a)=>new Promise((ok,no)=>{const h=window.__powosHost,id=910000+Math.floor(Math.random()*9999),r=h.resolve,j=h.reject;const done=()=>{h.resolve=r;h.reject=j};h.resolve=(i,v)=>i===id?(done(),ok(v)):r(i,v);h.reject=(i,e)=>i===id?(done(),no(e)):j(i,e);PowosHost.postMessage(JSON.stringify([id,m,JSON.stringify(a)]))});const b64=(v)=>btoa(unescape(encodeURIComponent(JSON.stringify(v))));'

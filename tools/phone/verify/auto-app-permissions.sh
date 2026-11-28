@@ -15,7 +15,8 @@ OUT=${OUT:-$HOME/.cache/powos-verify/auto-app-permissions-$(date +%m%d-%H%M%S)};
 . "$(dirname "$0")/window-lock.sh"
 window_lock auto-app-permissions.sh 120 || exit 3
 fails=()
-su_() { "$A" shell "su -c '$*'" </dev/null 2>/dev/null | tr -d '\r'; }
+. "$(dirname "${BASH_SOURCE[0]}")/../su-quote.sh"  # su_q: a ' inside the command is safe
+su_() { "$A" shell "$(su_q "$*")" </dev/null 2>/dev/null | tr -d '\r'; }
 
 # 1. The keyboard's mic (rooted phones only: without root it asks at first use, MicPermissionActivity).
 if [ "$(su_ id -u)" = 0 ]; then

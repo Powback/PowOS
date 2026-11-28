@@ -1,6 +1,7 @@
 #!/bin/bash
 # test-verify-base.sh - tools/phone/verify/base.sh, the shared base of the phone checks, against a fake adb, cdp.sh and
-# shot.sh (no phone): sh_ is the exact pasted root-shell form, its SH_T / step caps hold, tap/swipe/drag validate their
+# shot.sh (no phone): sh_ is the pasted root-shell form but quote-safe (' " $ ` \ and newlines reach a fake phone's
+# root shell intact, tools/phone/su-quote.sh), its SH_T / step caps hold, tap/swipe/drag validate their
 # integers and a drag is ONE on-device shell, hcall retries a transport miss, cdp_val unquotes, the verdict lines and
 # exit codes are the queue's, `within` kills an over-time command, and a check's own helpers are never replaced.
 # Then the lint: no verify script pastes a copy of base.sh's sh_ or hcall forms again (source base.sh instead).
@@ -44,6 +45,38 @@ is "no \\r in its output" "$out" 0
 run 'sh_ "dumpsys power" >/dev/null' >/dev/null
 is "one adb call: shell su -c '<cmd>'" "$(cat "$LOG")" "CALL shell su -c 'dumpsys power'"
 out=$(run 'sh_ "x"'); is "stderr dropped" "$(printf '%s\n' "$out" | grep -c noise)" 0
+
+echo "== sh_: any command - ' \" \$ \` \\ and newlines reach the root shell intact (tools/phone/su-quote.sh) =="
+# A fake phone: adb.sh runs `shell <arg>` in sh (the phone's shell), `su -c <s>` runs <s> in sh (the root shell).
+P=$W/phone; mkdir -p "$P/bin" "$P/g"; touch "$P/g/g1" "$P/g/g2"
+printf '#!/bin/sh\n[ "$1" = shell ] || exit 64\nshift\nPATH="%s/bin:$PATH" exec sh -c "$*"\n' "$P" > "$P/adb.sh"
+printf '#!/bin/sh\n[ "$1" = -c ] || exit 64\nexec sh -c "$2"\n' > "$P/bin/su"
+chmod +x "$P/adb.sh" "$P/bin/su"
+# prun <cmd>: sh_ <cmd> on the fake phone, then rc (pipefail, so adb's rc is sh_'s).
+prun() { ( cd "$W" && G=$P/g A=$P/adb.sh T=$W here=$W bash -c 'set -o pipefail; . "$1"; sh_ "$2"; echo "rc=$?"' _ "$BASE" "$1" 2>&1 ); }
+# want: the same command straight in sh (what the check author meant), rc appended.
+want() { ( G=$P/g sh -c "$1" 2>/dev/null; echo "rc=$?" ); }
+nl='
+'
+i=0
+for c in "grep -c 'x y' /dev/null; true" "date -r 0 +'%s %S'" "echo 'it'\"'\"'s' \"dq \\\"in\\\"\"" \
+  'echo $((1+2)) "$G" `echo bt` $(echo cs)' 'printf "%s|" a\\b "c\\\\d"; echo' "echo one${nl}echo 'two'${nl}echo \"three\"" \
+  "ls \$G/g* | wc -l | tr -d ' '" "echo 'out'; echo 'err' >&2; exit 7" "x='\$HOME'; echo \"\$x\"" "printf '%s\\n' '\`not run\`' '\\'"; do
+  i=$((i + 1)); is "quote-safe $i: $(printf '%s' "$c" | tr '\n' '~' | cut -c1-48)" "$(prun "$c")" "$(want "$c")"
+done
+is "plain form kept when there is no ' (same bytes as before)" "$(. "$ROOT/tools/phone/su-quote.sh"; su_q 'ls "$G" $X')" "su -c 'ls \"\$G\" \$X'"
+case $(. "$ROOT/tools/phone/su-quote.sh"; su_q "echo 'a'") in "su -c 'eval \"\$(echo "*" | base64 -d)\"'") ok "a ' goes base64 (only [A-Za-z0-9+/=] in the quotes)" ;; *) bad "su_q's ' form" ;; esac
+is "a big command (8 KiB, quotes in it)" "$(prun "$(printf "echo '%s' >/dev/null; " $(seq 1 600)) echo done")" "done${nl}rc=0"
+# shq: one more shell level (the Linux user's powos-run.sh "<cmd>"): fake powos-run.sh = sh -c "$1".
+printf '#!/bin/sh\nexec sh -c "$1"\n' > "$P/bin/powos-run.sh"; chmod +x "$P/bin/powos-run.sh"
+c="echo 'it'\''s' \"dq\" \$((2*3)) \`echo bt\` 'a\\b'${nl}printf '%s\\n' 'two'"
+got=$( cd "$W" && A=$P/adb.sh bash -c '. "$1"; "$A" shell "$(su_q "powos-run.sh $(shq "$2")")"; echo "rc=$?"' _ "$ROOT/tools/phone/su-quote.sh" "$c" 2>&1 )
+is "shq + su_q: a command two shells deep arrives intact" "$got" "$(want "$c")"
+out=$(cd "$W" && printf 'piped in\n' | A=$P/adb.sh T=$W here=$W bash -c '. "$1"; sh_ "cat; echo '"'"'q'"'"'"' _ "$BASE")
+is "stdin still reaches the command (uncapped sh_)" "$out" "piped in${nl}q"
+# The local sh_/su_ forks (not sourcing base.sh) use su_q too: no `su -c '$*'` / `'$1'` left in tools/phone.
+raw=$(cd "$ROOT/tools/phone" && grep -nE "su -c '\\\$(\*|1|@|\{1\})'" ./*.sh verify/*.sh 2>/dev/null)
+[ -z "$raw" ] && ok "no raw su -c '\$*' helper left in tools/phone (use su_q)" || bad "raw su -c '\$*' helpers (use \"\$(su_q \"\$*\")\")" "$raw"
 
 if command -v perl >/dev/null; then
   echo "== caps: SH_T and a step's cap =="

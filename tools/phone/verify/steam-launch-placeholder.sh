@@ -21,7 +21,8 @@ here=$(cd "$(dirname "$0")" && pwd); T=$here/..; A=$T/adb.sh
 . "$here/ww-lib.sh"
 APP=${1:-${APP:-274190}}; PLACEHOLDER_MS=${PLACEHOLDER_MS:-3000}; WINDOW_S=${WINDOW_S:-150}
 OUT=${OUT:-$HOME/.cache/powos-verify/steam-launch-placeholder-$(date +%F_%H%M)}; mkdir -p "$OUT"
-session() { "$A" shell "su -c 'sh /data/powos/powos-run.sh \"$1\"'" | tr -d '\r'; }
+. "$(dirname "${BASH_SOURCE[0]}")/../su-quote.sh"  # su_q/shq: any quote in the command is safe
+session() { "$A" shell "$(su_q "sh /data/powos/powos-run.sh $(shq "$1")")" | tr -d '\r'; }
 WIN="importShim('./ui/webwindows.tsx').then(m=>{const w=m.webWins.value.find(w=>w.steam);return w?[w.id,!!w.pending,!!w.live,w.phase||'',w.failed||''].join('|'):'none'})"
 "$A" push "$here/steam-launch-placeholder-phone.sh" /data/local/tmp/powos-slp.sh >/dev/null || { echo "FAIL setup: can't push the phone side"; exit 1; }
 "$A" shell "su -c 'cp /data/local/tmp/powos-slp.sh /data/powos/root/var/tmp/powos-slp.sh && chmod 755 /data/powos/root/var/tmp/powos-slp.sh'" >/dev/null

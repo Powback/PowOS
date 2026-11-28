@@ -5,7 +5,8 @@
 # WHY: 52 checks pasted the same `sh_` line, 27 their own `hcall`, and several FAILed on the check script, not the
 # product (11-23/24): one `adb shell su` per motionevent dragging too slowly (scroll-own, home-stack), `\"` inside a
 # `python3 -c` (ai-tab-head), a quoted "x y" passed as one tap coordinate, broken pipes. The helpers here do it once:
-#   sh_ <cmd>               root shell, \r stripped, stderr dropped (the exact pasted form). Capped at SH_T seconds when
+#   sh_ <cmd>               root shell, \r stripped, stderr dropped (the pasted form, but any <cmd> - a ' inside is
+#                           safe: tools/phone/su-quote.sh). Capped at SH_T seconds when
 #                           SH_T is set, and at what's left of a `step` cap; unset = no cap, as before.
 #   rsh                     a script on stdin as root (`su -c 'sh -s'`): any quoting inside, same caps as sh_.
 #   vb_cap <s> <cmd...>     run a program, its process group killed after s seconds (rc 124).
@@ -31,6 +32,7 @@
 # Every public name is defined only when the script hasn't defined it already, and a definition after the `.` wins, so
 # sourcing this never changes a check's own helpers. Its tier-1 test (fake adb/cdp/shot): test/tier1/test-verify-base.sh.
 here=${here:-$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)}; T=${T:-$here/..}; A=${A:-$T/adb.sh}
+declare -F su_q >/dev/null || . "$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)/su-quote.sh"  # su_q: quote-safe su -c
 VB_FAILS=${VB_FAILS:-0}; VB_STEP=""; VB_STEP_CAP=""; VB_STEP_END=""
 
 # vb_cap: window-render.sh's `mt` (its fifo-bounds test covers it there): the command in a process group of its own; at
@@ -50,15 +52,15 @@ vb_say() { if [ -n "${OUT:-}" ] && [ -d "${OUT:-}" ]; then echo "$*" | tee -a "$
 # counter couldn't carry it out) and rc 124.
 vb_root() {
   local c=${SH_T:-} r
-  if [ -z "$c$VB_STEP_END" ]; then "$A" shell "su -c '$1'" 2>/dev/null | tr -d '\r'; return; fi
+  if [ -z "$c$VB_STEP_END" ]; then "$A" shell "$(su_q "$1")" 2>/dev/null | tr -d '\r'; return; fi
   if [ -n "$VB_STEP_END" ]; then
     r=$((VB_STEP_END - SECONDS))
     [ "$r" -gt 0 ] || { echo "FAIL: step $VB_STEP: past its $VB_STEP_CAP s cap" >&2; return 124; }
     if [ -z "$c" ] || [ "$r" -lt "$c" ]; then c=$r; fi
   fi
   # Its own process group can't read a terminal (SIGTTIN would stop it): only rsh's script goes in on stdin.
-  if [ "$1" = "sh -s" ]; then vb_cap "$c" "$A" shell "su -c '$1'" 2>/dev/null | tr -d '\r'
-  else vb_cap "$c" "$A" shell "su -c '$1'" </dev/null 2>/dev/null | tr -d '\r'; fi
+  if [ "$1" = "sh -s" ]; then vb_cap "$c" "$A" shell "$(su_q "$1")" 2>/dev/null | tr -d '\r'
+  else vb_cap "$c" "$A" shell "$(su_q "$1")" </dev/null 2>/dev/null | tr -d '\r'; fi
 }
 declare -F sh_ >/dev/null || sh_() { vb_root "$*"; }
 declare -F rsh >/dev/null || rsh() { vb_root "sh -s"; }

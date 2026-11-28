@@ -17,7 +17,8 @@ NAME=live; NOW=0
 while [ $# -gt 0 ]; do case $1 in --name) NAME=$2; shift 2 ;; --now) NOW=1; shift ;; *) break ;; esac; done
 [ "$NOW" = 1 ] || [ "${LOCK_HELD:-0}" = 1 ] || { echo "live.sh: run it through tools/phone/verify/queue.sh add, or --now when the user said so"; exit 3; }
 OUT=$HOME/.cache/powos-verify/live-$NAME-$(date +%m%d-%H%M%S); mkdir -p "$OUT"
-sh_() { "$A" shell "su -c '$*'" </dev/null 2>/dev/null | tr -d '\r'; }
+. "$(dirname "${BASH_SOURCE[0]}")/su-quote.sh"  # su_q: a ' inside the command is safe
+sh_() { "$A" shell "$(su_q "$*")" </dev/null 2>/dev/null | tr -d '\r'; }
 ev() { "$here/cdp.sh" eval home "$1" 2>/dev/null | tr -d '\r' | tail -1; }
 log() { echo "$*" | tee -a "$OUT/log.txt"; }
 FOLD=0; trap '[ $FOLD = 1 ] && sh_ "cmd device_state state reset"' EXIT

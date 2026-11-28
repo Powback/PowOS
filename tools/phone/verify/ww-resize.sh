@@ -52,10 +52,11 @@ DIAG_ONLY=${WWR_DIAGNOSTIC_ONLY:-0}
 GESTURES=${WWR_GESTURES:-"edge corner"}
 [ "$DIAG_ONLY" = 1 ] && { TRACE=0; REC=0; }
 CALC=${TEST_APP:-com.oneplus.calculator}
-sh_() { "$A" shell "su -c '$*'" </dev/null 2>/dev/null | tr -d '\r'; }
+. "$(dirname "${BASH_SOURCE[0]}")/../su-quote.sh"  # su_q: a ' inside the command is safe
+sh_() { "$A" shell "$(su_q "$*")" </dev/null 2>/dev/null | tr -d '\r'; }
 us() { printf '%s\n' "$1" > "$OUT/u.sh"; "$T/user.sh" "$OUT/u.sh" 2>/dev/null | grep -v "file pushed" | tr -d '\r'; }
 rs() { printf '%s\n' "$1" > "$OUT/r.sh"; "$T/root.sh" "$OUT/r.sh" 2>/dev/null | grep -v "file pushed" | tr -d '\r'; }
-irq() { sh_ "awk '\''/touch-0/{s+=\$2+\$3+\$4+\$5+\$6+\$7+\$8+\$9} END{print s}'\'' /proc/interrupts"; }
+irq() { sh_ "awk '/touch-0/{s+=\$2+\$3+\$4+\$5+\$6+\$7+\$8+\$9} END{print s}' /proc/interrupts"; }
 log() { echo "$*" | tee -a "$OUT/log.txt"; }
 fail=0
 bad() { log "FAIL $*"; fail=1; }

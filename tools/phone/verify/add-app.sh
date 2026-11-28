@@ -13,7 +13,7 @@ here=$(cd "$(dirname "$0")" && pwd); T=$here/..; A="$T/adb.sh"
 OUT=${1:-$HOME/.cache/powos-verify/add-app-$(date +%m%d-%H%M)}; mkdir -p "$OUT"
 L=$HOME/.cache/powos-verify.lock
 . "$here/base.sh"  # sh_ and the shared check helpers (tools/phone/verify/base.sh)
-irq() { sh_ "awk '\''/touch-0/{s+=\$2+\$3+\$4+\$5+\$6+\$7+\$8+\$9} END{print s}'\'' /proc/interrupts"; }
+irq() { sh_ "awk '/touch-0/{s+=\$2+\$3+\$4+\$5+\$6+\$7+\$8+\$9} END{print s}' /proc/interrupts"; }
 q() { "$T/cdp.sh" eval home "$1" 2>/dev/null | tail -1 | tr -d '"\\\r'; }
 ADDED=""
 # The test tile goes again whatever happened (only its own key), then Back out of the picker and edit mode.

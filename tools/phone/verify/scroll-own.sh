@@ -19,8 +19,9 @@ OUT=${1:-$HOME/.cache/powos-verify/scroll-own-$(date +%m%d-%H%M)}; mkdir -p "$OU
 L=$HOME/.cache/powos-verify.lock
 # Every device call capped (CAP s, default 40): a hung adb/CDP call fails the step instead of the whole check's budget.
 cap() { perl -e 'alarm shift; exec @ARGV' "${CAP:-40}" "$@"; }
-sh_() { cap "$A" shell "su -c '$*'" 2>/dev/null | tr -d '\r'; }
-irq() { sh_ "awk '\''/touch-0/{s+=\$2+\$3+\$4+\$5+\$6+\$7+\$8+\$9} END{print s}'\'' /proc/interrupts"; }
+. "$(dirname "${BASH_SOURCE[0]}")/../su-quote.sh"  # su_q: a ' inside the command is safe
+sh_() { cap "$A" shell "$(su_q "$*")" 2>/dev/null | tr -d '\r'; }
+irq() { sh_ "awk '/touch-0/{s+=\$2+\$3+\$4+\$5+\$6+\$7+\$8+\$9} END{print s}' /proc/interrupts"; }
 q() { cap "$T/cdp.sh" eval home "$1" 2>/dev/null | tail -1 | tr -d '"\\\r'; }
 shade_shown() { sh_ "dumpsys window windows | grep -E \"Window #.*PowOS shade\" -A20 | grep -c mViewVisibility=0x0"; }
 . "$here/window-lock.sh"; window_lock scroll-own 120 "${MAX_WAIT:-10800}"

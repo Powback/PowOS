@@ -25,13 +25,14 @@ echo "== bad fixtures are caught =="
 expect bad-awk-ternary.sh awk-ternary 3
 expect bad-sigpipe.sh sigpipe 12
 expect bad-nested-quote.sh nested-quote 4
+expect bad-quote-idiom.sh quote-idiom 2
 expect bad-logcat-dup-tag.sh logcat-dup-tag 2
 expect bad-py-c.sh py-c 3
 expect bad-nomatch-grep.sh nomatch-grep 7
 expect bad-silent-return.sh silent-return 4
 
 echo "== fixed forms, lint-ok escapes, no-pipefail files stay quiet =="
-for f in good-awk-ternary.sh good-sigpipe.sh good-sigpipe-nopipefail.sh good-nested-quote.sh good-logcat-dup-tag.sh good-py-c.sh \
+for f in good-awk-ternary.sh good-sigpipe.sh good-sigpipe-nopipefail.sh good-nested-quote.sh good-quote-idiom.sh good-logcat-dup-tag.sh good-py-c.sh \
          good-nomatch-grep.sh good-nomatch-grep-noerrexit.sh good-silent-return.sh; do
   out=$(python3 "$LINT" "$FX/$f" 2>&1); rc=$?
   [ "$rc" = 0 ] && [ -z "$out" ] && ok "$f clean" || bad "$f: rc=$rc" "$out"

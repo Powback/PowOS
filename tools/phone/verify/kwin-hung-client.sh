@@ -36,11 +36,12 @@ except subprocess.TimeoutExpired:
     rc = 124
 sys.exit(rc)' "$budget" "$@"
 }
-sh_() { bounded "$A" shell "su -c '$*'" </dev/null | tr -d '\r'; }
+. "$(dirname "${BASH_SOURCE[0]}")/../su-quote.sh"  # su_q: a ' inside the command is safe
+sh_() { bounded "$A" shell "$(su_q "$*")" </dev/null | tr -d '\r'; }
 us() { printf '%s\n' "$1" > "$OUT/u.sh"; bounded "$T/user.sh" "$OUT/u.sh" | sed "/file pushed/d" | tr -d '\r'; }
 # $1 in the Plasma session's own environment (plasmashell's: WAYLAND_DISPLAY, DISPLAY, XAUTHORITY) - linux-float.sh.
 ses() { us "P=\$(pgrep -x plasmashell | head -1); while IFS= read -r -d '' kv; do export \"\$kv\"; done < /proc/\$P/environ; $1"; }
-irq() { sh_ "awk '\''/touch-0/{s+=\$2+\$3+\$4+\$5+\$6+\$7+\$8+\$9} END{print s}'\'' /proc/interrupts"; }
+irq() { sh_ "awk '/touch-0/{s+=\$2+\$3+\$4+\$5+\$6+\$7+\$8+\$9} END{print s}' /proc/interrupts"; }
 KATE_MINE=0 SETUP=0 H0=0
 restore() {
   [ "$SETUP" = 1 ] || return 0

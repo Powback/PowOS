@@ -15,7 +15,7 @@ OUT=${1:-$HOME/.cache/powos-verify/pad-fullscreen-$(date +%m%d-%H%M)}; mkdir -p 
 L=$HOME/.cache/powos-verify.lock
 . "$here/base.sh"  # sh_ and the shared check helpers (tools/phone/verify/base.sh)
 us() { printf '%s\n' "$1" > "$OUT/u.sh"; "$T/user.sh" "$OUT/u.sh" 2>/dev/null | grep -v "file pushed" | tr -d '\r'; }
-irq() { sh_ "awk '\''/touch-0/{s+=\$2+\$3+\$4+\$5+\$6+\$7+\$8+\$9} END{print s}'\'' /proc/interrupts"; }
+irq() { sh_ "awk '/touch-0/{s+=\$2+\$3+\$4+\$5+\$6+\$7+\$8+\$9} END{print s}' /proc/interrupts"; }
 KATE_MINE=0
 restore() {
   [ "$(padflag)" = true ] && tap_desc "Game controls" >/dev/null 2>&1

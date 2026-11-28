@@ -11,7 +11,8 @@
 set -u
 cd "$(dirname "$0")/../../.." || exit 1
 PKG=${TEST_APP:-com.oneplus.calculator}
-sh_() { tools/phone/adb.sh shell "su -c '$*'" 2>/dev/null | tr -d '\r'; }
+. "$(dirname "${BASH_SOURCE[0]}")/../su-quote.sh"  # su_q: a ' inside the command is safe
+sh_() { tools/phone/adb.sh shell "$(su_q "$*")" 2>/dev/null | tr -d '\r'; }
 # cdp.sh prints the result as a JSON string: drop the escaping so plain greps match.
 ev() { tools/phone/cdp.sh eval home "$1" 2>&1 | tr -d '\n\r' | sed 's/\\"/"/g; s/^"//; s/"$//'; }
 # A call on home's bridge as the page makes it (float-desktops.sh hcall).

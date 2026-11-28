@@ -27,7 +27,8 @@ TEST_APP=${TEST_APP:-com.oneplus.calculator}
 # Command-only calls must not drain a surrounding read loop (cleanup must visit every task).
 # Both go through the part's root shell session when it is up (ww-lib.sh sess_start: no docker exec + adb connect per
 # call), else one adb call each - the same command either way.
-sh_() { sess_sh "$*" && return 0; [ $? = 75 ] || return 0; "$A" shell "su -c '$*'" </dev/null 2>/dev/null | tr -d '\r'; }
+. "$(dirname "${BASH_SOURCE[0]}")/../su-quote.sh"  # su_q: a ' inside the command is safe
+sh_() { sess_sh "$*" && return 0; [ $? = 75 ] || return 0; "$A" shell "$(su_q "$*")" </dev/null 2>/dev/null | tr -d '\r'; }
 # ash: a script on stdin as Android root (any quoting inside).
 ash() { local s; s=$(cat); sess_sh "$s" && return 0; [ $? = 75 ] || return 0
   printf '%s\n' "$s" | "$A" shell "su -c 'sh -s'" 2>/dev/null | tr -d '\r'; }

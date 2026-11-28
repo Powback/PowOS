@@ -19,7 +19,7 @@ N=$(date +%s)$RANDOM
 . "$here/base.sh"  # sh_ and the shared check helpers (tools/phone/verify/base.sh)
 # A script run as the session user (its bus), through user.sh. Never sudo in it.
 ux() { printf '%s\n' "$1" >"$OUT/u.sh"; "$T/user.sh" "$OUT/u.sh" 2>/dev/null | tr -d '\r'; }
-irq() { sh_ "awk '\''/touch-0/{s+=\$2+\$3+\$4+\$5+\$6+\$7+\$8+\$9} END{print s}'\'' /proc/interrupts"; }
+irq() { sh_ "awk '/touch-0/{s+=\$2+\$3+\$4+\$5+\$6+\$7+\$8+\$9} END{print s}' /proc/interrupts"; }
 hcall() {
   "$T/cdp.sh" eval home "new Promise(ok=>{const h=window.__powosHost,P=window.PowosHost;if(!h||!P||!P.postMessage)return ok('ERR no bridge');const r=h.resolve,j=h.reject,id=910400+Math.floor(Math.random()*9000);const done=v=>{h.resolve=r;h.reject=j;ok(v)};h.resolve=(i,v)=>i===id?done(v):r(i,v);h.reject=(i,m)=>i===id?done('ERR '+m):j(i,m);setTimeout(()=>done('ERR no answer'),8000);P.postMessage(JSON.stringify([id,'$1',JSON.stringify($2)]))}).then(v=>typeof v==='string'&&v.startsWith('ERR')?v:($3)(v))" 2>&1 | tr -d '"\r' | tail -1
 }
@@ -49,7 +49,7 @@ if [ -z "$pids" ]; then
   [ -n "$pids" ] || fail "powos-plasma-bridge doesn't start: $(ux 'tail -5 /tmp/powos-plasma-bridge.log')"
   echo "started powos-plasma-bridge (the session predates its deploy)"
 fi
-t() { sh_ "for p in ${pids//,/ }; do awk '\''{s+=\$14+\$15} END{print s}'\'' /proc/\$p/stat; done" | awk '{s+=$1} END{print s}'; }
+t() { sh_ "for p in ${pids//,/ }; do awk '{s+=\$14+\$15} END{print s}' /proc/\$p/stat; done" | awk '{s+=$1} END{print s}'; }
 t0=$(t); sleep 5; t1=$(t)
 [ $((t1 - t0)) -le 1 ] || fail "powos-plasma-bridge used $((t1 - t0)) ticks in 5 s at rest"
 pass "bridge running ($pids), $((t1 - t0)) ticks in 5 s"

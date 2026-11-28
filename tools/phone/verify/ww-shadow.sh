@@ -15,8 +15,9 @@ here=$(cd "$(dirname "$0")" && pwd); T=$here/..; A="$T/adb.sh"
 OUT=${1:-$HOME/.cache/powos-verify/ww-shadow-$(date +%m%d-%H%M)}; mkdir -p "$OUT"
 L=$HOME/.cache/powos-verify.lock
 CALC=${TEST_APP:-com.oneplus.calculator}
-sh_() { "$A" shell "su -c '$*'" </dev/null 2>/dev/null | tr -d '\r'; }
-irq() { sh_ "awk '\''/touch-0/{s+=\$2+\$3+\$4+\$5+\$6+\$7+\$8+\$9} END{print s}'\'' /proc/interrupts"; }
+. "$(dirname "${BASH_SOURCE[0]}")/../su-quote.sh"  # su_q: a ' inside the command is safe
+sh_() { "$A" shell "$(su_q "$*")" </dev/null 2>/dev/null | tr -d '\r'; }
+irq() { sh_ "awk '/touch-0/{s+=\$2+\$3+\$4+\$5+\$6+\$7+\$8+\$9} END{print s}' /proc/interrupts"; }
 log() { echo "$*" | tee -a "$OUT/log.txt"; }
 fail=0
 bad() { log "FAIL $*"; fail=1; }

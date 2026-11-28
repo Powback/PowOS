@@ -23,7 +23,9 @@ WHY (11-10): three checks FAILed on shell pitfalls, not product bugs; each cost 
                 read to the end.
   nested-quote  a single quote inside an argument that ends up inside `su -c '...'` (sh_ "...", a literal
                 "su -c '...'") closes the su string early, so the command runs mangled. Use \\" or '\\''.
-                (ww-popup-x11)
+                (ww-popup-x11) Better: build the helper on su_q (tools/phone/su-quote.sh), then any quote is safe.
+  quote-idiom   a '\\'' inside a call of a quote-safe root helper (base.sh's sh_, or a function built on
+                su_q): it reaches the phone verbatim and breaks the command; write the plain ' (11-28).
   logcat-dup-tag  one tag twice in a logcat filterspec (`-s Tag:I Tag:W`): the last spec wins, so `Tag:W` drops the
                 tag's I lines - the check reads nothing. `Tag:I` already includes W/E. (ww-popups 11-10 09:21)
   py-c          a `python3 -c '...'` program that doesn't compile, or has a backslash inside an f-string's {...}
@@ -576,6 +578,32 @@ def bad_quotes(content):
     return "'" in "".join(out)
 
 
+SOURCES_BASE = re.compile(r"""(?:^|;)\s*(?:\.|source)\s+[^;\n]*/(?:base|wwc-lib|e2e-lib)\.sh\b""", re.M)
+
+
+def su_q_wrappers(text):
+    """Quote-safe root helpers: functions whose body calls su_q, and sh_ from base.sh/wwc-lib/e2e-lib when the file
+    sources one and doesn't define a raw sh_ of its own."""
+    names, raw = set(), su_wrappers(text)
+    for m in WRAP_DEF.finditer(text):
+        if re.search(r"\bsu_q\b", m.group(2)):
+            names.add(m.group(1))
+    if SOURCES_BASE.search(text) and "sh_" not in raw and not re.search(r"^\s*sh_\s*\(\)", text, re.M):
+        names.add("sh_")
+    return names - raw
+
+
+def check_quote_idiom(text, lines):
+    hits = []
+    for ln, s in logical_lines(lines):
+        for name in su_q_wrappers(text):
+            for m in re.finditer(r"(?:^|[\s;&|(`$])" + re.escape(name) + r"\s+(?=\")", s):
+                content, _ = dq_string_at(s, m.end())
+                if "'\\''" in content:
+                    hits.append(ln)
+    return sorted(set(hits))
+
+
 def check_nested_quotes(text, lines):
     hits = []
     wrappers = su_wrappers(text)
@@ -1120,6 +1148,10 @@ def lint_file(path):
     for ln in check_nested_quotes(text, lines):
         if not lint_ok(lines, ln):
             found.append((ln, "nested-quote", "single quote inside a su -c '...' string closes it early"))
+    for ln in check_quote_idiom(text, lines):
+        if not lint_ok(lines, ln):
+            found.append((ln, "quote-idiom", "'\\'' inside a quote-safe sh_/su_q helper's argument reaches the phone"
+                                             " verbatim; write the plain '"))
     for ln in check_logcat_dup_tag(lines):
         if not lint_ok(lines, ln):
             found.append((ln, "logcat-dup-tag", "a tag twice in a logcat filterspec: the last spec wins (Tag:W drops"

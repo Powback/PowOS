@@ -17,6 +17,7 @@
 # (DisplayDeviceInfo uniqueId local:<id> ... state ON|OFF), the same ids `dumpsys SurfaceFlinger --display-id` lists.
 set -uo pipefail
 here=$(cd "$(dirname "$0")" && pwd)
+. "$here/su-quote.sh"  # su_q: asroot with a ' inside the command
 out="" all="" onphone="" bg="" script=""
 for a in "$@"; do case "$a" in --all) all=1 ;; --phone) onphone=1 ;; --bg) bg=1 ;; --script) script=1 ;; -h|--help) sed -n '2,19p' "$0"; exit 0 ;; *) out=$a ;; esac; done
 [ -n "$out" ] || { sed -n '2,3p' "$0"; exit 2; }
@@ -52,7 +53,7 @@ EOF
 fi
 # Root where the phone has it (the rooted OnePlus), else adb's own shell uid - screencap, dumpsys and /data/local/tmp
 # need nothing more, so an unrooted phone (PHONE_SERIAL=<the razr fold>) is shot the same way.
-asroot() { "$here/adb.sh" shell "if command -v su >/dev/null 2>&1; then su -c '$1'; else $1; fi"; }
+asroot() { "$here/adb.sh" shell "if command -v su >/dev/null 2>&1; then $(su_q "$1"); else $1; fi"; }
 # One shell on the phone does all of it: state, display pick, capture, blank check.
 res=$("$here/adb.sh" shell "if command -v su >/dev/null 2>&1; then exec su -c 'sh -s'; else exec sh -s; fi" <<EOF 2>&1
 w=\$(dumpsys power | sed -n "s/.*mWakefulness=//p" | head -1)

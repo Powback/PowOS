@@ -26,7 +26,8 @@ window_lock fold-launch.sh 120
 trap 'rm -rf "${WL_LOCK:-/nonexistent}"; '"$WL_TRAP" EXIT
 FAILS=0
 fail() { echo "FAIL: $*"; FAILS=$((FAILS + 1)); }
-user() { "$A" shell "su -c \"sh /data/powos/powos-run.sh '$1'\"" 2>&1 | tr -d '\r'; }
+. "$(dirname "${BASH_SOURCE[0]}")/../su-quote.sh"  # su_q/shq: any quote in the command is safe
+user() { "$A" shell "$(su_q "sh /data/powos/powos-run.sh $(shq "$1")")" 2>&1 | tr -d '\r'; }
 # Tasks as "id mode bounds visible component", one per line (am stack list: a RootTask's config line carries its mode).
 tasks() { "$A" shell am stack list | tr -d '\r' | awk '/^RootTask/{m=""} /mWindowingMode=/{match($0,/mWindowingMode=[a-z-]*/); m=substr($0,RSTART+15,RLENGTH-15)}
   /^ +taskId=/{id=$1; sub("taskId=","",id); sub(":","",id); match($0,/bounds=\[[^ ]*/); b=substr($0,RSTART+7,RLENGTH-7); match($0,/visible=[a-z]*/); v=substr($0,RSTART+8,RLENGTH-8); print id, m, b, v, $2}'; }

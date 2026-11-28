@@ -13,7 +13,7 @@ OUT=${1:-$HOME/.cache/powos-verify/ai-stop-$(date +%m%d-%H%M)}; mkdir -p "$OUT"
 L=$HOME/.cache/powos-verify.lock
 MSG="stop-button check from a test script, please ignore: write a 1500-word essay about folding phones (it will be stopped)"
 . "$here/base.sh"  # sh_ and the shared check helpers (tools/phone/verify/base.sh)
-irq() { sh_ "awk '\''/touch-0/{s+=\$2+\$3+\$4+\$5+\$6+\$7+\$8+\$9} END{print s}'\'' /proc/interrupts"; }
+irq() { sh_ "awk '/touch-0/{s+=\$2+\$3+\$4+\$5+\$6+\$7+\$8+\$9} END{print s}' /proc/interrupts"; }
 home() { sh_ "am start -W -a android.intent.action.MAIN -c android.intent.category.HOME >/dev/null"; sleep 1.5; }
 ev() { "$T/cdp.sh" eval home "$1" 2>&1 | tail -1 | tr -d '"'; }
 . "$here/window-lock.sh"; window_lock ai-stop.sh 90

@@ -26,7 +26,7 @@ ST=${KWACT_STATUS:-${SHIP_DIR:-$HOME/.cache/powos-ship-queue}/kwin-activation}
 . "$here/kwin-up.sh"
 . "$here/base.sh"  # sh_ and the shared check helpers (tools/phone/verify/base.sh)
 us() { printf '%s\n' "$1" > "$OUT/u.sh"; "$T/user.sh" "$OUT/u.sh" 2>/dev/null | grep -v "file pushed" | tr -d '\r'; }
-irq() { sh_ "awk '\''/touch-0/{s+=\$2+\$3+\$4+\$5+\$6+\$7+\$8+\$9} END{print s}'\'' /proc/interrupts"; }
+irq() { sh_ "awk '/touch-0/{s+=\$2+\$3+\$4+\$5+\$6+\$7+\$8+\$9} END{print s}' /proc/interrupts"; }
 log() { echo "$*" | tee -a "$OUT/log.txt"; }
 fail() { echo "FAIL: $*" | tee -a "$OUT/log.txt"; [ $DRY = 1 ] || [ "${ACTIVE:-0}" = 1 ] || kwact_status "$ST" failed "${KV:-?}" "$*"; exit 1; }
 # hcall: a call on home's bridge exactly as the page makes it (linux-win-lib.sh's).

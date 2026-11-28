@@ -15,7 +15,7 @@ OUT=${1:-$HOME/.cache/powos-verify/ai-tab-head-$SCREEN-$(date +%m%d-%H%M)}; mkdi
 L=$HOME/.cache/powos-verify.lock
 TASK=${BOARD_TASK:-ai-page-agents-progress-devices-tabs-cut-off-at}
 . "$here/base.sh"  # sh_ and the shared check helpers (tools/phone/verify/base.sh)
-irq() { sh_ "awk '\''/touch-0/{s+=\$2+\$3+\$4+\$5+\$6+\$7+\$8+\$9} END{print s}'\'' /proc/interrupts"; }
+irq() { sh_ "awk '/touch-0/{s+=\$2+\$3+\$4+\$5+\$6+\$7+\$8+\$9} END{print s}' /proc/interrupts"; }
 cdp() { "$T/cdp.sh" eval home "$1" 2>&1 | tr -d '\\' | tail -1 | sed 's/^"//; s/"$//'; }
 restore() { sh_ "am start -a android.intent.action.MAIN -c android.intent.category.HOME >/dev/null; cmd device_state state reset"; echo "restored"; }
 . "$here/window-lock.sh"; window_lock ai-tab-head.sh 150
